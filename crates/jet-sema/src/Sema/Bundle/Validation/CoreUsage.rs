@@ -88,12 +88,11 @@ pub(crate) fn collect_used_core(
     }
     // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
     // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
-    // `#Extern` call site anywhere in the bundle. Collected in this same
-    // whole-program walk (not a second traversal) so codegen knows, before it
-    // emits ANY function, which ones must be `extern "C" fn` — never every
-    // `#Pure fn` (that leaked the purity lever into codegen and broke I3
-    // erasure; see 14dd68a5), only the ones actually crossing the C boundary
-    // as a raw function pointer.
+    // `#Import` call site anywhere in the bundle. Collected in this same
+    // whole-program walk (not a second traversal) so codegen can emit each
+    // function's raw C trampoline — never every `#Pure fn` (that leaked the
+    // purity lever into codegen and broke I3 erasure; see 14dd68a5), only the
+    // functions actually crossing the C boundary as raw function pointers.
     let mut ffi_cb = HashSet::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
         let imports = &states[idx].core_imports;
@@ -1359,10 +1358,9 @@ pub(crate) fn collect_core_expr(
             // walk. The Syntax descriptor selects the owning prelude fragment.
             note_typed_head_core_usage(used, spans, &c.name, Some(c.name_span));
             for arg in &c.args {
-                // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
-                // already proved this bare function name is passed as a stable
-                // C callback at a `#Extern` call site — record the referenced
-                // function so codegen emits its definition as `extern "C" fn`.
+                // D-CABI-CALLBACK1: sema proved this bare function name is
+                // passed as a stable C callback at a `#Import` call site.
+                // Record it so codegen emits the matching raw trampoline.
                 if arg.flags.c_callback_symbol {
                     if let Expr::Ident(name, _) = &arg.expr {
                         ffi_cb.insert(name.clone());

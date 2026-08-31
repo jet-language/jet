@@ -884,8 +884,8 @@ impl<'a> Fmt<'a> {
             && body.len() == 1
             && matches!(body[0], Stmt::Expr(_))
             && self.single_stmt_braces(&body[0]).is_some();
-        let force_braces = preserve_braced_expr
-            || (!arrow_body && body.len() == 1 && is_loop_exit_stmt(&body[0]));
+        let force_braces =
+            preserve_braced_expr || (!arrow_body && body.len() == 1 && is_loop_exit_stmt(&body[0]));
         self.fmt_control_body_after_header(body, force_braces);
     }
 

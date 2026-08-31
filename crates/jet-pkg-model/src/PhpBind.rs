@@ -301,7 +301,7 @@ void {abi}_close(int64_t h){{php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(uin
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_php_{lib}");
-    let mut out = format!("#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Import module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
     }

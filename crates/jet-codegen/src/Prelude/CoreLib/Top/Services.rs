@@ -458,6 +458,11 @@ impl JetShow for JetServiceRestart {
         }
     }
 }
+impl JetDisplay for JetServiceRestart {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
 
 impl JetShow for JetServiceDelivery {
     fn jet_show(&self) -> String {
@@ -465,6 +470,11 @@ impl JetShow for JetServiceDelivery {
             JetServiceDelivery::AtMostOnce => "AtMostOnce".to_string(),
             JetServiceDelivery::DurableAtLeastOnce => "DurableAtLeastOnce".to_string(),
         }
+    }
+}
+impl JetDisplay for JetServiceDelivery {
+    fn jet_display(&self) -> String {
+        self.jet_show()
     }
 }
 
@@ -609,6 +619,11 @@ impl JetShow for JetServiceStateStore {
         format!("ServiceStateStore({})", self.path)
     }
 }
+impl JetDisplay for JetServiceStateStore {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
 
 impl JetShow for JetServiceUpgradeReceipt {
     fn jet_show(&self) -> String {
@@ -647,6 +662,11 @@ impl JetShow for JetServiceEndpoint {
 impl JetShow for JetServiceRuntime {
     fn jet_show(&self) -> String {
         format!("ServiceRuntime(store={}, retention_ms={})", self.store, self.retention_ms)
+    }
+}
+impl JetDisplay for JetServiceRuntime {
+    fn jet_display(&self) -> String {
+        self.jet_show()
     }
 }
 

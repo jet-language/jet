@@ -633,7 +633,7 @@ pub fn render_scalar_jet(
     validate_scalar_bridge(abi, descriptor, functions)?;
     let effect = descriptor.effect_root;
     let contract = descriptor.stamp();
-    let mut out = format!("// jet-ffi-descriptor={contract}\n#Extern module c.{abi} {{\n");
+    let mut out = format!("// jet-ffi-descriptor={contract}\n#Import module c.{abi} {{\n");
     for function in functions {
         let _ = write!(out, "    fn {}(", function.name);
         for (index, scalar) in function.params.iter().enumerate() {

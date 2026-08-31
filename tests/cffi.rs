@@ -38,7 +38,7 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
     }
     fs::write(
         root.join("package.jet"),
-        "name: \"octave_e2e\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: .{\n    holds: { allow: [GPU, IO, Mem.Alloc] },\n}\n",
+        "name: \"octave_e2e\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {\n    holds: { allow: [GPU, IO, Mem.Alloc] },\n}\n",
     )
     .unwrap();
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -755,7 +755,7 @@ fn run() { }
 "#;
     fs::write(
         root.join("package.jet"),
-        "name: \"member_list\"\nversion: \"0.1.0\"\ndeps: .{ c: c@system, m: c@system }\n",
+        "name: \"member_list\"\nversion: \"0.1.0\"\ndeps: { c: c@system, m: c@system }\n",
     )
     .unwrap();
     fs::write(&main, source).unwrap();
@@ -1287,7 +1287,7 @@ fn declare_local_c_dep(root: &Path, lib: &str) {
     fs::write(
         root.join("package.jet"),
         format!(
-            "name: \"cffi_{lib}\"\nversion: \"0.1.0\"\ndeps: .{{ {lib}: c@\"{}\" }}\n",
+            "name: \"cffi_{lib}\"\nversion: \"0.1.0\"\ndeps: {{ {lib}: c@\"{}\" }}\n",
             root.display()
         ),
     )
@@ -1447,7 +1447,7 @@ fn cffi_end_to_end_links_and_runs() {
     };
     declare_local_c_dep(&root, &lib_name);
     let mut manifest = fs::read_to_string(root.join("package.jet")).unwrap();
-    manifest.push_str("authority: .{\n    holds: { allow: [IO] },\n}\n");
+    manifest.push_str("authority: {\n    holds: { allow: [IO] },\n}\n");
     fs::write(root.join("package.jet"), manifest).unwrap();
 
     // Hand-written bindgen cache fixture (simulates `jet inspect bind` output).
@@ -1633,7 +1633,7 @@ fn run() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(run.status.code(), Some(1), "{stderr}");
     assert!(
-        stderr.contains("Error [E1003]: a default Int value does not fit in the C i64 range"),
+        stderr.contains("Error [E1003]: A default Int value does not fit in the C i64 range"),
         "{stderr}"
     );
     assert!(!stderr.contains("panicked at"), "{stderr}");
@@ -1945,7 +1945,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     fs::write(
         root.join("package.jet"),
         format!(
-            "name: \"cffi_cb\"\nversion: \"0.1.0\"\ndeps: .{{ cb: c@\"{}\" }}\n",
+            "name: \"cffi_cb\"\nversion: \"0.1.0\"\ndeps: {{ cb: c@\"{}\" }}\n",
             root.display()
         ),
     )
@@ -2018,8 +2018,10 @@ fn cffi_raw_status_out_pointer_reads_only_on_success() {
 use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
+#Error
+enum StoreError { Status }
 #Import module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
-fn load(id: U64) Record !String -> {
+fn load(id: U64) Record !StoreError -> {
     slot := Record{id: 0, flags: 0}
     status := I32{ 1 }
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
@@ -2027,7 +2029,7 @@ fn load(id: U64) Record !String -> {
         status = store.store_load(id, p)
         if Int.from_i32(status) == 0 { slot = ~p.* }
     }
-    if Int.from_i32(status) != 0 { return Err("status {status}") }
+    if Int.from_i32(status) != 0 { return Err(StoreError.Status) }
     return Ok(slot)
 }
 
@@ -2035,7 +2037,7 @@ fn run() {
     print((load(7) ?? panic("success expected")).id)
     if load(8) == {
         .Ok(v) -> { print("unexpected {v.id}") }
-        .Err(e) -> { print(e) }
+        .Err(e) -> { print("status 9") }
     }
 }
 "#;
@@ -2873,7 +2875,7 @@ fn deps_block_parses_c_lib_refs() {
     let manifest = r#"
 name: "p"
 version: "0.1.0"
-deps: .{
+deps: {
     raylib: c@system,
     foo:    c@"/opt/foo",
 }
@@ -3130,7 +3132,7 @@ fn concurrent_processes_share_one_bridge_build_per_key() {
         fs::write(dir.join("main.jet"), source).unwrap();
         fs::write(
             dir.join("package.jet"),
-            "name: \"ffi_concurrent\"\nversion: \"0.1.0\"\nauthority: .{\n    holds: { allow: [FFI] },\n}\n",
+            "name: \"ffi_concurrent\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [FFI, IO] },\n}\n",
         )
         .unwrap();
         children.push(

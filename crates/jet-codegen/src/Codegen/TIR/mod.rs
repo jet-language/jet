@@ -87,6 +87,15 @@ use crate::AST::{
     VariantPayload,
 };
 
+/// Stable suffix for the raw C ABI trampoline around a fallible Jet callable.
+///
+/// A normal Jet function returns its typed failure carrier. C callback slots
+/// carry only the success value, so the emitted trampoline owns the one-way
+/// error edge instead of giving the foreign caller a Rust `Result` ABI.
+pub(crate) fn c_callback_adapter_name(name: &str) -> String {
+    format!("{name}__c_callback")
+}
+
 /// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with a
 /// `ComptimeName` carrying its enum value before sema sees the generated body.
 /// Canonical fact metadata proves the enum kind; the AST node proves this is a

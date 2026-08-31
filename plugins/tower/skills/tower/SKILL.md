@@ -154,11 +154,11 @@ everything (bypass event-logged). Full table in the plugin's `AGENTS.md`; headli
 - `decision add` needs a plain-language ballot with
   gist/lesson/story/inWild/options[].code/rec plus structured recommendation
   reasons for the winner and every loser. Full ballots also need ordered base,
-  boil-the-ocean, hybrid, cooperative, and adversarial summaries. Short ballots
-  need the owner's quoted request and must omit reviews. Use the `simple` skill
-  for every user-visible ballot field
-  or `E_BALLOT` — save unfinished work with `--draft`, finish later with
-  `decision update <id> --ready`.
+  boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
+  rival-family adversarial summaries. Short ballots need the owner's quoted
+  request and must omit reviews. Use the `simple` skill for every user-visible
+  ballot field or `E_BALLOT` — save unfinished work with `--draft`, finish
+  later with `decision update <id> --ready`.
 - `decision ratify` is owner-only (`E_OWNER_ONLY`) unless
   you pass `--quote "owner's words"` for an on-behalf-of action.
 - Any write to a frozen card is owner-only (`E_OWNER_LANE`); the owner moves

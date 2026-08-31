@@ -11147,6 +11147,24 @@ impl LowerCtx<'_, '_> {
         self.lower_named_str_interp_mode(buf_id, expr, &expr.ty, type_name, mode)
     }
 
+    fn named_prelude_show_host(&self, type_name: &str) -> Option<FuncId> {
+        let type_name = type_name
+            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(type_name);
+        match type_name {
+            "ComputeDevice" => Some(self.host.compute.device_show),
+            "ServiceDelivery" => Some(self.host.service_delivery_show),
+            "ServiceRestart" => Some(self.host.service_restart_show),
+            "ServiceRuntime"
+            | "ServiceStateStore"
+            | "SyncCounter"
+            | "SyncList"
+            | "SyncMap"
+            | "SyncText" => Some(self.host.service_show),
+            _ => None,
+        }
+    }
+
     fn lower_named_str_interp_mode(
         &mut self,
         buf_id: Value,
@@ -11158,6 +11176,16 @@ impl LowerCtx<'_, '_> {
         if type_name == "Unit" {
             return Ok(());
         }
+        if let Some(show_host) = self.named_prelude_show_host(type_name) {
+            let value = self.lower_expr(expr)?;
+            let text = self.call_host(show_host, &[value]);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push_ref, &[buf_id, text]);
+            return Ok(());
+        }
+
         if type_name == jet_foundation::Syntax::TYPE_RANGE {
             let values = self.lower_range_expr(expr)?;
             let text = self.lower_range_show(values)?;

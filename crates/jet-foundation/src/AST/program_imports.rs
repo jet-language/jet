@@ -587,9 +587,8 @@ pub struct ProgramBundle {
     pub used_core: std::collections::HashSet<String>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
     /// stable C callback symbol (`CallArgFlags::c_callback_symbol`) at some
-    /// `#Extern` call site anywhere in the bundle. Codegen emits exactly these
-    /// definitions as `extern "C" fn` — never every `#Pure fn` (that leaked the
-    /// purity lever into codegen and broke I3 erasure; see 14dd68a5).
+    /// `#Import` call site anywhere in the bundle. Codegen keeps each Jet
+    /// function's ordinary result carrier and emits a raw C trampoline beside it.
     pub ffi_callback_fns: std::collections::HashSet<String>,
     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading
     /// — per-file `use c.<lib>` bindings and the libraries to link against.

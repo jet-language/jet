@@ -36,8 +36,8 @@ use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
-use crate::Codegen::TIR::module_call_target_return;
 use crate::Codegen::TIR::module_call_source_return_type_with_args;
+use crate::Codegen::TIR::module_call_target_return;
 use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 
@@ -1526,7 +1526,13 @@ fn lower_method_call_impl(
                 }
                 return value;
             }
-            lower_expr(expr, cx, env)
+            let value = lower_expr(expr, cx, env);
+            if let Some((params, _)) = crate::Sema::core_fixed_sig(module, method) {
+                if let Some((_, ty)) = params.get(index) {
+                    return preserve_typed_list_shape(value, ty, cx);
+                }
+            }
+            value
         };
 
     // D-ZIPPAD1: lower the complete list/iterator zip family as one TIR
@@ -3156,7 +3162,10 @@ fn lower_method_call_impl(
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
                         let ret = module_call_source_return_type_with_args(
-                            cx, &mangled_key, type_args, &targs,
+                            cx,
+                            &mangled_key,
+                            type_args,
+                            &targs,
                         );
                         return TExpr {
                             ty: ret,
@@ -3375,7 +3384,10 @@ fn lower_method_call_impl(
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
                         let ret = module_call_source_return_type_with_args(
-                            cx, &mangled_key, type_args, &targs,
+                            cx,
+                            &mangled_key,
+                            type_args,
+                            &targs,
                         );
                         let lowered = TExpr {
                             ty: ret,

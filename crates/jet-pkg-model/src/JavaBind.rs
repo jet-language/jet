@@ -444,7 +444,7 @@ fn descriptor_types(value: &str) -> Result<(Vec<Scalar>, Scalar), BindError> {
 
 fn render_jet(lib: &str, s: &Surface) -> String {
     let abi = format!("jet_java_{lib}");
-    let mut o = format!("#Extern module c.{abi} {{\n    fn new(");
+    let mut o = format!("#Import module c.{abi} {{\n    fn new(");
     params_jet(&mut o, &s.ctor);
     o.push_str(") Int = \"");
     o.push_str(&format!(

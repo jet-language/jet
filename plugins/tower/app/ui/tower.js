@@ -1208,6 +1208,7 @@ const REVIEW_STAGES = [
   ['boilOcean', '◎', 'Boil the ocean'],
   ['hybrid', '◇', 'Hybrid'],
   ['cooperative', '＋', 'Cooperative'],
+  ['beginner', '◌', 'Beginner'],
   ['adversarial', '⚑', 'Adversarial'],
 ];
 function reviewPassesBody(d) {

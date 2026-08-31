@@ -40,11 +40,11 @@ fn plain_string_cannot_cross_checked_text_boundaries() {
     assert_plain_string_rejected(
         "checked text parameter",
         r#"
-fn take(value: Pattern) {}
+fn accept(value: Pattern) {}
 
 fn run() {
     plain :: "plain"
-    take(plain)
+    accept(plain)
 }
 "#,
     );
@@ -64,11 +64,11 @@ fn run() {
     assert_plain_string_rejected(
         "checked text collection",
         r#"
-fn take(values: [Pattern]) {}
+fn accept(values: [Pattern]) {}
 
 fn run() {
     plain :: "plain"
-    take([plain])
+    accept([plain])
 }
 "#,
     );
@@ -88,7 +88,7 @@ fn run() {
     assert_plain_string_rejected(
         "checked text return",
         r#"
-fn make() Pattern {
+fn make() Pattern -> {
     plain :: "plain"
     return plain
 }
@@ -121,7 +121,7 @@ fn run() {
         r#"
 use c.checked as c
 
-#Extern module c.checked {
+#Import module c.checked {
     fn put(value: Pattern) = "put"
 }
 
@@ -130,5 +130,27 @@ fn run() {
     c.put(plain)
 }
 "#,
+    );
+}
+
+#[test]
+fn email_html_body_rejects_plain_string() {
+    let diagnostics = compile(
+        r#"
+use core.email as email
+
+fn run() {
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    email.message(sender, [sender], [Address]{}, "subject", "body", "<b>unsafe</b>", [Attachment]{})
+}
+"#,
+    )
+    .expect_err("email HTML body accepted a plain String");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0149"),
+        "email HTML body produced no checked-text diagnostic: {diagnostics:#?}"
     );
 }

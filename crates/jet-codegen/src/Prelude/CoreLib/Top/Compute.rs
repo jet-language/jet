@@ -4887,6 +4887,12 @@ impl JetShow for JetComputeDevice {
     }
 }
 
+impl JetDisplay for JetComputeDevice {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
 impl JetShow for JetComputePlacementReceipt {
     fn jet_show(&self) -> String {
         format!(

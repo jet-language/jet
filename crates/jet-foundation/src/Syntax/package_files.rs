@@ -33,7 +33,7 @@ pub const JETPACK_TOML: &str = "jetpack.toml";
 /// `@run.jet`.
 pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
 
-/// Pre-ruling project entry name, accepted only as a compatibility fallback.
+/// Pre-ruling project entry name, retained only as a one-time migration sentinel.
 pub const LEGACY_ENTRY_FILE: &str = "main.jet";
 
 /// D-ROLEFILE1=A (ratified 2026-08-10, card #1866): optional package-root

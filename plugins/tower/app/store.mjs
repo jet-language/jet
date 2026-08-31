@@ -1823,12 +1823,32 @@ export function releaseCard(s, ref, by, handoff) {
 // format, not a narrative ballot, and are exempt.
 const PLAIN_SENTENCE_WORDS = 32;
 const PLAIN_PARAGRAPH_WORDS = 90;
-const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial'];
+const LEGACY_REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial'];
+const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial'];
+const BALLOT_PROCESS_VERSION = 2;
 const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
 const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
 const orderedReviewPasses = (passes) => Object.fromEntries(REVIEW_PASS_KEYS.map(key => [key, passes[key]]));
+const beginnerPrefix = /^Fresh agent: ([^.]+)\. Skill: rli5\./;
 const dissentPrefix = /^Author model family: ([^.]+)\. Adversarial model family: ([^.]+)\./;
+
+function beginnerMetadata(pass) {
+  if (typeof pass !== 'string') return null;
+  const match = beginnerPrefix.exec(pass);
+  if (!match) return null;
+  return {
+    agent: match[1].trim(),
+    summary: pass.slice(match[0].length).trim(),
+  };
+}
+
+function beginnerMetadataGaps(p) {
+  const metadata = beginnerMetadata(p.reviewPasses?.beginner);
+  if (!metadata || !metadata.agent)
+    return ['reviewPasses.beginner (must begin with `Fresh agent: <agent-id>. Skill: rli5.`)'];
+  return [];
+}
 
 function dissentMetadata(pass) {
   if (typeof pass !== 'string') return null;
@@ -1850,7 +1870,11 @@ function dissentMetadataGaps(p) {
   return [];
 }
 
-const reviewPassSummary = (key, pass) => key === 'adversarial' ? (dissentMetadata(pass)?.summary || pass) : pass;
+const reviewPassSummary = (key, pass) => {
+  if (key === 'beginner') return beginnerMetadata(pass)?.summary || pass;
+  if (key === 'adversarial') return dissentMetadata(pass)?.summary || pass;
+  return pass;
+};
 function proseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
@@ -1916,7 +1940,7 @@ export function plainLanguageGaps(p) {
   return gaps;
 }
 
-export function ballotGaps(p) {
+export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION } = {}) {
   const missing = [];
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
@@ -1959,13 +1983,15 @@ export function ballotGaps(p) {
     if (!passes || typeof passes !== 'object' || Array.isArray(passes)) {
       missing.push('reviewPasses');
     } else {
-      for (const key of REVIEW_PASS_KEYS) {
+      const requiredPasses = requireBeginner ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
+      for (const key of requiredPasses) {
         const summary = reviewPassSummary(key, passes[key]);
         if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
         else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
       }
       for (const key of Object.keys(passes).filter(key => !REVIEW_PASS_KEYS.includes(key)))
         missing.push(`reviewPasses.${key} (unexpected)`);
+      if (requireBeginner) missing.push(...beginnerMetadataGaps(p));
       missing.push(...dissentMetadataGaps(p));
     }
   } else if (ballotMode === 'short') {
@@ -1996,11 +2022,13 @@ export function addDecision(s, p) {
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   const draft = !!p.draft;
   if (!systemAcceptance && p.group !== 'acceptance') {
-    const gaps = ballotGaps(p);
-    const familyGaps = (p.ballotMode || 'full') === 'full' ? dissentMetadataGaps(p) : [];
+    const gaps = ballotGaps(p, { requireBeginner: true });
+    const metadataGaps = (p.ballotMode || 'full') === 'full'
+      ? [...beginnerMetadataGaps(p), ...dissentMetadataGaps(p)]
+      : [];
     if (draft) {
-      if (familyGaps.length)
-        fail('E_BALLOT', `ballot draft missing required model-family metadata: ${familyGaps.join(', ')}`);
+      if (metadataGaps.length)
+        fail('E_BALLOT', `ballot draft missing required review metadata: ${metadataGaps.join(', ')}`);
     } else if (gaps.length) {
       fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
     }
@@ -2012,6 +2040,7 @@ export function addDecision(s, p) {
     inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
     rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
     ballotMode, shortAuthorizedBy: ballotMode === 'short' ? p.shortAuthorizedBy : null,
+    ballotProcessVersion: p.group === 'acceptance' ? null : BALLOT_PROCESS_VERSION,
     reviewPasses: ballotMode === 'full' && p.reviewPasses ? orderedReviewPasses(p.reviewPasses) : null,
     checkInstructions: p.checkInstructions || null, ...(supersededBy ? { supersededBy } : {}),
     draft, status: 'open', created: now() };
@@ -2115,15 +2144,15 @@ export function updateDecision(s, id, patch, by) {
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
   if (d.group !== 'acceptance' && d.status !== 'ratified' && d.ballotMode !== 'short') {
-    const familyGaps = dissentMetadataGaps(d);
-    if (familyGaps.length)
-      fail('E_BALLOT', `ballot update missing required model-family metadata: ${familyGaps.join(', ')}`);
+    const metadataGaps = [...beginnerMetadataGaps(d), ...dissentMetadataGaps(d)];
+    if (metadataGaps.length)
+      fail('E_BALLOT', `ballot update missing required review metadata: ${metadataGaps.join(', ')}`);
   }
   // Every edit to an open ready ballot re-runs the gate. --ready does the
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
     d.ballotMode ||= 'full';
-    const gaps = ballotGaps(d);
+    const gaps = ballotGaps(d, { requireBeginner: true });
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
     if (d.ballotMode === 'full') {
       d.reviewPasses = orderedReviewPasses(d.reviewPasses);
@@ -2131,6 +2160,7 @@ export function updateDecision(s, id, patch, by) {
     } else {
       d.reviewPasses = null;
     }
+    d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
   }
   if (patch.ready) d.draft = false;
   const card = s.cards.find(c => c.id === d.cardId);

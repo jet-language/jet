@@ -22,6 +22,7 @@ const reviewPasses = () => ({
   boilOcean: 'The breadth pass checked for missing choices.',
   hybrid: 'The hybrid pass combined compatible strengths.',
   cooperative: 'The cooperative pass strengthened every option.',
+  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
   adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.',
 });
 
@@ -63,7 +64,7 @@ test('addDecision accepts a full ballot', () => {
   assert.equal(result.draft, false);
   assert.equal(result.ballotMode, 'full');
   assert.deepEqual(result.reviewPasses, reviewPasses());
-  assert.deepEqual(Object.keys(result.reviewPasses), ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial']);
+  assert.deepEqual(Object.keys(result.reviewPasses), ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial']);
 });
 
 test('verdicts require an existing supersession link', () => {
@@ -94,6 +95,26 @@ test('full ballot requires every ordered review summary', () => {
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
     (e) => e.code === 'E_BALLOT' && /reviewPasses\.cooperative/.test(e.message));
+});
+
+test('full ballot requires the fresh-agent beginner review', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const passes = reviewPasses();
+  delete passes.beginner;
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.beginner/.test(e.message));
+});
+
+test('beginner review requires fresh-agent RLI5 metadata', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const passes = reviewPasses();
+  passes.beginner = 'The beginner pass tested the complete ballot.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
+    (e) => e.code === 'E_BALLOT' && /Fresh agent: <agent-id>\. Skill: rli5\./.test(e.message));
 });
 
 test('full ballot requires string review summaries', () => {

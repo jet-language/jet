@@ -84,7 +84,7 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
     for selector in [
         "file:examples/features/io/cli_args.jet",
         "file:examples/features/io/watcher.jet",
-        "file:gauntlet/entries/taskfile-cli/jet/main.jet",
+        "file:gauntlet/entries/taskfile-cli/jet/run.jet",
     ] {
         assert_eq!(source_profile(selector), "raw-cli", "raw boundary drifted: {selector}");
     }
@@ -410,7 +410,7 @@ fn run() {
             "indexed-sequence",
         ),
         (
-            "gauntlet/entries/bulkrename/jet/main.jet",
+            "gauntlet/entries/bulkrename/jet/run.jet",
             r#"fn run() {
     value :: Regex{"IMG"}
 }"#,
@@ -587,7 +587,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let format = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/main.jet",
+            "gauntlet/entries/bulkrename/jet/run.jet",
             "fn run() { print(\"{value:Fixed(2)}\".replace(\",\", \"\")) }",
         )
         .unwrap();
@@ -596,7 +596,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "plain-format-fact"));
     let grouped = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/main.jet",
+            "gauntlet/entries/bulkrename/jet/run.jet",
             "fn run() { print(\"{value:Grouped(2)}\".replace(\",\", \"\")) }",
         )
         .unwrap();
@@ -667,7 +667,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let unrelated_regex_recipe = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/main.jet",
+            "gauntlet/entries/bulkrename/jet/run.jet",
             "fn pattern() { value :: Regex{\"^x$\"} }
 fn run(value: String) {
     matched :: re.match(Regex{\"x\"}, value)

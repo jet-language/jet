@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2409,
-    "rev": 47766,
+    "nextNum": 2413,
+    "rev": 47776,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26,10 +26,10 @@
         "radar:e13",
         "radar-sq",
         "radar:e10",
-        "board-ideas",
         "radar:e3",
         "radar:e5",
-        "radar:e11"
+        "radar:e11",
+        "board-ideas"
       ]
     },
     "completionCursor": "2026-08-31T19:48:42.330Z"
@@ -160161,6 +160161,11 @@
         {
           "at": "2026-08-31",
           "by": "fable",
+          "text": "2026-08-31 wave: both model families are now genuinely reachable. Adapters resolve through authenticated OMP command transport (tools/agent-eval/adapters.json:9-29 OpenAI, :39-50 Anthropic); direct OMP smoke succeeded for openai-codex/gpt-5.6-luna and opus. Fail-closed preflight was preserved, not weakened: the test still asserts BLOCKED when no provider is reachable, and a second case now accepts the OMP transport.\n\nA real --record-baseline run took 1282.95s and produced 15 of 16 honest cells: Anthropic capsule cli/data/hello/http passed, Anthropic control data/hello passed, control cli failed on model output; OpenAI capsule cli/data/hello passed with http probe-1 failed, control cli/data/hello passed with http probe-2 failed. The run exited 78 BLOCKED on one cell, anthropic control HTTP, which exceeded the 10-minute adapter timeout.\n\nOwner ruling applied: adapter timeout was raised rather than capping model thinking, because reasoning budget is the subject under test; harness.adapter_timeout_ms=600000 is recorded in scoreboard provenance. Timeout was not raised further and no baseline was fabricated, so docs/audits/cold-agent-jet-baseline.json still has empty rows.\n\nC2 and C3 stay open on that single timing-out cell."
+        },
+        {
+          "at": "2026-08-31",
+          "by": "fable",
           "text": "EXTERNAL GATE: criteria 2-3 need two stock model families. Anthropic auth is not present in this session. No implementation work until credentials exist."
         },
         {
@@ -160217,7 +160222,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:47.280Z",
-      "updated": "2026-08-31T12:28:47.228Z",
+      "updated": "2026-08-31T21:04:07.758Z",
       "updatedBy": "fable"
     },
     {
@@ -166490,6 +166495,123 @@
       "created": "2026-08-31T20:20:08.851Z",
       "updated": "2026-08-31T20:20:08.851Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0wca1u5",
+      "num": 2409,
+      "title": "One-file Package metadata surface",
+      "body": "Choose how one Jet source can carry complete Package facts before it grows into package.jet. The current corpus has 137 manifests. Eighty-seven, or 63.5%, own exactly one source file. Seventy-six, or 55.5%, are at most 100 bytes. The median manifest is 98 bytes and four lines.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/proposals/ecosystem-shape.md",
+        "crates/jet-pkg-model",
+        "Source/Loader.rs"
+      ],
+      "tags": [
+        "syntax",
+        "package-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T20:59:20.624Z",
+      "updated": "2026-08-31T21:59:13.078Z",
+      "updatedBy": "sol"
+    },
+    {
+      "id": "c06n8xvz",
+      "num": 2410,
+      "title": "auto_printable table hand-synced against Prelude JetShow impls and drifts silently",
+      "body": "Sema decides whether `print(value)` is legal via Diagnostics::is_printable -> TraitRegistry::implements_trait(PRINTABLE), backed by the hand-maintained auto_printable list populated in register_synthetic_display_debug (crates/jet-foundation/src/Traits.rs). That list has to agree with the actual `impl JetShow for Jet*` set in crates/jet-codegen/src/Prelude, and nothing enforces it.\n\nIt had silently drifted for nine types. ComputeDevice has `impl JetShow for JetComputeDevice` at Prelude/Compute.rs:4877-4888 and six Core conformance witnesses print it directly, yet E0112 rejected it and blocked the strict three-tier gate. An audit then found eight more printed by strict Core witnesses with deterministic JetShow output and no row: SyncText, SyncCounter, SyncMap, SyncList, ServiceRestart, ServiceDelivery, ServiceRuntime, ServiceStateStore. All nine rows were added at Traits.rs:2012,2088-2091,2095-2098.\n\nThe failure mode is bad: a type gets a JetShow impl, no row is added, and print stays rejected until some witness happens to exercise it. The gate only caught this one because a conformance program printed the value.\n\nInvestigating agent's assessment: deriving the list is feasible only through a larger canonical declaration or codegen refactor, because the sema-side foundation registry cannot reflect Rust impls living in jet-codegen, and aliases, internal-only types, and deliberate explicit-show exclusions all need metadata. Types with explicit *_show APIs (Tensor, ComputeStream, SparseTensor, ServiceTree, Endpoint) are intentionally excluded and must stay excluded.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Make the relationship enforced rather than remembered. Cheapest useful step is a test that walks the Prelude JetShow impls and fails when one has neither an auto_printable row nor a declared explicit-show exclusion, which converts silent drift into a red test. The full fix is a canonical declaration that both the Prelude impl and the sema registry derive from.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "2286",
+        "2399"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T21:05:40.007Z",
+      "updated": "2026-08-31T21:05:40.007Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0n8wkt3",
+      "num": 2411,
+      "title": "P0: JIT drops a compute resource nested in a Result carrier before the caller uses it",
+      "body": "In the resident Cranelift JIT, a function returning Ok(Tensor) has its Tensor freed before the caller can use the returned carrier, so a later compute.shape(output) reads an invalid handle and the program fails with E3001.\n\nTrace, all in crates/jet-jit/src/jit/lower_ctx.rs:\n- 1312-1327 result_new lowers Ok(Tensor) and builds the Result carrier WITHOUT adopting the payload's compute resource.\n- 21153-21155 TExprKind::Ok routes into that path.\n- 3728-3734 the preserve predicate does not see the nested payload, so 3744-3755 emit_compute_resource_closes drops it, and 3858-3867 emit_lexical_values_exit closes it at scope exit.\n- 2439-2448 jet_jit_compute_shape then receives a dead handle.\n\nThe correct shape already exists nearby: lower_clone_result_value at 24217-24255 explicitly adopts the resource at 24238-24249. The Ok-carrier path is missing that adoption.\n\nThis is a tier-parity defect under I9: AOT and the interpreter keep the payload alive, and only the JIT frees it early, so the same program produces different behavior per tier. Found while clearing the last cffi failures for #2404; it surfaces through the Octave sidecar round-trip test.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Adopt the payload compute resource when building a Result carrier in result_new, mirroring lower_clone_result_value:24238-24249, so a nested resource is preserved exactly as a direct return is. Add a witness that returns Ok(Tensor) and uses the tensor through the returned carrier, and assert identical behavior on AOT, default jet run, and the forced interpreter.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "2404"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T22:26:39.589Z",
+      "updated": "2026-08-31T22:26:39.589Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0gsgsir",
+      "num": 2412,
+      "title": "Typed SQL values at database sinks",
+      "body": "Choose whether core.db query, query_one, execute, live, transaction, and migrate accept first-class SQL values instead of splitting one checked value into template text and a separate DBValue list. The current API makes safe SQL construction explicit, then immediately dismantles it at every database sink.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "typed-text",
+        "database",
+        "corelib"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T22:34:42.444Z",
+      "updated": "2026-08-31T22:34:42.444Z",
+      "updatedBy": "sol"
     }
   ],
   "decisions": [
@@ -227386,6 +227508,199 @@
       "created": "2026-08-31T01:23:28.708Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-31"
+    },
+    {
+      "id": "D-ECO-INLINEPACKAGE1",
+      "cardId": "c0wca1u5",
+      "group": "syntax",
+      "title": "Put Package facts inside a single source file",
+      "gist": "Choose how one Jet file declares its Package facts.",
+      "lesson": "Today, one Jet file is complete only while default Package facts are enough. This ballot chooses how that file can declare a name, dependencies, capabilities, targets, or build settings without package.jet. G is today's behavior; A–F are proposed replacements.",
+      "explainer": "All options change only how Package facts are enclosed. They keep package.jet's fields, values, defaults, dependency resolution, capabilities, targets, builds, Package graph, and lock behavior. A deps key is the local dependency name used after use. The @ characters inside a quoted dependency coordinate are plain text.\n\nFor A, the inline declaration is the first non-comment construct in the entry source file. It appears once per Package, before every use and declaration. Other source files cannot add or override Package facts. More than one inline declaration, or an inline declaration beside package.jet, fails before dependency resolution. No source wins or merges; the diagnostic names every conflicting location.\n\nOutside strings, @fact reads a fact known before the program runs; it does not create that fact. B would also make @package introduce a declaration. C would make @field assign Package fields. A leaves @ unchanged.\n\nTo extract A, copy only the package block's body into package.jet at the Package root. Delete the wrapper and leave every use and program declaration in the entry file. The reverse operation inserts the wrapper after leading comments but before every use or declaration, then removes package.jet in the same tool operation. If that placement is unavailable, the tool fails without changing either file.\n\nInline and extracted forms normalize to the same Package facts and dependency graph. The wrapper and manifest path do not change the lock key or resolved versions. Package locks remain in .jet/lock. One-file means one authored file to share; Jet may still keep generated lock and cache data.",
+      "story": "Maya shares one run.jet file that fetches weather data and prints a report. The program needs one dependency and network access. She wants one file now, without blocking a later move into a larger Package.",
+      "inWild": "// Proposed A — complete one-file run.jet after adding two dependencies\npackage {\n  name: \"weather-report\"\n  deps: {\n    http: ./deps/http,\n    json: ./deps/json,\n  }\n  capabilities: [Network]\n}\n\nuse http\nuse json\n\nrun() {\n  body := http.get(\"https://api.weather.gov/gridpoints/OKX/33,37/forecast\")\n  report := json.parse(body) ?? panic(\"weather service returned invalid JSON\")\n  print(report)\n}\n\n// The exact extracted result has two authored files:\n// package.jet\nname: \"weather-report\"\ndeps: {\n  http: ./deps/http,\n  json: ./deps/json,\n}\ncapabilities: [Network]\n\n// run.jet\nuse http\nuse json\n\nrun() {\n  body := http.get(\"https://api.weather.gov/gridpoints/OKX/33,37/forecast\")\n  report := json.parse(body) ?? panic(\"weather service returned invalid JSON\")\n  print(report)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Native package block",
+          "detail": "Start the file with one package declaration. Its body uses the same fields and values as package.jet. Tools can parse it as Jet and move it unchanged into package.jet later.",
+          "technical": "package is a declaration, not a runtime value. Only one may appear, before other declarations. An inline block and package.jet are mutually exclusive. Both produce the same Package model, graph identity, and lock identity.",
+          "code": "// Package header only; the complete unchanged program is shown above.\npackage {\n  name: \"weather-report\"\n  deps: { http: ./deps/http }\n  capabilities: [Network]\n}\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "B",
+          "name": "Marked package block",
+          "detail": "Use @package to mark the block as compiler input. The marker makes the special role visible. It also gives @ a new declaration role beside its existing compile-time read role.",
+          "technical": "The body and migration rules match option A. This expands @ beyond known-value reads such as @build and @name, so the syntax must distinguish reading a fact from declaring Package facts.",
+          "code": "// Package header only; the complete unchanged program is shown above.\n@package {\n  name: \"weather-report\"\n  deps: { http: ./deps/http }\n  capabilities: [Network]\n}\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "C",
+          "name": "Marked fields",
+          "detail": "Prefix each Package field with @. Small files avoid a wrapper, and each special line is visible. Larger manifests repeat the marker and turn one Package declaration into many directives.",
+          "technical": "Each allowed Package field is one contiguous top-of-file @field directive. Repeated, late, or unknown fields fail. Extraction removes each @ and writes the fields in source order as one package.jet body.",
+          "code": "// Package header only; the complete unchanged program is shown above.\n@name: \"weather-report\"\n@deps: { http: ./deps/http }\n@capabilities: [Network]\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "D",
+          "name": "Typed Package value",
+          "detail": "Declare Package facts with Jet's normal typed binding syntax. This reuses familiar grammar. It also looks like a runtime value that users could rename, pass, or construct more than once.",
+          "technical": "Only the top-level binding named package with declared type Package supplies compiler facts. It appears once and cannot be read or passed at runtime. Any other Package value is ordinary program data.",
+          "code": "// Package header only; the complete unchanged program is shown above.\npackage: Package :: {\n  name: \"weather-report\"\n  deps: { http: ./deps/http }\n  capabilities: [Network]\n}\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "E",
+          "name": "Bare Package fields",
+          "detail": "Allow recognized package.jet fields directly at the file top. This is the shortest form. A reader must know where metadata stops, and those names cannot be ordinary declarations in that prefix.",
+          "technical": "Only a contiguous prefix of recognized package.jet field names is metadata. Each appears once. A recognized name there is never a user declaration. Repeated, late, or unknown metadata fields fail.",
+          "code": "// Package header only; the complete unchanged program is shown above.\nname: \"weather-report\"\ndeps: { http: ./deps/http }\ncapabilities: [Network]\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "F",
+          "name": "Comment front matter",
+          "detail": "Place a fenced package.jet document inside comments. Existing tools can scan text before parsing Jet. Users must learn a second embedded format, and language tools need two parsers for one file.",
+          "technical": "The exact // ---package opener is the first non-comment line, and // --- closes it. Every body line starts with //. Missing, repeated, or late fences fail. Fence-like text elsewhere is ordinary text.",
+          "code": "// Package header only; the complete unchanged program is shown above.\n// ---package\n// name: \"weather-report\"\n// deps: { http: ./deps/http }\n// capabilities: [Network]\n// ---\n\nrun() { print(http.get(url)) }"
+        },
+        {
+          "key": "H",
+          "name": "Reserved directive lines",
+          "detail": "Write one reserved line for each Package setting, like .NET file-based apps. Each line is easy to add independently. Package configuration becomes a separate directive language beside Jet declarations.",
+          "technical": "A contiguous top-of-file prefix accepts directives such as #:name, #:dep, and #:capability. Repeated, unknown, or late directives fail. Extraction translates the directives into one package.jet body.",
+          "code": "// Package header only; the complete unchanged program is shown above.\n#:name weather-report\n#:dep http ./deps/http\n#:capability Network"
+        },
+        {
+          "key": "G",
+          "name": "Keep package.jet separate",
+          "detail": "Keep source files free of Package facts. The current model stays simple for tools. A program that needs one dependency or capability stops being a single-file program.",
+          "technical": "This keeps today's behavior. Scripts stay file-free only while defaults are enough. The first explicit Package fact requires package.jet at the Package root.",
+          "code": "// package.jet\nname: \"weather-report\"\ndeps: { http: ./deps/http }\ncapabilities: [Network]\n\n// run.jet\nrun() { print(http.get(url)) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python and uv",
+          "note": "PEP 723 standardizes fenced TOML comments. uv makes the workflow popular and now supports uv lock --script. The praised result is a shareable file; complaints target comment fences, hidden metadata, and project promotion.",
+          "code": "# /// script\n# dependencies = [\"requests\"]\n# ///\n# Sources: https://packaging.python.org/en/latest/specifications/inline-script-metadata/\n# https://docs.astral.sh/uv/guides/scripts/"
+        },
+        {
+          "lang": "Rust Cargo scripts",
+          "note": "RFC 3502 uses ---cargo TOML front matter. It praises format reuse and easy migration. It records unclear defaults, hidden locks, cache concerns, and tooling rollout as costs.",
+          "code": "---cargo\n[dependencies]\ntime = \"0.3\"\n---\n// Source: https://rust-lang.github.io/rfcs/3502-cargo-script.html"
+        },
+        {
+          "lang": ".NET file-based apps",
+          "note": ".NET 10 uses reserved top-of-file directives such as #:package and #:property. This keeps one source file, but each project setting becomes a separate directive outside normal C# declarations.",
+          "code": "#:package Humanizer@2.14.1\n// Source: https://learn.microsoft.com/en-us/dotnet/core/sdk/file-based-apps"
+        },
+        {
+          "lang": "Kotlin scripts",
+          "note": "Kotlin uses file annotations such as @file:DependsOn. The marker is explicit and editor-visible, but package configuration becomes annotation-shaped compiler input rather than one coherent manifest value.",
+          "code": "@file:DependsOn(\"com.squareup.okhttp3:okhttp:4.12.0\")\n// Source: https://kotlinlang.org/docs/custom-script-deps-tutorial.html"
+        },
+        {
+          "lang": "Public code search, 2026-08-31",
+          "note": "Sourcegraph indexed 10,811 PEP 723 matches across 1,670 repositories, 1,215 .NET directive matches across 109, and 145 Cargo-script matches across 22. These are matches, not users.",
+          "code": "Queries: context:global archived:no fork:no lang:Python '# /// script'; lang:C# '#:package'; lang:Rust '---cargo'. Results may include docs, tests, examples, and shard-limited counts."
+        },
+        {
+          "lang": "uv reception, 2026-08-31",
+          "note": "uv had 89,288 GitHub stars and 182,502,668 recent-month PyPI downloads. Two Hacker News PEP 723 stories received 640 and 247 points. These signals do not isolate feature usage.",
+          "code": "Sources: https://api.github.com/repos/astral-sh/uv\nhttps://pypistats.org/api/packages/uv/recent\nhttps://hn.algolia.com/api/v1/search?query=PEP%20723"
+        },
+        {
+          "lang": "Python design discussion",
+          "note": "The 93-post PEP 723 discussion had 8,791 views and 265 likes. Participants praised low boilerplate, debated namespacing, warned about pyproject confusion, and demanded a clear promotion path.",
+          "code": "Source: https://discuss.python.org/t/how-would-you-like-to-declare-runtime-dependencies-and-python-requirements-for-pep-723/40418/17"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the proven one-file workflow without embedding package.jet text inside comments. It gives Jet one native declaration, one Package model, exact editor error locations, and a body that moves unchanged into package.jet.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is explicit, and Kotlin proves @ can introduce annotations. Jet already gives @ one different law: outside strings it reads compile-time facts. The package keyword avoids making the same mark mean both reading and declaring."
+          },
+          {
+            "key": "C",
+            "reason": "C is brief for one field, but repeats syntax as Packages grow. It fragments one Package value and forces a directive grammar for every current and future field."
+          },
+          {
+            "key": "D",
+            "reason": "D reuses binding syntax but is not an ordinary binding: the reserved package value cannot be read, passed, shadowed, or rebound. A parses as a declaration from the start and never promises those binding operations."
+          },
+          {
+            "key": "E",
+            "reason": "E is shortest, but hides the boundary between Package facts and user declarations. It reserves field names and gives parsers, readers, and tools less structure."
+          },
+          {
+            "key": "F",
+            "reason": "F copies the market leader's comment fence rather than its useful one-file workflow. It needs comment scanning and a second embedded grammar, with weaker editor locations and more edge cases than native Jet syntax."
+          },
+          {
+            "key": "H",
+            "reason": "H is proven workable by .NET, but every Package field needs a second directive grammar and translation rule. A keeps the complete package.jet body as native Jet data instead."
+          },
+          {
+            "key": "G",
+            "reason": "G preserves today's split, but breaks Jet's single-file promise as soon as a program needs one dependency, capability, target, or build setting."
+          }
+        ],
+        "tradeoff": "A reserves one declaration keyword and adds one source-file construct. Existing source that binds package must migrate in the same clean cutover; Jet keeps no compatibility alias. That visible cost avoids expanding @, runtime bindings, or comment grammar."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A keeps uv's self-contained workflow, Cargo's unchanged promotion path, and .NET's explicit compiler-owned boundary. It replaces their secondary metadata syntax with Jet's native Package body.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One native declaration keeps the Package whole.",
+            "use": "Use it as the canonical source form."
+          },
+          {
+            "key": "B",
+            "aspect": "A visible marker prevents accidental runtime interpretation.",
+            "use": "Keep the visibility through the package keyword, not @."
+          },
+          {
+            "key": "D",
+            "aspect": "The body should look like normal typed Jet data.",
+            "use": "Reuse Package field and value grammar without creating a runtime binding."
+          },
+          {
+            "key": "E",
+            "aspect": "package.jet and inline source should share a body.",
+            "use": "Make split and merge move the body unchanged."
+          },
+          {
+            "key": "F",
+            "aspect": "Tools should find metadata before running user code.",
+            "use": "Give the native declaration a fixed top-of-file position."
+          },
+          {
+            "key": "G",
+            "aspect": "Large Packages deserve a dedicated manifest.",
+            "use": "Keep package.jet as the extracted form, never as a requirement for one-file programs."
+          }
+        ]
+      },
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass framed the choice as preserving one-file Packages without inventing a second Package model.",
+        "boilOcean": "The breadth pass added keyword, @ block, @ fields, typed binding, bare fields, comment front matter, and status quo as distinct final designs.",
+        "hybrid": "The hybrid pass kept the market leader's self-contained workflow, Cargo's promotion path, and an explicit compiler boundary while replacing secondary metadata syntax with native Jet.",
+        "cooperative": "The cooperative pass gave every option its strongest real benefit and named its concrete grammar, tooling, migration, or semantic cost.",
+        "beginner": "Fresh agent: InlinePackageBeginner. Skill: rli5. The pass exposed an unclear baseline, incomplete migration example, and missing common placement, conflict, lock, and @ rules; the revised ballot now teaches each before comparison.",
+        "adversarial": "Author model family: OpenAI. Adversarial model family: Anthropic. A survived, but the pass exposed inconsistent dependency grammar, a missing .NET-style directive option, and stale locking language. The revision adds that option, unifies examples, and replaces rhetoric with concrete grammar costs."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-31T21:03:57.829Z",
+      "ballotProcessVersion": 2
     }
   ],
   "questions": [
@@ -229482,9 +229797,74 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-30T15:21:08.744Z"
+    },
+    {
+      "id": "b0ueqwn9",
+      "text": "Run docs/agents/prompts/web-dev-ux.md prompt through fable",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-31T21:02:23.357Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-31T22:34:42.444Z",
+      "by": "sol",
+      "action": "card.add",
+      "ref": "c0gsgsir",
+      "note": "Typed SQL values at database sinks"
+    },
+    {
+      "at": "2026-08-31T22:26:39.589Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0n8wkt3",
+      "note": "P0: JIT drops a compute resource nested in a Result carrier before the caller uses it"
+    },
+    {
+      "at": "2026-08-31T21:59:13.078Z",
+      "by": "sol",
+      "action": "decision.update",
+      "ref": "D-ECO-INLINEPACKAGE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-31T21:05:40.007Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c06n8xvz",
+      "note": "auto_printable table hand-synced against Prelude JetShow impls and drifts silently"
+    },
+    {
+      "at": "2026-08-31T21:04:07.758Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uk4f8w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-31T21:03:57.829Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-ECO-INLINEPACKAGE1",
+      "note": "One-file Package metadata surface"
+    },
+    {
+      "at": "2026-08-31T21:02:23.357Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b0ueqwn9",
+      "note": "Run docs/agents/prompts/web-dev-ux.md prompt through fable"
+    },
+    {
+      "at": "2026-08-31T20:59:20.624Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c0wca1u5",
+      "note": "One-file Package metadata surface"
+    },
     {
       "at": "2026-08-31T20:20:08.851Z",
       "by": "fable",
@@ -232927,62 +233307,6 @@
       "by": "owner",
       "action": "decision.ratify",
       "ref": "D-FREESTAND-TIME1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:50:02.610Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-SINK1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-30T14:49:43.674Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-ALLOCAPI1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:49:20.155Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-FACTS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:48:50.433Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-PRELUDE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:48:15.447Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-SELECT1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-30T14:46:58.836Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-30T14:46:58.836Z"
-    },
-    {
-      "at": "2026-08-30T14:46:08.000Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PACKAGE-MODEL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:45:44.310Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CHECKSCOPE1",
       "note": "A"
     }
   ],

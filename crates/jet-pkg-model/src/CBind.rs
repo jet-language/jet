@@ -5,7 +5,7 @@
 //! parser for **C function prototypes** over the type subset Jet's FFI binds
 //! (scalars, `char*` strings, `void`). A declaration it cannot map is *skipped
 //! and reported* — never faked (I3). Anything beyond this subset is hand-written
-//! as an `#Extern module c.<lib>` overlay, which still wins on merge.
+//! as an `#Import module c.<lib>` overlay, which still wins on merge.
 //!
 //! Output is a `#Bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
 //! `src/cffi.rs`; each binding is `fn name(p: T, …) R = "c_symbol";`.

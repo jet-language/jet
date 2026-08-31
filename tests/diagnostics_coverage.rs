@@ -326,6 +326,7 @@ fn semantic_guidance_lints_round_trip_through_the_registry() {
         ("L0519", "unit_scalar_rewrap"),
         ("L0521", "complete_ascii_case_ladder"),
         ("L0522", "walk_files_filter"),
+        ("L0523", "repeated_list_head"),
     ] {
         let row = jet_foundation::Registry::diagnostic(code)
             .unwrap_or_else(|| panic!("{code} must stay registered"));
@@ -797,11 +798,7 @@ fn diagnostic_snapshots_keep_the_complete_registered_product() {
                 .iter()
                 .enumerate()
                 .skip(start + 1)
-                .find_map(|(index, line)| {
-                    extract_report_opening_codes(line)
-                        .first()
-                        .map(|_| index)
-                })
+                .find_map(|(index, line)| extract_report_opening_codes(line).first().map(|_| index))
                 .unwrap_or(lines.len());
             let report = &lines[start..end];
             let what = line
@@ -811,16 +808,16 @@ fn diagnostic_snapshots_keep_the_complete_registered_product() {
                 .unwrap_or("");
             assert!(!what.is_empty(), "{} lost What for {code}", path.display());
             assert!(
-                report
-                    .iter()
-                    .any(|line| line.strip_prefix(" Why: ").is_some_and(|why| !why.is_empty())),
+                report.iter().any(|line| line
+                    .strip_prefix(" Why: ")
+                    .is_some_and(|why| !why.is_empty())),
                 "{} lost Why for {code}",
                 path.display()
             );
             assert!(
-                report
-                    .iter()
-                    .any(|line| line.strip_prefix(" Fix: ").is_some_and(|fix| !fix.is_empty())),
+                report.iter().any(|line| line
+                    .strip_prefix(" Fix: ")
+                    .is_some_and(|fix| !fix.is_empty())),
                 "{} lost Fix for {code}",
                 path.display()
             );

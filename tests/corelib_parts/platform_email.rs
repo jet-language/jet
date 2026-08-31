@@ -14,7 +14,7 @@ fn run() {
         .Ok(_) -> panic("address injection accepted")
         .Err(_) -> print("address-rejected")
     }
-    if email.message(~sender, [~recipient], [], "hello\nBcc := stolen@example.com", "text", "", []) == {
+    if email.message(~sender, [~recipient], [Address]{}, "hello\nBcc := stolen@example.com", "text", HTML{""}, [Attachment]{}) == {
         .Ok(_) -> panic("header injection accepted")
         .Err(_) -> print("header-rejected")
     }
@@ -24,7 +24,7 @@ fn run() {
         recipients.push(~recipient)
         count++
     }
-    if email.message(~sender, recipients, [], "subject", "text", "", []) == {
+    if email.message(~sender, recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
         .Ok(_) -> panic("recipient bound ignored")
         .Err(_) -> print("recipient-bound")
     }
@@ -34,7 +34,7 @@ fn run() {
         .Err(_) -> print("attachment-bound")
     }
     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
-    message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", "<b>html</b>", [attachment]) ?? panic("message")
+    message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", HTML{"<b>html</b>"}, [attachment]) ?? panic("message")
     first :: email.serialize(~message) ?? panic("serialize")
     second :: email.serialize(message) ?? panic("serialize twice")
     print(first == second)

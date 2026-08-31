@@ -68,6 +68,11 @@ pub(crate) fn sync_apply(
     jet_codegen::Comptime::SyncLite::apply(method, args, span)
 }
 
+pub(crate) fn service_show(value: &CtValue) -> Option<String> {
+    jet_codegen::Comptime::ServicesLite::service_show_value(value)
+        .or_else(|| jet_codegen::Comptime::SyncLite::sync_show_value(value))
+}
+
 pub(crate) fn service_display(value: &CtValue) -> Option<String> {
-    jet_codegen::Comptime::display_core_pure_value(value)
+    service_show(value).or_else(|| jet_codegen::Comptime::display_core_pure_value(value))
 }

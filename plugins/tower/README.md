@@ -79,10 +79,11 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   attempts remain in the audit log.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. Full ballots contain a complete base draft followed by
-  boil-the-ocean, hybrid, cooperative, and adversarial reviews. Short ballots
-  contain the same complete base draft without reviews and require an explicit
-  owner request. The `simple` skill applies to every visible ballot field. A
-  card with an open decision surfaces as **Decide** no matter its stage.
+  boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
+  rival-family adversarial reviews. Short ballots contain the same complete
+  base draft without reviews and require an explicit owner request. The
+  `simple` skill applies to every visible ballot field. A card with an open
+  decision surfaces as **Decide** no matter its stage.
 - **Milestone review** — milestone criteria use the same `open` → `met` →
   `verified` flow. `tower milestone verify <id> --evidence "…" --by X` works
   only when every linked card is done and every milestone criterion is verified.
@@ -226,10 +227,11 @@ and goes dark as you clear them. Two views:
 
 - **Now** — everything blocked on you in one queue: cards needing your visual
   review, and decisions (opens focus mode: ←/→ move, 1–9 pick, Enter
-  record). Focus Mode shows the five review summaries in order: slate base,
-  violet breadth, cyan hybrid, green cooperative, and orange adversarial. The
-  recommendation is blue, while reasons against alternatives are muted red.
-  Labels and icons repeat every color's meaning. Empty state = tower clear.
+  record). Focus Mode shows the six review summaries in order: slate base,
+  violet breadth, cyan hybrid, green cooperative, blue beginner, and orange
+  adversarial. The recommendation is blue, while reasons against alternatives
+  are muted red. Labels and icons repeat every color's meaning. Empty state =
+  tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
   bay; card modal for editing, decisions, questions, log.
 - **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×

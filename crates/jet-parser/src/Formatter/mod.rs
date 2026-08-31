@@ -2070,6 +2070,35 @@ fn run() {
     }
 
     #[test]
+    fn repeated_struct_list_heads_collapse_to_typed_list_head() {
+        let source = r#"struct Point {
+    x: Int
+}
+
+fn run() {
+    compact := [Point{x: 1}, Point{x: 2}]
+    spread := [
+        Point{x: 3},
+        Point{x: 4},
+    ]
+}
+"#;
+        let once = format_source(source).expect("repeated struct heads should format");
+        assert!(
+            once.contains("compact := [Point]{{x: 1}, {x: 2}}"),
+            "{once}"
+        );
+        assert!(
+            once.contains("spread := [Point]{\n        {x: 3},\n        {x: 4}\n    }"),
+            "{once}"
+        );
+        assert_eq!(
+            once,
+            format_source(&once).expect("collapsed typed list should re-format")
+        );
+    }
+
+    #[test]
     fn lambda_interface_round_trips_result_error_and_pure_effect_row() {
         let source = r#"enum LambdaError { Invalid }
 
@@ -2097,7 +2126,10 @@ fn run() {
         let once = format_source(source).expect("failure syntax should format");
         assert!(once.contains("fn load() ?Int !IOError"), "{once}");
         assert!(once.contains("read()?(\"loading\")"), "{once}");
-        assert_eq!(once, format_source(&once).expect("failure fmt should be stable"));
+        assert_eq!(
+            once,
+            format_source(&once).expect("failure fmt should be stable")
+        );
 
         let source = "fn load() Int !IOError -> read()\n";
         let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
@@ -2124,6 +2156,9 @@ fn run() {
         let formatted = format_program(&program, source, &[]);
         assert!(formatted.contains("-> read()"), "{formatted}");
         assert!(!formatted.contains("read()?"), "{formatted}");
-        assert_eq!(formatted, format_source(&formatted).expect("implicit fmt should be stable"));
+        assert_eq!(
+            formatted,
+            format_source(&formatted).expect("implicit fmt should be stable")
+        );
     }
 }

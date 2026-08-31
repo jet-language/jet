@@ -756,7 +756,7 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         .expect("COM binder descriptor is registered")
         .stamp();
     let mut o = format!(
-        "// jet-ffi-descriptor={descriptor}\n#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) String = \"{abi}_dynamic\"\n"
+        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) String = \"{abi}_dynamic\"\n"
     );
     for m in &s.methods {
         let name = method_name(m);

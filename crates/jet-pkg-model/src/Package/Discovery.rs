@@ -207,7 +207,11 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let dir = tempdir("recursive-symlink");
-        std::fs::write(dir.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            dir.join("workspace.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         let nested = dir.join("nested");
         std::fs::create_dir(&nested).unwrap();
         symlink("..", nested.join("loop")).unwrap();

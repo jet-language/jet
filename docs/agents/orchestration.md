@@ -93,6 +93,23 @@ adapter, full access, explicit timeout, and brief on standard input.
 `workspace-write` cannot write worktree `.git` pointers or reach the Nix
 daemon socket. Every brief still forbids sibling worktrees and `plugins/tower`.
 
+### Fresh-context ballot beginner pass
+
+Every new, draft, or updated full ballot must receive a true-beginner review
+from a fresh OMP agent that did not join any earlier ballot pass. Its brief
+invokes `/rli5`, supplies the complete ballot, and requires explain, predict,
+modify, and derive tasks plus the final friction table.
+
+Revise the ballot from the findings. Record the exact OMP agent id in
+`reviewPasses.beginner`, beginning with:
+
+```text
+Fresh agent: agent-id. Skill: rli5. The beginner pass tested the complete ballot.
+```
+
+Tower rejects a new or updated full ballot without this metadata. Older,
+untouched open ballots retain their earlier process version until edited.
+
 ### Cross-model ballot dissent
 
 Every new, draft, or updated full ballot must use an adversarial review from a

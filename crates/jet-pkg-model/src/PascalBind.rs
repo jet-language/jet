@@ -480,7 +480,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_pascal_{lib}");
     let ty = pascal_case(&surface.handle.group);
     let mut output = format!(
-        "use c.{abi} as abi\n\n#Extern module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
+        "use c.{abi} as abi\n\n#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
     );
     for routine in &surface.plain {
         raw_jet(&mut output, &abi, routine, &routine.name);

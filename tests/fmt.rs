@@ -3,6 +3,7 @@
 mod common;
 
 use std::fs;
+use std::process::Command;
 
 #[test]
 fn package_transition_surface_formats_canonically_and_idempotently() {
@@ -28,6 +29,30 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
         .expect("package field spacing should format");
     assert!(formatted.contains("name: \"demo\""), "{formatted}");
     assert!(!formatted.contains("name :"), "{formatted}");
+}
+
+#[test]
+fn package_cli_migrates_retired_record_heads_before_validation() {
+    let scratch = common::Scratch::new("package-fmt-retired-record-heads");
+    let path = scratch.join("package.jet");
+    fs::write(
+        &path,
+        "name: \"demo\"\nauthority: .{ holds: { allow: [IO] } }\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fmt", path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let formatted = fs::read_to_string(path).unwrap();
+    assert!(formatted.contains("authority: {"), "{formatted}");
+    assert!(!formatted.contains(".{"), "{formatted}");
 }
 
 #[test]

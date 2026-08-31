@@ -585,7 +585,7 @@ fn public_transcript_composes_email_and_codecs_exactly() {
         "sender :: email.address(\"Mara <mara@example.com>\") ?? panic(\"sender\")",
         "recipient :: email.address(\"ada@example.net\") ?? panic(\"recipient\")",
         "attachment :: email.attachment(\"note.txt\", \"Text/Plain\", [104, 105]) ?? panic(\"attachment\")",
-        "message :: email.message(sender, [recipient], [], \"Hello\", \"body\", \"\", [attachment]) ?? panic(\"message\")",
+        "message :: email.message(sender, [recipient], [Address]{}, \"Hello\", \"body\", HTML{\"\"}, [attachment]) ?? panic(\"message\")",
         "email.envelope(sender, [recipient])",
         "fn serialized(message: Message) Bool -> {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
         "serialized(message)",
@@ -900,7 +900,7 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "result/bytes",
             parity_source(
                 "email_wire()",
-                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String -> {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String -> {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [Address]{}, \"s\", \"body\", HTML{\"\"}, [Attachment]{}) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
             ),
         ),
         (
@@ -984,7 +984,7 @@ fn registered_shared_kernel_edges_match_all_execution_tiers() {
             "email-one-kernel",
             parity_source(
                 "email_wire()",
-                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String -> {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String -> {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [Address]{}, \"s\", \"body\", HTML{\"\"}, [Attachment]{}) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
             ),
         ),
         (

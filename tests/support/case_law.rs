@@ -171,11 +171,7 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
                 CaseLawKind::Title,
             );
         } else if let Some(tip) = line.strip_prefix("Tip: ") {
-            add(
-                format!("REPL help tip {tip}"),
-                tip,
-                CaseLawKind::Sentence,
-            );
+            add(format!("REPL help tip {tip}"), tip, CaseLawKind::Sentence);
         } else if let Some((_, description)) = line.split_once("  ") {
             add(
                 format!("REPL help line {line_index}"),
@@ -195,13 +191,13 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
     }
     for (mode, hint) in [
         ("raw", jet::REPL::Render::render_discovery_hint(true, false)),
-        ("cooked", jet::REPL::Render::render_discovery_hint(false, false)),
+        (
+            "cooked",
+            jet::REPL::Render::render_discovery_hint(false, false),
+        ),
     ] {
         for part in hint.strip_prefix("Try: ").unwrap_or(&hint).split(" · ") {
-            if part
-                .to_ascii_lowercase()
-                .starts_with("interactive keys")
-            {
+            if part.to_ascii_lowercase().starts_with("interactive keys") {
                 add(
                     format!("REPL {mode} discovery status {part}"),
                     part,
@@ -252,12 +248,12 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
         CaseLawKind::Excluded,
     );
     let pin = jet::REPL::Render::render_pin_rail("total: Int :: 15", 3, 62, false);
-    if let Some(hint) = pin.lines().next().and_then(|line| line.split("turn 3").nth(1)) {
-        add(
-            "REPL pin status".to_string(),
-            "turn",
-            CaseLawKind::Excluded,
-        );
+    if let Some(hint) = pin
+        .lines()
+        .next()
+        .and_then(|line| line.split("turn 3").nth(1))
+    {
+        add("REPL pin status".to_string(), "turn", CaseLawKind::Excluded);
         add(
             "REPL pin action".to_string(),
             hint.split('·')
@@ -308,14 +304,18 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
 fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
     let index = jet::Help::build_index();
 
-    let categorized = jet::Help::Render::render_categorized(
-        &index, 0, true, Some("run"), 72, false, None,
-    );
+    let categorized =
+        jet::Help::Render::render_categorized(&index, 0, true, Some("run"), 72, false, None);
     let categorized_lines: Vec<&str> = categorized.lines().collect();
     let title = frame_title(categorized_lines.first().copied().unwrap_or_default())
         .and_then(|title| title.strip_prefix("jet ? — ").or(Some(title)))
         .expect("categorized help must have a frame title");
-    push_source(sources, "help categorized frame title", title, CaseLawKind::Title);
+    push_source(
+        sources,
+        "help categorized frame title",
+        title,
+        CaseLawKind::Title,
+    );
     let hint = panel_line(
         categorized_lines
             .get(1)
@@ -323,15 +323,17 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
             .expect("categorized help must have a search hint"),
     )
     .expect("categorized help search hint must be a panel row");
-    push_source(sources, "help categorized search hint", hint, CaseLawKind::Sentence);
+    push_source(
+        sources,
+        "help categorized search hint",
+        hint,
+        CaseLawKind::Sentence,
+    );
     for line in &categorized_lines {
         let Some(line) = panel_line(line) else {
             continue;
         };
-        if let Some(category) = line
-            .strip_prefix("▾ ")
-            .or_else(|| line.strip_prefix("▸ "))
-        {
+        if let Some(category) = line.strip_prefix("▾ ").or_else(|| line.strip_prefix("▸ ")) {
             push_source(
                 sources,
                 format!("help categorized category {category}"),
@@ -347,28 +349,31 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
         .iter()
         .position(|category| *category == "Error Codes")
         .expect("hybrid help must retain its error-code category");
-    let error_view = jet::Help::Render::render_categorized(
-        &index,
-        error_category,
-        true,
-        None,
-        72,
-        false,
-        None,
-    );
+    let error_view =
+        jet::Help::Render::render_categorized(&index, error_category, true, None, 72, false, None);
     let error_tip = error_view
         .lines()
         .filter_map(panel_line)
         .find(|line| !line.starts_with("▾ ") && !line.starts_with("▸ "))
         .expect("expanded error-code help must have its explanatory row");
-    push_source(sources, "help error-code tip", error_tip, CaseLawKind::Sentence);
+    push_source(
+        sources,
+        "help error-code tip",
+        error_tip,
+        CaseLawKind::Sentence,
+    );
 
     let hits = jet::Help::search(&index, "run");
     let results = jet::Help::Render::render_result_list(&hits, "run", 72, false, None, None);
     let result_lines: Vec<&str> = results.lines().collect();
     let title = frame_title(result_lines.first().copied().unwrap_or_default())
         .expect("help results must have a frame title");
-    push_source(sources, "help result frame title", title, CaseLawKind::Title);
+    push_source(
+        sources,
+        "help result frame title",
+        title,
+        CaseLawKind::Title,
+    );
     let footer = result_lines
         .iter()
         .rev()
@@ -391,7 +396,12 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
             .map(str::trim)
             .filter(|label| !label.is_empty())
             .expect("help example row must have a label");
-        push_source(sources, "help result example label", label, CaseLawKind::Title);
+        push_source(
+            sources,
+            "help result example label",
+            label,
+            CaseLawKind::Title,
+        );
     }
 
     let detail_entry = index
@@ -406,14 +416,24 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
         .rsplit_once("⇥ ")
         .map(|(_, label)| label)
         .expect("help detail frame title must have a collapse label");
-    push_source(sources, "help detail collapse label", collapse, CaseLawKind::Title);
+    push_source(
+        sources,
+        "help detail collapse label",
+        collapse,
+        CaseLawKind::Title,
+    );
     if let Some(line) = detail_lines.get(1).and_then(|line| panel_line(line)) {
         let label = line
             .split_once("   ")
             .map(|(label, _)| label.trim())
             .filter(|label| !label.is_empty())
             .expect("help detail usage row must have a label");
-        push_source(sources, "help detail usage label", label, CaseLawKind::Title);
+        push_source(
+            sources,
+            "help detail usage label",
+            label,
+            CaseLawKind::Title,
+        );
     }
     for line in &detail_lines {
         let Some(line) = panel_line(line) else {
@@ -442,7 +462,12 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
                     .map(str::trim)
                     .filter(|label| !label.is_empty())
                     .expect("help detail example row must have a label");
-                push_source(sources, "help detail example label", label, CaseLawKind::Title);
+                push_source(
+                    sources,
+                    "help detail example label",
+                    label,
+                    CaseLawKind::Title,
+                );
             }
         }
         let see_also = detail_entry.see_also.join(" · ");
@@ -452,7 +477,12 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
                 .map(str::trim)
                 .filter(|label| !label.is_empty())
                 .expect("help detail see-also row must have a label");
-            push_source(sources, "help detail see-also label", label, CaseLawKind::Title);
+            push_source(
+                sources,
+                "help detail see-also label",
+                label,
+                CaseLawKind::Title,
+            );
         }
     }
     let footer = detail_lines
@@ -464,21 +494,10 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
         .expect("help detail must have a footer");
     push_source(sources, "help detail footer", footer, CaseLawKind::Sentence);
 
-    let reference = jet::Help::Render::render_reference(
-        &index,
-        0,
-        Some(detail_entry),
-        80,
-        12,
-        false,
-        "run",
-    );
+    let reference =
+        jet::Help::Render::render_reference(&index, 0, Some(detail_entry), 80, 12, false, "run");
     let reference_lines: Vec<&str> = reference.lines().collect();
-    let header = reference_lines
-        .first()
-        .copied()
-        .unwrap_or_default()
-        .trim();
+    let header = reference_lines.first().copied().unwrap_or_default().trim();
     let reference_label = header
         .strip_prefix("jet ? ")
         .and_then(|header| header.split_once(" · Search:").map(|(label, _)| label))
@@ -495,18 +514,26 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .expect("help reference must have a search label");
-    push_source(sources, "help reference search label", search_label, CaseLawKind::Title);
+    push_source(
+        sources,
+        "help reference search label",
+        search_label,
+        CaseLawKind::Title,
+    );
     let footer = reference_lines
         .last()
         .copied()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .expect("help reference must have a footer");
-    push_source(sources, "help reference footer", footer, CaseLawKind::Sentence);
-
-    let empty_reference = jet::Help::Render::render_reference(
-        &index, 0, None, 80, 12, false, "",
+    push_source(
+        sources,
+        "help reference footer",
+        footer,
+        CaseLawKind::Sentence,
     );
+
+    let empty_reference = jet::Help::Render::render_reference(&index, 0, None, 80, 12, false, "");
     let empty_body = empty_reference
         .lines()
         .nth(1)
@@ -533,7 +560,12 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .expect("help no-match query must have a message");
-    push_source(sources, "help no-match message", no_match, CaseLawKind::Sentence);
+    push_source(
+        sources,
+        "help no-match message",
+        no_match,
+        CaseLawKind::Sentence,
+    );
 
     // The symbol lookup branch is the other non-interactive help path. Its
     // signature, summary, example, and provenance are data already checked
@@ -541,7 +573,12 @@ fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
     let symbol_help = jet::Help::run_query("List.len", false);
     for line in symbol_help.lines().skip(2) {
         if let Some((label, _)) = line.split_once(": ") {
-            push_source(sources, "help symbol lookup label", label, CaseLawKind::Title);
+            push_source(
+                sources,
+                "help symbol lookup label",
+                label,
+                CaseLawKind::Title,
+            );
         }
     }
 }
@@ -593,7 +630,9 @@ pub(crate) fn sentence_case_violation(value: &str) -> Option<String> {
     }
     let rest = &value[offset..];
     let end = rest
-        .find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!'))
+        .find(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
+        })
         .unwrap_or(rest.len());
     let token = &rest[..end];
     if token.is_empty() || diagnostic_token_keeps_case(token) {
@@ -624,7 +663,9 @@ pub(crate) fn title_case_violation(value: &str) -> Option<String> {
         let is_first_or_last = index == 0 || index + 1 == words.len();
         if minor && !is_first_or_last {
             if *word != lower {
-                return Some(format!("minor word `{word}` must stay lowercase in {value:?}"));
+                return Some(format!(
+                    "minor word `{word}` must stay lowercase in {value:?}"
+                ));
             }
         } else if word
             .chars()
@@ -641,8 +682,8 @@ pub(crate) fn title_case_violation(value: &str) -> Option<String> {
 /// Keep it here, beside the title-case checker, so every label uses the same
 /// per-word rule instead of growing a call-site-specific exception list.
 pub(crate) const TITLE_CASE_MINOR_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of",
-    "on", "to", "via",
+    "a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of", "on", "to",
+    "via",
 ];
 
 fn title_case_minor_word(word: &str) -> bool {
@@ -727,8 +768,19 @@ pub(crate) fn diagnostic_token_keeps_case(token: &str) -> bool {
             // Proper nouns, then the binary names a user actually types. A
             // Fix line may BE a command (`jetpack env -- jet build`), and
             // capitalising its first word would misstate the command.
-            "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
-                | "jet" | "jetpack" | "cargo" | "nix" | "git" | "rustc"
+            "App"
+                | "Hangar"
+                | "Jet"
+                | "Jetpack"
+                | "Nix"
+                | "Runtime"
+                | "Store"
+                | "jet"
+                | "jetpack"
+                | "cargo"
+                | "nix"
+                | "git"
+                | "rustc"
         )
     {
         return true;

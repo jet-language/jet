@@ -561,6 +561,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0521 | sema | complete ASCII case ladder repeats a direct case conversion (D-ASCII-CASE1=A) |
 | L0522 | sema | direct `fs.walk` loop filters directories by hand (D-FS-WALK-FILES1=A) |
+| L0523 | sema | a list repeats the same struct head on every element (D-DOTCTOR3=A) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | L0619 | jet   | package boundary rule matches no import edge (D-STRUCT-EDGE1) |
 | L1141 | sema  | autodiff transform result called inline; bind the derivative before calling it (D-COMPUTE-GRAD1=E) |
@@ -1367,6 +1368,7 @@ block reserved for M6.
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) String { … } }`, or use `{value:Debug}` for debug output. |
 | L0521 | A complete ASCII case ladder repeats a direct case conversion. | All 26 constant ASCII branches inspect the same value and only change its case. | Replace the complete ladder with `value.to_ascii_lower()` or `value.to_ascii_upper()`. |
 | L0522 | A direct `fs.walk` loop filters directories by hand. | `fs.walk_files()` already returns only file entries; the direct API keeps this control flow and intent together. | Replace `fs.walk` with `fs.walk_files`. |
+| L0523 | This list repeats `{type}` on every element. | A typed list head states the shared element type once and leaves each record body focused on its fields. | Write `[{type}]{{…}, {…}}` and remove the repeated element heads. |
 
 ## Streaming I/O diagnostics (E2-M7, D-IO1..3)
 
@@ -1765,6 +1767,7 @@ signature.
 | L0519 | manual unit unwrap/scale/rewrap hides a direct scalar operation | the same linear unit can apply a scalar without crossing a helper or policy boundary | use `unit * scalar`, `scalar * unit`, or `unit / scalar` |
 | L0521 | complete ASCII case ladder repeats a direct case conversion | all 26 constant ASCII branches inspect the same value and only change its case | replace the complete ladder with `value.to_ascii_lower()` or `value.to_ascii_upper()` |
 | L0522 | direct `fs.walk` loop filters directories by hand | `fs.walk_files()` already returns only file entries; the direct API keeps this control flow and intent together | replace `fs.walk` with `fs.walk_files` |
+| L0523 | a list repeats the same struct head on every element | a typed list head states the shared element type once and leaves each record body focused on its fields | write `[{type}]{{…}, {…}}` and remove the repeated element heads |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item) in xs` — or `loop i in xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |

@@ -247,15 +247,12 @@ impl LockedPackage {
             return "unverified-mapping";
         }
         if !envelope.signature.is_empty()
-            || (envelope.catalog_tier == "official-signed"
-                && envelope.catalog_trust == "verified")
+            || (envelope.catalog_tier == "official-signed" && envelope.catalog_trust == "verified")
         {
             return "signed";
         }
         if envelope.provenance == "attested-v1"
-            || envelope
-                .provenance
-                .starts_with("independent-agreeing-v1:")
+            || envelope.provenance.starts_with("independent-agreeing-v1:")
             || self.provenance.as_ref().is_some_and(|provenance| {
                 provenance.build.as_deref().is_some_and(|build| {
                     build == "attested-v1" || build.starts_with("independent-agreeing-v1:")
@@ -442,10 +439,18 @@ impl LockDiff {
 
         let mut channel_names = BTreeSet::new();
         if let Some(lock) = before {
-            channel_names.extend(lock.source_channels.iter().map(|channel| channel.name.clone()));
+            channel_names.extend(
+                lock.source_channels
+                    .iter()
+                    .map(|channel| channel.name.clone()),
+            );
         }
         if let Some(lock) = after {
-            channel_names.extend(lock.source_channels.iter().map(|channel| channel.name.clone()));
+            channel_names.extend(
+                lock.source_channels
+                    .iter()
+                    .map(|channel| channel.name.clone()),
+            );
         }
         let channels = channel_names
             .into_iter()
@@ -719,14 +724,8 @@ pub fn write(lock: &LockFile) -> String {
     for pkg in &lock.packages {
         out.push('\n');
         out.push_str("[[package]]\n");
-        out.push_str(&format!(
-            "name = \"{}\"\n",
-            escape_str(&pkg.name)
-        ));
-        out.push_str(&format!(
-            "version = \"{}\"\n",
-            escape_str(&pkg.version)
-        ));
+        out.push_str(&format!("name = \"{}\"\n", escape_str(&pkg.name)));
+        out.push_str(&format!("version = \"{}\"\n", escape_str(&pkg.version)));
 
         let source_str = match &pkg.source {
             LockSource::Root => "{ root = \".\" }".to_string(),
@@ -780,10 +779,7 @@ pub fn write(lock: &LockFile) -> String {
 
         // D-CASTORE1=A: content hash of installed source tree.
         if let Some(ref ch) = pkg.content_hash {
-            out.push_str(&format!(
-                "content-hash = \"{}\"\n",
-                escape_str(ch)
-            ));
+            out.push_str(&format!("content-hash = \"{}\"\n", escape_str(ch)));
         }
 
         out.push_str(&format!(
@@ -800,10 +796,7 @@ pub fn write(lock: &LockFile) -> String {
 
         // D-EFFBUDGET1: per-dependency effect provenance + audited grants.
         if !pkg.effects.is_empty() {
-            out.push_str(&format!(
-                "effects = {}\n",
-                write_string_array(&pkg.effects)
-            ));
+            out.push_str(&format!("effects = {}\n", write_string_array(&pkg.effects)));
         }
         if !pkg.effect_grants.is_empty() {
             out.push_str(&format!(
@@ -1004,8 +997,12 @@ fn canonicalize_lock(lock: &mut LockFile) {
         effects.sort();
         effects.dedup();
     }
-    policy.build_grants.sort_by(|left, right| left.0.cmp(&right.0));
-    policy.build_grants.dedup_by(|left, right| left.0 == right.0);
+    policy
+        .build_grants
+        .sort_by(|left, right| left.0.cmp(&right.0));
+    policy
+        .build_grants
+        .dedup_by(|left, right| left.0 == right.0);
 }
 
 fn canonicalize_last<T, K, F>(values: &mut Vec<T>, mut key: F)
@@ -1042,7 +1039,7 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
         holds.push(format!("deny: {}", write_string_array(deny)));
     }
     if !holds.is_empty() {
-        fields.push(format!("holds: .{{ {} }}", holds.join(", ")));
+        fields.push(format!("holds: {{ {} }}", holds.join(", ")));
     }
 
     if !authority.grants.is_empty() {
@@ -1057,7 +1054,7 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
                 )
             })
             .collect::<Vec<_>>();
-        fields.push(format!("grants: .{{ {} }}", grants.join(", ")));
+        fields.push(format!("grants: {{ {} }}", grants.join(", ")));
     }
 
     if let Some(trust) = &authority.trust {
@@ -1066,7 +1063,7 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
             trust_fields.push(format!("default: {}", write_trust_decision(default)));
         }
         if let Some(ci) = trust.ci_prompt {
-            trust_fields.push(format!("ci: .{{ prompt: {} }}", write_trust_decision(ci)));
+            trust_fields.push(format!("ci: {{ prompt: {} }}", write_trust_decision(ci)));
         }
         if !trust.services.is_empty() {
             let services = trust
@@ -1080,12 +1077,12 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
                     )
                 })
                 .collect::<Vec<_>>();
-            trust_fields.push(format!("services: .{{ {} }}", services.join(", ")));
+            trust_fields.push(format!("services: {{ {} }}", services.join(", ")));
         }
         if let Some(require) = trust.require {
             trust_fields.push(format!("require: {}", require.label()));
         }
-        fields.push(format!("trust: .{{ {} }}", trust_fields.join(", ")));
+        fields.push(format!("trust: {{ {} }}", trust_fields.join(", ")));
     }
 
     if !authority.providers.is_empty() {
@@ -1102,16 +1099,16 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
                     provider_fields.push(format!("deny: {}", write_string_array(&provider.deny)));
                 }
                 format!(
-                    "\"{}\": .{{ {} }}",
+                    "\"{}\": {{ {} }}",
                     escape_str(&provider.provider),
                     provider_fields.join(", ")
                 )
             })
             .collect::<Vec<_>>();
-        fields.push(format!("providers: .{{ {} }}", providers.join(", ")));
+        fields.push(format!("providers: {{ {} }}", providers.join(", ")));
     }
 
-    format!(".{{ {} }}", fields.join(", "))
+    format!("{{ {} }}", fields.join(", "))
 }
 
 fn write_trust_decision(decision: crate::Package::TrustDecision) -> &'static str {
@@ -2313,15 +2310,12 @@ fn read_lock_text(path: &Path) -> std::io::Result<String> {
                     oversized_lock_value_message(line_number),
                 ));
             }
-            let new_length = raw
-                .len()
-                .checked_add(take)
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        oversized_lock_file_message(),
-                    )
-                })?;
+            let new_length = raw.len().checked_add(take).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    oversized_lock_file_message(),
+                )
+            })?;
             if new_length > MAX_LOCK_BYTES {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -3440,9 +3434,8 @@ pub fn record_generated_inputs(
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
-    write_lock_atomically(&lock_path, &write(&lock)).map_err(|error| {
-        lock_write_error(&lock_path, std::io::Error::other(error))
-    })?;
+    write_lock_atomically(&lock_path, &write(&lock))
+        .map_err(|error| lock_write_error(&lock_path, std::io::Error::other(error)))?;
     Ok(())
 }
 
@@ -3579,9 +3572,8 @@ pub fn record_build_contributions(
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
-    write_lock_atomically(&lock_path, &write(&lock)).map_err(|error| {
-        lock_write_error(&lock_path, std::io::Error::other(error))
-    })?;
+    write_lock_atomically(&lock_path, &write(&lock))
+        .map_err(|error| lock_write_error(&lock_path, std::io::Error::other(error)))?;
     Ok(())
 }
 
@@ -4251,17 +4243,14 @@ mod a4_envelope_tests {
 
         let raw = write(&lock);
         assert!(
-            raw.contains("authority = .{"),
+            raw.contains("authority = {"),
             "missing root authority: {raw}"
         );
-        assert!(raw.contains("holds: .{"), "missing authority holds: {raw}");
+        assert!(raw.contains("holds: {"), "missing authority holds: {raw}");
+        assert!(raw.contains("grants: {"), "missing authority grants: {raw}");
+        assert!(raw.contains("trust: {"), "missing authority trust: {raw}");
         assert!(
-            raw.contains("grants: .{"),
-            "missing authority grants: {raw}"
-        );
-        assert!(raw.contains("trust: .{"), "missing authority trust: {raw}");
-        assert!(
-            raw.contains("providers: .{"),
+            raw.contains("providers: {"),
             "missing authority providers: {raw}"
         );
         assert_eq!(

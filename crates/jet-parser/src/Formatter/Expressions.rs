@@ -294,9 +294,7 @@ impl<'a> Fmt<'a> {
         };
         let (ok_pattern_end, err_pattern_end, err_branch_end) = match expr {
             Expr::If {
-                cond,
-                else_value,
-                ..
+                cond, else_value, ..
             } => match else_value.as_ref() {
                 Expr::If { cond: err_cond, .. } => (
                     cond.span().end,
@@ -365,25 +363,13 @@ impl<'a> Fmt<'a> {
         self.write(ok_binding);
         self.write(" ");
         self.write(Syntax::OP_UNIFIED_ARROW);
-        self.fmt_result_handler_branch(
-            ok_body,
-            ok_value,
-            true,
-            ok_branch_start,
-            ok_branch_end,
-        );
+        self.fmt_result_handler_branch(ok_body, ok_value, true, ok_branch_start, ok_branch_end);
         self.newline();
         self.write("! ");
         self.write(err_binding);
         self.write(" ");
         self.write(Syntax::OP_UNIFIED_ARROW);
-        self.fmt_result_handler_branch(
-            err_body,
-            err_value,
-            true,
-            err_branch_start,
-            err_branch_end,
-        );
+        self.fmt_result_handler_branch(err_body, err_value, true, err_branch_start, err_branch_end);
     }
 
     /// The offset of an expression's first source byte.
@@ -1084,6 +1070,105 @@ impl<'a> Fmt<'a> {
         self.fmt_type(ty);
     }
 
+    fn repeated_struct_list_head<'b>(
+        elems: &'b [Expr],
+    ) -> Option<(&'b str, &'b [Type], Option<&'b str>)> {
+        if elems.len() < 2 {
+            return None;
+        }
+        let Expr::StructLit {
+            type_name,
+            type_args,
+            import_ns,
+            inferred: false,
+            ..
+        } = &elems[0]
+        else {
+            return None;
+        };
+        let repeated = elems.iter().all(|elem| {
+            matches!(
+                elem,
+                Expr::StructLit {
+                    type_name: elem_name,
+                    type_args: elem_args,
+                    import_ns: elem_ns,
+                    inferred: false,
+                    ..
+                } if elem_name == type_name && elem_args == type_args && elem_ns == import_ns
+            )
+        });
+        repeated.then_some((type_name, type_args, import_ns.as_deref()))
+    }
+
+    fn fmt_named_struct_head(
+        &mut self,
+        type_name: &str,
+        type_args: &[Type],
+        import_ns: Option<&str>,
+    ) {
+        if let Some(ns) = import_ns {
+            self.write(ns);
+            self.write(".");
+        }
+        self.write(type_name);
+        if !type_args.is_empty() {
+            self.write("<");
+            for (i, arg) in type_args.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_type(arg);
+            }
+            self.write(">");
+        }
+    }
+
+    fn fmt_struct_lit_body(
+        &mut self,
+        fields: &[(String, crate::Diagnostics::Span, Expr)],
+        span: crate::Diagnostics::Span,
+    ) {
+        self.write("{");
+        let multiline = self.source_span_multiline(span);
+        if multiline {
+            self.newline();
+            self.indent += 1;
+        }
+        for (i, (name, name_span, expr)) in fields.iter().enumerate() {
+            if i > 0 {
+                if multiline {
+                    self.newline();
+                } else {
+                    self.write(", ");
+                }
+            }
+            if multiline {
+                self.emit_leading(name_span.start);
+            }
+            self.write(name);
+            self.write(": ");
+            if multiline {
+                self.emit_leading(expr.span().start);
+            }
+            self.fmt_expr(expr, Prec::OrFallback);
+            if multiline && i + 1 < fields.len() {
+                self.write(",");
+            }
+            if multiline {
+                self.emit_trailing(expr.span().end);
+            }
+        }
+        if multiline {
+            self.emit_leading(span.end);
+            self.indent -= 1;
+            if !self.at_line_start {
+                self.newline();
+            }
+        }
+        self.write("}");
+    }
+
     pub(super) fn fmt_expr(&mut self, expr: &Expr, prec: Prec) {
         match expr {
             // S68 (D-SG2): `if` used as a value.
@@ -1163,7 +1248,12 @@ impl<'a> Fmt<'a> {
             Expr::Unit(_) => self.write("()"),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
             Expr::ListLit(elems, span) => {
+                let repeated_head = Self::repeated_struct_list_head(elems);
                 self.write("[");
+                if let Some((type_name, type_args, import_ns)) = repeated_head {
+                    self.fmt_named_struct_head(type_name, type_args, import_ns);
+                    self.write("]{");
+                }
                 if self.source_span_multiline(*span) {
                     self.newline();
                     self.with_indent(|f| {
@@ -1172,7 +1262,16 @@ impl<'a> Fmt<'a> {
                                 f.newline();
                             }
                             f.emit_leading(e.span().start);
-                            f.fmt_expr(e, Prec::OrFallback);
+                            if repeated_head.is_some() {
+                                let Expr::StructLit { fields, span, .. } = e else {
+                                    unreachable!(
+                                        "repeated struct list head changed during formatting"
+                                    );
+                                };
+                                f.fmt_struct_lit_body(fields, *span);
+                            } else {
+                                f.fmt_expr(e, Prec::OrFallback);
+                            }
                             if i + 1 < elems.len() {
                                 f.write(",");
                             }
@@ -1188,10 +1287,17 @@ impl<'a> Fmt<'a> {
                         if i > 0 {
                             self.write(", ");
                         }
-                        self.fmt_expr(e, Prec::OrFallback);
+                        if repeated_head.is_some() {
+                            let Expr::StructLit { fields, span, .. } = e else {
+                                unreachable!("repeated struct list head changed during formatting");
+                            };
+                            self.fmt_struct_lit_body(fields, *span);
+                        } else {
+                            self.fmt_expr(e, Prec::OrFallback);
+                        }
                     }
                 }
-                self.write("]");
+                self.write(if repeated_head.is_some() { "}" } else { "]" });
             }
             // D-SPREAD1=A: re-emit member spread sugar.
             Expr::MemberSpread { base, members, .. } => {
@@ -1568,63 +1674,10 @@ impl<'a> Fmt<'a> {
                             type_args,
                             import_ns.as_deref(),
                         ));
-                if inferred {
-                    // `{ field: val, … }` — type inferred from context.
-                } else {
-                    if let Some(ns) = import_ns {
-                        self.write(ns.as_str());
-                        self.write(".");
-                    }
-                    self.write(type_name);
-                    if !type_args.is_empty() {
-                        self.write("<");
-                        for (i, a) in type_args.iter().enumerate() {
-                            if i > 0 {
-                                self.write(", ");
-                            }
-                            self.fmt_type(a);
-                        }
-                        self.write(">");
-                    }
+                if !inferred {
+                    self.fmt_named_struct_head(type_name, type_args, import_ns.as_deref());
                 }
-                self.write("{");
-                let multiline = self.source_span_multiline(*span);
-                if multiline {
-                    self.newline();
-                    self.indent += 1;
-                }
-                for (i, (name, name_span, expr)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        if multiline {
-                            self.newline();
-                        } else {
-                            self.write(", ");
-                        }
-                    }
-                    if multiline {
-                        self.emit_leading(name_span.start);
-                    }
-                    self.write(name);
-                    self.write(": ");
-                    if multiline {
-                        self.emit_leading(expr.span().start);
-                    }
-                    self.fmt_expr(expr, Prec::OrFallback);
-                    if multiline && i + 1 < fields.len() {
-                        self.write(",");
-                    }
-                    if multiline {
-                        self.emit_trailing(expr.span().end);
-                    }
-                }
-                if multiline {
-                    self.emit_leading(span.end);
-                    self.indent -= 1;
-                    if !self.at_line_start {
-                        self.newline();
-                    }
-                }
-                self.write("}");
+                self.fmt_struct_lit_body(fields, *span);
             }
             Expr::TypedLit { head, body, span } => {
                 // D-DOTCTOR3: print the head (when present) and the body shape.
@@ -2595,9 +2648,7 @@ impl<'a> Fmt<'a> {
         for index in 0..branch_count {
             let (name, branch) = match &args[0].expr {
                 Expr::ListLit(branches, _) => (None, &branches[index]),
-                Expr::TupleLit(fields, _, _) => {
-                    (Some(fields[index].0.as_str()), &fields[index].1)
-                }
+                Expr::TupleLit(fields, _, _) => (Some(fields[index].0.as_str()), &fields[index].1),
                 _ => unreachable!("task combinator branch carrier"),
             };
             if index > 0 {

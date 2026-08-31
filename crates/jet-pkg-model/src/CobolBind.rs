@@ -575,7 +575,7 @@ fn render_jet(
         out.push_str(&format!("    {}: {}\n", f.name, f.kind.jet_type()));
     }
     out.push_str("}\n\n");
-    out.push_str(&format!("#Extern module c.{abi} {{\n    fn apply_minor("));
+    out.push_str(&format!("#Import module c.{abi} {{\n    fn apply_minor("));
     if input.is_some() {
         out.push_str("record_id: Int, ");
     }

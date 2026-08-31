@@ -3036,6 +3036,32 @@ mod service_adapter {
         };
         rt.heap.alloc_string(rendered)
     }
+
+    // Only unpack the scalar enum ABI here; the shared Prelude owns rendering.
+    pub(super) fn show_enum(rt: &mut JitRuntime, type_name: &str, raw: i64) -> i64 {
+        let variant = match (type_name, raw) {
+            ("ServiceRestart", 0) => "OneForOne",
+            ("ServiceRestart", 1) => "OneForAll",
+            ("ServiceRestart", 2) => "RestForOne",
+            ("ServiceDelivery", 0) => "AtMostOnce",
+            ("ServiceDelivery", 1) => "DurableAtLeastOnce",
+            _ => {
+                rt.set_trap("the JIT received an invalid service enum value");
+                return 0;
+            }
+        };
+        let value = CtValue::Enum {
+            type_name: type_name.to_string(),
+            variant: variant.to_string(),
+            args: Vec::new(),
+        };
+        let Some(rendered) = service_prelude::service_display(&value) else {
+            rt.set_trap("the JIT received an unsupported service enum display value");
+            return 0;
+        };
+        rt.heap.alloc_string(rendered)
+
+    }
 }
 
 fn jet_jit_service_call(
@@ -3074,6 +3100,18 @@ fn jet_jit_service_call_bool(
 
 fn jet_jit_service_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| service_adapter::show(rt, handle))
+}
+
+fn jet_jit_service_restart_show(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        service_adapter::show_enum(rt, "ServiceRestart", value)
+    })
+}
+
+fn jet_jit_service_delivery_show(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        service_adapter::show_enum(rt, "ServiceDelivery", value)
+    })
 }
 
 pub(crate) fn alloc_io_error_result(
@@ -4561,6 +4599,8 @@ host_fns! {
     service_call: "jet_jit_service_call" => jet_jit_service_call: sig_service_call;
     service_call_bool: "jet_jit_service_call_bool" => jet_jit_service_call_bool: sig_service_call_bool;
     service_show: "jet_jit_service_show" => jet_jit_service_show: sig_str_unary_i64;
+    service_restart_show: "jet_jit_service_restart_show" => jet_jit_service_restart_show: sig_str_unary_i64;
+    service_delivery_show: "jet_jit_service_delivery_show" => jet_jit_service_delivery_show: sig_str_unary_i64;
     is_trapped: "jet_jit_is_trapped" => jet_jit_is_trapped: sig_is_trapped;
     stack_enter: "jet_jit_stack_enter" => jet_jit_stack_enter: sig_stack_enter;
     stack_leave: "jet_jit_stack_leave" => jet_jit_stack_leave: sig_noarg;

@@ -3379,7 +3379,7 @@ anything. This keeps inference sound without reading foreign code.
 The #2259 witnesses are `print("Shipping {project}")` in
 `examples/features/basics/first_hour_expert.jet` and
 `core.process.argv()` in that example and
-`gauntlet/entries/sieve/jet/main.jet`. The interpolated print records
+`gauntlet/entries/sieve/jet/run.jet`. The interpolated print records
 `Mem.Alloc` for its fresh `String` as well as `IO`; argv records `Exec`.
 These are honest sema facts. The application authority only supplies the
 ratified manifest-less beginner default and does not change inference.

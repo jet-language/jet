@@ -670,6 +670,10 @@ mod semantics {
         }
     }
 
+    pub(super) fn device_show(word: i64) -> Option<String> {
+        device_from_word(word).map(|device| device.jet_show())
+    }
+
     pub(super) fn on_device(tensor: &Tensor, device: Device) -> Result<Tensor, String> {
         jet_compute_on_device(tensor, device).map_err(|error| error.jet_show())
     }
@@ -1931,6 +1935,16 @@ fn jet_jit_compute_device_auto() -> i64 {
     semantics::device_word(semantics::device_auto())
 }
 
+fn jet_jit_compute_device_show(device: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| match semantics::device_show(device) {
+        Some(text) => runtime.heap.alloc_string(text),
+        None => {
+            runtime.set_trap("core.compute.device_show received an invalid device");
+            0
+        }
+    })
+}
+
 fn jet_jit_compute_device_metal() -> i64 {
     semantics::device_word(semantics::device_metal())
 }
@@ -2860,6 +2874,7 @@ host_fns! {
     placement: "jet_compute_tensor_placement" => jet_jit_compute_placement: sig_one;
     device_cpu: "jet_compute_device_cpu" => jet_jit_compute_device_cpu: sig_zero;
     device_auto: "jet_compute_device_auto" => jet_jit_compute_device_auto: sig_zero;
+    device_show: "jet_compute_device_show" => jet_jit_compute_device_show: sig_one;
     device_metal: "jet_compute_device_metal" => jet_jit_compute_device_metal: sig_zero;
     device_cuda: "jet_compute_device_cuda" => jet_jit_compute_device_cuda: sig_zero;
     device_vulkan: "jet_compute_device_vulkan" => jet_jit_compute_device_vulkan: sig_zero;

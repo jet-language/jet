@@ -453,7 +453,7 @@ fn run() {
     env_mailer :: email.smtp_from_env() ?? panic("environment mailer config")
     sender :: email.address("sender@example.com") ?? panic("sender")
     recipient :: email.address("recipient@example.net") ?? panic("recipient")
-    message :: email.message(sender, [recipient], [], "subject", "body", "", []) ?? panic("message")
+    message :: email.message(sender, [recipient], [Address]{}, "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
     if false {
         report :: mailer.send(message) ?? panic("send")
         print(report.response_code)

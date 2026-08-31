@@ -79,6 +79,59 @@ fn is_string_literal(expr: &Expr, expected: &str) -> bool {
     )
 }
 
+fn repeated_struct_list_edit(
+    source: &str,
+    elems: &[Expr],
+    span: Span,
+) -> Option<(String, TextEdit)> {
+    if elems.len() < 2
+        || source.as_bytes().get(span.start) != Some(&b'[')
+        || span.end <= span.start + 1
+        || source.as_bytes().get(span.end - 1) != Some(&b']')
+    {
+        return None;
+    }
+
+    let mut head = None;
+    let mut bodies = Vec::with_capacity(elems.len());
+    for elem in elems {
+        let Expr::StructLit {
+            inferred: false, ..
+        } = elem
+        else {
+            return None;
+        };
+        let elem_span = elem.span();
+        let elem_source = source.get(elem_span.start..elem_span.end)?;
+        let brace_offset = elem_source.find('{')?;
+        let candidate = elem_source[..brace_offset].trim();
+        if candidate.is_empty()
+            || candidate.contains("//")
+            || candidate.contains("/*")
+            || head.is_some_and(|head: &str| head != candidate)
+        {
+            return None;
+        }
+        head.get_or_insert(candidate);
+        bodies.push((elem_span, elem_span.start + brace_offset));
+    }
+
+    let head = head?.to_string();
+    let mut new_text = String::with_capacity(span.end - span.start);
+    new_text.push('[');
+    new_text.push_str(&head);
+    new_text.push_str("]{");
+    let mut cursor = span.start + 1;
+    for (elem_span, body_start) in bodies {
+        new_text.push_str(source.get(cursor..elem_span.start)?);
+        new_text.push_str(source.get(body_start..elem_span.end)?);
+        cursor = elem_span.end;
+    }
+    new_text.push_str(source.get(cursor..span.end - 1)?);
+    new_text.push('}');
+    Some((head, TextEdit { span, new_text }))
+}
+
 fn call_suffix_end(source: &str, open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut quoted = false;
@@ -131,17 +184,19 @@ fn redundant_fixed_cleanup_edit(
     }
     let receiver_end = receiver.span().end;
     let mut start = method_span.start;
-    while start > receiver_end && source.as_bytes().get(start - 1).is_some_and(u8::is_ascii_whitespace) {
+    while start > receiver_end
+        && source
+            .as_bytes()
+            .get(start - 1)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
         start -= 1;
     }
     if start == 0 || source.as_bytes().get(start - 1) != Some(&b'.') {
         return None;
     }
     start -= 1;
-    let open = method_span.end
-        + source
-            .get(method_span.end..)?
-            .find('(')?;
+    let open = method_span.end + source.get(method_span.end..)?.find('(')?;
     let end = call_suffix_end(source, open)?;
     Some(TextEdit {
         span: Span::new(start, end),
@@ -154,13 +209,8 @@ fn is_plain_call_arg(arg: &CallArg) -> bool {
 }
 
 pub(crate) fn landed_core_call(module: &str, member: &str, arity: usize) -> bool {
-    let Some(row) = Syntax::core_call_projection(
-        module,
-        member,
-        Syntax::CoreCallCoverage::SEMA,
-        arity,
-    )
-    .ok()
+    let Some(row) =
+        Syntax::core_call_projection(module, member, Syntax::CoreCallCoverage::SEMA, arity).ok()
     else {
         return false;
     };
@@ -170,8 +220,7 @@ pub(crate) fn landed_core_call(module: &str, member: &str, arity: usize) -> bool
 }
 
 fn landed_http_method(ty: &Type, method: &str, args: &[CallArg], result: Type) -> bool {
-    crate::Sema::CheckerCoreLib::http_type_method_return(ty, method, args)
-        == Some(Some(result))
+    crate::Sema::CheckerCoreLib::http_type_method_return(ty, method, args) == Some(Some(result))
 }
 
 fn http_text_result() -> Type {
@@ -228,8 +277,7 @@ impl<'a> Checker<'a> {
             "text",
             &[],
             http_text_result(),
-        )
-        {
+        ) {
             return None;
         }
         Some((receiver.as_ref(), owner_type))
@@ -525,10 +573,7 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(jet_foundation::Layout::TargetLayout::host)
     }
 
-    fn state_fact_registry(
-        &self,
-        type_name: &str,
-    ) -> Option<&jet_foundation::Facts::FactRegistry> {
+    fn state_fact_registry(&self, type_name: &str) -> Option<&jet_foundation::Facts::FactRegistry> {
         let owner = self.struct_owner_module(type_name, None)?;
         self.modules
             .and_then(|modules| modules.get(owner))
@@ -570,8 +615,8 @@ impl<'a> Checker<'a> {
         }
         let target = self.layout_target();
         let fact_registry = self.state_fact_registry(type_name);
-        let graph = fact_registry
-            .and_then(|facts| facts.state_graph(&format!("{type_name}.State")));
+        let graph =
+            fact_registry.and_then(|facts| facts.state_graph(&format!("{type_name}.State")));
         let Some(value) = crate::Comptime::reflect_type_value_with_target_and_graph_and_facts(
             self.items,
             type_name,
@@ -787,20 +832,21 @@ impl<'a> Checker<'a> {
                     _ => None,
                 },
                 jet_foundation::Registry::FactRead::States => match &**inner {
-                    Expr::Ident(type_name, _) => self.state_fact_registry(type_name).and_then(
-                        |fact_registry| {
-                            fact_registry.state_members(type_name).map(|states| {
-                                let graph = fact_registry
-                                    .state_graph(&format!("{type_name}.State"));
-                                (
-                                    Type::List(Box::new(Type::Named("StateInfo".to_string()))),
-                                    crate::Comptime::build_state_infos_with_graph(
-                                        type_name, states, graph,
-                                    ),
-                                )
+                    Expr::Ident(type_name, _) => {
+                        self.state_fact_registry(type_name)
+                            .and_then(|fact_registry| {
+                                fact_registry.state_members(type_name).map(|states| {
+                                    let graph =
+                                        fact_registry.state_graph(&format!("{type_name}.State"));
+                                    (
+                                        Type::List(Box::new(Type::Named("StateInfo".to_string()))),
+                                        crate::Comptime::build_state_infos_with_graph(
+                                            type_name, states, graph,
+                                        ),
+                                    )
+                                })
                             })
-                        },
-                    ),
+                    }
                     _ => None,
                 },
                 jet_foundation::Registry::FactRead::Effects => match &**inner {
@@ -1376,10 +1422,7 @@ impl<'a> Checker<'a> {
                     structs.insert(definition.name.clone(), definition);
                     for block in &definition.trait_impls {
                         for method in &block.methods {
-                            methods.insert(
-                                (definition.name.clone(), method.name.clone()),
-                                method,
-                            );
+                            methods.insert((definition.name.clone(), method.name.clone()), method);
                         }
                     }
                 }
@@ -1672,16 +1715,13 @@ impl<'a> Checker<'a> {
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
             )
             || !matches!(result, Some(Type::Result { .. }))
-            || self
-                .expected_type
-                .as_ref()
-                .is_some_and(|expected| {
-                    matches!(
-                        expected,
-                        Type::Result { err, .. }
-                            if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-                    )
-                })
+            || self.expected_type.as_ref().is_some_and(|expected| {
+                matches!(
+                    expected,
+                    Type::Result { err, .. }
+                        if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                )
+            })
         {
             return result;
         }
@@ -1898,11 +1938,14 @@ impl<'a> Checker<'a> {
         operation: crate::AST::ArithmeticOperation,
         operation_span: Span,
     ) -> Option<crate::AST::ArithmeticPolicyFact> {
-        self.arithmetic_policy_stack.last().copied().map(|mut fact| {
-            fact.operation_span = operation_span;
-            fact.operation = Some(operation);
-            fact
-        })
+        self.arithmetic_policy_stack
+            .last()
+            .copied()
+            .map(|mut fact| {
+                fact.operation_span = operation_span;
+                fact.operation = Some(operation);
+                fact
+            })
     }
 
     fn policy_call(
@@ -2470,11 +2513,7 @@ impl<'a> Checker<'a> {
     /// still use `infer`, so a value-producing call keeps its normal type and
     /// ownership checks. This is the same call checker used by statement
     /// position; the handler adds no carrier or runtime operation.
-    fn infer_pattern_branch_value(
-        &mut self,
-        cond: &Expr,
-        value: &mut Expr,
-    ) -> Option<Type> {
+    fn infer_pattern_branch_value(&mut self, cond: &Expr, value: &mut Expr) -> Option<Type> {
         // A value-if checked under a callable's Result contract still has
         // success-valued branches. Keep explicit `Ok`/`Err` constructors on
         // the carrier path, but let every other branch call use the normal
@@ -2489,8 +2528,7 @@ impl<'a> Checker<'a> {
         let result_pattern = matches!(
             cond,
             Expr::PatternTest {
-                pattern: crate::AST::Pattern::Ok { .. }
-                    | crate::AST::Pattern::Err { .. },
+                pattern: crate::AST::Pattern::Ok { .. } | crate::AST::Pattern::Err { .. },
                 ..
             }
         );
@@ -3178,14 +3216,14 @@ impl<'a> Checker<'a> {
                                 crate::AST::StrFormat::Display => {
                                     let display_migration_lint = !self.is_unit_type(&t)
                                         && matches!(&t, Type::Named(n)
-                                            // `BuildError` is a compiler-host-only
-                                            // carrier for the `fn build` entry.
-                                            if n != "BuildError"
-                                                && self.trait_reg.auto_printable.contains(n)
-                                                && !self.trait_reg.implements_trait(
-                                                    n,
-                                                    crate::Generics::DISPLAY,
-                                                ));
+                                        // `BuildError` is a compiler-host-only
+                                        // carrier for the `fn build` entry.
+                                        if n != "BuildError"
+                                            && self.trait_reg.auto_printable.contains(n)
+                                            && !self.trait_reg.implements_trait(
+                                                n,
+                                                crate::Generics::DISPLAY,
+                                            ));
                                     if (!is_displayable(&t, self.registry, self.trait_reg)
                                         && !self.is_unit_type(&t))
                                         || display_migration_lint
@@ -3422,11 +3460,12 @@ impl<'a> Checker<'a> {
                                 crate::AST::StrFormat::Pad { .. }
                                 | crate::AST::StrFormat::PadLeft { .. } => {
                                     if t != Type::String {
-                                        let selector = if matches!(fmt, crate::AST::StrFormat::Pad { .. }) {
-                                            pad_selector
-                                        } else {
-                                            pad_left_selector
-                                        };
+                                        let selector =
+                                            if matches!(fmt, crate::AST::StrFormat::Pad { .. }) {
+                                                pad_selector
+                                            } else {
+                                                pad_left_selector
+                                            };
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
@@ -3685,6 +3724,7 @@ impl<'a> Checker<'a> {
                 self.infer_inner(e)
             }
             Expr::ListLit(elems, span) => {
+                let repeated_head = repeated_struct_list_edit(self.source, elems, *span);
                 // Rewrite before typing so the list sees call results, not nested `[T#N]`.
                 // #779 demo: surface-only change; engines never learn a new construct.
                 if !elems.is_empty()
@@ -3696,7 +3736,20 @@ impl<'a> Checker<'a> {
                         "list construction allocates backing storage",
                     ));
                 }
-                self.infer_list_lit(elems, *span)
+                let inferred = self.infer_list_lit(elems, *span);
+                if inferred.is_some() {
+                    if let Some((type_name, edit)) = repeated_head {
+                        self.diags.push(
+                            Diagnostic::from_row(
+                                "L0523",
+                                &[("type", type_name.as_str())],
+                                Some(*span),
+                            )
+                            .with_edit(edit),
+                        );
+                    }
+                }
+                inferred
             }
             Expr::TupleLit(fields, span, ty_slot) => {
                 let t = self.infer_tuple_lit(fields, *span);
@@ -3856,30 +3909,16 @@ impl<'a> Checker<'a> {
                 }
                 let t = self.infer(inner)?;
                 if matches!(op, UnOp::Neg) {
-                    if let Type::IntN {
-                        signed: true,
-                        bits,
-                    } = &t
-                    {
-                        if let Some(fact) = self.active_arithmetic_policy(
-                            crate::AST::ArithmeticOperation::Neg,
-                            *span,
-                        ) {
-                            let zero = Expr::Int(
-                                0,
-                                *span,
-                                Some((true, *bits)),
-                                Some("0".to_string()),
-                            );
+                    if let Type::IntN { signed: true, bits } = &t {
+                        if let Some(fact) = self
+                            .active_arithmetic_policy(crate::AST::ArithmeticOperation::Neg, *span)
+                        {
+                            let zero =
+                                Expr::Int(0, *span, Some((true, *bits)), Some("0".to_string()));
                             let operand = inner.as_ref().clone();
                             *e = self.policy_call(
                                 fact.mode,
-                                Expr::Binary(
-                                    BinOp::Sub,
-                                    Box::new(zero),
-                                    Box::new(operand),
-                                    *span,
-                                ),
+                                Expr::Binary(BinOp::Sub, Box::new(zero), Box::new(operand), *span),
                                 fact,
                             );
                             return Some(t);
@@ -3960,7 +3999,9 @@ impl<'a> Checker<'a> {
                 if let Some(replacement) = replacement {
                     *e = replacement;
                 } else if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow)
-                    && ty.as_ref().is_some_and(|ty| matches!(ty, Type::IntN { .. }))
+                    && ty
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty, Type::IntN { .. }))
                 {
                     let operation = match op {
                         BinOp::Add => Some(crate::AST::ArithmeticOperation::Add),
@@ -3971,13 +4012,13 @@ impl<'a> Checker<'a> {
                     };
                     if let Some(operation) = operation {
                         if let Some(fact) = self.active_arithmetic_policy(operation, span) {
-                        let inner = Expr::Binary(
-                            op,
-                            Box::new(lhs.as_ref().clone()),
-                            Box::new(rhs.as_ref().clone()),
-                            span,
-                        );
-                        *e = self.policy_call(fact.mode, inner, fact);
+                            let inner = Expr::Binary(
+                                op,
+                                Box::new(lhs.as_ref().clone()),
+                                Box::new(rhs.as_ref().clone()),
+                                span,
+                            );
+                            *e = self.policy_call(fact.mode, inner, fact);
                         }
                     }
                 }
@@ -4500,7 +4541,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(diagnostic);
                 }
                 if method == "replace"
-                    && inferred.as_ref().is_some_and(|ty| matches!(ty, Type::String))
+                    && inferred
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty, Type::String))
                 {
                     if let Some(edit) = redundant_fixed_cleanup_edit(
                         self.source,
@@ -4526,8 +4569,7 @@ impl<'a> Checker<'a> {
                         .is_some_and(|ty| matches!(ty, Type::String));
                 if string_slice_range {
                     let slice_span = *method_span;
-                    let base =
-                        std::mem::replace(receiver, Box::new(Expr::Absent(slice_span)));
+                    let base = std::mem::replace(receiver, Box::new(Expr::Absent(slice_span)));
                     let range = std::mem::replace(&mut args[0].expr, Expr::Absent(slice_span));
                     let zero = || Box::new(Expr::Int(0, slice_span, None, None));
                     *e = Expr::Slice {
@@ -4904,7 +4946,8 @@ impl<'a> Checker<'a> {
             } => {
                 let ty = self.check_incdec(*op, operand, *postfix, *span);
                 if ty.is_some() {
-                    if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(operand.as_ref()) {
+                    if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(operand.as_ref())
+                    {
                         self.clear_origin(root);
                     }
                 }

@@ -388,7 +388,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
 use core.compute as compute
 use core.encoding.json as json
 
-#Extern module c.{abi} {{
+#Import module c.{abi} {{
     fn open() Int = "{abi}_open"
     fn take_error() Int = "{abi}_take_error"
     fn cancel(handle: Int) = "{abi}_cancel"

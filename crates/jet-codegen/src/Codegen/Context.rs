@@ -271,9 +271,9 @@ pub(crate) struct Cx {
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
-    /// stable C callback symbol at some `#Extern` call site. Emission must give
-    /// exactly these functions `extern "C" fn` — never every `#Pure fn` (that
-    /// leaked the purity lever into codegen and broke I3 erasure; 14dd68a5).
+    /// stable C callback symbol at some `#Import` call site. Emission keeps
+    /// each Jet function's result carrier and gives it a raw `extern "C"`
+    /// trampoline; this set identifies which adapters are needed.
     pub(crate) ffi_callback_fns: HashSet<String>,
     /// Empty at the entry module, `super::` inside generated import modules.
     pub(crate) root_prefix: String,

@@ -543,10 +543,7 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
             }
             saw_overrides = true;
             let record = value.trim();
-            let Some(record) = record
-                .strip_prefix('{')
-                .or_else(|| record.strip_prefix(".{"))
-            else {
+            let Some(record) = record.strip_prefix('{') else {
                 return Err(OverlayError::Malformed(
                     "`overrides` must be a record".to_string(),
                 ));
@@ -569,9 +566,7 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
 
 /// Parse the ratified keyed override record:
 ///
-/// ```text
-/// overrides: { mpv: .{ version: "0.38.0", flags: .{ vapoursynth: true } } }
-/// ```
+/// overrides: { mpv: { version: "0.38.0", flags: { vapoursynth: true } } }
 ///
 /// This is intentionally a source-level parser. `workspace.jet` policy is
 /// stripped before Jet's normal evaluator runs, so accepting the record here
@@ -584,7 +579,7 @@ fn parse_keyed_overrides(body: &str) -> Result<Vec<PackageOverride>, OverlayErro
         let entry = entry.trim();
         let Some((raw_package, raw_record)) = split_top_level_colon(entry) else {
             return Err(OverlayError::Malformed(
-                "each `overrides` entry needs `<package>: .{ … }`".to_string(),
+                "each `overrides` entry needs `<package>: { … }`".to_string(),
             ));
         };
         let package = unquote(raw_package.trim());
@@ -599,9 +594,9 @@ fn parse_keyed_overrides(body: &str) -> Result<Vec<PackageOverride>, OverlayErro
             )));
         }
         let record = raw_record.trim();
-        let Some(record) = record.strip_prefix(".{") else {
+        let Some(record) = record.strip_prefix('{') else {
             return Err(OverlayError::Malformed(format!(
-                "override `{package}` must use the standard `.{{ … }}` record"
+                "override `{package}` must use the standard `{{ … }}` record"
             )));
         };
         let Some(record) = record.strip_suffix('}') else {
@@ -768,9 +763,9 @@ fn parse_priority_patch_list(raw: &str) -> Result<(Vec<String>, i32), OverlayErr
 
 fn parse_flag_record(raw: &str) -> Result<Vec<String>, OverlayError> {
     let raw = raw.trim();
-    let Some(inner) = raw.strip_prefix(".{").and_then(|v| v.strip_suffix('}')) else {
+    let Some(inner) = raw.strip_prefix('{').and_then(|v| v.strip_suffix('}')) else {
         return Err(OverlayError::Malformed(
-            "`flags` must be a typed record like `.{ feature: true }`".to_string(),
+            "`flags` must be a record like `{ feature: true }`".to_string(),
         ));
     };
     let mut flags = Vec::new();
@@ -790,9 +785,9 @@ fn parse_flag_record(raw: &str) -> Result<Vec<String>, OverlayError> {
 
 fn parse_env_record(raw: &str) -> Result<Vec<(String, String)>, OverlayError> {
     let raw = raw.trim();
-    let Some(inner) = raw.strip_prefix(".{").and_then(|v| v.strip_suffix('}')) else {
+    let Some(inner) = raw.strip_prefix('{').and_then(|v| v.strip_suffix('}')) else {
         return Err(OverlayError::Malformed(
-            "`env` must be a typed record like `.{ CC: \"clang\" }`".to_string(),
+            "`env` must be a record like `{ CC: \"clang\" }`".to_string(),
         ));
     };
     let mut values = Vec::new();
@@ -1061,15 +1056,11 @@ fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayE
     };
     let raw = raw.trim();
     let inner = raw
-        .strip_prefix(".{")
+        .strip_prefix('{')
         .and_then(|value| value.strip_suffix('}'))
-        .or_else(|| {
-            raw.strip_prefix('{')
-                .and_then(|value| value.strip_suffix('}'))
-        })
         .ok_or_else(|| {
             OverlayError::Malformed(
-                "`policy.grants:` must be a package map like `.{ \"pkg\": #(Net) }`".to_string(),
+                "`policy.grants:` must be a package map like `{ \"pkg\": #(Net) }`".to_string(),
             )
         })?;
     let mut grants = Vec::new();
@@ -1245,7 +1236,7 @@ fn balanced_policy_body(source: &str) -> Result<String, OverlayError> {
         }
     }
     Err(OverlayError::Malformed(
-        "unclosed `policy: .{ … }` block".to_string(),
+        "unclosed `policy: { … }` block".to_string(),
     ))
 }
 
@@ -2006,8 +1997,8 @@ mod tests {
         let policy = parse_workspace_policy(
             r#"
 module workspace {
-    policy_note: .{ deny: #(Exec) }
-    policy: .{ deny: #(Exec, FS) }
+    policy_note: { deny: #(Exec) }
+    policy: { deny: #(Exec, FS) }
 }
 "#,
         )
@@ -2020,8 +2011,8 @@ module workspace {
         let policy = parse_workspace_policy(
             r#"
 module workspace {
-    policy: .{
-        grants: .{ "native:tools": #(Net, Exec), "app": #(FS) },
+    policy: {
+        grants: { "native:tools": #(Net, Exec), "app": #(FS) },
         deny: #(Time)
     }
 }
@@ -2044,7 +2035,7 @@ module workspace {
     #[test]
     fn malformed_build_grants_fail_closed() {
         let error =
-            parse_workspace_policy("module workspace { policy: .{ grants: .{ \"app\": [Net] } } }")
+            parse_workspace_policy("module workspace { policy: { grants: { \"app\": [Net] } } }")
                 .unwrap_err();
         assert!(error.message().contains("policy.grants"));
     }
@@ -2052,7 +2043,7 @@ module workspace {
     #[test]
     fn unsupported_workspace_policy_allow_fails_closed() {
         for source in [
-            "module workspace { policy: .{ allow: #(Exec) } }",
+            "module workspace { policy: { allow: #(Exec) } }",
             "module workspace { policy.allow: #(Exec) }",
         ] {
             let error = parse_workspace_policy(source).unwrap_err();
@@ -2063,12 +2054,12 @@ module workspace {
     #[test]
     fn workspace_policy_fields_fail_closed() {
         for source in [
-            "module workspace { policy: .{ deny: #(Exec), unknown: #(FS) } }",
+            "module workspace { policy: { deny: #(Exec), unknown: #(FS) } }",
             "module workspace { policy.unknown: #(FS) }",
             "module workspace { policy.allowUnfree: [\"a\"]\n policy.allowUnfree: [\"b\"] }",
-            "module workspace { policy: .{ deny: #(Exec), deny: #(FS) } }",
-            "module workspace { policy: .{ deny: #(Exec) } policy: .{ grants: .{ \"app\": #(FS) } } }",
-            "module workspace { policy: .{ grants: .{ \"app\": #(FS), \"app\": #(Net) } } }",
+            "module workspace { policy: { deny: #(Exec), deny: #(FS) } }",
+            "module workspace { policy: { deny: #(Exec) } policy: { grants: { \"app\": #(FS) } } }",
+            "module workspace { policy: { grants: { \"app\": #(FS), \"app\": #(Net) } } }",
         ] {
             assert!(
                 parse_workspace_policy(source).is_err(),
@@ -2079,7 +2070,7 @@ module workspace {
 
     #[test]
     fn unknown_build_effects_fail_closed() {
-        let error = parse_workspace_policy("module workspace { policy: .{ deny: #(Teleport) } }")
+        let error = parse_workspace_policy("module workspace { policy: { deny: #(Teleport) } }")
             .unwrap_err();
         assert!(error.message().contains("unknown build effect"));
     }
@@ -2161,10 +2152,10 @@ module workspace {
 module workspace {
     overlay dev {
         overrides: {
-            "app": .{ version: Priority(10: "2"), env: .{ CC: "clang", CFLAGS: "-O2" }, flags: .{ lto: true } }
+            "app": { version: Priority(10: "2"), env: { CC: "clang", CFLAGS: "-O2" }, flags: { lto: true } }
         }
         package("app").version = "1"
-        package("app").env += .{ CC: "gcc", RUST_LOG: "debug" }
+        package("app").env += { CC: "gcc", RUST_LOG: "debug" }
     }
 }
 "#,
@@ -2231,12 +2222,12 @@ module workspace {
 module workspace {
     overlay base {
         package("app").version: Priority(10: "1")
-        package("app").env += .{ CC: "gcc" }
+        package("app").env += { CC: "gcc" }
         package("app").patches += [patch("base.patch")]
     }
     overlay local {
         package("app").version: "2"
-        package("app").env += .{ CC: "clang", RUST_LOG: "debug" }
+        package("app").env += { CC: "clang", RUST_LOG: "debug" }
         package("app").patches += [patch("local.patch")]
     }
 }
@@ -2267,13 +2258,13 @@ module workspace {
     #[test]
     fn malformed_or_duplicate_environment_facts_fail_closed() {
         let invalid = parse_workspace_policy(
-            "module workspace { overlay dev { overrides: { app: .{ env: .{ 1BAD: \"x\" } } } } }",
+            "module workspace { overlay dev { overrides: { app: { env: { 1BAD: \"x\" } } } } }",
         )
         .unwrap_err();
         assert!(invalid.message().contains("variable name"));
 
         let duplicate = parse_workspace_policy(
-            "module workspace { overlay dev { overrides: { app: .{ version: \"1\" }, app: .{ version: \"2\" } } } }",
+            "module workspace { overlay dev { overrides: { app: { version: \"1\" }, app: { version: \"2\" } } } }",
         )
         .unwrap_err();
         assert!(duplicate.message().contains("declared more than once"));

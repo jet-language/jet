@@ -44,7 +44,7 @@ const TIER_POLICY = {
 };
 
 const LANGUAGE_FILES = {
-  jet: "main.jet",
+  jet: "run.jet",
   rust: "main.rs",
   python: "main.py",
   c: "main.c",
@@ -799,7 +799,7 @@ async function discoverJetArtifact(dir) {
 }
 
 function buildCommand(language, jetBin, sourceDir) {
-  if (language === "jet") return [jetBin, "build", "main.jet"];
+  if (language === "jet") return [jetBin, "build", "run.jet"];
   if (language === "rust") return ["rustc", "--edition=2021", "-O", "main.rs", "-o", "main-rust"];
   if (language === "c") return ["gcc", "-O2", "main.c", "-o", "main-c", "-lm"];
   if (language === "zig") return ["zig", "build-exe", "-O", "ReleaseFast", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "main.zig"];
@@ -1124,8 +1124,8 @@ function emptyJetTiers(entry, dev, reason) {
 
 function jetTierCommands(entry, tier, jetBin) {
   const prefix = tier === "run"
-    ? [jetBin, "run", "main.jet", "--"]
-    : [jetBin, "dev", "--watch=off", "main.jet", "--"];
+    ? [jetBin, "run", "run.jet", "--"]
+    : [jetBin, "dev", "--watch=off", "run.jet", "--"];
   if (entry.mode === "batch-steps") return (entry.spec?.steps ?? []).map((args) => [...prefix, ...args]);
   return [[...prefix, ...(entry.spec?.args ?? [])]];
 }
@@ -1444,8 +1444,8 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     }
     if (entry.mode === "service") {
       const commandFor = (port) => tier === "run"
-        ? [jetBin, "run", "main.jet", "--", String(port)]
-        : [jetBin, "dev", "--watch=off", "main.jet", "--", String(port)];
+        ? [jetBin, "run", "run.jet", "--", String(port)]
+        : [jetBin, "dev", "--watch=off", "run.jet", "--", String(port)];
       const service = await runService("jet", jetDir, null, entry, commandFor);
       tiers[tier] = {
         applicable: true,

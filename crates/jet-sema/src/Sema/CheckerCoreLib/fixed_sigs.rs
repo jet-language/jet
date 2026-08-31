@@ -929,11 +929,17 @@ fn core_fixed_sig_impl(
         )),
         ("core.time", "parse_iso_week_date") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("LocalDate".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("LocalDate".to_string()),
+                Type::String,
+            )),
         )),
         ("core.time", "from_iso_week") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::Named("LocalDate".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("LocalDate".to_string()),
+                Type::String,
+            )),
         )),
         ("core.time", "parse_zoned") => Some((
             vec![(read, Type::String)],
@@ -1959,9 +1965,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::Int)],
             Some(Type::String),
         )),
-        ("core.text.fmt", "bin" | "oct") => {
-            Some((vec![(read, Type::Int)], Some(Type::String)))
-        }
+        ("core.text.fmt", "bin" | "oct") => Some((vec![(read, Type::Int)], Some(Type::String))),
         ("core.text.fmt", "plural") => Some((
             vec![
                 (read, Type::Int),
@@ -2192,7 +2196,7 @@ fn core_fixed_sig_impl(
                 ),
                 (read, Type::String),
                 (read, Type::String),
-                (read, Type::String),
+                (read, Type::Named("HTML".to_string())),
                 (
                     read,
                     Type::List(Box::new(Type::Named("Attachment".to_string()))),
@@ -4162,13 +4166,12 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             optional("header", CoreDefault::Bool(false)),
             optional("skip_blank", CoreDefault::Bool(false)),
         ]),
-        (
-            "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.cbor",
-            "reader",
-        ) => Some(vec![
-            required("source"),
-            optional("limits", ENCODING_LIMITS_DEFAULT),
-        ]),
+        ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.cbor", "reader") => {
+            Some(vec![
+                required("source"),
+                optional("limits", ENCODING_LIMITS_DEFAULT),
+            ])
+        }
         ("core.encoding.json", "writer") => Some(vec![
             required("target"),
             optional("limits", ENCODING_LIMITS_DEFAULT),

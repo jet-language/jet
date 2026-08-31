@@ -1573,7 +1573,10 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         }
         if !mode.json && !mode.quiet {
             if let Some(projection) = checked.as_ref() {
-                print!("{}", crate::CmdInspect::check_result_text(&projection.check));
+                print!(
+                    "{}",
+                    crate::CmdInspect::check_result_text(&projection.check)
+                );
             }
             if let Some(checked) = checked.as_mut() {
                 if let Some(report) =
@@ -1585,7 +1588,10 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         }
         if mode.json && lints.is_empty() {
             if let Some(projection) = checked.as_ref() {
-                print!("{}", crate::CmdInspect::check_result_json(&projection.check));
+                print!(
+                    "{}",
+                    crate::CmdInspect::check_result_json(&projection.check)
+                );
             } else {
                 let machine_file = crate::machine_report_path_for_process(file);
                 print!("{}", jet::Diagnostics::render_success_json(&machine_file));
@@ -4678,6 +4684,7 @@ fn format_package_manifest_for_fmt(
     origin: &str,
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
     let (materialized, _) = jet::Package::rewrite_retired_targets(src);
+    let (materialized, _) = jet::Package::rewrite_retired_record_heads(&materialized);
     if let Err(error) = jet::Package::PackageFacts::parse(&materialized, origin) {
         return Err(vec![jet::Manifest::manifest_parse_diagnostic(
             Path::new(origin),
@@ -7925,9 +7932,8 @@ mod missing_c_lib_tests {
             self.0.join("main.jet").to_string_lossy().into_owned()
         }
         fn native_cache_key_with_input(&self, relative: &str) -> String {
-            let mut bundle =
-                jet::Loader::load_entry_with_overlay(&self.main(), None, false)
-                    .expect("load consumed-input cache fixture");
+            let mut bundle = jet::Loader::load_entry_with_overlay(&self.main(), None, false)
+                .expect("load consumed-input cache fixture");
             jet::Driver::seed_build_facts(
                 &mut bundle,
                 "dev",
@@ -7935,8 +7941,7 @@ mod missing_c_lib_tests {
                 &std::collections::BTreeMap::new(),
             )
             .expect("seed consumed-input cache fixture");
-            let diagnostics =
-                jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+            let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
             assert!(
                 diagnostics
                     .iter()
@@ -8043,7 +8048,17 @@ mod missing_c_lib_tests {
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
         let salt = |tool, deps, runtime, core, mode, target, instances: &[String]| {
-            native_cache_salt(tool, deps, runtime, core, mode, target, instances, None, &[])
+            native_cache_salt(
+                tool,
+                deps,
+                runtime,
+                core,
+                mode,
+                target,
+                instances,
+                None,
+                &[],
+            )
         };
         let base = salt(
             "tool-a",
@@ -8539,14 +8554,10 @@ mod web_output_boundary_tests {
     fn web_build_rejects_symlinked_output_root_before_creation() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-web-build-root-symlink-{}",
-            std::process::id()
-        ));
-        let outside = std::env::temp_dir().join(format!(
-            "jet-web-build-root-outside-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-web-build-root-symlink-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("jet-web-build-root-outside-{}", std::process::id()));
         let _ = std::fs::remove_file(&root);
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);

@@ -57,7 +57,8 @@ Load the smallest slice. Never hand-edit `plugins/tower/.tower/*.json`.
      **tower-ballot** (`--draft` only while unfinished; `--ready` when the
      owner can decide from the ballot alone). Use the full profile unless the
      owner's current request explicitly asks for a short ballot. Full profile
-     reviews run base, boil the ocean, hybrid, cooperative, then adversarial.
+     reviews run base, boil the ocean, hybrid, cooperative, a fresh-agent RLI5
+     beginner pass, then rival-family adversarial review.
    - Advance honestly: planning → ready when ungated; leave in decide while
      ballots are open. Log what changed with `--by <agent>`.
 4. Optionally run **tower-rank** if the user asked to reorder as part of prep.

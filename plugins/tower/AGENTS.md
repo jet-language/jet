@@ -201,8 +201,9 @@ hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
 `recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
 The `simple` skill applies to every user-visible field. A full ballot is the
 default and records one- or two-sentence summaries for the complete base draft,
-then boil-the-ocean, hybrid, cooperative, and adversarial reviews in that exact
-order. A short ballot is the complete base draft with no reviews; use it only
+then boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
+rival-family adversarial reviews in that exact order. A short ballot is the
+complete base draft with no reviews; use it only
 when the owner's current request explicitly asks for one, and preserve that
 request in `shortAuthorizedBy`. Plain prose uses one idea per sentence, defines
 jargon, expands acronyms, and leads with user impact. Write-time density limits

@@ -547,11 +547,15 @@ use core.email as email
 fn run() {
     from :: email.address("Mara <mara@example.com>") ?? return
     to :: email.address("Ada <ada@example.net>") ?? return
-    message :: email.message(from, [to], [], "Welcome", "Hello", "", []) ?? return
+    message :: email.message(from, [to], [Address]{}, "Welcome", "Hello", HTML{""}, [Attachment]{}) ?? return
     bytes :: email.serialize(message) ?? return
     print(bytes.len())
 }
+
 ```
+
+The HTML body is checked `HTML`, so interpolated values are escaped. Use
+`HTML{""}` when a message has only a plain-text body.
 
 The native surface ships `address`, `attachment`, `message`, `envelope`,
 `serialize`, `smtp_from_env`, and `smtp`. `Message.with_envelope` replaces SMTP

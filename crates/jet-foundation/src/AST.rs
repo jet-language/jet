@@ -87,7 +87,7 @@ mod ffi;
 pub use ffi::{
     binder_descriptor, foreign_abi_contract, BinderCapability, BinderCapabilityReport,
     BinderDescriptor, BinderRuntime, BinderStatus, BinderSurface, BindingStubKind, CFfi,
-    CImportLink, CLib, ComptimeInput, FfiLink, ForeignAbiContract, ForeignAsyncModel,
+    CImportLink, COverlayOverride, CLib, ComptimeInput, FfiLink, ForeignAbiContract, ForeignAsyncModel,
     ForeignCallbackModel, ForeignCallingConvention, ForeignErrorModel, ForeignLayoutModel,
     ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
     ForeignTaskBoundary, FOREIGN_ABI_CONTRACT_VERSION, FOREIGN_BINDERS, FOREIGN_DESCRIPTOR_SCHEMA,

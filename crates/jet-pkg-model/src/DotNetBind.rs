@@ -382,7 +382,7 @@ fn args(o: &mut String, n: usize) {
 
 fn render_jet(lib: &str, s: &Surface) -> String {
     let abi = format!("jet_cs_{lib}");
-    let mut o = format!("#Extern module c.{abi} {{\n    fn new(");
+    let mut o = format!("#Import module c.{abi} {{\n    fn new(");
     jet_params(&mut o, &s.ctor);
     o.push_str(&format!(") Int = \"{abi}_new\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n"));
     for m in &s.methods {

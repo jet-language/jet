@@ -1100,6 +1100,11 @@ impl JetShow for JetSyncText {
         jet_sync_text_show(self)
     }
 }
+impl JetDisplay for JetSyncText {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
 
 impl JetShow for JetSyncCounter {
     fn jet_show(&self) -> String {
@@ -1113,10 +1118,20 @@ impl JetShow for JetSyncCounter {
         )
     }
 }
+impl JetDisplay for JetSyncCounter {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
 
 impl JetShow for JetSyncMap {
     fn jet_show(&self) -> String {
         jet_sync_map_show(self)
+    }
+}
+impl JetDisplay for JetSyncMap {
+    fn jet_display(&self) -> String {
+        self.jet_show()
     }
 }
 
@@ -1133,6 +1148,11 @@ where
 impl JetShow for JetSyncList {
     fn jet_show(&self) -> String {
         jet_sync_list_show(self)
+    }
+}
+impl JetDisplay for JetSyncList {
+    fn jet_display(&self) -> String {
+        self.jet_show()
     }
 }
 

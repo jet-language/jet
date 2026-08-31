@@ -373,7 +373,7 @@ fn scalar(name: &str) -> Option<Scalar> {
 
 fn render_jet(lib: &str, routines: &[Routine]) -> String {
     let abi = format!("jet_ada_{lib}");
-    let mut o = format!("#Extern module c.{abi} {{\n");
+    let mut o = format!("#Import module c.{abi} {{\n");
     for r in routines {
         o.push_str("    fn ");
         o.push_str(&r.name);

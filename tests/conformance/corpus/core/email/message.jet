@@ -4,6 +4,6 @@ use core.email as email
 fn run() {
     sender :: email.address("sender@example.com") ?? panic("sender")
     recipient :: email.address("recipient@example.net") ?? panic("recipient")
-    message :: email.message(sender, [recipient], [], "Welcome", "Hello", "<b>Hello</b>", []) ?? panic("message")
+    message :: email.message(sender, [recipient], [Address]{}, "Welcome", "Hello", HTML{"<b>Hello</b>"}, [Attachment]{}) ?? panic("message")
     print((email.serialize(message) ?? panic("serialize")).len())
 }

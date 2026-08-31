@@ -14,7 +14,7 @@ use crate::Comptime::Builtins::{as_bool, as_int, exact_big};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
-use crate::Comptime::ServicesLite;
+use crate::Comptime::{ServicesLite, SyncLite};
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 use jet_foundation::StructuralDebug::jet_debug_map;
 use jet_foundation::Syntax::CoreCallPureRoute;
@@ -1029,11 +1029,14 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
         _ => {}
     }
-    // D-SERVICE-RECEIPT2=A / I9: service lifecycle values cross the evaluator
-    // boundary as the same typed facts that AOT's Prelude `JetShow` renders.
-    // Keep opaque handles and audit records on that projection instead of
-    // exposing the CtValue carrier fields or error variant names.
-    if let Some(text) = ServicesLite::service_display_value(value) {
+    // D-SERVICE-RECEIPT2=A / I9: service lifecycle and sync carriers cross
+    // the evaluator boundary as the same typed facts that AOT's Prelude
+    // `JetShow` renders. Keep opaque handles and audit records on that
+    // projection instead of exposing the CtValue carrier fields or error
+    // variant names.
+    if let Some(text) = ServicesLite::service_show_value(value)
+        .or_else(|| SyncLite::sync_show_value(value))
+    {
         return Some(text);
     }
     let core_type = match value {

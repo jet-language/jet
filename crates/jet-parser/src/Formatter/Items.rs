@@ -1342,9 +1342,7 @@ impl<'a> Fmt<'a> {
                             | TokKind::LambdaArrow
                             | TokKind::ColonColon
                             | TokKind::Eq
-                    ) || (f.declared_effects.is_some()
-                        || f.effect_via.is_some()
-                        || f.is_pure)
+                    ) || (f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure)
                         && matches!(token.kind, TokKind::Gt)
                 })
                 .map(|_| expr)

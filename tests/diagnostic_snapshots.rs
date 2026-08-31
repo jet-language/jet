@@ -28,16 +28,16 @@
 //! Never bless a snapshot you haven't read against the typed diagnostic row.
 //! These files are the product: the error messages ARE the language's UX.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
-mod common;
 #[path = "support/case_law.rs"]
 mod case_law;
+mod common;
 use common::{
     fixture_filter, fixture_matches, jetpack_bin, normalize_fixture_selector, unified_diff,
     unique_tmp,
@@ -1207,6 +1207,7 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
         ("path_containment_string_prefix", &["L0517"], "is_within"),
         ("complete_ascii_case_ladder", &["L0521"], "to_ascii_"),
         ("walk_files_filter", &["L0522"], "walk_files"),
+        ("repeated_list_head", &["L0523"], "[Point]{"),
     ];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for (name, expected_codes, edit_fragment) in cases {
@@ -1220,13 +1221,7 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
             .filter(|diagnostic| {
                 matches!(
                     diagnostic.code.as_str(),
-                    "L0515"
-                        | "L0516"
-                        | "L0517"
-                        | "L0518"
-                        | "L0519"
-                        | "L0521"
-                        | "L0522"
+                    "L0515" | "L0516" | "L0517" | "L0518" | "L0519" | "L0521" | "L0522" | "L0523"
                 )
             })
             .collect::<Vec<_>>();
@@ -1234,7 +1229,10 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
             .iter()
             .map(|diagnostic| diagnostic.code.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(actual_codes, *expected_codes, "selected lints changed for {name}");
+        assert_eq!(
+            actual_codes, *expected_codes,
+            "selected lints changed for {name}"
+        );
         let mut sites = HashSet::new();
         for diagnostic in &selected {
             let span = diagnostic

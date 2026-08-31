@@ -31,13 +31,16 @@ short ballot in the current request.
   complete options, and a recommendation, but no review passes. Set
   `ballotMode: "short"`, copy the owner's request into `shortAuthorizedBy`, and
   omit `reviewPasses`.
-- A **full ballot** starts with the same complete base draft, then runs all four
-  review passes below. Set `ballotMode: "full"` and record all five stage
+- A **full ballot** starts with the same complete base draft, then runs all five
+  review passes below. Set `ballotMode: "full"` and record all six stage
   summaries in `reviewPasses`.
-  The `reviewPasses.adversarial` string must begin with these exact sentences:
+  The `reviewPasses.beginner` string must begin with:
+  `Fresh agent: <agent-id>. Skill: rli5.`
+  The `reviewPasses.adversarial` string must begin with:
   `Author model family: <family>. Adversarial model family: <family>.`
-  The two normalized family names must differ. Draft and updated full ballots
-  follow the same rule. Ratified decisions are immutable history.
+  Draft and updated full ballots follow both rules. The beginner agent must be
+  fresh, and the two normalized model family names must differ. Ratified
+  decisions are immutable history.
 
 "Simple ballot" is not a profile name. `/simple` applies to both profiles.
 
@@ -71,6 +74,23 @@ short ballot in the current request.
 - **`group`** — one of the project's `decisionGroups` (see `.tower/config.json`)
   so the queue stays organized.
 
+## Ground comparisons in real use
+
+For user-facing syntax, workflow, or API choices, search current external
+practice before ranking options. Start with primary specifications and official
+documentation. Then measure adoption or reception with a reproducible public
+source when one exists.
+
+State what each number measures. A package manager's downloads or stars measure
+the tool, not one feature. A code-search count measures indexed matches, not
+users. Give the query, date, exclusions, and known limits. Never present a
+repository census as market evidence.
+
+Identify the strongest praised design, why people praise it, and its recorded
+complaints. Keep the useful mechanism. Repair its observed faults instead of
+copying its accidental syntax. Put source URLs and measured signals in
+`comparisons`.
+
 Make each option internally cohesive. When one canonical mechanism can serve
 beginners and experts, present that complete mechanism as a normal option. Do
 not create a separate hybrid option unless it is a real final design.
@@ -93,22 +113,30 @@ one- or two-sentence summary of what that pass found or changed.
    the `reviewPasses.hybrid` summary is required.
 4. **Cooperative** — steelman every option on its own terms. Make each choice the
    strongest honest version of itself, including the options you expect to lose.
-5. **Adversarial** — attack the recommendation, its assumptions, and its failure
-   modes. Repair the ballot and change the recommendation if it does not survive.
+5. **Beginner** — dispatch one fresh OMP agent that had no role in the earlier
+   passes. The brief must invoke `/rli5`, provide the complete ballot, and use
+   the true-beginner profile unless the owner named another reader. The agent
+   must attempt explain, predict, modify, and derive tasks, then return the RLI5
+   friction table. Revise the ballot and record its exact agent id after
+   `Fresh agent: <agent-id>. Skill: rli5.`
+6. **Adversarial** — use the required rival model family to attack the
+   recommendation, assumptions, evidence, and failure modes. Repair the ballot
+   and change the recommendation if it does not survive.
 
 The summaries are evidence, not status labels. Say what was tested, added,
 removed, combined, strengthened, or repaired. After the adversarial pass, check
 that `recommendation.whyNot` still covers every losing option.
 
 Focus Mode shows these stages in order: base in slate, boil the ocean in violet,
-hybrid in cyan, cooperative in green, and adversarial in orange. It shows the
-recommendation in blue and reasons against alternatives in muted red. Labels and
-icons carry the same meaning when color is unavailable.
+hybrid in cyan, cooperative in green, beginner in blue, and adversarial in
+orange. It shows the recommendation in blue and reasons against alternatives
+in muted red. Labels and icons carry the same meaning when color is unavailable.
 
 ## Mechanics
 
 ```
-cat > /tmp/ballot.json <<'EOF'
+mkdir -p ~/.cache/jet-luna
+cat > ~/.cache/jet-luna/ballot.json <<'EOF'
 {
   "cardId": "#12",
   "id": "D-CACHE1",
@@ -135,11 +163,12 @@ cat > /tmp/ballot.json <<'EOF'
     "boilOcean": "The breadth review tested versioned keys and manual clearing.",
     "hybrid": "The hybrid review kept purge events and added a safety limit.",
     "cooperative": "The cooperative review strengthened time limits with safe staggering.",
+    "beginner": "Fresh agent: reader-17. Skill: rli5. The beginner pass found one undefined term and one ambiguous example. Both were repaired.",
     "adversarial": "Author model family: family-a. Adversarial model family: family-b. The rival-family review attacked the recommendation and repaired one failure mode."
   }
 }
 EOF
-tower decision add --file /tmp/ballot.json --by <me>
+tower decision add --file ~/.cache/jet-luna/ballot.json --by <me>
 ```
 
 The card's lane flips to `decide` automatically; leave it there. Nudge the

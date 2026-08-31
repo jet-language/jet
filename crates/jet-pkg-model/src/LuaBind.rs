@@ -120,7 +120,7 @@ const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
 ];
 
 fn render_jet(abi: &str, functions: &[String]) -> String {
-    let mut out = format!("#Extern module c.{abi} {{\n");
+    let mut out = format!("#Import module c.{abi} {{\n");
     for (name, signature) in GENERATED_FIXED_FUNCTIONS {
         out.push_str(&format!("    fn {name}{signature} = \"{abi}_{name}\"\n"));
     }

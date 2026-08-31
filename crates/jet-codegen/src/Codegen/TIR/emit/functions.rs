@@ -803,18 +803,12 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
     // source was `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
-    // D-CABI-CALLBACK1: `extern "C" fn` ONLY for a function sema proved is
-    // actually passed as a native callback symbol somewhere (`cx.ffi_callback_fns`,
-    // built from `CallArgFlags::c_callback_symbol` — see
-    // `crates/jet-sema/src/Sema/Bundle.rs::collect_core_expr`). Never every
-    // `#Pure fn`: that leaked the purity lever into codegen and broke I3
-    // erasure (`effect_annotations_are_erased`, `eff2_levers_are_erased`,
-    // fixed by 14dd68a5) — but a bare fn reference handed to a `#Extern`
-    // C-ABI callback parameter (`callback_twice(increment, x)`) genuinely
-    // needs the C calling convention: the referenced Rust item's own type
-    // must match the raw `extern "C" fn` pointer type the C side expects.
+    // D-CABI-CALLBACK1: a named callback still has its ordinary Jet failure
+    // carrier. Emit a separate raw `extern "C"` trampoline below instead of
+    // changing this function's Rust return type to a foreign ABI-incompatible
+    // `Result`. The lowerer points C callback arguments at that adapter.
     let ffi_callback = cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty();
-    let abi = if ffi_callback { "extern \"C\" " } else { "" };
+    let abi = "";
     // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` lower to a Rust `#[inline]`/
     // `#[inline(always)]` attribute right above the signature. `is_inline_always`
     // is only ever `true` here once sema has confirmed the function can actually
@@ -887,9 +881,8 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         abi = abi,
     ));
     if ffi_callback {
-        // D-FFI-UNIFY1 / card #1121: no Rust unwind may cross a foreign
-        // callback frame. Prelude owns failure conversion; this emitter only
-        // supplies the callback body and ABI spelling.
+        // Keep the body behind the same fail-closed callback boundary as the
+        // raw adapter below; the Jet function itself keeps its typed result.
         out.push_str(&format!(
             "    {}jet_ffi_callback_boundary(|| {{\n",
             cx.root_prefix
@@ -900,6 +893,69 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         emit_tir_function_body(tir, cx, out, 1);
     }
     out.push_str("}\n\n");
+    if ffi_callback {
+        emit_tir_c_callback_adapter(tir, cx, out, &params);
+    }
+}
+
+/// Emit the raw C ABI edge for a named callback.
+///
+/// A normal Jet function always returns its typed `Result` carrier. C callback
+/// slots cannot carry that Rust type, so keep the Jet function intact and
+/// expose a stable trampoline that unwraps success and terminates on failure.
+fn emit_tir_c_callback_adapter(tir: &TFunc, cx: &Cx, out: &mut String, params: &str) {
+    let Some(return_type) = tir.ret.as_ref() else {
+        return;
+    };
+    let adapter = cx.mangle_name(&crate::Codegen::TIR::c_callback_adapter_name(&tir.name));
+    let target = cx.mangle_name(&tir.name);
+    let call_args = tir
+        .params
+        .iter()
+        .map(|(rust_name, _, _)| rust_name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let call = if tir.is_unsafe {
+        format!("unsafe {{ {target}({call_args}) }}")
+    } else {
+        format!("{target}({call_args})")
+    };
+    let (callback_return, body) = match return_type {
+        Type::Result { ok, err } => {
+            let error = if matches!(
+                err.as_ref(),
+                Type::Named(name) if name == crate::Syntax::TYPE_NEVER
+            ) {
+                "Err(error) => match error {}".to_string()
+            } else if matches!(
+                err.as_ref(),
+                Type::Named(name) if name == crate::Syntax::TYPE_ERR
+            ) {
+                format!(
+                    "Err(error) => {}jet_entry_error_exit_jet(error)",
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "Err(_error) => {}jet_panic(\"\", 0, \"named C callback returned an error\")",
+                    cx.root_prefix
+                )
+            };
+            (
+                cx.rust_type(ok),
+                format!("match {call} {{ Ok(value) => value, {error} }}"),
+            )
+        }
+        other => (cx.rust_type(other), call),
+    };
+    out.push_str(&format!(
+        "pub extern \"C\" fn {adapter}({params}) -> {callback_return} {{\n\
+    {root}jet_ffi_callback_boundary(|| {{\n\
+        {body}\n\
+    }})\n\
+}}\n\n",
+        root = cx.root_prefix,
+    ));
 }
 
 /// D-MEMO1=A: emit one public function wrapper around one private body and one
@@ -964,6 +1020,9 @@ fn emit_tir_memoized_toplevel(
     out.push_str(&format!(
         "pub fn {stats_name}() -> {root}JetMemoStats {{\n    {store_init}.lock().unwrap_or_else(|error| error.into_inner()).stats()\n}}\n\n"
     ));
+    if cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty() {
+        emit_tir_c_callback_adapter(tir, cx, out, params);
+    }
 }
 
 fn memo_key_type(tir: &TFunc, cx: &Cx) -> String {

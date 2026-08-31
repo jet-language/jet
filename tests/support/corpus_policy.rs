@@ -9,11 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use jet::Diagnostics::Span;
 use jet::AST::{
     AccessConvention, BinOp, BindPattern, CallArg, Expr, ForKind, Item, LambdaBody, OrFallback,
     Pattern, Program, Stmt, StrFormat, StrPart, StructPatField, Type, UnOp,
 };
-use jet::Diagnostics::Span;
 
 pub const MANIFEST_PATH: &str = "tests/corpus_policy.tsv";
 const MANIFEST: &str = include_str!("../corpus_policy.tsv");
@@ -420,7 +420,11 @@ impl CorpusPolicy {
             let source = fs::read_to_string(&path)
                 .map_err(|error| format!("read {}: {error}", path.display()))?;
             let has_run_command = has_jet_run_command(&source);
-            let sources = if Path::new(&entry.path).extension().and_then(|ext| ext.to_str()) == Some("md") {
+            let sources = if Path::new(&entry.path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                == Some("md")
+            {
                 jet_fences(&source)
             } else {
                 vec![source]
@@ -430,10 +434,10 @@ impl CorpusPolicy {
                 .map(|source| parse_program(source))
                 .collect::<Result<Vec<_>, _>>()?;
             let valid = match recipe {
-                CliRecipe::Typed => !programs.is_empty() && programs.iter().all(has_typed_cli_entry),
-                CliRecipe::TypedDoc => {
-                    programs.iter().any(has_typed_cli_entry) && has_run_command
+                CliRecipe::Typed => {
+                    !programs.is_empty() && programs.iter().all(has_typed_cli_entry)
                 }
+                CliRecipe::TypedDoc => programs.iter().any(has_typed_cli_entry) && has_run_command,
                 CliRecipe::Builder => programs.iter().any(has_args_builder),
                 CliRecipe::Raw => programs.iter().any(has_raw_process_boundary),
             };
@@ -488,7 +492,10 @@ impl CorpusPolicy {
             let compatible = match expected {
                 ProfileFixtureRole::One(role) => row.role == role,
                 ProfileFixtureRole::Generated => {
-                    matches!(row.role, SourceRole::RawProtocol | SourceRole::GeneratedOutput)
+                    matches!(
+                        row.role,
+                        SourceRole::RawProtocol | SourceRole::GeneratedOutput
+                    )
                 }
             };
             if !compatible {
@@ -542,7 +549,12 @@ impl CorpusPolicy {
                 let Some(path) = artifact.selector.strip_prefix("path:") else {
                     continue;
                 };
-                let Some(producer) = self.manifest.producers.iter().find(|producer| producer.selector == artifact.producer) else {
+                let Some(producer) = self
+                    .manifest
+                    .producers
+                    .iter()
+                    .find(|producer| producer.selector == artifact.producer)
+                else {
                     continue;
                 };
                 if is_no_response_protocol(&producer.protocol)
@@ -626,7 +638,10 @@ impl CorpusPolicy {
         row: &SourceRow,
         program: &Program,
     ) -> Result<(), String> {
-        if !matches!(row.role, SourceRole::CanonicalTeaching | SourceRole::ExpertLesson) {
+        if !matches!(
+            row.role,
+            SourceRole::CanonicalTeaching | SourceRole::ExpertLesson
+        ) {
             return Ok(());
         }
         let mut occurrences: BTreeMap<(String, String), usize> = BTreeMap::new();
@@ -644,10 +659,7 @@ impl CorpusPolicy {
                 if !maintained_guidance_lint(rule) {
                     continue;
                 }
-                let site = format!(
-                    "allow:{rule}@{}..{}",
-                    target.start, target.end
-                );
+                let site = format!("allow:{rule}@{}..{}", target.start, target.end);
                 *occurrences.entry((rule.clone(), site)).or_default() += 1;
             }
         }
@@ -677,8 +689,7 @@ impl CorpusPolicy {
         }
 
         for exception in self.manifest.exceptions.iter().filter(|exception| {
-            exception.selector == format!("file:{path}")
-                && exception.site.starts_with("allow:")
+            exception.selector == format!("file:{path}") && exception.site.starts_with("allow:")
         }) {
             let count = occurrences
                 .get(&(exception.rule.clone(), exception.site.clone()))
@@ -699,7 +710,12 @@ impl CorpusPolicy {
         producer: &str,
         source: &str,
     ) -> Result<Vec<SemanticViolation>, String> {
-        let Some(row) = self.manifest.producers.iter().find(|row| row.selector == producer) else {
+        let Some(row) = self
+            .manifest
+            .producers
+            .iter()
+            .find(|row| row.selector == producer)
+        else {
             return Err(inventory_error(
                 "unclassified generated-source producer",
                 producer,
@@ -768,7 +784,10 @@ impl CorpusPolicy {
         let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
         for candidate in candidates {
             if candidate.file != selector {
-                return Err(format!("candidate file {} does not match {selector}", candidate.file));
+                return Err(format!(
+                    "candidate file {} does not match {selector}",
+                    candidate.file
+                ));
             }
             let key = (candidate.rule.clone(), candidate.site.clone());
             *counts.entry(key).or_default() += 1;
@@ -779,7 +798,9 @@ impl CorpusPolicy {
                 .exceptions
                 .iter()
                 .filter(|exception| {
-                    exception.rule == rule && exception.selector == format!("file:{selector}") && exception.site == site
+                    exception.rule == rule
+                        && exception.selector == format!("file:{selector}")
+                        && exception.site == site
                 })
                 .collect::<Vec<_>>();
             if matches.len() != 1 {
@@ -892,9 +913,9 @@ fn is_response_decoder(function: &jet::AST::Func) -> bool {
         && named_type(&function.params[0].ty, "String")
         && named_type(&function.params[1].ty, "Int")
         && matches!(
-            function.return_type.as_ref(),
-            Some(Type::Result { ok, .. }) if named_type(ok, "DataTree")
-    )
+                function.return_type.as_ref(),
+                Some(Type::Result { ok, .. }) if named_type(ok, "DataTree")
+        )
 }
 
 fn protocol_override_identity(protocol: &str) -> Option<&str> {
@@ -908,7 +929,9 @@ fn ordinary_envelope_decoder(function: &jet::AST::Func) -> bool {
     for_each_statement_expr(&function.body, |expr| {
         if let Expr::MethodCall { method, args, .. } = expr.without_parens() {
             if method == "field"
-                && args.first().is_some_and(|arg| is_literal_string(&arg.expr, "ok"))
+                && args
+                    .first()
+                    .is_some_and(|arg| is_literal_string(&arg.expr, "ok"))
             {
                 has_status_field = true;
             }
@@ -928,8 +951,15 @@ impl CorpusManifest {
             }
             if line.starts_with('[') && line.ends_with(']') {
                 section = line[1..line.len() - 1].to_string();
-                if !matches!(section.as_str(), "source" | "scope" | "producer" | "artifact" | "finding" | "exception") {
-                    return Err(format!("manifest line {}: unknown section [{}]", line_number + 1, section));
+                if !matches!(
+                    section.as_str(),
+                    "source" | "scope" | "producer" | "artifact" | "finding" | "exception"
+                ) {
+                    return Err(format!(
+                        "manifest line {}: unknown section [{}]",
+                        line_number + 1,
+                        section
+                    ));
                 }
                 continue;
             }
@@ -973,7 +1003,9 @@ impl CorpusManifest {
                     rule: nonempty(fields[1], &error("exception rule is empty"))?,
                     selector: parse_selector(fields[2]).map_err(|message| error(&message))?,
                     site: parse_site(fields[3]).map_err(|message| error(&message))?,
-                    expected: fields[4].parse().map_err(|_| error("exception occurrence is not a positive integer"))?,
+                    expected: fields[4]
+                        .parse()
+                        .map_err(|_| error("exception occurrence is not a positive integer"))?,
                     protocol: nonempty(fields[5], &error("exception protocol is empty"))?,
                     reason: nonempty(fields[6], &error("exception reason is empty"))?,
                 }),
@@ -988,24 +1020,69 @@ impl CorpusManifest {
 
     pub fn validate(&self) -> Result<(), String> {
         let mut errors = Vec::new();
-        unique_selectors(&self.sources.iter().map(|row| row.selector.as_str()).collect::<Vec<_>>(), "source", &mut errors);
+        unique_selectors(
+            &self
+                .sources
+                .iter()
+                .map(|row| row.selector.as_str())
+                .collect::<Vec<_>>(),
+            "source",
+            &mut errors,
+        );
         let mut scope_keys = BTreeSet::new();
         for scope in &self.scopes {
             if !scope_keys.insert((&scope.rule, &scope.selector)) {
                 errors.push(format!("duplicate scope {} {}", scope.rule, scope.selector));
             }
         }
-        unique_selectors(&self.producers.iter().map(|row| row.selector.as_str()).collect::<Vec<_>>(), "producer", &mut errors);
-        unique_selectors(&self.artifacts.iter().map(|row| row.selector.as_str()).collect::<Vec<_>>(), "artifact", &mut errors);
-        unique_selectors(&self.findings.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), "finding", &mut errors);
-        let rule_names = rule_registry().iter().map(|spec| spec.name).collect::<BTreeSet<_>>();
-        let producer_names = self.producers.iter().map(|row| row.selector.as_str()).collect::<BTreeSet<_>>();
+        unique_selectors(
+            &self
+                .producers
+                .iter()
+                .map(|row| row.selector.as_str())
+                .collect::<Vec<_>>(),
+            "producer",
+            &mut errors,
+        );
+        unique_selectors(
+            &self
+                .artifacts
+                .iter()
+                .map(|row| row.selector.as_str())
+                .collect::<Vec<_>>(),
+            "artifact",
+            &mut errors,
+        );
+        unique_selectors(
+            &self
+                .findings
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            "finding",
+            &mut errors,
+        );
+        let rule_names = rule_registry()
+            .iter()
+            .map(|spec| spec.name)
+            .collect::<BTreeSet<_>>();
+        let producer_names = self
+            .producers
+            .iter()
+            .map(|row| row.selector.as_str())
+            .collect::<BTreeSet<_>>();
         for finding in &self.findings {
             if !rule_names.contains(finding.rule.as_str()) {
-                errors.push(format!("finding {} names unknown rule {}", finding.id, finding.rule));
+                errors.push(format!(
+                    "finding {} names unknown rule {}",
+                    finding.id, finding.rule
+                ));
             }
             if finding.owner.is_empty() || finding.proof.is_empty() {
-                errors.push(format!("finding {} has no owner or executable proof", finding.id));
+                errors.push(format!(
+                    "finding {} has no owner or executable proof",
+                    finding.id
+                ));
             }
             if !self.scopes.iter().any(|scope| scope.rule == finding.rule)
                 && !domain_guard_rule(finding.rule.as_str())
@@ -1017,7 +1094,10 @@ impl CorpusManifest {
             }
         }
         if self.findings.len() != 38 {
-            errors.push(format!("manifest must retain all 38 audited findings, found {}", self.findings.len()));
+            errors.push(format!(
+                "manifest must retain all 38 audited findings, found {}",
+                self.findings.len()
+            ));
         }
         for scope in &self.scopes {
             if !rule_names.contains(scope.rule.as_str()) {
@@ -1029,10 +1109,16 @@ impl CorpusManifest {
                 .iter()
                 .any(|source| selector_matches(&source.selector, path))
             {
-                errors.push(format!("scope {} names an unclassified source selector {}", scope.rule, scope.selector));
+                errors.push(format!(
+                    "scope {} names an unclassified source selector {}",
+                    scope.rule, scope.selector
+                ));
             }
             if scope.reason.is_empty() {
-                errors.push(format!("scope {} {} has no reason", scope.rule, scope.selector));
+                errors.push(format!(
+                    "scope {} {} has no reason",
+                    scope.rule, scope.selector
+                ));
             }
         }
         for producer in &self.producers {
@@ -1046,13 +1132,21 @@ impl CorpusManifest {
                     )
                 ));
             }
-            if !self.artifacts.iter().any(|artifact| artifact.selector == producer.artifact && artifact.producer == producer.selector) {
-                errors.push(format!("producer {} family has no artifact row", producer.selector));
+            if !self.artifacts.iter().any(|artifact| {
+                artifact.selector == producer.artifact && artifact.producer == producer.selector
+            }) {
+                errors.push(format!(
+                    "producer {} family has no artifact row",
+                    producer.selector
+                ));
             }
         }
         for artifact in &self.artifacts {
             if !producer_names.contains(artifact.producer.as_str()) {
-                errors.push(format!("artifact {} names unknown producer {}", artifact.selector, artifact.producer));
+                errors.push(format!(
+                    "artifact {} names unknown producer {}",
+                    artifact.selector, artifact.producer
+                ));
             }
         }
         let mut exception_keys = BTreeSet::new();
@@ -1062,10 +1156,16 @@ impl CorpusManifest {
             }
             let key = (&exception.rule, &exception.selector, &exception.site);
             if !exception_keys.insert(key) {
-                errors.push(format!("duplicate occurrence exception {} {} {}", exception.rule, exception.selector, exception.site));
+                errors.push(format!(
+                    "duplicate occurrence exception {} {} {}",
+                    exception.rule, exception.selector, exception.site
+                ));
             }
             if exception.expected == 0 {
-                errors.push(format!("exception {} {} has zero expected occurrences", exception.rule, exception.site));
+                errors.push(format!(
+                    "exception {} {} has zero expected occurrences",
+                    exception.rule, exception.site
+                ));
             }
             if !exception.selector.starts_with("file:") {
                 errors.push(format!(
@@ -1100,7 +1200,10 @@ impl CorpusManifest {
                 }
             }
             if exception.protocol.is_empty() || exception.reason.is_empty() {
-                errors.push(format!("exception {} {} has no protocol or reason", exception.rule, exception.site));
+                errors.push(format!(
+                    "exception {} {} has no protocol or reason",
+                    exception.rule, exception.site
+                ));
             } else if let Err(error) = validate_exception_protocol(&exception.protocol) {
                 errors.push(format!(
                     "exception {} {}: {error}",
@@ -1190,7 +1293,9 @@ fn parse_producer(value: &str) -> Result<String, String> {
     };
     validate_relative_path(path)?;
     if symbol.is_empty() || symbol.contains('#') {
-        return Err(format!("producer selector must name one non-empty symbol ({value})"));
+        return Err(format!(
+            "producer selector must name one non-empty symbol ({value})"
+        ));
     }
     Ok(value.to_string())
 }
@@ -1200,10 +1305,14 @@ fn parse_artifact(value: &str) -> Result<String, String> {
         validate_relative_path(path)?;
     } else if let Some(family) = value.strip_prefix("family:") {
         if family.is_empty() || family.contains('/') {
-            return Err(format!("artifact family is not a stable identifier ({value})"));
+            return Err(format!(
+                "artifact family is not a stable identifier ({value})"
+            ));
         }
     } else {
-        return Err(format!("artifact selector must start with path: or family: ({value})"));
+        return Err(format!(
+            "artifact selector must start with path: or family: ({value})"
+        ));
     }
     Ok(value.to_string())
 }
@@ -1213,13 +1322,19 @@ fn parse_site(value: &str) -> Result<String, String> {
         .rsplit_once('@')
         .ok_or_else(|| format!("semantic site must carry a span ({value})"))?;
     if kind.is_empty() || kind.contains('@') {
-        return Err(format!("semantic site kind is empty or malformed ({value})"));
+        return Err(format!(
+            "semantic site kind is empty or malformed ({value})"
+        ));
     }
     let (start, end) = span
         .split_once("..")
         .ok_or_else(|| format!("semantic site span must use start..end ({value})"))?;
-    let start = start.parse::<usize>().map_err(|_| format!("bad site start ({value})"))?;
-    let end = end.parse::<usize>().map_err(|_| format!("bad site end ({value})"))?;
+    let start = start
+        .parse::<usize>()
+        .map_err(|_| format!("bad site start ({value})"))?;
+    let end = end
+        .parse::<usize>()
+        .map_err(|_| format!("bad site end ({value})"))?;
     if end < start {
         return Err(format!("site end precedes start ({value})"));
     }
@@ -1227,8 +1342,13 @@ fn parse_site(value: &str) -> Result<String, String> {
 }
 
 fn validate_relative_path(path: &str) -> Result<(), String> {
-    if path.is_empty() || Path::new(path).is_absolute() || path.split('/').any(|part| part == ".." || part.is_empty()) {
-        return Err(format!("manifest path is not a normalized relative path ({path})"));
+    if path.is_empty()
+        || Path::new(path).is_absolute()
+        || path.split('/').any(|part| part == ".." || part.is_empty())
+    {
+        return Err(format!(
+            "manifest path is not a normalized relative path ({path})"
+        ));
     }
     Ok(())
 }
@@ -1257,11 +1377,16 @@ fn selector_matches(selector: &str, path: &str) -> bool {
     let Some(root) = selector.strip_prefix("root:") else {
         return false;
     };
-    path == root || path.strip_prefix(root).is_some_and(|rest| rest.starts_with('/'))
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn selector_specificity(selector: &str) -> usize {
-    selector.strip_prefix("file:").map_or(0, |file| 100_000 + file.len())
+    selector
+        .strip_prefix("file:")
+        .map_or(0, |file| 100_000 + file.len())
         + selector.strip_prefix("root:").map_or(0, str::len)
 }
 
@@ -1327,7 +1452,10 @@ fn domain_guard_rule(rule: &str) -> bool {
 }
 
 fn semantic_role(role: SourceRole) -> bool {
-    matches!(role, SourceRole::CanonicalTeaching | SourceRole::ExpertLesson | SourceRole::GeneratedOutput)
+    matches!(
+        role,
+        SourceRole::CanonicalTeaching | SourceRole::ExpertLesson | SourceRole::GeneratedOutput
+    )
 }
 
 fn fixture_role_for_path(path: &str) -> Option<SourceRole> {
@@ -1652,9 +1780,7 @@ fn for_each_statement_expr<'a>(body: &'a [Stmt], mut f: impl FnMut(&'a Expr)) {
                         }
                     }
                     Expr::OptField { base, .. } => stack.push(CorpusWalkNode::Expr(base)),
-                    Expr::MethodCall {
-                        receiver, args, ..
-                    } => {
+                    Expr::MethodCall { receiver, args, .. } => {
                         push_corpus_args(&mut stack, args);
                         stack.push(CorpusWalkNode::Expr(receiver));
                     }
@@ -1837,7 +1963,9 @@ fn program_expressions<'a>(program: &'a Program) -> Vec<&'a Expr> {
     for_each_statement_expr(&program.script_body, |expr| expressions.push(expr));
     for item in &program.items {
         match item {
-            Item::Func(function) => for_each_statement_expr(&function.body, |expr| expressions.push(expr)),
+            Item::Func(function) => {
+                for_each_statement_expr(&function.body, |expr| expressions.push(expr))
+            }
             Item::Struct(structure) => {
                 for method in &structure.methods {
                     for_each_statement_expr(&method.body, |expr| expressions.push(expr));
@@ -1927,7 +2055,11 @@ fn collect_statement_facts<'a>(
                     bodies.push(task_body);
                 }
                 Stmt::CountedLoop {
-                    span, init, step, body, ..
+                    span,
+                    init,
+                    step,
+                    body,
+                    ..
                 } => {
                     facts
                         .counted_loops
@@ -1969,7 +2101,9 @@ fn collect_statement_facts<'a>(
                     }
                 }
                 Stmt::ComptimeIf {
-                    then_body, else_body, ..
+                    then_body,
+                    else_body,
+                    ..
                 } => {
                     if let Some(body) = else_body {
                         bodies.push(body);
@@ -2014,8 +2148,10 @@ fn proof_matches(proof: &str, gate: &str) -> bool {
 }
 
 fn skip_directory(name: &str) -> bool {
-    matches!(name, ".git" | ".claude" | ".agent-worktrees" | "plugins" | "node_modules" | "target")
-        || name.starts_with("target-")
+    matches!(
+        name,
+        ".git" | ".claude" | ".agent-worktrees" | "plugins" | "node_modules" | "target"
+    ) || name.starts_with("target-")
 }
 
 fn discover_manifest_files(
@@ -2035,11 +2171,7 @@ fn discover_manifest_files(
     Ok(())
 }
 
-fn discover_files(
-    root: &Path,
-    current: &Path,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
+fn discover_files(root: &Path, current: &Path, out: &mut Vec<String>) -> Result<(), String> {
     // Keep directory traversal off the call stack. Symlinked directories are
     // excluded before they can re-enter a manifest root.
     let mut pending = vec![current.to_path_buf()];
@@ -2142,7 +2274,9 @@ fn parse_program(source: &str) -> Result<Program, String> {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
         if !lexer_diagnostics.is_empty() {
-            return Err(format!("Jet lexer rejected corpus source: {lexer_diagnostics:?}"));
+            return Err(format!(
+                "Jet lexer rejected corpus source: {lexer_diagnostics:?}"
+            ));
         }
         jet::Parser::parse(&tokens)
             .map_err(|diagnostics| format!("Jet parser rejected corpus source: {diagnostics:?}"))
@@ -2178,7 +2312,10 @@ fn evaluate_program(
     if applies(manifest, path, row, "first-hour-doc-recipe")
         && path == "examples/features/types/typed_literal_forms.jet"
     {
-        if let Some(expression) = expressions.iter().find(|expr| is_build_command_literal(expr)) {
+        if let Some(expression) = expressions
+            .iter()
+            .find(|expr| is_build_command_literal(expr))
+        {
             violations.push(SemanticViolation::new(
                 path,
                 "first-hour-doc-recipe",
@@ -2192,61 +2329,135 @@ fn evaluate_program(
             argv_sites.push(expr.span());
         }
         if applies(manifest, path, row, "raw-cli-fixed-shape") && is_process_argv(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "raw-cli-fixed-shape", site("call:process.argv", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "raw-cli-fixed-shape",
+                site("call:process.argv", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "raw-cli-builder-shape") && is_process_argv_view(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "raw-cli-builder-shape", site("call:process.argv.skip", expr.span())));
+        if applies(manifest, path, row, "raw-cli-builder-shape")
+            && is_process_argv_view(expr, &aliases)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "raw-cli-builder-shape",
+                site("call:process.argv.skip", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "duration-constant-safe") && is_constant_duration_constructor(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "duration-constant-safe", site("call:Duration.constructor", expr.span())));
+        if applies(manifest, path, row, "duration-constant-safe")
+            && is_constant_duration_constructor(expr, &aliases)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "duration-constant-safe",
+                site("call:Duration.constructor", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "unit-scalar-rewrap") && is_unit_scalar_rewrap(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "unit-scalar-rewrap", site("call:unit-rewrap", expr.span())));
+        if applies(manifest, path, row, "unit-scalar-rewrap")
+            && is_unit_scalar_rewrap(expr, &aliases)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "unit-scalar-rewrap",
+                site("call:unit-rewrap", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "readonly-copy") && is_readonly_copy(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "readonly-copy", site("call:readonly-copy", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "readonly-copy",
+                site("call:readonly-copy", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "error-identity") && is_identity_fallback(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "error-identity", site("expr:error-propagation", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "error-identity",
+                site("expr:error-propagation", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "http-wrapper-json") && is_http_ceremony(expr, &functions) {
-            violations.push(SemanticViolation::new(path, "http-wrapper-json", site("call:http-wrapper", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "http-wrapper-json",
+                site("call:http-wrapper", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "http-message-text") && is_http_message_text(expr) {
-            violations.push(SemanticViolation::new(path, "http-message-text", site("call:response.text", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "http-message-text",
+                site("call:response.text", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "http-typed-json") && is_raw_http_json_body(expr, &functions) {
-            violations.push(SemanticViolation::new(path, "http-typed-json", site("call:request.body", expr.span())));
+        if applies(manifest, path, row, "http-typed-json")
+            && is_raw_http_json_body(expr, &functions)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "http-typed-json",
+                site("call:request.body", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "delimited-reader-config") && is_raw_delimited_split(expr) {
-            violations.push(SemanticViolation::new(path, "delimited-reader-config", site("call:delimited-split", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "delimited-reader-config",
+                site("call:delimited-split", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "plain-format-fact")
-            && is_redundant_fixed_cleanup(expr)
-        {
+        if applies(manifest, path, row, "plain-format-fact") && is_redundant_fixed_cleanup(expr) {
             violations.push(SemanticViolation::new(
                 path,
                 "plain-format-fact",
                 site("call:Fixed.replace", expr.span()),
             ));
         }
-        if applies(manifest, path, row, "dogfood-path-containment") && is_string_prefix_containment(expr) {
-            violations.push(SemanticViolation::new(path, "dogfood-path-containment", site("call:path.starts_with", expr.span())));
+        if applies(manifest, path, row, "dogfood-path-containment")
+            && is_string_prefix_containment(expr)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-path-containment",
+                site("call:path.starts_with", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "dogfood-json") && is_hand_json_wire(expr) {
-            violations.push(SemanticViolation::new(path, "dogfood-json", site("literal:json-wire", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-json",
+                site("literal:json-wire", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "dogfood-url-query") && is_url_query_reparse(expr) {
-            violations.push(SemanticViolation::new(path, "dogfood-url-query", site("call:url.query.split", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-url-query",
+                site("call:url.query.split", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "dogfood-list-equality") && is_named_list_equality(expr) {
-            violations.push(SemanticViolation::new(path, "dogfood-list-equality", site("fn:same_strings", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-list-equality",
+                site("fn:same_strings", expr.span()),
+            ));
         }
-        if applies(manifest, path, row, "dogfood-directory-setup") && is_non_idempotent_directory_call(expr, &aliases) {
-            violations.push(SemanticViolation::new(path, "dogfood-directory-setup", site("call:fs.create_dir", expr.span())));
+        if applies(manifest, path, row, "dogfood-directory-setup")
+            && is_non_idempotent_directory_call(expr, &aliases)
+        {
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-directory-setup",
+                site("call:fs.create_dir", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "dogfood-ascii") && is_ascii_replacement_chain(expr) {
-            violations.push(SemanticViolation::new(path, "dogfood-ascii", site("call:String.replace", expr.span())));
+            violations.push(SemanticViolation::new(
+                path,
+                "dogfood-ascii",
+                site("call:String.replace", expr.span()),
+            ));
         }
         if applies(manifest, path, row, "crypto-naming-fact")
             && is_legacy_digest_call(expr, &aliases)
@@ -2261,23 +2472,41 @@ fn evaluate_program(
 
     if applies(manifest, path, row, "raw-cli-process-boundary") && argv_sites.len() > 1 {
         for span in argv_sites.into_iter().skip(1) {
-            violations.push(SemanticViolation::new(path, "raw-cli-process-boundary", site("call:process.argv", span)));
+            violations.push(SemanticViolation::new(
+                path,
+                "raw-cli-process-boundary",
+                site("call:process.argv", span),
+            ));
         }
     }
     if applies(manifest, path, row, "entry-implicit")
-        && program.items.iter().any(|item| matches!(item, Item::Func(function) if function.name == "run"))
+        && program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
     {
         let span = program
             .items
             .iter()
-            .find_map(|item| match item { Item::Func(function) if function.name == "run" => Some(function.span), _ => None })
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function.span),
+                _ => None,
+            })
             .unwrap_or(Span { start: 0, end: 0 });
-        violations.push(SemanticViolation::new(path, "entry-implicit", site("fn:run", span)));
+        violations.push(SemanticViolation::new(
+            path,
+            "entry-implicit",
+            site("fn:run", span),
+        ));
     }
     if applies(manifest, path, row, "codable-structural") {
         for structure in structures {
             if bare_structural_codable(structure) {
-                violations.push(SemanticViolation::new(path, "codable-structural", site(&format!("type:{}", structure.name), structure.name_span)));
+                violations.push(SemanticViolation::new(
+                    path,
+                    "codable-structural",
+                    site(&format!("type:{}", structure.name), structure.name_span),
+                ));
             }
         }
     }
@@ -2295,7 +2524,11 @@ fn evaluate_program(
     if applies(manifest, path, row, "task-one-child") {
         for (span, is_single_combinator) in statement_facts.task_groups {
             if is_single_combinator {
-                violations.push(SemanticViolation::new(path, "task-one-child", site("stmt:task.group", span)));
+                violations.push(SemanticViolation::new(
+                    path,
+                    "task-one-child",
+                    site("stmt:task.group", span),
+                ));
             }
         }
     }
@@ -2309,7 +2542,11 @@ fn evaluate_program(
         }
         for (span, is_sequence_index) in statement_facts.counted_loops {
             if is_sequence_index {
-                violations.push(SemanticViolation::new(path, "indexed-sequence", site("loop:counted-sequence", span)));
+                violations.push(SemanticViolation::new(
+                    path,
+                    "indexed-sequence",
+                    site("loop:counted-sequence", span),
+                ));
             }
         }
     }
@@ -2407,7 +2644,10 @@ fn redundant_effect_row(function: &jet::AST::Func, aliases: &BTreeMap<String, St
 fn expression_effect(expr: &Expr, aliases: &BTreeMap<String, String>) -> Option<&'static str> {
     match expr.without_parens() {
         Expr::Call(call) => {
-            if matches!(call.name.as_str(), "print" | "println" | "eprint" | "eprintln") {
+            if matches!(
+                call.name.as_str(),
+                "print" | "println" | "eprint" | "eprintln"
+            ) {
                 return Some("IO");
             }
             let (module, _) = call.name.rsplit_once('.')?;
@@ -2440,7 +2680,11 @@ fn module_aliases(program: &Program) -> BTreeMap<String, String> {
     program
         .imports
         .iter()
-        .filter_map(|import| import.core_module_path().map(|module| (import.import_alias(), module)))
+        .filter_map(|import| {
+            import
+                .core_module_path()
+                .map(|module| (import.import_alias(), module))
+        })
         .collect()
 }
 
@@ -2510,8 +2754,7 @@ fn datatree_domain_policy_violations(path: &str, program: &Program) -> Vec<Seman
                 .all(|parameter| data_tree_domain_value(&parameter.ty));
         if returns_bool
             && data_tree_pair
-            && (body_returns_constant_bool(&function.body)
-                || compares_parameter_pair(function))
+            && (body_returns_constant_bool(&function.body) || compares_parameter_pair(function))
         {
             violations.push(SemanticViolation::new(
                 path,
@@ -2563,8 +2806,7 @@ fn body_returns_constant_bool(body: &[Stmt]) -> bool {
 }
 
 fn data_tree_domain_value(ty: &Type) -> bool {
-    named_type(ty, "DataTree")
-        || matches!(ty, Type::List(inner) if named_type(inner, "DataTree"))
+    named_type(ty, "DataTree") || matches!(ty, Type::List(inner) if named_type(inner, "DataTree"))
 }
 
 fn compares_parameter_pair(function: &jet::AST::Func) -> bool {
@@ -2579,9 +2821,7 @@ fn compares_parameter_pair(function: &jet::AST::Func) -> bool {
         let Expr::Binary(BinOp::Eq, left, right, _) = expr.without_parens() else {
             return;
         };
-        let direct = |value: &Expr, expected: &str| {
-            matches!(value.without_parens(), Expr::Ident(name, _) if name == expected)
-        };
+        let direct = |value: &Expr, expected: &str| matches!(value.without_parens(), Expr::Ident(name, _) if name == expected);
         if (direct(left, left_name) && direct(right, right_name))
             || (direct(left, right_name) && direct(right, left_name))
         {
@@ -2594,7 +2834,9 @@ fn compares_parameter_pair(function: &jet::AST::Func) -> bool {
 fn receiver_is(expr: &Expr, expected: &str, aliases: &BTreeMap<String, String>) -> bool {
     match expr.without_parens() {
         Expr::Ident(name, _) if name == expected => true,
-        Expr::Ident(name, _) => aliases.get(name).is_some_and(|module| module == &format!("core.{expected}")),
+        Expr::Ident(name, _) => aliases
+            .get(name)
+            .is_some_and(|module| module == &format!("core.{expected}")),
         _ => false,
     }
 }
@@ -2617,17 +2859,15 @@ fn is_process_argv_view(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool
         return false;
     };
     method == "skip"
-        && args.first().is_some_and(|arg| {
-            matches!(arg.expr.without_parens(), Expr::Int(value, ..) if *value == 1)
-        })
+        && args.first().is_some_and(
+            |arg| matches!(arg.expr.without_parens(), Expr::Int(value, ..) if *value == 1),
+        )
         && is_process_argv(receiver, aliases)
 }
 
 fn is_legacy_digest_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
     let Expr::MethodCall {
-        receiver,
-        method,
-        ..
+        receiver, method, ..
     } = expr.without_parens()
     else {
         return false;
@@ -2642,10 +2882,27 @@ fn is_legacy_digest_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> boo
 }
 
 fn is_constant_duration_constructor(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
-    let Expr::MethodCall { receiver, method, args, .. } = expr.without_parens() else {
+    let Expr::MethodCall {
+        receiver,
+        method,
+        args,
+        ..
+    } = expr.without_parens()
+    else {
         return false;
     };
-    if !receiver_is(receiver, "Duration", aliases) || !matches!(method.as_str(), "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours" | "days") {
+    if !receiver_is(receiver, "Duration", aliases)
+        || !matches!(
+            method.as_str(),
+            "nanoseconds"
+                | "microseconds"
+                | "milliseconds"
+                | "seconds"
+                | "minutes"
+                | "hours"
+                | "days"
+        )
+    {
         return false;
     }
     let Some(argument) = args.first() else {
@@ -2739,7 +2996,16 @@ fn is_unit_scalar_rewrap(expr: &Expr, aliases: &BTreeMap<String, String>) -> boo
     };
     let is_constructor = method.starts_with("from_")
         || (receiver_is(receiver, "Duration", aliases)
-            && matches!(method.as_str(), "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours" | "days"));
+            && matches!(
+                method.as_str(),
+                "nanoseconds"
+                    | "microseconds"
+                    | "milliseconds"
+                    | "seconds"
+                    | "minutes"
+                    | "hours"
+                    | "days"
+            ));
     if !is_constructor || args.len() != 1 {
         return false;
     }
@@ -2750,9 +3016,7 @@ fn is_unit_scalar_rewrap(expr: &Expr, aliases: &BTreeMap<String, String>) -> boo
         return false;
     }
     (is_unit_projection(left) && is_direct_scalar(right))
-        || (matches!(operator, BinOp::Mul)
-            && is_direct_scalar(left)
-            && is_unit_projection(right))
+        || (matches!(operator, BinOp::Mul) && is_direct_scalar(left) && is_unit_projection(right))
 }
 
 fn is_unit_projection(expr: &Expr) -> bool {
@@ -2781,7 +3045,10 @@ fn is_direct_scalar(expr: &Expr) -> bool {
                 ..
             } if matches!(receiver.without_parens(), Expr::Ident(name, _) if name == "Float")
                 && method == "from_int"
-                && args.len() == 1 => current = &args[0].expr,
+                && args.len() == 1 =>
+            {
+                current = &args[0].expr
+            }
             _ => return false,
         }
     }
@@ -2805,11 +3072,12 @@ fn is_readonly_copy(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
     };
     let module_is_files = module == "fs"
         || module == "files"
-        || aliases
-            .get(module)
-            .is_some_and(|path| path == "core.files");
+        || aliases.get(module).is_some_and(|path| path == "core.files");
     module_is_files
-        && matches!(method, "read" | "read_bytes" | "read_at" | "read_link" | "stat" | "list_dir")
+        && matches!(
+            method,
+            "read" | "read_bytes" | "read_at" | "read_link" | "stat" | "list_dir"
+        )
         && args.iter().any(|arg| {
             arg.convention == AccessConvention::Read
                 && matches!(arg.expr.without_parens(), Expr::Copy(_, _))
@@ -2859,9 +3127,9 @@ fn is_io_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
 
 fn is_io_module(module: &str, aliases: &BTreeMap<String, String>) -> bool {
     matches!(module, "fs" | "files" | "io" | "env")
-        || aliases.get(module).is_some_and(|path| {
-            matches!(path.as_str(), "core.files" | "core.io" | "core.env")
-        })
+        || aliases
+            .get(module)
+            .is_some_and(|path| matches!(path.as_str(), "core.files" | "core.io" | "core.env"))
 }
 
 fn is_http_ceremony(expr: &Expr, functions: &[&jet::AST::Func]) -> bool {
@@ -2908,9 +3176,10 @@ fn is_http_request_value(expr: &Expr, functions: &[&jet::AST::Func]) -> bool {
         return false;
     };
     functions.iter().any(|function| {
-        function.params.iter().any(|parameter| {
-            parameter.name == *name && named_type(&parameter.ty, "HTTPRequest")
-        })
+        function
+            .params
+            .iter()
+            .any(|parameter| parameter.name == *name && named_type(&parameter.ty, "HTTPRequest"))
     })
 }
 
@@ -2928,27 +3197,26 @@ fn is_build_command_literal(expr: &Expr) -> bool {
     let Expr::Str(parts, _) = expr.without_parens() else {
         return false;
     };
-    parts.iter().any(|part| {
-        matches!(part, StrPart::Lit(text) if text.contains("jet build"))
-    })
+    parts
+        .iter()
+        .any(|part| matches!(part, StrPart::Lit(text) if text.contains("jet build")))
 }
 
 fn is_hand_json_wire(expr: &Expr) -> bool {
     let Expr::Str(parts, _) = expr.without_parens() else {
         return false;
     };
-    let has_interpolation = parts.iter().any(|part| matches!(part, StrPart::Interp(_, _)));
-    let has_object_shape = parts.iter().any(|part| {
-        matches!(part, StrPart::Lit(text) if text.contains('{') && text.contains(':'))
-    });
+    let has_interpolation = parts
+        .iter()
+        .any(|part| matches!(part, StrPart::Interp(_, _)));
+    let has_object_shape = parts
+        .iter()
+        .any(|part| matches!(part, StrPart::Lit(text) if text.contains('{') && text.contains(':')));
     has_interpolation && has_object_shape
 }
 
 fn is_string_prefix_containment(expr: &Expr) -> bool {
-    let Expr::MethodCall {
-        method, args, ..
-    } = expr.without_parens()
-    else {
+    let Expr::MethodCall { method, args, .. } = expr.without_parens() else {
         return false;
     };
     method == "starts_with"
@@ -2996,9 +3264,7 @@ fn is_non_idempotent_directory_call(expr: &Expr, aliases: &BTreeMap<String, Stri
             method == "create_dir"
                 && (module == "fs"
                     || module == "files"
-                    || aliases
-                        .get(module)
-                        .is_some_and(|path| path == "core.files"))
+                    || aliases.get(module).is_some_and(|path| path == "core.files"))
         }
         Expr::MethodCall {
             receiver, method, ..
@@ -3162,16 +3428,21 @@ fn has_anchored_regex_capture(program: &Program, aliases: &BTreeMap<String, Stri
 fn body_has_anchored_regex_capture(body: &[Stmt], aliases: &BTreeMap<String, String>) -> bool {
     let mut expressions = Vec::new();
     for_each_statement_expr(body, |expr| expressions.push(expr));
-    let anchored_pattern = expressions.iter().copied().any(|expr| match expr.without_parens() {
-        Expr::StructLit { type_name, fields, .. } if type_name == "Regex" => fields
-            .first()
-            .is_some_and(|(_, _, value)| is_anchored_literal(value)),
-        Expr::TypedLit { body, .. } => match body {
-            jet::AST::TypedLitBody::Value(value) => is_anchored_literal(value),
+    let anchored_pattern = expressions
+        .iter()
+        .copied()
+        .any(|expr| match expr.without_parens() {
+            Expr::StructLit {
+                type_name, fields, ..
+            } if type_name == "Regex" => fields
+                .first()
+                .is_some_and(|(_, _, value)| is_anchored_literal(value)),
+            Expr::TypedLit { body, .. } => match body {
+                jet::AST::TypedLitBody::Value(value) => is_anchored_literal(value),
+                _ => false,
+            },
             _ => false,
-        },
-        _ => false,
-    });
+        });
     let matched = expressions.iter().copied().any(|expr| {
         matches!(expr.without_parens(), Expr::Call(call) if call.name == "re.match")
             || matches!(
@@ -3239,7 +3510,9 @@ fn is_task_combinator_expr(expr: &Expr) -> bool {
                         | jet::Syntax::INTERNAL_TASK_ANY_METHOD
                 );
             }
-            Expr::MethodCall { receiver, method, .. } => {
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
                 return matches!(receiver.without_parens(), Expr::Ident(name, _)
                     if name == "task" || name == jet::Syntax::INTERNAL_TASK_RECEIVER)
                     && matches!(
@@ -3259,8 +3532,13 @@ fn is_task_combinator_expr(expr: &Expr) -> bool {
 fn bare_structural_codable(structure: &jet::AST::StructDef) -> bool {
     structure.type_params.is_empty()
         && structure.type_markers.len() == 1
-        && structure.type_markers.first().is_some_and(|marker| marker.name == "Codable" && !marker.negated)
-        && structure.fields.iter().all(|field| field.serde_markers.is_empty() && field.computed.is_none() && field.default.is_none())
+        && structure
+            .type_markers
+            .first()
+            .is_some_and(|marker| marker.name == "Codable" && !marker.negated)
+        && structure.fields.iter().all(|field| {
+            field.serde_markers.is_empty() && field.computed.is_none() && field.default.is_none()
+        })
         && !structure.is_published_schema
 }
 
@@ -3271,10 +3549,6 @@ fn site(kind: &str, span: Span) -> String {
 fn inventory_error(message: &str, file: &str, site_kind: &str) -> String {
     format!(
         "{message}: {file}; {}",
-        SemanticViolation::new(
-            file,
-            "corpus-inventory",
-            site(site_kind, Span::new(0, 0)),
-        )
+        SemanticViolation::new(file, "corpus-inventory", site(site_kind, Span::new(0, 0)),)
     )
 }

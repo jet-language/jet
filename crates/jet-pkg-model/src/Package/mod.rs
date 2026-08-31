@@ -17,8 +17,8 @@ mod Edit;
 
 pub use Blocks::{
     build_entry_source, dep_display, dep_display_redacted, parse_policy_document, AuthorityHolds,
-    BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry, PackageKind,
-    ProvenanceRequirement, ProviderAuthority, Target, TrustDecision, TrustPolicy,
+    BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry,
+    PackageKind, ProvenanceRequirement, ProviderAuthority, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
@@ -30,6 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +90,7 @@ pub struct CheckedPackageEntry {
 }
 
 impl OutputFact {
-    /// D-LIB-NAME1=A: `Library.{ loadable: true }` requests a `.jetlib`
+    /// D-LIB-NAME1=A: `Library{ loadable: true }` requests a `.jetlib`
     /// artifact. The manifest parser owns the field shape; callers read the
     /// checked boolean instead of re-parsing the payload.
     pub fn is_loadable(&self) -> bool {
@@ -200,7 +201,7 @@ pub struct PackageFacts {
     pub outputs: BTreeMap<String, OutputFact>,
     pub environments: BTreeMap<String, EnvironmentFact>,
     pub defaults: BTreeMap<String, String>,
-    /// D-BUILDPROFILE1: named build profiles from `build: .{ … }`.
+    /// D-BUILDPROFILE1: named build profiles from `build: { … }`.
     pub build_profiles: Vec<Blocks::BuildProfileDef>,
     /// D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
     pub build_allow: Vec<String>,
@@ -211,11 +212,11 @@ pub struct PackageFacts {
     /// D-EFFBUDGET1: the audited per-dependency escape from `authority:`.
     pub grants: Vec<(String, Vec<String>)>,
     /// D-AUTHORITY-MANIFEST1=A: the one source authority namespace
-    /// (`authority: .{ … }`).
+    /// (`authority: { … }`).
     pub authority: PackageAuthority,
-    /// D-POLICY-WORD1=A: package governance settings (`policy: .{ … }`).
+    /// D-POLICY-WORD1=A: package governance settings (`policy: { … }`).
     pub policy: PackagePolicy,
-    /// D-CONF-MODULE1=A: typed settings declared in `settings: .{ … }`.
+    /// D-CONF-MODULE1=A: typed settings declared in `settings: { … }`.
     /// The driver resolves their effective profile values into the shared
     /// build-fact snapshot.
     pub settings: BTreeMap<String, SettingDecl>,
@@ -224,7 +225,7 @@ pub struct PackageFacts {
     /// root and keep discovery provenance available to source enumeration.
     #[doc(hidden)]
     pub resolved_config_paths: Vec<String>,
-    /// Inline `name :: Config.{ ... }` contributions. The merged fields stay
+    /// Inline `name :: Config{ ... }` contributions. The merged fields stay
     /// in the parent facts; this map preserves the declaration identity so a
     /// `configs: [...]` list can refer to either inline or file-backed Configs.
     pub inline_configs: BTreeMap<String, ConfigFacts>,
@@ -416,6 +417,7 @@ pub enum PackageParseError {
         field: String,
         value: String,
     },
+    RetiredRecordHead,
     ConfigMembers,
     Composition(String),
     /// D-ECO-MEMBERS1: a member Package may not introduce another member list.
@@ -489,6 +491,9 @@ impl fmt::Display for PackageParseError {
             Self::InvalidValue { field, value } => {
                 write!(f, "invalid value for `{field}`: `{value}`")
             }
+            Self::RetiredRecordHead => f.write_str(
+                "record literals use `{ … }`; remove the retired dot before `{` (D-LIT-DOT1)",
+            ),
             Self::ConfigMembers => f.write_str("Config cannot declare `members`"),
             Self::Composition(value) => f.write_str(value),
             Self::NestedMembers { root, member } => write!(
@@ -1738,6 +1743,40 @@ pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
     (rewritten, spans.len())
 }
 
+/// Rewrite the retired `.{ … }` record head while preserving strings and comments.
+///
+/// D-LIT-DOT1 keeps a leading dot only for enum variants. For `.Kind.{ … }`,
+/// this removes the second dot and preserves `.Kind{ … }`.
+pub fn rewrite_retired_record_heads(text: &str) -> (String, usize) {
+    let spans = retired_record_head_spans(text);
+    let mut rewritten = text.to_string();
+    for span in spans.iter().rev() {
+        rewritten.replace_range(span.clone(), "");
+    }
+    (rewritten, spans.len())
+}
+
+fn retired_record_head_spans(text: &str) -> Vec<Range<usize>> {
+    let (tokens, lex_diags) = Lexer::lex(text);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let tokens: Vec<&Lexer::Token> = tokens
+        .iter()
+        .filter(|token| {
+            !Lexer::is_comment(&token.kind) && !matches!(token.kind, Lexer::TokKind::Eof)
+        })
+        .collect();
+    tokens
+        .windows(2)
+        .filter_map(|pair| {
+            (matches!(pair[0].kind, Lexer::TokKind::Dot)
+                && matches!(pair[1].kind, Lexer::TokKind::LBrace))
+            .then(|| pair[0].span.start..pair[0].span.end)
+        })
+        .collect()
+}
+
 /// Format one canonical Package or Config source file.
 ///
 /// These files use the typed ecosystem surface rather than the compiler's
@@ -1749,6 +1788,7 @@ pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
 pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, String> {
     let origin = origin.into();
     let (canonical_text, _) = rewrite_retired_targets(text);
+    let (canonical_text, _) = rewrite_retired_record_heads(&canonical_text);
     let text = canonical_text.as_str();
     let stripped = strip_comments(text);
     let trimmed = stripped.trim();
@@ -1966,6 +2006,9 @@ fn parse_common(
     origin: String,
     config: bool,
 ) -> Result<PackageFacts, PackageParseError> {
+    if !retired_record_head_spans(text).is_empty() {
+        return Err(PackageParseError::RetiredRecordHead);
+    }
     let mut facts = PackageFacts {
         origin,
         ..PackageFacts::default()
@@ -2927,7 +2970,7 @@ fn parse_output_payload(value: &str) -> Result<OutputPayload, PackageParseError>
                 .collect::<Result<Vec<_>, _>>()?,
         ));
     }
-    if value.starts_with('{') || value.starts_with(".{") {
+    if value.starts_with('{') {
         let body = record_body(value, "output payload")?;
         let entries = named_entries_checked(body, "output payload")?;
         return Ok(OutputPayload::Object(
@@ -3118,7 +3161,7 @@ fn service_field_allowed(field: &str) -> bool {
     )
 }
 
-/// `settings: .{ tls: Bool = true, api_base: String = "…" }` — a name, a
+/// `settings: { tls: Bool = true, api_base: String = "…" }` — a name, a
 /// Tier-0 type, and a required default (D-CONF-KEY1).
 fn parse_settings(value: &str) -> Result<BTreeMap<String, SettingDecl>, PackageParseError> {
     let mut out = BTreeMap::new();
@@ -3218,7 +3261,7 @@ fn named_entries_checked(
     Ok(entries)
 }
 
-/// Parse the file form `pub name :: Config.{ ... }` while keeping the file
+/// Parse the file form `pub name :: Config{ ... }` while keeping the file
 /// itself layout-neutral. The same helper also recognizes an inline Config
 /// declaration in `package.jet`.
 fn config_wrapper<'a>(text: &'a str) -> Result<Option<(String, &'a str)>, PackageParseError> {
@@ -3860,11 +3903,11 @@ mod tests {
         let facts = PackageFacts::parse(
             r#"
 name: "demo"
-outputs: .{
-    app: .Executable.{ name: "app", entry: run }
-    check: .Check.{ name: "check", entry: check }
+outputs: {
+    app: .Executable{ name: "app", entry: run }
+    check: .Check{ name: "check", entry: check }
 }
-defaults: .{ run: app, test: check }
+defaults: { run: app, test: check }
 "#,
             "package.jet",
         )
@@ -3878,9 +3921,24 @@ defaults: .{ run: app, test: check }
     }
 
     #[test]
+    fn formatter_migrates_retired_record_heads_before_validation() {
+        let retired = r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: run } }"#;
+        assert_eq!(
+            PackageFacts::parse(retired, "package.jet").unwrap_err(),
+            PackageParseError::RetiredRecordHead
+        );
+
+        let formatted = format_source(retired, "package.jet").unwrap();
+        assert!(!formatted.contains(".{"), "{formatted}");
+        let facts = PackageFacts::parse(&formatted, "package.jet").unwrap();
+        assert_eq!(facts.outputs["app"].kind, PackageOutputKind::Executable);
+    }
+
+    #[test]
     fn loadable_library_uses_ratified_field_and_formats_round_trip() {
         let source = r#"name: "skyhawk"
-outputs: .{ mod: .Library.{ entry: Skyhawk, loadable: true } }"#;
+outputs: { mod: .Library{ entry: Skyhawk, loadable: true } }"#;
         let facts = PackageFacts::parse(source, "package.jet").unwrap();
         let output = &facts.outputs["mod"];
         assert_eq!(output.entry.as_deref(), Some("Skyhawk"));
@@ -3896,7 +3954,7 @@ outputs: .{ mod: .Library.{ entry: Skyhawk, loadable: true } }"#;
     fn loadable_library_requires_a_boolean() {
         let error = PackageFacts::parse(
             r#"name: "skyhawk"
-outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
+outputs: { mod: .Library{ loadable: "yes" } }"#,
             "package.jet",
         )
         .unwrap_err();
@@ -3909,7 +3967,7 @@ outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
     #[test]
     fn native_library_keeps_binding_requests_structured() {
         let source = r#"name: "flightlog"
-outputs: .{ core: .Library.{ entry: Flightlog, native: true, bindings: [c, python, swift] } }"#;
+outputs: { core: .Library{ entry: Flightlog, native: true, bindings: [c, python, swift] } }"#;
         let facts = PackageFacts::parse(source, "package.jet").unwrap();
         let output = &facts.outputs["core"];
         assert!(output.is_native());
@@ -3927,7 +3985,7 @@ outputs: .{ core: .Library.{ entry: Flightlog, native: true, bindings: [c, pytho
     fn native_library_requires_a_boolean() {
         let error = PackageFacts::parse(
             r#"name: "flightlog"
-outputs: .{ core: .Library.{ native: "yes" } }"#,
+outputs: { core: .Library{ native: "yes" } }"#,
             "package.jet",
         )
         .unwrap_err();
@@ -3952,12 +4010,12 @@ outputs: .{ core: .Library.{ native: "yes" } }"#,
         .unwrap();
         std::fs::write(
             dir.join("first.jet"),
-            "pub first :: Config.{ version: \"1\" }\n",
+            "pub first :: Config{ version: \"1\" }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("second.jet"),
-            "pub second :: Config.{ version: \"2\" }\n",
+            "pub second :: Config{ version: \"2\" }\n",
         )
         .unwrap();
 
@@ -3975,8 +4033,8 @@ outputs: .{ core: .Library.{ native: "yes" } }"#,
         let facts = PackageFacts::parse(
             r#"
 name: "demo"
-outputs: .{
-    app: .Environment.{ name: "dev", tools: ["a", "b"], services: .{ db: .{ enable: true, ports: [5432] } }, secrets: .{ token: "x" } }
+outputs: {
+    app: .Environment{ name: "dev", tools: ["a", "b"], services: { db: .{ enable: true, ports: [5432] } }, secrets: { token: "x" } }
 }
 "#,
             "package.jet",
@@ -3998,7 +4056,7 @@ outputs: .{
             r#"
 name: "demo"
 configs: [dev, "release.jet"]
-defaults: .{ run: app }
+defaults: { run: app }
 dev :: Config{
     version: "1"
 }
@@ -4007,7 +4065,7 @@ dev :: Config{
         .unwrap();
         std::fs::write(
             dir.join("release.jet"),
-            r#"pub release :: Config{ outputs: .{ app: Executable{ entry: run } } }"#,
+            r#"pub release :: Config{ outputs: { app: Executable{ entry: run } } }"#,
         )
         .unwrap();
         let facts = PackageFacts::load(&dir).unwrap().unwrap();
@@ -4023,12 +4081,12 @@ dev :: Config{
         std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         std::fs::write(
             dir.join("_dev.jet"),
-            "pub dev :: Config.{ version: \"ignored\" }\n",
+            "pub dev :: Config{ version: \"ignored\" }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("one.jet"),
-            "pub dev :: Config.{ version: \"selected\" }\n",
+            "pub dev :: Config{ version: \"selected\" }\n",
         )
         .unwrap();
         std::fs::write(dir.join("ordinary.jet"), "pub run() { }\n").unwrap();
@@ -4057,7 +4115,7 @@ dev :: Config{
         let dir = temp_dir("config-ambiguous");
         std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         for file in ["one.jet", "two.jet"] {
-            std::fs::write(dir.join(file), "pub dev :: Config.{ version: \"same\" }\n").unwrap();
+            std::fs::write(dir.join(file), "pub dev :: Config{ version: \"same\" }\n").unwrap();
         }
 
         let error = PackageFacts::load(&dir).unwrap().unwrap_err().to_string();
@@ -4069,7 +4127,7 @@ dev :: Config{
     fn conflicting_nested_fields_fail_closed() {
         let error = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
+outputs: { app: .Executable{ entry: run, entry: other } }"#,
             "package.jet",
         )
         .unwrap_err();
@@ -4079,8 +4137,8 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
     #[test]
     fn scalar_config_conflict_names_both_sources_and_does_not_mutate() {
         let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet").unwrap();
-        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet").unwrap();
-        let second = ConfigFacts::parse("Config.{ version: \"2\" }", "configs/two.jet").unwrap();
+        let first = ConfigFacts::parse("Config{ version: \"1\" }", "configs/one.jet").unwrap();
+        let second = ConfigFacts::parse("Config{ version: \"2\" }", "configs/two.jet").unwrap();
 
         let error = facts.compose([first, second]).unwrap_err();
         match error {
@@ -4106,8 +4164,8 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
     #[test]
     fn equal_scalar_config_contributors_keep_ordered_provenance() {
         let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet").unwrap();
-        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet").unwrap();
-        let second = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/two.jet").unwrap();
+        let first = ConfigFacts::parse("Config{ version: \"1\" }", "configs/one.jet").unwrap();
+        let second = ConfigFacts::parse("Config{ version: \"1\" }", "configs/two.jet").unwrap();
 
         facts.compose([first, second]).unwrap();
         assert_eq!(facts.version.as_deref(), Some("1"));
@@ -4125,7 +4183,7 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
         std::fs::write(dir.join("run.jet"), "fn run() { print(1) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: run } }"#,
+outputs: { app: .Executable{ entry: run } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4144,7 +4202,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: serve } }"#,
+outputs: { app: .Executable{ entry: serve } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4161,7 +4219,7 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         std::fs::write(dir.join("launch.jet"), "fn launch() { print(1) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: launch } }"#,
+outputs: { app: .Executable{ entry: launch } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4184,7 +4242,7 @@ outputs: .{ app: .Executable.{ entry: launch } }"#,
         .unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+outputs: { app: .Executable{ entry: app.cli_run } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4210,7 +4268,7 @@ outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
         std::fs::write(dir.join("src/cli/main.jet"), "pub fn cli_run() {}\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+outputs: { app: .Executable{ entry: app.cli_run } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4234,7 +4292,7 @@ outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
             }
             let facts = PackageFacts::parse(
                 r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+outputs: { app: .Executable{ entry: app.cli_run } }"#,
                 "package.jet",
             )
             .unwrap();
@@ -4270,7 +4328,7 @@ outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
         let facts = PackageFacts::parse(
             r#"name: "demo"
 version: "0.1.0"
-outputs: .{ app: .Executable.{ entry: run } }"#,
+outputs: { app: .Executable{ entry: run } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4322,7 +4380,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         std::fs::write(dir.join("two.jet"), "fn run() { print(2) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ app: .Executable.{ entry: run } }"#,
+outputs: { app: .Executable{ entry: run } }"#,
             "package.jet",
         )
         .unwrap();

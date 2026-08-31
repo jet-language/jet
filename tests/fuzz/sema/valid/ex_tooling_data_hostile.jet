@@ -56,11 +56,11 @@ fn run() {
     loop cell in pivots -> print("pivot: row={cell.row_key} col={cell.column_key} sum={cell.sum}")
 
     // Equal-key sort ties keep input order (stable).
-    tied :: [
-        Ticket{team: "same", minutes: 3.0},
-        Ticket{team: "same", minutes: 1.0},
-        Ticket{team: "same", minutes: 2.0}
-    ]
+    tied :: [Ticket]{
+        {team: "same", minutes: 3.0},
+        {team: "same", minutes: 1.0},
+        {team: "same", minutes: 2.0}
+    }
     sorted :: data.sort_by(tied, t -> t.team) ?? panic("sort")
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
 
@@ -101,10 +101,10 @@ fn run() {
     }
 
     // Hostile plot labels are SVG-escaped; negative counts reject.
-    hostile_rows :: [
-        Ticket{team: "<script>&\"x", minutes: 4.0},
-        Ticket{team: "<script>&\"x", minutes: 4.0}
-    ]
+    hostile_rows :: [Ticket]{
+        {team: "<script>&\"x", minutes: 4.0},
+        {team: "<script>&\"x", minutes: 4.0}
+    }
     hostile_groups :: data.group_count(hostile_rows, t -> t.team) ?? panic("hostile_groups")
     svg :: data.bar_svg(hostile_groups) ?? panic("svg")
     escaped :: svg.contains("&lt;script&gt;") && svg.contains("&amp;") && svg.contains("&quot;")
@@ -119,7 +119,7 @@ fn run() {
     reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
     groups :: data.group_mean(reader, e -> e.service, e -> e.latency_ms)
     if groups == {
-        .Ok(_) -> { print("large_limit: ok") }
-        .Err(error) -> { print("large_limit: {error}") }
+        .Ok(_) -> print("large_limit: ok")
+        .Err(error) -> print("large_limit: {error}")
     }
 }

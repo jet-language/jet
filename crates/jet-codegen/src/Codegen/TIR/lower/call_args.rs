@@ -224,7 +224,7 @@ pub(crate) fn lower_call_arg_value(
             TExpr {
                 ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(
-                    name.clone(),
+                    crate::Codegen::TIR::c_callback_adapter_name(name),
                 ))),
             }
         }

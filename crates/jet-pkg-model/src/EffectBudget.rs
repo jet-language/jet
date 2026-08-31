@@ -2,7 +2,7 @@
 //!
 //! Zero-config: every `jet build` prints a one-line summary of the effects the
 //! dependency graph uses, and per-dependency effect provenance is recorded in
-//! the lockfile. An `authority: .{ holds: { allow: […], deny: […] } }` block in
+//! the lockfile. An `authority: { holds: { allow: […], deny: […] } }` block in
 //! `package.jet` turns on whole-graph enforcement — the build fails naming the
 //! exact dependency and offending function when a transitive dependency needs
 //! an effect outside the budget. `authority.grants: { "dep": [Effect] }` is the
@@ -467,10 +467,8 @@ pub fn summary_line_for_program_with_authority(
     default_entry: &str,
     manifest: Option<&PackageFacts>,
 ) -> String {
-    let projection = project_application_effects(
-        &program_effects(bundle, summaries, default_entry),
-        manifest,
-    );
+    let projection =
+        project_application_effects(&program_effects(bundle, summaries, default_entry), manifest);
     format!(
         "required effects: {}; granted effects: {}; denied effects: {}; authority: {}",
         render_effect_names(&projection.required_effects),
@@ -553,7 +551,11 @@ fn render_effect_names(effects: &EffectSet) -> String {
     if effects.is_empty() {
         "none".to_string()
     } else {
-        effects.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
+        effects
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -601,7 +603,6 @@ pub fn render_effect_projection_json(projection: &EffectProjection) -> String {
     )
 }
 
-
 /// Human build status reports effects reachable through statically known
 /// calls from the selected entry. Open function values remain conservative in
 /// policy enforcement, but they do not invent every ambient effect in status.
@@ -609,10 +610,7 @@ pub fn summary_line_for_entry(summaries: &HashMap<String, EffectSummary>, entry:
     render_effect_line(&entry_effects(summaries, entry))
 }
 
-pub fn summary_json_for_entry(
-    summaries: &HashMap<String, EffectSummary>,
-    entry: &str,
-) -> String {
+pub fn summary_json_for_entry(summaries: &HashMap<String, EffectSummary>, entry: &str) -> String {
     render_effect_json(&entry_effects(summaries, entry))
 }
 
@@ -735,12 +733,7 @@ pub fn update_lock_provenance(
             .map(|(_, effects)| effects.clone())
             .unwrap_or_default();
         pkg.effect_grants = pkg.granted_effects.clone();
-        pkg.denied_effects = manifest
-            .authority
-            .holds
-            .deny
-            .clone()
-            .unwrap_or_default();
+        pkg.denied_effects = manifest.authority.holds.deny.clone().unwrap_or_default();
         pkg.effect_authority = Some(
             if pkg.source == crate::Lock::LockSource::Root {
                 "package.jet authority.holds"
@@ -832,10 +825,7 @@ mod tests {
             },
         );
         assert_eq!(summary_line_for_entry(&summaries, "run"), "effects: IO");
-        assert!(
-            summary_json_for_entry(&summaries, "run")
-                .contains("\"action\":\"build.effects\"")
-        );
+        assert!(summary_json_for_entry(&summaries, "run").contains("\"action\":\"build.effects\""));
     }
 
     #[test]
@@ -865,7 +855,10 @@ mod tests {
             "denied_effects",
             "authority",
         ] {
-            assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
+            assert!(
+                json.contains(&format!("\"{field}\"")),
+                "missing {field}: {json}"
+            );
         }
     }
 
@@ -961,12 +954,12 @@ mod tests {
             authority: "package.jet authority.holds".to_string(),
         };
 
-        let diagnostic = application_policy_diagnostic(
-            &projection,
-            &EffectSet::from(["Net".to_string()]),
-        );
+        let diagnostic =
+            application_policy_diagnostic(&projection, &EffectSet::from(["Net".to_string()]));
         assert!(diagnostic.why.contains("denied_effects=Net, Panic"));
         assert!(diagnostic.why.contains("denied_required_effects=Net"));
-        assert!(diagnostic.why.contains("authority=package.jet authority.holds"));
+        assert!(diagnostic
+            .why
+            .contains("authority=package.jet authority.holds"));
     }
 }

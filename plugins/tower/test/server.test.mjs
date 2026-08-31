@@ -216,7 +216,7 @@ test('served index.html stamps a live tower-version meta tag', async () => {
 
 test('server ratify flow advances the card', async () => {
   await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
@@ -234,7 +234,7 @@ test('server ratify flow advances the card', async () => {
 test('clearance/reopen rejects missing actor without owner attribution', async () => {
   const added = await post('decision/add', {
     cardId: '#1', id: 'D-OPEN-NO-ACTOR', title: 'open decision', by: 'agent-test', draft: true,
-    reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b.' },
+    reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b.' },
   });
   assert.equal(added.status, 200);
   const rejected = await post('clearance/reopen', { decisionId: 'D-OPEN-NO-ACTOR' });

@@ -14,6 +14,7 @@ test('Focus Mode renders every review pass in the required order', () => {
     "['boilOcean', '◎', 'Boil the ocean']",
     "['hybrid', '◇', 'Hybrid']",
     "['cooperative', '＋', 'Cooperative']",
+    "['beginner', '◌', 'Beginner']",
     "['adversarial', '⚑', 'Adversarial']",
   ];
   for (let i = 1; i < labels.length; i++)
@@ -27,6 +28,7 @@ test('Focus Mode preserves the ballot color and non-color meaning', () => {
     /\.reviewpass--boilOcean \{ --pass-color: var\(--frost\); \}/,
     /\.reviewpass--hybrid \{ --pass-color: var\(--cyan\); \}/,
     /\.reviewpass--cooperative \{ --pass-color: var\(--ok\); \}/,
+    /\.reviewpass--beginner \{ --pass-color: var\(--blue\); \}/,
     /\.reviewpass--adversarial \{ --pass-color: var\(--amber\); \}/,
     /\.recline \{[^}]*var\(--blue\)/,
     /\.recline__why-not \{[^}]*var\(--red\)/,

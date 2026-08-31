@@ -874,11 +874,22 @@ pub struct CLib {
     pub module_idx: usize,
 }
 
+/// One bindgen export replaced by a user `#Import` overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct COverlayOverride {
+    pub lib: String,
+    pub generated_symbol: String,
+    pub overlay_symbol: String,
+}
+
+
 /// Gathered C-FFI artifacts threaded into sema and codegen.
 #[derive(Debug, Default, Clone)]
 pub struct CFfi {
     pub import_links: Vec<CImportLink>,
     pub libs: Vec<CLib>,
+    /// Bindgen symbols replaced by matching user overlay declarations.
+    pub overlay_overrides: Vec<COverlayOverride>,
 }
 
 impl CFfi {

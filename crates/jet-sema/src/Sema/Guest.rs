@@ -125,7 +125,15 @@ pub(crate) fn is_guest_marker_at(
         Some(crate::Policy::RuleSite::Function) => {
             is_guest_import_marker(marker) || is_guest_export_marker(marker)
         }
-        Some(crate::Policy::RuleSite::Module) => is_guest_import_marker(marker),
+        Some(crate::Policy::RuleSite::Module) => {
+            // C modules use the marker as a bare introducer:
+            // `#Import module c.<lib>`.  Per-function guest declarations use
+            // the explicit `(c)` argument, so the two forms must stay
+            // distinct while both remain outside the Prelude vocabulary.
+            marker.name == Syntax::MARKER_IMPORT
+                && !marker.negated
+                && marker.args.is_empty()
+        }
         _ => false,
     }
 }

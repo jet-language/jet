@@ -23,11 +23,14 @@ pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> 
     match protocol {
         DecoderProtocol::StandardEnvelope => format!(
             r#"fn decode_response(raw: String, code: Int) DataTree !{error} -> {{
-    if code == 1 -> return Err({error}.NotRunning)
-    if code == 2 -> return Err({error}.Timeout)
-    if code == 3 -> return Err({error}.Cancelled)
-    if code == 5 -> return Err({error}.Limit)
-    if code != 0 -> return Err({error}.Protocol)
+    if code == {{
+        1 -> {{ return Err({error}.NotRunning) }}
+        2 -> {{ return Err({error}.Timeout) }}
+        3 -> {{ return Err({error}.Cancelled) }}
+        5 -> {{ return Err({error}.Limit) }}
+        0 -> {{}}
+        else -> {{ return Err({error}.Protocol) }}
+    }}
     response := json.parse(raw) ?? return Err({error}.Protocol)
     succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
     if !succeeded -> return Err({error}.CommandFailed)
@@ -295,7 +298,7 @@ mod tests {
                 }
             }
             assert!(
-                source.contains("#Extern module c."),
+                source.contains("#Import module c."),
                 "{} lacks the raw extern path",
                 renderer.language.root()
             );

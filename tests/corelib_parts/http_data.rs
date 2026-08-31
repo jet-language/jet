@@ -18,7 +18,7 @@ fn run() {
     sender :: email.address("sender@example.com") ?? panic("sender")
     visible :: email.address("visible@example.net") ?? panic("visible")
     hidden :: email.address("hidden@example.org") ?? panic("hidden")
-    message :: email.message(~sender, [~visible], [~hidden], "subject", "body", "", []) ?? panic("message")
+    message :: email.message(~sender, [~visible], [~hidden], "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
     original_bytes :: email.serialize(~message) ?? panic("serialize original")
     default_envelope :: message.envelope()
     envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")

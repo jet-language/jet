@@ -496,8 +496,9 @@ mod tests {
     #[test]
     fn public_dependency_display_redacts_git_credentials_and_parameters() {
         let source = DepSource::Git {
-            url: "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private"
-                .to_string(),
+            url:
+                "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private"
+                    .to_string(),
             selector: crate::Manifest::GitSelector::Rev("abc123".to_string()),
         };
         let display = dep_display_redacted(&source);
@@ -2467,7 +2468,8 @@ fn is_ident_byte(byte: u8) -> bool {
 mod security_tests {
     #[test]
     fn build_profile_rejects_retired_environment_payload() {
-        let hostile = r#"release: Build.{ optimize: "full", env: "RUSTFLAGS=--cfg=hostile; touch pwned" }"#;
+        let hostile =
+            r#"release: Build.{ optimize: "full", env: "RUSTFLAGS=--cfg=hostile; touch pwned" }"#;
         assert!(
             super::parse_build(hostile).is_err(),
             "retired build-profile environment data must not reach rustc"

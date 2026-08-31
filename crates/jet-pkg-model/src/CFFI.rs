@@ -4,7 +4,7 @@
 //! `extern "C"` shims (I2/I3). This module runs after the loader has read every
 //! `.jet` file and before sema:
 //!
-//! 1. Gather every `#Extern module c.<lib>` (overlay) and
+//! 1. Gather every `#Import module c.<lib>` (overlay) and
 //!    `#Bindgen module c.<lib>.__bindgen__` (generated cache) item.
 //! 2. Enforce the location rule: `#Bindgen` only in a generated
 //!    `.jet/bindings/c/<lib>.jet` file (E3207).
@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // Struct defs live in AST for cross-seam sharing; re-export for callers.
-pub use crate::AST::{CFfi, CImportLink, CLib};
+pub use crate::AST::{CFfi, CImportLink, COverlayOverride, CLib};
 
 fn all_imports(module: &LoadedModule) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
     let mut seen = HashSet::new();
@@ -243,8 +243,13 @@ pub fn rustc_link_args_for_target(
     for lib in &cffi.libs {
         match resolve_link_for_target(&lib.lib, project_root, target) {
             Ok(flags) => {
-                if let Err(diagnostic) = validate_link_inputs(&lib.lib, project_root, target, &flags)
-                {
+                if let Err(diagnostic) = validate_link_inputs(
+                    &lib.lib,
+                    project_root,
+                    target,
+                    &flags,
+                    &cffi.overlay_overrides,
+                ) {
                     diags.push(diagnostic);
                     continue;
                 }
@@ -275,6 +280,7 @@ fn validate_link_inputs(
     project_root: &Path,
     target: &str,
     flags: &LinkFlags,
+    overlay_overrides: &[COverlayOverride],
 ) -> Result<(), Diagnostic> {
     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
         let directory = project_root
@@ -312,7 +318,7 @@ fn validate_link_inputs(
         let archive = directory.join(format!("libjet_com_{actual}.a"));
         return validate_com_binding(actual, &directory, &archive);
     }
-    validate_c_binding(lib, project_root)
+    validate_c_binding(lib, project_root, overlay_overrides)
 }
 
 fn validate_com_binding(
@@ -476,7 +482,11 @@ fn validate_provenance_archive_inputs(
     Ok(())
 }
 
-fn validate_c_binding(lib: &str, project_root: &Path) -> Result<(), Diagnostic> {
+fn validate_c_binding(
+    lib: &str,
+    project_root: &Path,
+    overlay_overrides: &[COverlayOverride],
+) -> Result<(), Diagnostic> {
     let cache = binding_cache_file(project_root, ForeignLanguage::C, lib);
     if !cache.is_file() {
         return Ok(());
@@ -553,7 +563,11 @@ fn validate_c_binding(lib: &str, project_root: &Path) -> Result<(), Diagnostic> 
             &format!("the generated C cache could not be read ({reason})"),
         )
     })?;
-    let expected = binding_symbols(&source);
+    let mut expected = binding_symbols(&source);
+    for overlay in overlay_overrides.iter().filter(|overlay| overlay.lib == lib) {
+        expected.remove(&overlay.generated_symbol);
+        expected.insert(overlay.overlay_symbol.clone());
+    }
     if expected.is_empty() {
         return Ok(());
     }
@@ -850,6 +864,11 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         // Start from bindgen, then let overlay add/override.
         let mut merged: Vec<ExternFn> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
+        let bindgen_symbols: HashMap<String, String> = surf
+            .bindgen
+            .iter()
+            .map(|function| (function.name.clone(), function.rust_path.clone()))
+            .collect();
         for ef in &surf.bindgen {
             // Last bindgen wins on intra-bindgen dup (regen artifact); rare.
             if let Some(&i) = index.get(&ef.name) {
@@ -865,6 +884,13 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 if !same_signature(&merged[i], ef) {
                     diags.push(e3205(lib, &ef.name, ef.name_span));
                     continue;
+                }
+                if let Some(generated_symbol) = bindgen_symbols.get(&ef.name) {
+                    cffi.overlay_overrides.push(COverlayOverride {
+                        lib: lib.clone(),
+                        generated_symbol: generated_symbol.clone(),
+                        overlay_symbol: ef.rust_path.clone(),
+                    });
                 }
                 let effect_root = merged[i].effect_root.clone();
                 merged[i] = ef.clone();

@@ -1040,7 +1040,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
     let descriptor = cpp_descriptor_stamp();
     let mut out = format!(
-        "// jet-ffi-descriptor={descriptor}\n#Extern module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
+        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
     );
     for class in &surface.classes {
         let name = snake(&class.name);

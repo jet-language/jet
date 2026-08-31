@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn malformed_authority_outer_value_uses_e1221() {
-        for authority in ["authority: []", "authority: .{}\nauthority: .{}"] {
+        for authority in ["authority: []", "authority: {}\nauthority: {}"] {
             let raw = format!("name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n");
             let error = crate::Package::PackageFacts::parse(&raw, "package.jet")
                 .expect_err("malformed authority must be rejected");
@@ -438,6 +438,10 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::UnknownOutputKind(kind) => {
             e1206(&file, &format!("unknown Output kind `{kind}`"))
         }
+        PackageParseError::RetiredRecordHead => e1206(
+            &file,
+            "record literals use `{ … }`; remove the retired dot before `{` (D-LIT-DOT1)",
+        ),
         PackageParseError::InvalidValue { field, value } if field == "runtime" => e1206(
             &file,
             &format!(
@@ -549,7 +553,7 @@ fn e1221(_file: &str, detail: &str) -> Diagnostic {
         ),
         detail.to_string(),
         format!(
-            "`{}: .{{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`",
+            "`{}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`",
             Syntax::MANIFEST_BLOCK_AUTHORITY,
         ),
         None,
@@ -588,7 +592,7 @@ fn e1206_retired_authority(_file: &str, field: &str, replacement: &str) -> Diagn
         "E1206",
         format!("`{field}` is retired"),
         format!("`{field}` moved into `{replacement}` in the one `authority:` block."),
-        format!("write `{replacement}` inside `authority: .{{ … }}`"),
+        format!("write `{replacement}` inside `authority: {{ … }}`"),
         None,
     )
 }
@@ -598,7 +602,7 @@ fn e1206_retired_memory(_file: &str, detail: &str) -> Diagnostic {
         "E1206",
         format!("`{}` uses a retired memory floor", Syntax::PACKAGE_FILE),
         format!("{detail}; memory floors belong in `authority.holds.deny`."),
-        "write the denial in `authority.holds.deny` inside `authority: .{ holds: { deny: […] } }`"
+        "write the denial in `authority.holds.deny` inside `authority: { holds: { deny: […] } }`"
             .to_string(),
         None,
     )

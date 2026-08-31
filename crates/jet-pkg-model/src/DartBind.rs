@@ -539,7 +539,7 @@ fn matching_close(source: &str, open: usize) -> Option<usize> {
 fn render_jet(lib: &str, functions: &[Function]) -> String {
     let abi = format!("jet_dart_{lib}");
     let mut out =
-        format!("#Extern module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n");
+        format!("#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n");
     for f in functions {
         out.push_str("    fn ");
         out.push_str(&f.jet);

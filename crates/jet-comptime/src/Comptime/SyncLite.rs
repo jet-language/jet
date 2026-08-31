@@ -770,6 +770,23 @@ fn ct_to_list(v: &CtValue, span: Span) -> Result<JetSyncList, Diagnostic> {
     }
 }
 
+/// I9: the resident adapter marshals a sync carrier into the same Prelude
+/// `JetShow` implementation used by the evaluator and AOT emitter.
+pub fn sync_show_value(value: &CtValue) -> Option<String> {
+    let span = Span::new(0, 0);
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    match type_name.as_str() {
+        "SyncText" | "JetSyncText" => Some(ct_to_text(value, span).ok()?.jet_show()),
+        "SyncCounter" | "JetSyncCounter" => Some(ct_to_counter(value, span).ok()?.jet_show()),
+        "SyncMap" | "JetSyncMap" => Some(ct_to_map(value, span).ok()?.jet_show()),
+        "SyncList" | "JetSyncList" => Some(ct_to_list(value, span).ok()?.jet_show()),
+        _ => None,
+    }
+}
+
+
 fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
     let CtValue::Struct { type_name, fields } = v else {
         return Err(unsupported("RowPolicy", span));

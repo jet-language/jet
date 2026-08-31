@@ -18,7 +18,7 @@ It is a source map for the #2396 semantic corpus guard. The guard owns enforceme
 | `examples/features/time` | Calendar and clock examples | Exact duration literals |
 | `examples/features/types` | Typed literal and run-instruction onboarding | Use `jet run` for runnable examples |
 | `tests/agent_workloads/adapters` | Agent workload programs | Indexed loops for sequence counters |
-| `gauntlet/entries/bulkrename/jet/main.jet` | Real-program teaching example | Regex capture for filename numbers |
+| `gauntlet/entries/bulkrename/jet/run.jet` | Real-program teaching example | Regex capture for filename numbers |
 | `examples/suites`, `dogfood/jetpack`, `dogfood/tower` | Maintained story and product sources | #2396 classification perimeter |
 | `gauntlet/measurement-manifest.json`, `tests/agent_workloads/manifest.tsv` | Manifest-owned sources | #2396 producer and adapter classification |
 | `docs/first-hour.md`, `examples/README.md`, `tests/agent_workloads/llm_digest/first_program.jet` | Onboarding and index sources | #2396 teaching-source classification |
@@ -48,7 +48,7 @@ The local expert exception is occurrence-scoped in `tests/corpus_policy.tsv`; ot
 | Fex-sys-3 | Use `task.race(...)` or `task.any(...)` directly when no group state is needed | `examples/features/concurrency` | Keep groups with multiple children, limits, cancellation state, or group APIs |
 | Fex-sys-4 | Remove positive effect rows already inferred by the body | Routine feature examples | Keep public effect ceilings, authority contracts, and negative effect rows |
 | Frealprog-2 | Use `loop (index, item) in xs` for sequence numbering | `tests/agent_workloads/adapters` | Keep deliberate custom numbering or stateful counters |
-| Frealprog-6 | Match the filename once and capture the number | `gauntlet/entries/bulkrename/jet/main.jet` | Keep a predicate pipeline only when it is the expert lesson |
+| Frealprog-6 | Match the filename once and capture the number | `gauntlet/entries/bulkrename/jet/run.jet` | Keep a predicate pipeline only when it is the expert lesson |
 | Fex-core-1 | Put the first-contact body at top level | `examples/features/basics/hello.jet` | Keep explicit `fn run` where the function form is the lesson |
 | Fex-core-5 | Tell users to run the example with `jet run` | `examples/features/types/typed_literal_forms.jet` | None |
 | Ffixtures-1 | Classify fixture roles before applying teaching-surface rules | `tests/conformance/corpus`, `tests/ui`, `tests/fuzz` | Negative and diagnostic fixtures may retain the form under a local exception |

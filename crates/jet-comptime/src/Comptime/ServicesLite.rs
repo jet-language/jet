@@ -1570,6 +1570,27 @@ pub fn service_display_value(value: &CtValue) -> Option<String> {
     }
 }
 
+/// I9: extend the service display bridge for every named service value whose
+/// Prelude `JetShow` implementation crosses a resident handle boundary.
+pub fn service_show_value(value: &CtValue) -> Option<String> {
+    let span = Span::new(0, 0);
+    match value {
+        CtValue::Enum { type_name, .. } if type_name == "ServiceRestart" => {
+            Some(ct_to_restart(value, span).ok()?.jet_show())
+        }
+        CtValue::Enum { type_name, .. } if type_name == "ServiceDelivery" => {
+            Some(ct_to_delivery(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "ServiceStateStore" => {
+            Some(ct_to_state_store(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "ServiceUpgradeReceipt" => {
+            Some(ct_to_upgrade_receipt(value, span).ok()?.jet_show())
+        }
+        _ => service_display_value(value),
+    }
+}
+
 fn ct_to_runtime(value: &CtValue, span: Span) -> Result<JetServiceRuntime, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("ServiceRuntime", span));

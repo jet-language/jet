@@ -214,7 +214,7 @@ while ($true) {{
 fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     let abi = format!("jet_pwsh_{lib}");
     let mut out = format!(
-        r#"#Extern module c.{abi} {{
+        r#"#Import module c.{abi} {{
     fn open() Int = "{abi}_open"
     fn take_error() Int = "{abi}_take_error"
     fn cancel(handle: Int) = "{abi}_cancel"

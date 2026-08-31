@@ -972,6 +972,7 @@ function renderBrief(p, t) {
           ['boilOcean', '◎ boil-the-ocean pass'],
           ['hybrid', '◇ hybrid pass'],
           ['cooperative', '＋ cooperative pass'],
+          ['beginner', '◌ beginner pass'],
           ['adversarial', '⚑ adversarial pass'],
         ]) if (d.reviewPasses?.[key]) L.push(`    ${t.dim(`${label}:`)} ${d.reviewPasses[key]}`);
         if (d.rec) L.push(`    ${t.warn('rec:')} ${d.rec}`);
