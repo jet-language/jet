@@ -27,12 +27,12 @@ fn run() {
     // Write test data via whole-file helper (D-IO3: kept as sugar).
     wrote :: fs.write(src, "alpha\nbeta\ngamma")
     // Stream-copy with uppercase transform — bounded memory.
-    copied :: copy_upper(src, dst) ?? return Err("copy failed")
+    copied :: copy_upper(src, dst)
     // Verify: read destination and print.
-    result :: fs.read(dst) ?? return Err("read failed")
+    result :: fs.read(dst)
     print(result)
     // Count lines streaming.
-    n :: count_lines(src) ?? return Err("count failed")
+    n :: count_lines(src)
     print("lines: {n}")
     // std.path helpers.
     print(Path.from("/home/user/file.txt").parent())

@@ -1,7 +1,6 @@
 // D-JSON-EXACTNUM1: typed JSON keeps Decimal and Int number tokens exact.
 use core.encoding.json as json
 
-#Codable
 struct Address {
     city: String
     zip: String
@@ -29,7 +28,6 @@ struct ExactNumbers {
     large_exp: Int
 }
 
-#Codable
 struct BoundedNumbers {
     value: I64
 }
@@ -56,9 +54,9 @@ fn run() ![FieldError] {
     print(exact.large_exp.to_string())
     // Expert policy: fixed-width I64 rejects values outside its wire range.
     bounded_raw :: "{{\"value\":9223372036854775808}}"
-    bounded :: json.decode<BoundedNumbers>(bounded_raw)
-    if bounded == {
-        .Err(_) -> { print("fixed-width-rejected") }
-        else -> { print("fixed-width-accepted") }
+    _bounded :: json.decode<BoundedNumbers>(bounded_raw) ?? {
+        print("fixed-width-rejected")
+        return
     }
+    print("fixed-width-accepted")
 }

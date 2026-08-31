@@ -13,7 +13,7 @@ mod runtime {
 }
 
 fn jet_jit_gzip_compress(bytes: i64) -> i64 {
-    let out = runtime::jet_compress_gzip_compress(&clone_bytes(bytes));
+    let out = jet_foundation::GzipKernel::jet_compress_gzip_compress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 

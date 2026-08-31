@@ -3,7 +3,7 @@ use core.encoding as encoding
 use core.encoding.csv as csv
 use core.files as files
 
-fn write_catalog(path: Path) Bool !(EncodingError | IOError) {
+fn write_catalog(path: Path) Bool !(EncodingError | IOError) -> {
     output :: files.create(path)
     writer :: csv.writer(^output, encoding.EncodingLimits.safe())
     writer.write(["ok", "true"])
@@ -20,6 +20,6 @@ fn run() !(EncodingError | IOError) {
     write_catalog(path)
     input :: files.open(path)
     reader :: csv.reader(^input)
-    loop record in reader -> print("record")
+    loop _record in reader -> print("record")
     print("eof")
 }

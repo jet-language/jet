@@ -6,13 +6,17 @@ mod common;
 mod tir_support;
 
 use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 
-use tir_support::{build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
+};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms
-/// (`jet_std_math_*`, `jet_path_join`, `jet_ring_crypto_sha256`) reproduce
+/// (`jet_std_math_*`, `jet_path_join`, `jet_crypto_sha256_typed_impl`) reproduce
 /// `emit_core_call` byte-for-byte; here we prove they compile (I2) and run.
 /// parity: guard tests/tir_core_and_closures.rs::core_math_path_crypto_calls
 #[test]
@@ -50,6 +54,35 @@ fn run() {
     );
 }
 
+#[test]
+fn core_crypto_typed_digests_match_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.crypto as crypto
+fn run() {
+    input :: [U8]{0x61, 0x62, 0x63}
+    sha256 :: crypto.sha256(input)
+    print(sha256.hex())
+    print(sha256.bytes() == [U8]{0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad})
+    sha512 :: crypto.sha512(input)
+    print(sha512.hex())
+    print(sha512.bytes() == [U8]{0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae, 0x20, 0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6, 0x4b, 0x55, 0xd3, 0x9a, 0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1, 0xa8, 0x36, 0xba, 0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd, 0x45, 0x4d, 0x44, 0x23, 0x64, 0x3c, 0xe8, 0x0e, 0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f})
+    blake3 :: crypto.blake3(input)
+    print(blake3.hex())
+    print(blake3.bytes() == [U8]{0x64, 0x37, 0xb3, 0xac, 0x38, 0x46, 0x51, 0x33, 0xff, 0xb6, 0x3b, 0x75, 0x27, 0x3a, 0x8d, 0xb5, 0x48, 0xc5, 0x58, 0x46, 0x5d, 0x79, 0xdb, 0x03, 0xfd, 0x35, 0x9c, 0x6c, 0xd5, 0xbd, 0x9d, 0x85})
+}
+";
+    assert_tiers_agree(
+        "tir_core_crypto_typed_digests",
+        src,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\n\
+         ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\ntrue\n\
+         6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85\ntrue\n",
+    );
+}
+
 /// c109 Phase 10: a fallible core call composed with `??` (Phase 8). `fs.read`
 /// returns `Result<String, IOError>`; the `??` value fallback unwraps it, so
 /// `read_or` is covered and the `jet_std_fs_read(&(…))` form composes with the
@@ -72,6 +105,83 @@ fn run() {
     let (code, stdout) = build_and_run("tir_core_fs_fallback", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "missing\n");
+}
+
+#[test]
+fn core_files_absolute_matches_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.files as fs
+fn run() {
+    path :: fs.absolute(Path.from(\".\")) ?? panic(\"absolute\")
+    print(path != \".\")
+}
+";
+    assert_tiers_agree("tir_core_fs_absolute", src, "true\n");
+}
+
+#[test]
+fn core_files_absolute_path_read_matches_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dogfood_root = PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+        .join(".cache/jet-dogfood")
+        .join(format!("tir-absolute-path-read-{}", std::process::id()));
+    let cache_root =
+        common::test_scratch_root("tir-core-fs-absolute-path").join(std::process::id().to_string());
+    if cache_root.exists() {
+        common::make_tree_writable(&cache_root);
+        fs::remove_dir_all(&cache_root).unwrap();
+    }
+    fs::create_dir_all(&cache_root).unwrap();
+    let mut outputs = Vec::new();
+    for (mode, release, interpret) in [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg("dogfood/jetpack")
+            .arg("--")
+            .args(["plan", "--json", "--offline"])
+            .current_dir(&repo)
+            .env("JET_CACHE_DIR", cache_root.join(format!("cache-{mode}")))
+            .env("JETPACK_DOGFOOD_ROOT", &dogfood_root)
+            .env(
+                "JETPACK_PROJECT_ROOT",
+                "dogfood/jetpack/tests/fixtures/phase1",
+            )
+            .env("JETPACK_OFFLINE", "1")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{mode} absolute path read failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        outputs.push((mode, stdout));
+    }
+    assert_eq!(outputs[1].1, outputs[0].1, "default disagreed with release");
+    assert_eq!(
+        outputs[2].1, outputs[0].1,
+        "interpreter disagreed with release"
+    );
+    common::make_tree_writable(&cache_root);
+    fs::remove_dir_all(&cache_root).unwrap();
 }
 
 // NOTE: typed regex calls (`re.is_match(.{…}, …)`) route through the TIR and emit
@@ -408,6 +518,22 @@ fn run() {
     let (code, stdout) = build_and_run("tir_sort_by", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n");
+}
+
+/// Infallible sort callbacks produce stable results on every execution tier.
+#[test]
+fn infallible_sort_callback_is_tier_stable() {
+    let src = "\
+fn sort_key(n: Int) String !Never -> \"{n}\"
+fn run() {
+    ascending := [3, 1, 2]
+    ascending.sort_by((n: Int) -> sort_key(n))
+    descending := [3, 1, 2]
+    descending.sort_by_desc((n: Int) -> sort_key(n))
+    print(\"{ascending}|{descending}\")
+}
+";
+    assert_tiers_agree("tir_infallible_sort_by", src, "[1, 2, 3]|[3, 2, 1]\n");
 }
 
 /// Stable partition and sort keep equal-key values in source order on every

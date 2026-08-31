@@ -1,8 +1,17 @@
-Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
-  --> tests/ui/try_suffix_staged.jet:7:10
+Error [E-ERR-SUFFIX]: `Error!` is a retired suffix failure contract.
+  --> tests/ui/try_suffix_staged.jet:5:18
     |
-  7 |     x :: compute()?
-    |          ^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E => Err`
- Fix: add `impl E => Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
+  5 | fn compute() Int E! -> Ok(1)
+    |                  ^^
+ Why: Jet puts the error contract before its type so the success role and error role stay distinct in every type position.
+ Fix: Write `!Error`, or write `?Success !Error` when the success can be absent.
+More: jet-lang.dev/e/E-ERR-SUFFIX
+
+Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
+  --> tests/ui/try_suffix_staged.jet:8:19
+    |
+  8 |     x :: compute()?
+    |                   ^
+ Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

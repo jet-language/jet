@@ -12,7 +12,7 @@ use tir_support::{build_and_run, build_and_run_full, have_rustc};
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
-/// audited region lowers to `unsafe { … }` (the reason string emits nothing);
+/// audited region lowers to `unsafe { … }` and carries its reason to the sentry;
 /// `mem.Ptr<T>.from_addr(addr)`, `mem.address_of(x)`, and `mem.volatile_read(p)`
 /// lower to the raw-pointer ops. I1: every emitted `unsafe` is a gated form tied
 /// 1:1 to a source gate.
@@ -114,7 +114,8 @@ fn run() {
 
 /// c109 Phase 18 / D-UNSAFE2: assert the EMITTED Rust for the unsafe tier is byte-exact
 /// (the gate forms + ptr ops), and that EVERY `unsafe` is a gated form (`unsafe fn` /
-/// `unsafe {`) — the I1 self-check. The reason string emits no comment/marker.
+/// `unsafe {`) — the I1 self-check. The gate reason is carried into the shared
+/// sentry Prelude so hardened reports retain source context.
 #[test]
 fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
@@ -168,12 +169,18 @@ cell :: 1337
     // `mem.address_of(cell)` → the sentry-backed address identity (no `unsafe`).
     assert!(
         out.rust.contains(
-            "let __jet_addr: i64 = jet_mem::jet_sentry_address_of((&(__jet_cell) as *const _));"
+            "let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of((&(__jet_cell) as *const _));"
         ),
         "address_of sentry wrapper missing:\n{}",
         out.rust
     );
-    // `#Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
+    assert!(
+        out.rust
+            .contains("let _jet_sentry_frame = jet_mem::jet_sentry_frame();"),
+        "stack address function lacks the shared lifetime hook:\n{}",
+        out.rust
+    );
+    // `#Unsafe("…") { … }` → `unsafe {` and carries its reason to the sentry.
     assert!(
         out.rust.contains("    unsafe {\n"),
         "unsafe block not emitted:\n{}",
@@ -184,10 +191,10 @@ cell :: 1337
         "unsafe block must carry its sentry gate:\n{}",
         out.rust
     );
-    // Reason string emits nothing — "safe: cell is live" must not appear in generated Rust.
+    // The reason is a sentry argument, so hardened reports retain source context.
     assert!(
-        !out.rust.contains("safe: cell is live"),
-        "reason string must emit nothing:\n{}",
+        out.rust.contains("safe: cell is live"),
+        "unsafe gate reason must reach the sentry Prelude:\n{}",
         out.rust
     );
     // I1 self-check: drop every vetted prelude region (jet_mem and the rest of
@@ -208,6 +215,52 @@ cell :: 1337
             );
         }
     }
+}
+
+/// D-HARDENED1 / D-FFI-CAP1: a capability edge must marshal through the
+/// shared memory Prelude before entering the hidden foreign bridge. The bridge
+/// crate cannot own a second sentry kernel, so the call-site adapter is the
+/// boundary witness.
+#[test]
+fn ffi_capability_edge_uses_shared_sentry_prelude() {
+    let src = r#"
+extern rust "std" {
+    fn borrow(s: &String) String = "std::mem::take"
+}
+fn run() {
+    value := "hi"
+    #Unsafe("the foreign call may write through the borrowed value") {
+        print(borrow(&value))
+    }
+}
+"#;
+    let dir = std::env::temp_dir().join(format!("jet_tir_ffi_sentry_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ffi_sentry.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    assert!(
+        out.rust.contains("jet_mem::jet_sentry_foreign_ref"),
+        "foreign capability did not use the shared sentry adapter:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("jet_ffi_borrow(&mut"),
+        "foreign capability lost its exclusive call shape:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("the foreign call may write through the borrowed value"),
+        "foreign gate reason was not carried into generated Rust:\n{}",
+        out.rust
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -319,6 +372,37 @@ fn run() {
     }
 }
 ";
+    let expired_stack_source = "\
+use core.mem
+fn leak() Int {
+    cell :: 1337
+    return mem.address_of(cell)
+}
+fn run() {
+    addr :: leak()
+    #Unsafe(\"the returned address outlives its owning Jet frame\") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}
+";
+    let expired_recursive_source = "\
+use core.mem
+fn leak(depth: Int) Int {
+    cell :: depth
+    if depth == 0 {
+        return mem.address_of(cell)
+    }
+    return leak(depth - 1)
+}
+fn run() {
+    addr :: leak(2)
+    #Unsafe(\"the recursive address outlives its owning Jet frame\") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}
+";
     let cases = [
         (
             "unsafe_sentries_provenance",
@@ -330,13 +414,25 @@ fn run() {
             "unsafe_sentries_quarantine",
             include_str!("../examples/features/memory/unsafe_sentries.jet"),
             "R0802",
-            "quarantined and poisoned",
+            "quarantined storage",
         ),
         (
             "unsafe_sentries_alignment",
             misaligned_source,
             "R0803",
             "misaligned raw read",
+        ),
+        (
+            "unsafe_sentries_expired_stack",
+            expired_stack_source,
+            "R0802",
+            "owning Jet frame has expired",
+        ),
+        (
+            "unsafe_sentries_expired_recursive_stack",
+            expired_recursive_source,
+            "R0802",
+            "owning Jet frame has expired",
         ),
     ];
     let aot_available = have_rustc();
@@ -740,6 +836,91 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
     }
 }
 
+fn assert_named_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
+    let (aot_code, aot_stdout) = build_and_run(name, src);
+    assert_eq!(aot_code, 0);
+    assert_eq!(aot_stdout, expected_stdout);
+
+    let dir = std::env::temp_dir().join(format!("jet_{name}_parity_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("named task bundle should load");
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect::<Vec<_>>();
+    assert!(
+        errors.is_empty(),
+        "named task program must type-check: {errors:?}"
+    );
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "named task.all must lower before taking its explicit deopt route"
+    );
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(
+        plan.whole_interp && plan.deopt.iter().any(|(function, _)| function == "run"),
+        "named task.all must report an interpreter deopt for run: {plan:?}"
+    );
+    assert!(
+        !jet_jit::resident_jit_safe_bundle(&bundle),
+        "named task.all tuple/record carrier must remain an explicit deopt"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(&shown, false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, aot_code, "named task default exit drift");
+            assert_eq!(stdout, aot_stdout, "named task default stdout drift");
+            assert_eq!(stderr, "", "named task default stderr drift");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("default named task run failed: {diagnostics:?}")
+        }
+    }
+    assert!(
+        jet_jit::deopt_invoked_for_test(),
+        "named task default run must report interpreter deopt"
+    );
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "named task default run must not claim resident JIT execution"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "named task default run must not use the forbidden fallback"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(&shown, false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, aot_code, "named task interpreter exit drift");
+            assert_eq!(stdout, aot_stdout, "named task interpreter stdout drift");
+            assert_eq!(stderr, "", "named task interpreter stderr drift");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter named task run failed: {diagnostics:?}")
+        }
+    }
+    assert!(
+        !jet_jit::jit_executed_for_test()
+            && !jet_jit::deopt_invoked_for_test()
+            && !jet_jit::fallback_invoked_for_test(),
+        "forced named task run must use only the interpreter"
+    );
+}
+
 /// D-CONC-SPAWN1=D: `task.all` waits for each branch in source order and
 /// returns the results in that same order.
 #[test]
@@ -748,7 +929,7 @@ fn task_all() {
         return;
     }
     let src = r#"
-fn work(value: Int, turns: Int) Int {
+fn work(value: Int, turns: Int) Int -> {
     total := value
     loop _ in 1..turns {
         total += 1
@@ -767,7 +948,36 @@ fn run() {
 "#;
     assert_task_tier_parity("tir_task_all", src, "10\n20\n30\n");
 }
+/// D-CONC-ALLNAMED1=A: completion may differ from source order, but the named
+/// result assembles by field name. The delays force reverse completion; the
+/// only assertion is the final heterogeneous field mapping, not scheduler timing.
+#[test]
+fn named_task_all_maps_reverse_completion_by_field_name() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
 
+fn slow() String -> {
+    turns := 0
+    loop _ in 0..<50000 {
+        turns += 1
+    }
+    return "slow"
+}
+fn fast() Int -> {
+    return 7
+}
+fn run() {
+    values :: (task.all {
+        z: slow(),
+        a: fast()
+    }) ?? panic("named task.all failed")
+    print(values.z, values.a)
+}
+"#;
+    assert_named_task_tier_parity("tir_named_task_all_order", src, "slow\n7\n");
+}
 /// D-CONC-FAIL1=A: child failure is one typed rail on AOT, resident JIT, and
 /// forced interpreter. `??` is the only consumer-side recovery form.
 #[test]

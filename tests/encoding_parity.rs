@@ -364,6 +364,29 @@ fn run() {
 }
 "#;
 
+const CONFIGURED_CSV_RUNTIME: &str = r#"
+use core.encoding.csv as csv
+
+fn run() {
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    rows :: csv.rows(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("rows")
+    print(rows.len())
+    print(rows[0].line)
+    print(rows[0].fields[0])
+    note :: rows[0].fields[1]
+    print(note.replace(crlf, "|"))
+    parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
+    print(parsed.len())
+    malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
+    malformed_result :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true)
+    if malformed_result == {
+        .Ok(_) -> print(false)
+        .Err(_) -> print(true)
+    }
+}
+"#;
+
 /// AOT-only comptime|runtime binding parity. Inline expressions only — local
 /// fn wrappers from comptime hit E0956 on the shared evaluator seam.
 const WHOLE_VALUE_COMPTIME: &str = r#"
@@ -399,6 +422,30 @@ fn run() {
 #[test]
 fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner);
+}
+
+#[test]
+fn configured_csv_options_match_aot_default_dev_and_interpreter() {
+    on_encoding_stack(configured_csv_options_match_aot_default_dev_and_interpreter_inner);
+}
+
+fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping configured CSV parity (need rustc)");
+        return;
+    }
+    let scratch = Scratch::new("configured_csv");
+    let path = scratch.write_project("2026", CONFIGURED_CSV_RUNTIME);
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "configured CSV AOT failed: {}", aot.stderr);
+    let expected = "1\n3\nada\nline1|line2\n1\ntrue\n";
+    assert_eq!(aot.stdout, expected, "configured CSV AOT output drift");
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev.1.exit, 0, "configured CSV default-dev failed: {}", dev.1.stderr);
+    assert_eq!(dev.1.stdout, aot.stdout, "configured CSV default-dev drift");
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter.exit, 0, "configured CSV interpreter failed: {}", interpreter.stderr);
+    assert_eq!(interpreter.stdout, aot.stdout, "configured CSV interpreter drift");
 }
 
 #[test]
@@ -1286,6 +1333,84 @@ fn run() {
 #[test]
 fn datatree_int_accessor_matches_aot_on_named_deopt() {
     on_encoding_stack(datatree_int_accessor_matches_aot_on_named_deopt_inner);
+}
+
+#[test]
+fn datatree_scalar_and_unordered_parity_matches_all_tiers() {
+    on_encoding_stack(datatree_scalar_and_unordered_parity_matches_all_tiers_inner);
+}
+
+fn datatree_scalar_and_unordered_parity_matches_all_tiers_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping DataTree scalar/equality parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.json as json
+
+fn run() {
+    if DataTree.Text("strict").text() == {
+        .Ok(value) -> print(value)
+        .Err(_) -> print("strict-error")
+    }
+    if DataTree.Int(7).text() == {
+        .Ok(_) -> print("strict-bad")
+        .Err(_) -> print("strict-error")
+    }
+
+    print(DataTree.Text("text").to_text() ?? "none")
+    print(DataTree.Int(-42).to_text() ?? "none")
+    print(DataTree.Float(1.0).to_text() ?? "none")
+    print(DataTree.Bool(false).to_text() ?? "none")
+    print(DataTree.Null.to_text() ?? "none")
+    print(DataTree.Array([DataTree.Int(1)]).to_text() ?? "none")
+    print(DataTree.Object(["a": DataTree.Int(1)]).to_text() ?? "none")
+
+    left :: json.parse("{{\"outer\":{{\"b\":1.0,\"a\":[1,false]}},\"name\":\"x\"}}") ?? panic("left")
+    right :: json.parse("{{\"name\":\"x\",\"outer\":{{\"a\":[1,false],\"b\":1.0}}}}") ?? panic("right")
+    print(left.equal_unordered(right))
+    print(DataTree.Null.equal_unordered(DataTree.Null))
+    print(DataTree.Array([DataTree.Int(1), DataTree.Int(2)]).equal_unordered(DataTree.Array([DataTree.Int(2), DataTree.Int(1)])))
+    print(DataTree.Int(1).equal_unordered(DataTree.Float(1.0)))
+    print(DataTree.Bool(false).equal_unordered(DataTree.Bool(false)))
+    print(DataTree.Text("same").equal_unordered(DataTree.Text("same")))
+    print(DataTree.Text("1").equal_unordered(DataTree.Int(1)))
+    print(DataTree.Float(Float.NAN).equal_unordered(DataTree.Float(Float.NAN)))
+}
+"#;
+    let scratch = Scratch::new("datatree_scalar_unordered");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(
+        plan.deopt.is_empty() && !plan.whole_interp,
+        "DataTree scalar/equality probe must stay resident: {plan:?}"
+    );
+    try_compile_bundle(&bundle)
+        .expect("DataTree scalar/equality probe must compile for resident JIT");
+    let expected = concat!(
+        "strict\nstrict-error\n",
+        "text\n-42\n1.0\nfalse\nnone\nnone\nnone\n",
+        "true\ntrue\nfalse\ntrue\ntrue\nfalse\nfalse\n",
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(
+        aot.exit, 0,
+        "DataTree scalar/equality AOT failed: {}",
+        aot.stderr
+    );
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::ResidentJit);
+    assert_eq!(
+        dev, aot,
+        "DataTree scalar/equality default-dev drift: {backend:?}"
+    );
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(
+        interpreter, aot,
+        "DataTree scalar/equality interpreter drift"
+    );
 }
 
 fn datatree_int_accessor_matches_aot_on_named_deopt_inner() {

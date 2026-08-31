@@ -196,7 +196,7 @@ fn check_close_contract(
 /// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
 /// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
 /// `use core.mem` + `#Unsafe`.
-pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
+pub(crate) fn guest_c_abi_type_is_safe(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
         // D-SG9: fixed-width integers/floats have a stable C ABI (`u8` … `i64`, `f32`).
@@ -241,11 +241,15 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
             ..
         } => {
             matches!(effect_bound, Some(b) if b.is_empty())
-                && params.iter().all(|p| is_c_abi_type(p, registry))
-                && ret.as_deref().is_none_or(|r| is_c_abi_type(r, registry))
+                && params
+                    .iter()
+                    .all(|p| guest_c_abi_type_is_safe(p, registry))
+                && ret
+                    .as_deref()
+                    .is_none_or(|r| guest_c_abi_type_is_safe(r, registry))
         }
-        Type::Tagged { inner, .. } => is_c_abi_type(inner, registry),
-        Type::InlineRange { base, .. } => is_c_abi_type(base, registry),
+        Type::Tagged { inner, .. } => guest_c_abi_type_is_safe(inner, registry),
+        Type::InlineRange { base, .. } => guest_c_abi_type_is_safe(base, registry),
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
         Type::Measure(_) => false,
@@ -264,7 +268,12 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
             fields,
             is_c_layout,
             ..
-        }) => *is_c_layout && fields.iter().all(|(_, _, ty)| is_c_abi_type(ty, registry)),
+        }) => {
+            *is_c_layout
+                && fields
+                    .iter()
+                    .all(|(_, _, ty)| guest_c_abi_type_is_safe(ty, registry))
+        }
         // No ratified C-safe enum representation exists yet (tag placement,
         // discriminant width, payload union layout are all undecided — see
         // card #436 report). Reject every enum at the C boundary rather than
@@ -278,17 +287,19 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
             c_layout_tag.is_some()
                 && variants.values().all(|(_, payload)| match payload {
                     VariantPayload::Unit => true,
-                    VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
+                    VariantPayload::Single(ty, _) => guest_c_abi_type_is_safe(ty, registry),
                     VariantPayload::Named(fields) => {
-                        fields.iter().all(|f| is_c_abi_type(&f.ty, registry))
+                        fields
+                            .iter()
+                            .all(|f| guest_c_abi_type_is_safe(&f.ty, registry))
                     }
                 })
         }
         // D-DIST1: distinct types are repr(transparent) over their base, so
         // they share the base's C ABI exactly — treat as C-compatible iff
         // the base is.
-        Some(TypeDef::Distinct { base, .. }) => is_c_abi_type(base, registry),
-        Some(TypeDef::Alias { target, .. }) => is_c_abi_type(target, registry),
+        Some(TypeDef::Distinct { base, .. }) => guest_c_abi_type_is_safe(base, registry),
+        Some(TypeDef::Alias { target, .. }) => guest_c_abi_type_is_safe(target, registry),
         None => false,
     }
 }
@@ -322,8 +333,8 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
         ),
         format!(
             "`#{}` / `#{}` functions must use types with a stable C ABI at the edge.",
-            Syntax::MARKER_EXTERN_MODULE,
-            Syntax::MARKER_BINDGEN,
+            Syntax::MARKER_IMPORT,
+            Syntax::MARKER_EXPORT,
         ),
         "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier."
             .to_string(),
@@ -386,6 +397,44 @@ pub fn e3303(span: Span) -> Diagnostic {
     )
 }
 
+/// Validate one C callable's parameter and return types (E3203/E3202).
+/// Registers nothing; the caller registers the function after a clean check.
+pub(crate) fn check_c_signature(
+    params: &[Param],
+    return_type: Option<&Type>,
+    return_span: Span,
+    registry: &TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let mut ok = true;
+    for param in params {
+        if let Type::Apply { name, args } = &param.ty {
+            if name == Syntax::TYPE_PTR {
+                if args.len() != 1 || !guest_c_abi_type_is_safe(&args[0], registry) {
+                    diags.push(e3203(&param.ty, param.ty_span));
+                    ok = false;
+                }
+            } else if !guest_c_abi_type_is_safe(&param.ty, registry) {
+                diags.push(e3203(&param.ty, param.ty_span));
+                ok = false;
+            }
+        } else if !guest_c_abi_type_is_safe(&param.ty, registry) {
+            diags.push(e3203(&param.ty, param.ty_span));
+            ok = false;
+        }
+    }
+    if let Some(return_type) = return_type {
+        if matches!(return_type, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
+            diags.push(e3202(&return_type.name(), return_span));
+            ok = false;
+        } else if !guest_c_abi_type_is_safe(return_type, registry) {
+            diags.push(e3203(return_type, return_span));
+            ok = false;
+        }
+    }
+    ok
+}
+
 /// Validate one C FFI module's signatures (E3203/E3202). Registers nothing; the
 /// caller registers the functions after a clean check.
 pub(crate) fn check_c_module(
@@ -439,36 +488,17 @@ pub(crate) fn check_c_module(
                 }
             }
         }
-        for p in &ef.params {
-            if let Type::Apply { name, args } = &p.ty {
-                if name == Syntax::TYPE_PTR {
-                    // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C
-                    // header exactly. The call is marked unsafe by `extern_to_sig`;
-                    // only a single C-safe pointee is admitted.
-                    if args.len() != 1 || !is_c_abi_type(&args[0], registry) {
-                        diags.push(e3203(&p.ty, p.ty_span));
-                        ok = false;
-                    }
-                } else if !is_c_abi_type(&p.ty, registry) {
-                    diags.push(e3203(&p.ty, p.ty_span));
-                    ok = false;
-                }
-            } else if !is_c_abi_type(&p.ty, registry) {
-                diags.push(e3203(&p.ty, p.ty_span));
-                ok = false;
-            }
-        }
-        if let Some(rt) = &ef.return_type {
-            if matches!(rt, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
-                diags.push(e3202(
-                    &rt.name(),
-                    ef.return_type_span.unwrap_or(ef.name_span),
-                ));
-                ok = false;
-            } else if !is_c_abi_type(rt, registry) {
-                diags.push(e3203(rt, ef.return_type_span.unwrap_or(ef.name_span)));
-                ok = false;
-            }
+        // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C header
+        // exactly. The call is marked unsafe by `extern_to_sig`; only a single
+        // C-safe pointee is admitted.
+        if !check_c_signature(
+            &ef.params,
+            ef.return_type.as_ref(),
+            ef.return_type_span.unwrap_or(ef.name_span),
+            registry,
+            diags,
+        ) {
+            ok = false;
         }
         if !check_close_contract(ef, &cm.functions, diags) {
             ok = false;

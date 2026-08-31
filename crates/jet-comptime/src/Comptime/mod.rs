@@ -68,6 +68,7 @@ pub use AmbientRuntime::{
     ambient_hooks, try_core_call as try_ambient_core_call,
     try_core_call_typed as try_ambient_core_call_typed, try_core_call_typed_with_sink,
     try_extern_call as try_ambient_extern_call, try_handle as try_ambient_handle, with_ambient,
+    package_read_root, record_package_input, with_package_read_context,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
@@ -447,7 +448,11 @@ pub fn run_build_entry_with_policy(
     };
     let mut frame = HashMap::new();
     frame.insert(build.params[0].name.clone(), context.clone());
-    let returned = match interp.call_func("build", build, frame) {
+    let (call_result, package_inputs) = with_package_read_context(base_dir, || {
+        interp.call_func("build", build, frame)
+    });
+    interp.embed_inputs.extend(package_inputs);
+    let returned = match call_result {
         Ok(value) => value,
         Err(error) => {
             Build::abort_program_build(&context);
@@ -515,18 +520,6 @@ static EMPTY_STRUCTS: std::sync::OnceLock<HashMap<String, &'static StructDef>> =
     std::sync::OnceLock::new();
 fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
     EMPTY_STRUCTS.get_or_init(HashMap::new)
-}
-
-/// TIR core-call bridge for schema-aware CBOR encoding. `CtValue` erases
-/// `[U8]` into an integer list, so the root type and normalized field schema
-/// must cross the evaluator seam with the value.
-pub fn cbor_encode_typed_for_tir(
-    value: &CtValue,
-    root_ty: &Type,
-    struct_fields: &HashMap<String, Vec<(String, Type)>>,
-    canonical: bool,
-) -> Result<Vec<u8>, String> {
-    EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
 /// TIR/JIT bridge for whole-value CBOR encoding. Keep the wire encoder in the
@@ -626,40 +619,6 @@ pub fn cbor_decode_source_error_for_tir(error: CtValue) -> CtValue {
     };
     let reason = text("reason").unwrap_or("CBOR decode failed");
     TypedDecode::decode_error_at(path, format!("CBOR {kind} at byte {offset}: {reason}"))
-}
-
-/// TIR core-call bridge for generic CBOR decode. TIR retains the resolved
-/// `Result<T, [FieldError]>` type, so use its `T` with the shared typed decoder
-/// instead of returning the parser's internal `DataTree` representation.
-pub fn cbor_decode_typed_for_tir(
-    bytes: &[u8],
-    options: Option<&CtValue>,
-    root_ty: &Type,
-) -> CtValue {
-    let options = match EncodingLite::cbor_options(options) {
-        Ok(options) => options,
-        Err(error) => {
-            return CtValue::failed(Box::new(cbor_decode_source_error_for_tir(
-                EncodingLite::cbor_error_value(error),
-            )));
-        }
-    };
-    let tree = match EncodingLite::cbor_decode(bytes, &options, true) {
-        Ok(tree) => tree,
-        Err(error) => {
-            return CtValue::failed(Box::new(cbor_decode_source_error_for_tir(
-                EncodingLite::cbor_error_value(error),
-            )));
-        }
-    };
-    match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
-        Some(Ok(value)) => CtValue::Present(Box::new(value)),
-        Some(Err(error)) => CtValue::failed(Box::new(error)),
-        None => CtValue::failed(Box::new(TypedDecode::decode_error(format!(
-            "comptime can't decode `{}` yet",
-            root_ty.name()
-        )))),
-    }
 }
 
 /// TIR static-call bridge for shared EncodingLimits / XML safe constructors.
@@ -938,30 +897,33 @@ pub fn evaluate_with_imports_opts(
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
-    TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
-        expr: init,
-        funcs,
-        error_conversions: &[],
-        methods: empty_methods(),
-        extern_names,
-        base_dir,
-        globals,
-        core_imports,
-        gates,
-        initial_impure_depth,
-        structs: &HashMap::new(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        unit_families: &[],
-        fuel: FUEL_BUDGET,
-        sink: None,
-        repl_mode: false,
-        repl_grants: &[],
-        repl_authorizer: None,
-        embed_inputs: None,
-        mutated: None,
-    })
+    let (value, _) = with_package_read_context(base_dir, || {
+        TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
+            expr: init,
+            funcs,
+            error_conversions: &[],
+            methods: empty_methods(),
+            extern_names,
+            base_dir,
+            globals,
+            core_imports,
+            gates,
+            initial_impure_depth,
+            structs: &HashMap::new(),
+            computed_fields: empty_computed(),
+            distinct_ranges: empty_distinct(),
+            distinct_bases: empty_distinct_bases(),
+            unit_families: &[],
+            fuel: FUEL_BUDGET,
+            sink: None,
+            repl_mode: false,
+            repl_grants: &[],
+            repl_authorizer: None,
+            embed_inputs: None,
+            mutated: None,
+        })
+    });
+    value
 }
 
 /// Like [`evaluate_with_imports_opts`] but also returns the Tier-1 embed
@@ -1044,7 +1006,8 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
         check_purity(init, funcs, extern_names)?;
     }
     let mut embed_inputs = Vec::new();
-    let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
+    let (value, package_inputs) = with_package_read_context(base_dir, || {
+        TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
         error_conversions: &[],
@@ -1067,8 +1030,10 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
         repl_authorizer: None,
         embed_inputs: Some(&mut embed_inputs),
         mutated,
-    })?;
-    Ok((val, embed_inputs))
+        })
+    });
+    embed_inputs.extend(package_inputs);
+    Ok((value?, embed_inputs))
 }
 
 /// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
@@ -1548,32 +1513,35 @@ pub fn run_block_with_imports(
 ) -> Result<HashMap<String, CtValue>, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
     Purity::check_purity_stmts(stmts, &refs, extern_names)?;
-    match TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
-        stmts,
-        funcs: &refs,
-        error_conversions: &[],
-        methods: empty_methods(),
-        extern_names,
-        base_dir,
-        globals,
-        core_imports,
-        structs: &HashMap::new(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        unit_families: &[],
-        fuel: FUEL_BUDGET,
-        sink: None,
-        repl_mode: false,
-        repl_grants: &[],
-        repl_authorizer: None,
-        gates: jet_foundation::Policy::GateSet::default(),
-        impure_depth: 0,
-        debugger: None,
-        debug_function: String::new(),
-        debug_depth: 0,
-        embed_inputs: None,
-    })? {
+    let (result, _) = with_package_read_context(base_dir, || {
+        TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
+            stmts,
+            funcs: &refs,
+            error_conversions: &[],
+            methods: empty_methods(),
+            extern_names,
+            base_dir,
+            globals,
+            core_imports,
+            structs: &HashMap::new(),
+            computed_fields: empty_computed(),
+            distinct_ranges: empty_distinct(),
+            distinct_bases: empty_distinct_bases(),
+            unit_families: &[],
+            fuel: FUEL_BUDGET,
+            sink: None,
+            repl_mode: false,
+            repl_grants: &[],
+            repl_authorizer: None,
+            gates: jet_foundation::Policy::GateSet::default(),
+            impure_depth: 0,
+            debugger: None,
+            debug_function: String::new(),
+            debug_depth: 0,
+            embed_inputs: None,
+        })
+    });
+    match result? {
         TirBridge::StmtOutcome::Done(scope) => Ok(scope),
         TirBridge::StmtOutcome::Returned { scope, .. } => Ok(scope),
     }

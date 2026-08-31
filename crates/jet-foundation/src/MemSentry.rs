@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::io::Write as IOWrite;
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Mutex, OnceLock,
 };
 
@@ -28,10 +28,12 @@ struct Allocation {
     len: usize,
     live: bool,
     owner: Option<usize>,
+    stack_frame: Option<usize>,
 }
 
 static ALLOCATIONS: OnceLock<Mutex<Vec<Allocation>>> = OnceLock::new();
 static HARDENED: AtomicBool = AtomicBool::new(false);
+static NEXT_SENTRY_FRAME: AtomicUsize = AtomicUsize::new(1);
 const MAX_MEMORY_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
 static MEMORY_LEDGER_LOCK: Mutex<()> = Mutex::new(());
 
@@ -163,6 +165,7 @@ pub fn jet_memory_ledger_record(witness: MemoryLedgerWitness<'_>) -> Result<(), 
 thread_local! {
     static GATE: RefCell<Option<Gate>> = const { RefCell::new(None) };
     static FENCE_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static SENTRY_FRAMES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 fn allocations() -> &'static Mutex<Vec<Allocation>> {
@@ -186,6 +189,42 @@ impl Drop for JetSentryGuard {
     fn drop(&mut self) {
         GATE.with(|gate| *gate.borrow_mut() = self.saved.take());
         FENCE_DEPTH.with(|depth| depth.set(self.saved_fence_depth));
+    }
+}
+
+/// One runtime lifetime token for stack storage minted by `mem.address_of` or
+/// raw-of. The token is deliberately separate from `JetSentryGuard`: a source
+/// `#Unsafe` gate controls whether an access is checked, while this token owns
+/// the lifetime of the stack allocation fact. AOT, JIT/TIR, and the embedded
+/// Prelude all use this same RAII boundary.
+pub struct JetSentryFrame {
+    id: Option<usize>,
+}
+
+impl Drop for JetSentryFrame {
+    fn drop(&mut self) {
+        let Some(id) = self.id.take() else {
+            return;
+        };
+        SENTRY_FRAMES.with(|frames| {
+            let mut frames = frames.borrow_mut();
+            if frames.last().copied() == Some(id) {
+                frames.pop();
+            } else {
+                // Normal generated code drops frames in LIFO order. Retain a
+                // safe recovery path for an explicit early drop so a stale
+                // token can never remain the current owner.
+                frames.retain(|active| *active != id);
+            }
+        });
+        let mut records = allocations()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for allocation in records.iter_mut() {
+            if allocation.live && allocation.stack_frame == Some(id) {
+                allocation.live = false;
+            }
+        }
     }
 }
 
@@ -260,6 +299,7 @@ pub fn jet_sentry_set_hardened(enabled: bool) {
 pub fn jet_sentry_reset() {
     GATE.with(|gate| *gate.borrow_mut() = None);
     FENCE_DEPTH.with(|depth| depth.set(0));
+    SENTRY_FRAMES.with(|frames| frames.borrow_mut().clear());
     HARDENED.store(false, Ordering::Relaxed);
     allocations()
         .lock()
@@ -268,14 +308,47 @@ pub fn jet_sentry_reset() {
 }
 
 pub fn jet_sentry_register_allocation(start: usize, bytes: usize) {
-    jet_sentry_register_owned_allocation_inner(None, start, bytes);
+    jet_sentry_register_allocation_inner(None, None, start, bytes);
 }
 
 pub fn jet_sentry_register_owned_allocation(owner: usize, start: usize, bytes: usize) {
-    jet_sentry_register_owned_allocation_inner(Some(owner), start, bytes);
+    jet_sentry_register_allocation_inner(Some(owner), None, start, bytes);
 }
 
-fn jet_sentry_register_owned_allocation_inner(owner: Option<usize>, start: usize, bytes: usize) {
+/// Return the active Jet frame token on this execution context. The numeric
+/// token is globally unique, so synthetic TIR identities and task workers do
+/// not alias another frame's stack storage.
+pub fn jet_sentry_current_frame() -> Option<usize> {
+    SENTRY_FRAMES.with(|frames| frames.borrow().last().copied())
+}
+
+/// Enter one stack-lifetime scope. The caller only emits this hook for a body
+/// that can name stack storage. Registration remains gated by
+/// `runtime_available`, so an unwatched release records no allocation; keeping
+/// the token itself unconditional lets a fenced scope activate observation
+/// after the enclosing function has already started.
+pub fn jet_sentry_frame() -> JetSentryFrame {
+    let id = NEXT_SENTRY_FRAME.fetch_add(1, Ordering::Relaxed);
+    SENTRY_FRAMES.with(|frames| frames.borrow_mut().push(id));
+    JetSentryFrame { id: Some(id) }
+}
+
+/// Register storage owned by the currently active Jet frame. No active frame
+/// means no registration: stack storage must never become process-global live
+/// state merely because an address was observed.
+pub fn jet_sentry_register_stack_allocation(start: usize, bytes: usize) {
+    let Some(frame) = jet_sentry_current_frame() else {
+        return;
+    };
+    jet_sentry_register_allocation_inner(None, Some(frame), start, bytes);
+}
+
+fn jet_sentry_register_allocation_inner(
+    owner: Option<usize>,
+    stack_frame: Option<usize>,
+    start: usize,
+    bytes: usize,
+) {
     if !runtime_available() || start == 0 {
         return;
     }
@@ -287,6 +360,7 @@ fn jet_sentry_register_owned_allocation_inner(owner: Option<usize>, start: usize
             len: bytes.max(1),
             live: true,
             owner,
+            stack_frame,
         });
 }
 
@@ -343,6 +417,34 @@ pub fn jet_sentry_check(
     operation: &str,
     obligation: &str,
 ) -> Option<JetSentryFault> {
+    jet_sentry_check_inner(start, bytes, alignment, operation, obligation, true)
+}
+
+/// Check a pointer that is about to cross a foreign boundary.
+///
+/// A borrowed Rust reference can point at ordinary stack or foreign-owned
+/// storage that Jet did not allocate, so an unknown non-null address is legal
+/// at this boundary. Tracked storage still gets the same liveness, range, and
+/// alignment witness as a raw operation; raw `Ptr<T>` arguments use
+/// [`jet_sentry_check`] instead and therefore require tracked provenance.
+pub fn jet_sentry_check_foreign(
+    start: usize,
+    bytes: usize,
+    alignment: usize,
+    operation: &str,
+    obligation: &str,
+) -> Option<JetSentryFault> {
+    jet_sentry_check_inner(start, bytes, alignment, operation, obligation, false)
+}
+
+fn jet_sentry_check_inner(
+    start: usize,
+    bytes: usize,
+    alignment: usize,
+    operation: &str,
+    obligation: &str,
+    require_provenance: bool,
+) -> Option<JetSentryFault> {
     let gate = GATE.with(|gate| gate.borrow().clone())?;
     if !gate.enabled {
         return None;
@@ -360,7 +462,15 @@ pub fn jet_sentry_check(
                 && end <= allocation.start.saturating_add(allocation.len)
         })
     });
-    // Provenance classification precedes alignment: an untracked address is R0801.
+    let starts_in_live = records.iter().rev().any(|allocation| {
+        allocation.live
+            && start >= allocation.start
+            && start <= allocation.start.saturating_add(allocation.len)
+    });
+    // Provenance classification precedes alignment for raw accesses: an
+    // untracked address is R0801. A foreign borrowed reference may be
+    // untracked, but a tracked allocation that does not contain the complete
+    // requested range is still a boundary violation.
     let code_detail = if live {
         if start % alignment != 0 {
             Some((
@@ -371,22 +481,36 @@ pub fn jet_sentry_check(
             None
         }
     } else {
-        let freed = records.iter().rev().any(|allocation| {
+        let freed = records.iter().rev().find(|allocation| {
             !allocation.live
                 && start >= allocation.start
                 && start < allocation.start.saturating_add(allocation.len)
         });
-        Some(if freed {
-            (
-                "R0802",
-                "the address belongs to quarantined storage".to_string(),
-            )
-        } else {
-            (
+        if let Some(freed) = freed {
+            let detail = if freed.stack_frame.is_some() {
+                "the owning Jet frame has expired"
+            } else {
+                "the address belongs to quarantined storage"
+            };
+            Some(("R0802", detail.to_string()))
+        } else if starts_in_live {
+            Some((
+                "R0801",
+                "the foreign access extends beyond a live allocation".to_string(),
+            ))
+        } else if require_provenance || start == 0 || end.is_none() {
+            Some((
                 "R0801",
                 "no live allocation contains this address".to_string(),
-            )
-        })
+            ))
+        } else if start % alignment != 0 {
+            Some((
+                "R0803",
+                format!("address {start:#x} is not aligned to {alignment} bytes"),
+            ))
+        } else {
+            None
+        }
     }?;
     let name = gate_name(&gate);
     let repairs: &[&str] = match code_detail.0 {
@@ -426,4 +550,101 @@ pub fn jet_sentry_check(
         repairs,
     });
     Some(fault)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn stack_registration_is_live_only_inside_its_frame() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        jet_sentry_reset();
+        jet_sentry_set_hardened(true);
+        let mut value = 7i64;
+        let frame = jet_sentry_frame();
+        let address = (&mut value as *mut i64) as usize;
+        let gate = jet_sentry_scope(true, "stack.jet", 1, "same-scope");
+        jet_sentry_register_stack_allocation(address, std::mem::size_of::<i64>());
+        assert!(jet_sentry_check(address, 8, 8, "read", "valid_ptr").is_none());
+
+        drop(frame);
+        let fault = jet_sentry_check(address, 8, 8, "read", "valid_ptr")
+            .expect("a stack allocation must expire with its frame");
+        assert_eq!(fault.code, "R0802");
+        assert_eq!(fault.detail, "the owning Jet frame has expired");
+        drop(gate);
+        jet_sentry_reset();
+    }
+
+    #[test]
+    fn frame_expiry_does_not_expire_heap_or_foreign_storage() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        jet_sentry_reset();
+        jet_sentry_set_hardened(true);
+        let mut value = 17i64;
+        let frame = jet_sentry_frame();
+        let address = (&mut value as *mut i64) as usize;
+        let gate = jet_sentry_scope(true, "persistent.jet", 1, "persistent");
+        jet_sentry_register_allocation(address, 8);
+        drop(frame);
+        assert!(jet_sentry_check(address, 8, 8, "read", "valid_ptr").is_none());
+        assert!(jet_sentry_check_foreign(0x1000, 8, 8, "ffi_ptr", "ffi_contract").is_none());
+
+        jet_sentry_quarantine(address, 8);
+        let fault = jet_sentry_check(address, 8, 8, "read", "valid_ptr")
+            .expect("allocator quarantine must still expire persistent storage");
+        assert_eq!(fault.code, "R0802");
+        assert_eq!(fault.detail, "the address belongs to quarantined storage");
+        drop(gate);
+        jet_sentry_reset();
+    }
+
+    #[test]
+    fn nested_and_thread_frames_have_distinct_lifetimes() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        jet_sentry_reset();
+        jet_sentry_set_hardened(true);
+        let mut value = 11i64;
+        let gate = jet_sentry_scope(true, "nested.jet", 1, "nested-frame");
+        let outer = jet_sentry_frame();
+        let outer_id = jet_sentry_current_frame().expect("outer frame token");
+        let address = (&mut value as *mut i64) as usize;
+        jet_sentry_register_stack_allocation(address, 8);
+        let inner = jet_sentry_frame();
+        let inner_id = jet_sentry_current_frame().expect("inner frame token");
+        assert_ne!(outer_id, inner_id);
+        jet_sentry_register_stack_allocation(address, 8);
+        drop(inner);
+        assert!(jet_sentry_check(address, 8, 8, "read", "valid_ptr").is_none());
+        drop(outer);
+        let fault = jet_sentry_check(address, 8, 8, "read", "valid_ptr")
+            .expect("all nested stack registrations must expire with the outer frame");
+        assert_eq!(fault.code, "R0802");
+
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _gate = jet_sentry_scope(true, "task.jet", 2, "task-frame");
+                    let mut task_value = 13i64;
+                    let task_frame = jet_sentry_frame();
+                    let task_id = jet_sentry_current_frame().expect("task frame token");
+                    assert_ne!(outer_id, task_id);
+                    let task_address = (&mut task_value as *mut i64) as usize;
+                    jet_sentry_register_stack_allocation(task_address, 8);
+                    assert!(jet_sentry_check(task_address, 8, 8, "read", "valid_ptr").is_none());
+                    drop(task_frame);
+                    let fault = jet_sentry_check(task_address, 8, 8, "read", "valid_ptr")
+                        .expect("task stack allocation must expire with its task frame");
+                    assert_eq!(fault.code, "R0802");
+                })
+                .join()
+                .expect("task frame test");
+        });
+        drop(gate);
+        jet_sentry_reset();
+    }
 }

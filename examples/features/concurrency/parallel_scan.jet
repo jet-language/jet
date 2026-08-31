@@ -1,14 +1,13 @@
 // 34 — Parallel file scan (D-EXAMPLES-SHORTPATH1=A).
 // Short path: `para_map`. Expert channel+spawn+join → parallel_scan_expert.jet.
 use core.files as fs
-use core.term as io
 use core.process as process
 use core.sys as env
 
-fn count_lines(text: String) Int -> text.lines().len()
+fn count_lines(text: String) Int -> { text.lines().len() }
 
 fn scan_one(file_path: String) String -> {
-    text :: fs.read(~file_path) ?? return "{file_path}: unreadable"
+    text :: fs.read(file_path) ?? return "{file_path}: unreadable"
     lines :: count_lines(text)
     return "{file_path}: {lines} lines, {text.len()} chars"
 }
@@ -22,7 +21,7 @@ fn default_paths() [String] -> {
     return [a, b]
 }
 
-fn paths_from_args() [String] -> process.argv().skip(1).to_list()
+fn paths_from_args() [String] -> { process.argv().skip(1).to_list() }
 
 fn gather_paths() [String] -> {
     from_args :: paths_from_args()
@@ -33,12 +32,6 @@ fn gather_paths() [String] -> {
     return default_paths()
 }
 
-fn scan_parallel(paths: [String]) [String] -> {
-    results := paths.para_map((file_path: String) -> scan_one(file_path))
-    results.sort()
-    return results
-}
-
 fn run() {
     paths :: gather_paths()
     if paths.len() == 0 {
@@ -47,7 +40,8 @@ fn run() {
     }
     print("scanning {paths.len()} files...")
     print("")
-    parallel :: scan_parallel(paths)
+    parallel := paths.para_map((path: String) -> scan_one(path) ?? "{path}: unreadable")
+    parallel.sort()
     loop line in parallel -> print(line)
     print("")
     print("done — {paths.len()} files scanned in parallel")

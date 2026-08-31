@@ -53,9 +53,10 @@ mod Cache;
 pub use Cache::*;
 mod Seal;
 pub use Seal::arm_command_memo;
-pub(crate) use Seal::{census_report as seal_census_report, check as check_seal,
-    object_digest_for_path, recover_unlocked as recover_seals, remove as remove_seal,
-    write as write_seal, SEALS_DIR};
+pub(crate) use Seal::{
+    census_report as seal_census_report, check as check_seal, object_digest_for_path,
+    recover_unlocked as recover_seals, remove as remove_seal, write as write_seal, SEALS_DIR,
+};
 mod Archive;
 pub use Archive::*;
 mod Nar;
@@ -72,9 +73,7 @@ pub(crate) use NixCache::{
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
-pub(crate) use Reproducibility::{
-    reproducibility_blocked,
-};
+pub(crate) use Reproducibility::reproducibility_blocked;
 
 /// Progress facts emitted by a provider while it acquires bytes. The sink is
 /// additive so parallel closure workers can report independently; the
@@ -114,11 +113,6 @@ pub(crate) fn current_progress() -> Option<ProgressHandle> {
     CURRENT_PROGRESS.with(|current| current.borrow().clone())
 }
 
-pub(crate) fn timing(label: &str, elapsed: Duration) {
-    if std::env::var_os("JETPACK_TIMING").is_some() {
-        eprintln!("TIMING {label}: {elapsed:?}");
-    }
-}
 
 /// Process cache of the parsed, receipt-authenticated entry list, keyed by
 /// the same WAL identity stamp as the closure structure cache. One warm env
@@ -375,7 +369,10 @@ pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
                 Err(error) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("Hangar object `{}` could not be verified: {error}", entry.id),
+                        format!(
+                            "Hangar object `{}` could not be verified: {error}",
+                            entry.id
+                        ),
                     ))
                 }
             };
@@ -687,6 +684,377 @@ impl VerifiedRealization {
     pub(crate) fn into_parts(self) -> (StoreEntry, super::Provider::SourceState, CacheLease) {
         (self.entry, self.source_state, self.lease)
     }
+}
+
+/// The exact package/output selection captured by a verified project
+/// environment receipt: reference, store name, recorded version, output
+/// digest, and stable StoreEntry metadata. The metadata fingerprint excludes
+/// the two usage timestamps, which are allowed to change without invalidating
+/// an activation.
+pub(crate) type EnvironmentSelection = (String, String, String, String, String);
+
+pub(crate) fn environment_entry_selection(entry: &StoreEntry) -> EnvironmentSelection {
+    let mut stable = entry.clone();
+    stable.realized_at = 0;
+    stable.last_used_at = 0;
+    (
+        entry.reference.clone(),
+        entry.name.clone(),
+        entry.version.clone(),
+        entry.envelope.output_hash.clone(),
+        crate::SHA256::sha256_hex(stable.meta_json().as_bytes()),
+    )
+}
+
+struct EnvironmentEntryIndex {
+    by_selection: BTreeMap<EnvironmentSelection, StoreEntry>,
+}
+
+impl EnvironmentEntryIndex {
+    fn from_entries(entries: &[StoreEntry]) -> Self {
+        let mut by_selection = BTreeMap::new();
+        for entry in entries {
+            let selection = environment_entry_selection(entry);
+            let replace = by_selection
+                .get(&selection)
+                .is_none_or(|current: &StoreEntry| {
+                    (entry.last_used_at, entry.id.as_str())
+                        > (current.last_used_at, current.id.as_str())
+                });
+            if replace {
+                by_selection.insert(selection, entry.clone());
+            }
+        }
+        Self { by_selection }
+    }
+
+    fn get(&self, selection: &EnvironmentSelection) -> Option<&StoreEntry> {
+        self.by_selection.get(selection)
+    }
+}
+
+fn append_environment_stamp_field(stamp: &mut Vec<u8>, field: &[u8]) {
+    stamp.extend_from_slice(&(field.len() as u64).to_le_bytes());
+    stamp.extend_from_slice(field);
+}
+
+fn external_output_paths<'a>(
+    roots: &Roots,
+    entries: impl IntoIterator<Item = &'a StoreEntry>,
+) -> Vec<PathBuf> {
+    let hangar = roots.hangar_dir();
+    let mut paths = BTreeSet::new();
+    for entry in entries {
+        let output = Path::new(&entry.out);
+        if !entry.out.is_empty() && !output.starts_with(&hangar) {
+            paths.insert(output.to_path_buf());
+        }
+        let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+            continue;
+        };
+        // Nix named outputs are projected from their verified Hangar objects.
+        // Other providers record their real output paths and dependency files;
+        // those paths must remain part of the activation witness.
+        if producer.provider == "nix" {
+            continue;
+        }
+        for (key, value) in &producer.facts {
+            let path = if key.starts_with("nix.output.") || key.starts_with("output.path.") {
+                PathBuf::from(value)
+            } else if key.starts_with("dependency.object.") {
+                let relative = Path::new(value);
+                if relative.is_absolute()
+                    || relative
+                        .components()
+                        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                {
+                    continue;
+                }
+                Path::new(&entry.out).join(relative)
+            } else {
+                continue;
+            };
+            if !path.starts_with(&hangar) {
+                paths.insert(path);
+            }
+        }
+    }
+    paths.into_iter().collect()
+}
+
+fn append_external_metadata_stamp(stamp: &mut Vec<u8>, metadata: &fs::Metadata) {
+    let kind = if metadata.file_type().is_symlink() {
+        b"symlink".as_slice()
+    } else if metadata.is_dir() {
+        b"directory".as_slice()
+    } else if metadata.is_file() {
+        b"file".as_slice()
+    } else {
+        b"other".as_slice()
+    };
+    append_environment_stamp_field(stamp, kind);
+    append_environment_stamp_field(stamp, metadata.len().to_string().as_bytes());
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|time| format!("{}:{}", time.as_secs(), time.subsec_nanos()))
+        .unwrap_or_default();
+    append_environment_stamp_field(stamp, modified.as_bytes());
+}
+
+fn append_external_output_stamp(stamp: &mut Vec<u8>, path: &Path) {
+    append_environment_stamp_field(stamp, path.as_os_str().as_encoded_bytes());
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            append_environment_stamp_field(stamp, b"present");
+            append_external_metadata_stamp(stamp, &metadata);
+            if metadata.file_type().is_symlink() {
+                match fs::read_link(path) {
+                    Ok(target) => {
+                        append_environment_stamp_field(stamp, b"symlink-target");
+                        append_environment_stamp_field(
+                            stamp,
+                            target.as_os_str().as_encoded_bytes(),
+                        );
+                    }
+                    Err(error) => {
+                        append_environment_stamp_field(stamp, b"symlink-target-error");
+                        append_environment_stamp_field(
+                            stamp,
+                            format!("{:?}", error.kind()).as_bytes(),
+                        );
+                    }
+                }
+                match fs::metadata(path) {
+                    Ok(target) => {
+                        append_environment_stamp_field(stamp, b"target-present");
+                        append_external_metadata_stamp(stamp, &target);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        append_environment_stamp_field(stamp, b"target-missing");
+                    }
+                    Err(error) => {
+                        append_environment_stamp_field(stamp, b"target-error");
+                        append_environment_stamp_field(
+                            stamp,
+                            format!("{:?}", error.kind()).as_bytes(),
+                        );
+                    }
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            append_environment_stamp_field(stamp, b"missing");
+        }
+        Err(error) => {
+            append_environment_stamp_field(stamp, b"error");
+            append_environment_stamp_field(stamp, format!("{:?}", error.kind()).as_bytes());
+        }
+    }
+}
+
+fn environment_entry_stamp_with_index(
+    roots: &Roots,
+    project: &Path,
+    definition_fingerprint: &str,
+    inherited_loader_path: Option<&str>,
+    selections: &[EnvironmentSelection],
+    index: &EnvironmentEntryIndex,
+) -> std::io::Result<String> {
+    let store_stamp = Closure::wal_state_stamp(roots)?;
+    let project = project.to_string_lossy();
+    let mut canonical = b"jetpack-env-entry-v4\0".to_vec();
+    for field in [
+        store_stamp.as_bytes(),
+        definition_fingerprint.as_bytes(),
+        project.as_bytes(),
+        inherited_loader_path.unwrap_or_default().as_bytes(),
+    ] {
+        append_environment_stamp_field(&mut canonical, field);
+    }
+    let mut selections = selections.to_vec();
+    selections.sort();
+    let mut selected = Vec::with_capacity(selections.len());
+    for selection in &selections {
+        for field in [
+            selection.0.as_str(),
+            selection.1.as_str(),
+            selection.2.as_str(),
+            selection.3.as_str(),
+            selection.4.as_str(),
+        ] {
+            append_environment_stamp_field(&mut canonical, field.as_bytes());
+        }
+        if let Some(entry) = index.get(selection) {
+            append_environment_stamp_field(&mut canonical, b"seal-v1");
+            let seal = roots
+                .hangar_dir()
+                .join(SEALS_DIR)
+                .join(&entry.envelope.output_hash);
+            match fs::read(seal) {
+                Ok(bytes) => append_environment_stamp_field(&mut canonical, &bytes),
+                Err(error) => append_environment_stamp_field(
+                    &mut canonical,
+                    format!("error:{:?}", error.kind()).as_bytes(),
+                ),
+            }
+            selected.push(entry);
+        } else {
+            append_environment_stamp_field(&mut canonical, b"missing-selection");
+        }
+    }
+    append_environment_stamp_field(&mut canonical, b"external-output-stamps-v1");
+    for path in external_output_paths(roots, selected) {
+        append_external_output_stamp(&mut canonical, &path);
+    }
+    Ok(crate::SHA256::sha256_hex(&canonical))
+}
+
+pub(crate) fn environment_entry_stamp(
+    roots: &Roots,
+    project: &Path,
+    definition_fingerprint: &str,
+    inherited_loader_path: Option<&str>,
+    selections: &[EnvironmentSelection],
+) -> std::io::Result<String> {
+    let entries = list_read_only(roots);
+    let index = EnvironmentEntryIndex::from_entries(&entries);
+    environment_entry_stamp_with_index(
+        roots,
+        project,
+        definition_fingerprint,
+        inherited_loader_path,
+        selections,
+        &index,
+    )
+}
+
+#[cfg(test)]
+mod environment_entry_tests {
+    use super::*;
+
+    #[test]
+    fn external_output_removal_changes_environment_stamp() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "jpk-env-stamp-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let roots = Roots::at(root.clone());
+        let external = root.join("external-output");
+        fs::create_dir_all(&external).unwrap();
+        fs::write(external.join("payload"), "cached").unwrap();
+        let entry = StoreEntry {
+            id: "external-output".into(),
+            name: "external-output".into(),
+            version: "1".into(),
+            reference: "external-output@nixpkgs".into(),
+            out: external.to_string_lossy().into_owned(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope: crate::Envelope::Envelope {
+                output_hash: "sha256-external-output".into(),
+                platform: crate::Envelope::host_platform(),
+                signature: String::new(),
+                provenance: "test".into(),
+            },
+            cache_identity: CacheIdentity::default(),
+            references: Vec::new(),
+            named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
+            producer_record: String::new(),
+            receipt: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let entries = vec![entry.clone()];
+        let index = EnvironmentEntryIndex::from_entries(&entries);
+        let selection = environment_entry_selection(&entry);
+        let first = environment_entry_stamp_with_index(
+            &roots,
+            &root,
+            "definition",
+            None,
+            std::slice::from_ref(&selection),
+            &index,
+        )
+        .unwrap();
+        fs::remove_dir_all(&external).unwrap();
+        let second = environment_entry_stamp_with_index(
+            &roots,
+            &root,
+            "definition",
+            None,
+            std::slice::from_ref(&selection),
+            &index,
+        )
+        .unwrap();
+
+        assert_ne!(first, second);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+/// Rehydrate a previously verified project environment after its composite
+/// stamp still matches. This deliberately skips provider and per-entry
+/// verification; any stamp mutation falls back to the unchanged cold path.
+pub(crate) fn reuse_verified_environment(
+    roots: &Roots,
+    expected_stamp: &str,
+    project: &Path,
+    definition_fingerprint: &str,
+    inherited_loader_path: Option<&str>,
+    selections: &[EnvironmentSelection],
+) -> std::io::Result<Option<Vec<VerifiedRealization>>> {
+    if selections.is_empty() {
+        return Ok(None);
+    }
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let entries = list_read_only(roots);
+        let index = EnvironmentEntryIndex::from_entries(&entries);
+        let actual_stamp = environment_entry_stamp_with_index(
+            roots,
+            project,
+            definition_fingerprint,
+            inherited_loader_path,
+            selections,
+            &index,
+        )?;
+        if actual_stamp != expected_stamp {
+            return Ok(None);
+        }
+        let mut selected = Vec::with_capacity(selections.len());
+        for selection in selections {
+            let Some(entry) = index.get(selection) else {
+                return Ok(None);
+            };
+            selected.push(entry.clone());
+        }
+        for path in external_output_paths(roots, selected.iter()) {
+            match fs::metadata(&path) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        let leases = Reuse::snapshot_leases_with_entries_unlocked(roots, &selected, &entries)?;
+        Ok(Some(
+            selected
+                .into_iter()
+                .zip(leases)
+                .map(|(entry, lease)| VerifiedRealization {
+                    entry,
+                    source_state: super::Provider::SourceState::Cached,
+                    lease,
+                })
+                .collect(),
+        ))
+    })
 }
 
 #[derive(Debug)]
@@ -1203,14 +1571,7 @@ fn canonicalize_local_output_unlocked(
     }
     AdmissionTransaction::recover_unlocked(roots)?;
     let mut transaction = AdmissionTransaction::new(roots)?;
-    let projected = stage_local_output_unlocked(
-        roots,
-        out,
-        bin,
-        rlib,
-        digest,
-        &mut transaction,
-    )?;
+    let projected = stage_local_output_unlocked(roots, out, bin, rlib, digest, &mut transaction)?;
     transaction.commit_objects(Some(Path::new(out)))?;
     Ok(projected)
 }
@@ -1243,9 +1604,7 @@ pub fn realize_verified(
     }
     // WAL is authority. Recover package projections before cache verification;
     // selected-candidate proofs run below so invalid bytes can be quarantined.
-    let phase_started = std::time::Instant::now();
     Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
-    timing("realize closure-structure", phase_started.elapsed());
     let (reference, expectation) = match &request {
         RealizeRequest::Package { spec, table } => {
             super::Provider::validate_cache_authority(spec, table, ctx)
@@ -1274,14 +1633,8 @@ pub fn realize_verified(
         RealizeRequest::Adapter { .. } => false,
     };
 
-    let phase_started = std::time::Instant::now();
     let candidate = find_by_reference(roots, &reference);
-    timing(
-        &format!("realize {reference} candidate-list"),
-        phase_started.elapsed(),
-    );
     if let (Some(candidate), Some(expectation)) = (candidate, expectation.as_ref()) {
-        let phase_started = std::time::Instant::now();
         match find_verified_by_reference(roots, &reference, expectation)
             .map_err(RealizeError::Store)?
         {
@@ -1290,16 +1643,7 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
-                timing(
-                    &format!("realize {reference} verified-lookup"),
-                    phase_started.elapsed(),
-                );
-                let phase_started = std::time::Instant::now();
                 project_receipt_projection(ctx, &hit.entry)?;
-                timing(
-                    &format!("realize {reference} receipt-projection"),
-                    phase_started.elapsed(),
-                );
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -1307,10 +1651,6 @@ pub fn realize_verified(
                 });
             }
             None => {
-                timing(
-                    &format!("realize {reference} verified-lookup"),
-                    phase_started.elapsed(),
-                );
                 let proof = verify_cache_entry(roots, &candidate, &reference, expectation);
                 if !cache_bindings.is_empty()
                     && try_substitute_invalid_candidate(
@@ -2094,14 +2434,9 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
     // `bin`/`rlib` members may live inside the primary output or inside any
     // named output object of a multi-output Nix package (`util-linux.bin`).
     let mut member_roots = vec![canonical_out];
-    member_roots.extend(
-        entry
-            .named_outputs
-            .values()
-            .filter_map(|digest| {
-                fs::canonicalize(roots.hangar_dir().join(OBJECTS_DIR).join(digest)).ok()
-            }),
-    );
+    member_roots.extend(entry.named_outputs.values().filter_map(|digest| {
+        fs::canonicalize(roots.hangar_dir().join(OBJECTS_DIR).join(digest)).ok()
+    }));
     [&entry.bin, &entry.rlib].into_iter().all(|member| {
         if member.is_empty() {
             return true;
@@ -2110,9 +2445,9 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
         let Ok(canonical_member) = fs::canonicalize(member) else {
             return false;
         };
-        member_roots.iter().any(|root| {
-            canonical_member != *root && canonical_member.starts_with(root)
-        })
+        member_roots
+            .iter()
+            .any(|root| canonical_member != *root && canonical_member.starts_with(root))
     })
 }
 
@@ -2320,22 +2655,22 @@ mod Reuse;
 pub use Reuse::*;
 
 mod Cleanup;
-pub use Cleanup::*;
-pub(crate) use Cleanup::{is_live, live_roots_unlocked, nearest_lock_path, LiveRoots};
 #[cfg(test)]
 pub(crate) use Cleanup::live_roots_from;
+pub use Cleanup::*;
+pub(crate) use Cleanup::{is_live, live_roots_unlocked, nearest_lock_path, LiveRoots};
 
 mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
-mod Receipt;
 mod Journal;
+mod Receipt;
 pub(crate) use Journal::closure_graph_read_only;
 mod Transaction;
-pub(crate) use Transaction::{AdmissionObject, AdmissionReceipt, AdmissionTransaction};
 #[cfg(test)]
 pub(crate) use Transaction::{with_admission_failure, AdmissionFailurePoint};
+pub(crate) use Transaction::{AdmissionObject, AdmissionReceipt, AdmissionTransaction};
 mod Quota;
 pub(crate) use Quota::{admission_reservation, admission_size, ensure_hangar_capacity};
 mod Explain;
@@ -2348,6 +2683,6 @@ pub(crate) use Lifecycle::{
     register_external_root_at, unregister_external_root_at, ExternalRootError,
 };
 #[cfg(test)]
-mod Tests;
-#[cfg(test)]
 mod SealTests;
+#[cfg(test)]
+mod Tests;

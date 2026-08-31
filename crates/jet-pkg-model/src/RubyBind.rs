@@ -220,15 +220,32 @@ end
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_ruby_{lib}");
-    let mut out = format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum RubyError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() => Session !RubyError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RubyError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() Session !RubyError -> {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "RubyError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
     for name in functions {
-        out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) => DataTree !RubyError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(RubyError.NotRunning) }}\n    if code == 2 {{ return Err(RubyError.Timeout) }}\n    if code == 3 {{ return Err(RubyError.Cancelled) }}\n    if code == 5 {{ return Err(RubyError.Limit) }}\n    if code != 0 {{ return Err(RubyError.Protocol) }}\n    response := json.parse(raw) ?? return Err(RubyError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(RubyError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
+        out.push_str(&format!(
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !RubyError -> {{
+    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
+}}
+
+"#
+        ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet("registry", &["transform".into()])
 }
 
 fn tool_path(tool: &str) -> Option<PathBuf> {
@@ -378,7 +395,10 @@ fn ident(value: &str) -> bool {
 }
 
 fn reserved(value: &str) -> bool {
-    matches!(value, "open" | "cancel" | "close" | "Session" | "RubyError")
+    matches!(
+        value,
+        "open" | "cancel" | "close" | "decode_response" | "Session" | "RubyError"
+    )
         || crate::Syntax::JET_KEYWORD_LIST.contains(&value)
         || crate::Syntax::JET_TYPE_LIST.contains(&value)
 }
@@ -408,6 +428,15 @@ mod tests {
         assert!(super::parse_function_names(b"open\n").is_err());
         assert!(super::parse_function_names(b"call\ncall\n").is_err());
         assert!(super::parse_function_names(b"ready?\n").is_err());
+    }
+    #[test]
+    fn renders_one_response_decoder_for_ruby_operations() {
+        let jet = super::render_jet("ops", &["transform".into(), "fail".into()]);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.fail(").count(), 1);
+        assert_eq!(jet.matches("return decode_response(raw, code)").count(), 2);
     }
 
     #[test]

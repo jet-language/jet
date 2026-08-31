@@ -1,6 +1,6 @@
 //! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
 //! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
-//! `export:` name, validating the exported `pub fn` surface (v1: homogeneous
+//! `export:` name, validating the marked `#Export(c)` surface (v1: homogeneous
 //! `Int`/`Float`/`Bool`/`Text`
 //! scalars only), and the ApiFreeze-based version handshake.
 //!
@@ -66,15 +66,16 @@ fn e1260(detail: &str) -> Diagnostic {
     )
 }
 
-/// Validate the entry module's `pub fn` surface for a `target: sandbox` build.
-/// Every `pub fn` must be exportable (`Codegen::plugin_export_shape`); a
-/// non-conforming one is E1260, not a silent skip (I3/I4 — codegen's own skip
-/// is a defensive fallback, this is the real enforcement point).
+/// Validate the entry module's `#Export(c)` surface for a `target: sandbox`
+/// build. Every marked function must be exportable
+/// (`Codegen::plugin_export_shape`); a non-conforming one is E1260, not a
+/// silent skip (I3/I4 — codegen's own skip is a defensive fallback, this is
+/// the real enforcement point).
 pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !bundle.name_ledger.public(bundle.entry, &f.name) {
+        if !crate::Sema::is_guest_export(f) {
             continue;
         }
         if crate::Codegen::plugin_export_shape(f).is_none() {
@@ -126,7 +127,7 @@ pub fn check_and_freeze_version(
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !bundle.name_ledger.public(bundle.entry, &f.name)
+        if !crate::Sema::is_guest_export(f)
             || crate::Codegen::plugin_export_shape(f).is_none()
         {
             continue;

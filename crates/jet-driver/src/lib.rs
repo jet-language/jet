@@ -73,7 +73,8 @@ pub mod PluginExport;
 // summary and lint-policy enforcement without depending on the full
 // `jetpack` engine for that.
 pub use jet_pkg_model::Authority;
-pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};
+pub use jet_pkg_model::JetLib;
+pub use jet_pkg_model::JetLib::{JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp};
 pub use jet_pkg_model::{
     AdaBind, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FortranBind,
     GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package,

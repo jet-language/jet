@@ -301,15 +301,32 @@ void {abi}_close(int64_t h){{php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(uin
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_php_{lib}");
-    let mut out = format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct PhpPool {{ value: Int }}\npub enum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\npub fn open() => PhpPool !PhpError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool.{{ value: handle }})\n}}\n\npub fn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct PhpPool {{ value: Int }}\n#Error\npub enum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\npub fn open() PhpPool !PhpError -> {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\npub fn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n"));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "PhpError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
     for name in functions {
-        out.push_str(&format!("pub fn {name}(pool: PhpPool, input: DataTree, deadline_ms: Int) => DataTree !PhpError {{\n    raw :: abi.{name}(pool.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(PhpError.NotRunning) }}\n    if code == 2 {{ return Err(PhpError.Timeout) }}\n    if code == 3 {{ return Err(PhpError.Cancelled) }}\n    if code == 5 {{ return Err(PhpError.Limit) }}\n    if code != 0 {{ return Err(PhpError.Protocol) }}\n    response := json.parse(raw) ?? return Err(PhpError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(PhpError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
+        out.push_str(&format!(
+            r#"pub fn {name}(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree !PhpError -> {{
+    raw :: abi.{name}(pool.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
+}}
+
+"#
+        ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet("registry", &["transform".into()])
 }
 
 fn lint(php: &Path, script: &Path) -> Result<(), BindError> {
@@ -414,7 +431,15 @@ fn ident(v: &str) -> bool {
 fn reserved(v: &str) -> bool {
     matches!(
         v,
-        "open" | "take_error" | "cancel" | "close" | "abi" | "json" | "PhpPool" | "PhpError"
+        "open"
+            | "take_error"
+            | "cancel"
+            | "close"
+            | "decode_response"
+            | "abi"
+            | "json"
+            | "PhpPool"
+            | "PhpError"
     ) || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
         || crate::Syntax::JET_TYPE_LIST.contains(&v)
 }
@@ -502,6 +527,15 @@ class Hidden { function method($input) {} }
                 "{error}"
             );
         }
+    }
+    #[test]
+    fn renders_one_response_decoder_for_php_operations() {
+        let jet = super::render_jet("ops", &["transform".into(), "fail".into()]);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.fail(").count(), 1);
+        assert_eq!(jet.matches("return decode_response(raw, code)").count(), 2);
     }
     #[test]
     fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade() {

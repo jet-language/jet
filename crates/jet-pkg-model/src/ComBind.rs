@@ -5,6 +5,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+const COM_BINDER_SCHEMA: &str = "jet-com-bind-v3";
+
+fn unique_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeLibraryInput {
     File(PathBuf),
@@ -69,13 +78,20 @@ impl Kind {
     }
     fn jet(&self) -> &str {
         match self {
-            Self::Unit => "Void",
+            Self::Unit => "()",
             Self::Int => "Int",
             Self::Float => "Float",
             Self::Bool => "Bool",
             Self::Text => "String",
             Self::Data => "DataTree",
             Self::Object(v) => v,
+        }
+    }
+    fn abi_jet(&self) -> &str {
+        match self {
+            Self::Object(_) => "Int",
+            Self::Data => "String",
+            _ => self.jet(),
         }
     }
     fn c(&self) -> &'static str {
@@ -119,18 +135,39 @@ pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindRes
             "`{lib}` is not a valid Jet library name"
         )));
     }
+    let cc = crate::ForeignBridge::tool_path("cc")
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .ok_or(BindError::ToolMissing("cc"))?;
+    let ar = crate::ForeignBridge::tool_path("ar")
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .ok_or(BindError::ToolMissing("ar"))?;
+    let file_input = match input {
+        TypeLibraryInput::File(path) => Some(
+            std::fs::canonicalize(path).map_err(|e| {
+                BindError::IO(format!("could not resolve the COM type library: {e}"))
+            })?,
+        ),
+        TypeLibraryInput::Registered { guid, .. } => {
+            validate_guid(guid)?;
+            None
+        }
+    };
     std::fs::create_dir_all(cache)
         .map_err(|e| BindError::IO(format!("could not create COM binding cache: {e}")))?;
-    let build = cache.join(format!(".com-build-{lib}"));
-    let _ = std::fs::remove_dir_all(&build);
+    let build = cache.join(format!(
+        ".com-build-{lib}-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     std::fs::create_dir_all(&build)
         .map_err(|e| BindError::IO(format!("could not create COM build directory: {e}")))?;
+    let _cleanup = BuildCleanup(build.clone());
     let inspect_c = build.join("inspect.c");
     let inspect_exe = build.join("inspect.exe");
     std::fs::write(&inspect_c, DISCOVERY_C)
         .map_err(|e| BindError::IO(format!("could not write COM type-library inspector: {e}")))?;
     run(
-        Command::new("cc")
+        Command::new(&cc)
             .args(["-std=c11", "-municode"])
             .arg(&inspect_c)
             .args(["-loleaut32", "-lole32", "-o"])
@@ -139,10 +176,10 @@ pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindRes
     )?;
     let mut command = Command::new(&inspect_exe);
     match input {
-        TypeLibraryInput::File(path) => {
-            let path = std::fs::canonicalize(path).map_err(|e| {
-                BindError::IO(format!("could not resolve the COM type library: {e}"))
-            })?;
+        TypeLibraryInput::File(_) => {
+            let path = file_input
+                .as_ref()
+                .expect("file input was resolved before the COM inspector started");
             command.arg("file").arg(path);
         }
         TypeLibraryInput::Registered {
@@ -151,7 +188,6 @@ pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindRes
             minor,
             lcid,
         } => {
-            validate_guid(guid)?;
             command.args([
                 "reg",
                 guid,
@@ -168,7 +204,7 @@ pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindRes
     std::fs::write(&bridge, render_c(lib, &schema))
         .map_err(|e| BindError::IO(format!("could not write COM automation bridge: {e}")))?;
     run(
-        Command::new("cc")
+        Command::new(&cc)
             .args(["-std=c11", "-c"])
             .arg(&bridge)
             .arg("-o")
@@ -176,24 +212,380 @@ pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindRes
         "cc",
     )?;
     let archive = cache.join(format!("libjet_com_{lib}.a"));
-    let _ = std::fs::remove_file(&archive);
+    let staged_archive = cache.join(format!(
+        ".libjet_com_{lib}.a.tmp.{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let _ = std::fs::remove_file(&staged_archive);
     run(
-        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
+        Command::new(&ar)
+            .arg("rcs")
+            .arg(&staged_archive)
+            .arg(&object),
         "ar",
     )?;
+    publish_archive(&staged_archive, &archive)?;
     let source = render_jet(lib, &schema);
-    let mut identity = b"jet-com-bind-v1\0".to_vec();
-    identity.extend_from_slice(&metadata);
-    identity.extend_from_slice(source.as_bytes());
-    let provenance=format!("schema=jet-com-bind-v1\nsha256={}\ntype_library_name={}\ntype_library={}\nclass={}\nroot_interface={}\n",crate::SHA256::sha256_hex(&identity),schema.name,schema.guid,schema.class_guid,schema.root_interface);
+    let metadata_digest = crate::SHA256::sha256_hex(&metadata);
+    let generated_digest = crate::SHA256::sha256_hex(source.as_bytes());
+    let archive_digest = crate::ForeignBridge::sha_file(&archive).map_err(BindError::IO)?;
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Com)
+        .ok_or_else(|| BindError::IO("COM binder descriptor is not registered".into()))?;
+    let cc_identity = crate::ForeignBridge::tool_identity("cc");
+    let ar_identity = crate::ForeignBridge::tool_identity("ar");
+    let input_record = input_record(input, file_input.as_deref())?;
+    let identity = com_identity(
+        lib,
+        descriptor.stamp().as_str(),
+        &metadata_digest,
+        &generated_digest,
+        &input_record,
+        &cc_identity,
+        &ar_identity,
+    );
+    let mut fields = vec![
+        ("language", "com".to_string()),
+        ("abi", format!("jet_com_{lib}")),
+        ("transport", "windows-com-automation".to_string()),
+        ("binder-schema", COM_BINDER_SCHEMA.to_string()),
+        ("descriptor", descriptor.stamp()),
+        ("type-library-name", schema.name.clone()),
+        ("type-library-guid", schema.guid.clone()),
+        ("class-guid", schema.class_guid.clone()),
+        ("root-interface", schema.root_interface.clone()),
+        ("metadata-sha256", metadata_digest),
+        ("generated-sha256", generated_digest),
+        ("archive-sha256", archive_digest.clone()),
+        ("cc", cc_identity),
+        ("ar", ar_identity),
+        ("input-kind", input_kind(input)),
+    ];
+    match input {
+        TypeLibraryInput::File(_) => {
+            let path = file_input
+                .as_ref()
+                .expect("file input was resolved before provenance was written");
+            fields.push(("type-library", path.display().to_string()));
+            fields.push((
+                "type-library-sha256",
+                crate::ForeignBridge::sha_file(path).map_err(BindError::IO)?,
+            ));
+        }
+        TypeLibraryInput::Registered {
+            guid,
+            major,
+            minor,
+            lcid,
+        } => {
+            fields.push(("registry-guid", guid.clone()));
+            fields.push(("registry-major", major.to_string()));
+            fields.push(("registry-minor", minor.to_string()));
+            fields.push(("registry-lcid", lcid.to_string()));
+        }
+    }
+    let field_refs = fields
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    let archive_name = archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| BindError::IO("COM archive has no UTF-8 file name".into()))?;
+    let provenance = crate::ForeignBridge::render_provenance(
+        &identity,
+        &field_refs,
+        &[(archive_name.to_string(), archive_digest)],
+    )
+    .map_err(BindError::IO)?;
     let methods = schema.methods.iter().map(method_name).collect();
-    let _ = std::fs::remove_dir_all(&build);
     Ok(BindResult {
         source,
         archive,
         provenance,
         methods,
     })
+}
+
+/// Validate the published COM cache before the linker consumes it. COM's
+/// registry and type-library ABI are outside the Jet compiler, so the cache
+/// must carry enough identity to reject a stale or hand-edited bridge.
+pub fn validate_provenance(
+    provenance_path: &Path,
+    generated_source: &Path,
+    archive: &Path,
+    lib: &str,
+) -> Result<(), String> {
+    let provenance = crate::ForeignBridge::read_provenance(provenance_path)?;
+    if provenance.schema != crate::ForeignBridge::PROVENANCE_SCHEMA {
+        return Err(format!(
+            "unsupported COM binding provenance schema `{}`",
+            provenance.schema
+        ));
+    }
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Com)
+        .ok_or_else(|| "COM binder descriptor is not registered".to_string())?;
+    let expected_descriptor = descriptor.stamp();
+    let abi = format!("jet_com_{lib}");
+    if provenance_single(&provenance, "language")? != "com"
+        || provenance_single(&provenance, "abi")? != abi
+        || provenance_single(&provenance, "transport")? != "windows-com-automation"
+        || provenance_single(&provenance, "binder-schema")? != COM_BINDER_SCHEMA
+        || provenance_single(&provenance, "descriptor")? != expected_descriptor
+    {
+        return Err("COM binding provenance does not match the active ABI descriptor".into());
+    }
+    let identity = provenance.identity.as_str();
+    if !is_digest(identity) {
+        return Err("COM binding provenance has an invalid identity digest".into());
+    }
+    let metadata_digest = provenance_single(&provenance, "metadata-sha256")?;
+    let generated_digest = provenance_single(&provenance, "generated-sha256")?;
+    let archive_digest = provenance_single(&provenance, "archive-sha256")?;
+    for (name, value) in [
+        ("metadata-sha256", metadata_digest),
+        ("generated-sha256", generated_digest),
+        ("archive-sha256", archive_digest),
+    ] {
+        if !is_digest(value) {
+            return Err(format!("COM binding provenance has an invalid `{name}` digest"));
+        }
+    }
+    let actual_generated = crate::ForeignBridge::sha_file(generated_source)?;
+    if actual_generated != generated_digest {
+        return Err(
+            "the generated COM cache differs from its provenance; regenerate the binding".into(),
+        );
+    }
+    let actual_descriptor = generated_source
+        .to_str()
+        .and_then(|_| std::fs::read_to_string(generated_source).ok())
+        .and_then(|source| {
+            source
+                .lines()
+                .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="))
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "generated COM cache has no ABI descriptor".to_string())?;
+    if actual_descriptor != expected_descriptor {
+        return Err("generated COM cache has a stale ABI descriptor".into());
+    }
+    let actual_archive = crate::ForeignBridge::sha_file(archive)?;
+    if actual_archive != archive_digest {
+        return Err(
+            "the generated COM archive differs from its provenance; regenerate the binding".into(),
+        );
+    }
+    let archive_name = archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "COM archive has no UTF-8 file name".to_string())?;
+    if provenance_single(&provenance, &format!("artifact.{archive_name}"))? != archive_digest {
+        return Err("COM archive provenance does not match the selected archive".into());
+    }
+
+    let input_record = match provenance_single(&provenance, "input-kind")? {
+        "file" => {
+            let path = Path::new(provenance_single(&provenance, "type-library")?);
+            if !path.is_absolute() {
+                return Err("COM type-library provenance path is not absolute".into());
+            }
+            let expected = provenance_single(&provenance, "type-library-sha256")?;
+            if !is_digest(expected) {
+                return Err("COM type-library provenance has an invalid digest".into());
+            }
+            match std::fs::symlink_metadata(path) {
+                Ok(metadata) if metadata.file_type().is_file() => {
+                    let actual = crate::ForeignBridge::sha_file(path).map_err(|error| {
+                        format!(
+                            "the COM type library could not be read ({error}); regenerate the binding"
+                        )
+                    })?;
+                    if actual != expected {
+                        return Err(
+                            "the COM type library differs from its provenance; regenerate the binding"
+                                .into(),
+                        );
+                    }
+                }
+                Ok(_) => {
+                    return Err("the COM type-library provenance path is not a regular file".into())
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // A generated binding is a committable release artifact. The
+                    // original file-backed TLB may not be shipped to consumers;
+                    // when it is present, its bytes are still checked above.
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "the COM type library could not be inspected ({error}); regenerate the binding"
+                    ))
+                }
+            }
+            format!("file|{}|{expected}", path.display())
+        }
+        "registry" => {
+            let guid = provenance_single(&provenance, "registry-guid")?;
+            validate_guid(guid).map_err(|error| error.to_string())?;
+            let major: u16 = provenance_single(&provenance, "registry-major")?
+                .parse()
+                .map_err(|_| "COM registry major version is invalid".to_string())?;
+            let minor: u16 = provenance_single(&provenance, "registry-minor")?
+                .parse()
+                .map_err(|_| "COM registry minor version is invalid".to_string())?;
+            let lcid: u32 = provenance_single(&provenance, "registry-lcid")?
+                .parse()
+                .map_err(|_| "COM registry locale is invalid".to_string())?;
+            format!("registry|{guid}|{major}|{minor}|{lcid}")
+        }
+        other => return Err(format!("unsupported COM binding input kind `{other}`")),
+    };
+    let cc = provenance_single(&provenance, "cc")?;
+    let ar = provenance_single(&provenance, "ar")?;
+    if cc != crate::ForeignBridge::tool_identity("cc")
+        || ar != crate::ForeignBridge::tool_identity("ar")
+    {
+        return Err(
+            "the COM binding toolchain differs from its provenance; use the pinned tools and regenerate"
+                .into(),
+        );
+    }
+    let expected_identity = com_identity(
+        lib,
+        &expected_descriptor,
+        metadata_digest,
+        generated_digest,
+        &input_record,
+        cc,
+        ar,
+    );
+    if identity != expected_identity {
+        return Err(
+            "COM binding identity differs from its provenance; regenerate the binding".into(),
+        );
+    }
+    for (name, value) in [
+        ("type-library-guid", provenance_single(&provenance, "type-library-guid")?),
+        ("class-guid", provenance_single(&provenance, "class-guid")?),
+    ] {
+        validate_guid(value)
+            .map_err(|error| format!("COM provenance `{name}` is invalid ({error})"))?;
+    }
+    if !ident(provenance_single(&provenance, "root-interface")?) {
+        return Err("COM provenance has an invalid root interface".into());
+    }
+    Ok(())
+}
+
+fn provenance_single<'a>(
+    provenance: &'a crate::ForeignBridge::Provenance,
+    name: &str,
+) -> Result<&'a str, String> {
+    match provenance.fields.get(name).map(Vec::as_slice) {
+        Some([value]) => Ok(value),
+        Some(_) => Err(format!("COM binding provenance has duplicate `{name}` fields")),
+        None => Err(format!("COM binding provenance has no `{name}` field")),
+    }
+}
+
+fn is_digest(value: &str) -> bool {
+    value.len() == 64
+        && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+        })
+}
+
+struct BuildCleanup(PathBuf);
+
+impl Drop for BuildCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn input_kind(input: &TypeLibraryInput) -> String {
+    match input {
+        TypeLibraryInput::File(_) => "file".to_string(),
+        TypeLibraryInput::Registered { .. } => "registry".to_string(),
+    }
+}
+
+fn input_record(input: &TypeLibraryInput, file: Option<&Path>) -> Result<String, BindError> {
+    match input {
+        TypeLibraryInput::File(_) => {
+            let path = file.ok_or_else(|| {
+                BindError::IO("file-backed COM input was not resolved".into())
+            })?;
+            let digest = crate::ForeignBridge::sha_file(path).map_err(BindError::IO)?;
+            Ok(format!("file|{}|{digest}", path.display()))
+        }
+        TypeLibraryInput::Registered {
+            guid,
+            major,
+            minor,
+            lcid,
+        } => Ok(format!("registry|{guid}|{major}|{minor}|{lcid}")),
+    }
+}
+
+fn com_identity(
+    lib: &str,
+    descriptor: &str,
+    metadata_digest: &str,
+    generated_digest: &str,
+    input_record: &str,
+    cc: &str,
+    ar: &str,
+) -> String {
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new(COM_BINDER_SCHEMA);
+    identity.field("language", b"com");
+    identity.field("library", lib.as_bytes());
+    identity.field("abi", format!("jet_com_{lib}").as_bytes());
+    identity.field("descriptor", descriptor.as_bytes());
+    identity.field("metadata-sha256", metadata_digest.as_bytes());
+    identity.field("generated-sha256", generated_digest.as_bytes());
+    identity.field("input", input_record.as_bytes());
+    identity.field("cc", cc.as_bytes());
+    identity.field("ar", ar.as_bytes());
+    identity.finish()
+}
+
+fn publish_archive(staged: &Path, archive: &Path) -> Result<(), BindError> {
+    let backup = archive.with_extension(format!(
+        "a.previous.{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let had_previous = archive.exists();
+    if had_previous && !archive.is_file() {
+        return Err(BindError::IO(format!(
+            "COM archive path is not a regular file: {}",
+            archive.display()
+        )));
+    }
+    if had_previous {
+        let _ = std::fs::remove_file(&backup);
+        std::fs::rename(archive, &backup).map_err(|error| {
+            BindError::IO(format!(
+                "could not stage the previous COM archive {}: {error}",
+                archive.display()
+            ))
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staged, archive) {
+        if had_previous {
+            let _ = std::fs::rename(&backup, archive);
+        }
+        let _ = std::fs::remove_file(staged);
+        return Err(BindError::IO(format!(
+            "could not publish COM archive {}: {error}",
+            archive.display()
+        )));
+    }
+    if had_previous {
+        let _ = std::fs::remove_file(backup);
+    }
+    Ok(())
 }
 
 fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
@@ -208,11 +600,20 @@ fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
         let fields = line.split('\t').collect::<Vec<_>>();
         match fields.first().copied() {
             Some("LIB") if fields.len() == 3 => {
-                name = Some(fields[1].to_string());
-                guid = Some(fields[2].to_string())
+                if name.replace(fields[1].to_string()).is_some()
+                    || guid.replace(fields[2].to_string()).is_some()
+                {
+                    return Err(BindError::Source(
+                        "the COM inspector returned duplicate library metadata".into(),
+                    ));
+                }
             }
             Some("CLASS") if fields.len() == 3 => {
-                class = Some(fields[1].to_string());
+                if class.replace(fields[1].to_string()).is_some() {
+                    return Err(BindError::Source(
+                        "the COM inspector returned duplicate coclass metadata".into(),
+                    ));
+                }
                 root = Some(project(fields[2])?)
             }
             Some("METHOD") if fields.len() >= 6 => {
@@ -224,6 +625,11 @@ fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
                 let flags: u16 = fields[4].parse().map_err(|_| {
                     BindError::Source(format!("COM member `{raw}` has invalid invocation flags"))
                 })?;
+                if !matches!(flags, 1 | 2 | 4 | 8) {
+                    return Err(BindError::Source(format!(
+                        "COM member `{raw}` has unsupported invocation flags `{flags}`"
+                    )));
+                }
                 let mut jet = project(raw)?;
                 if methods.iter().any(|m: &Method| {
                     m.interface.eq_ignore_ascii_case(&interface) && m.jet.eq_ignore_ascii_case(&jet)
@@ -250,14 +656,21 @@ fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
                     ))
                 })?;
                 let mut params = Vec::new();
+                let mut parameter_names = std::collections::HashSet::new();
                 for value in &fields[6..] {
                     let Some((n, k)) = value.split_once(':') else {
                         return Err(BindError::Source(format!(
                             "COM member `{raw}` has malformed parameter metadata"
                         )));
                     };
+                    let name = project(n)?;
+                    if !parameter_names.insert(name.clone()) {
+                        return Err(BindError::Source(format!(
+                            "COM member `{raw}` has duplicate parameter name `{name}`"
+                        )));
+                    }
                     params.push(Param {
-                        name: project(n)?,
+                        name,
                         kind: Kind::parse(k).ok_or_else(|| {
                             BindError::Source(format!(
                                 "COM member `{raw}` has unsupported parameter type `{k}`"
@@ -288,19 +701,30 @@ fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
             "the type library has no safely bindable IDispatch members".into(),
         ));
     }
-    Ok(Schema {
-        name: name.ok_or_else(|| {
+    let name = name.ok_or_else(|| {
             BindError::Source("the COM inspector omitted the library identity".into())
-        })?,
-        guid: guid.ok_or_else(|| {
+        })?;
+    let guid = guid.ok_or_else(|| {
             BindError::Source("the COM inspector omitted the library GUID".into())
-        })?,
-        class_guid: class.ok_or_else(|| {
+        })?;
+    let class_guid = class.ok_or_else(|| {
             BindError::Source("the type library has no creatable COM class".into())
-        })?,
-        root_interface: root.ok_or_else(|| {
+        })?;
+    let root_interface = root.ok_or_else(|| {
             BindError::Source("the COM class has no default automation interface".into())
-        })?,
+        })?;
+    if name.is_empty() {
+        return Err(BindError::Source(
+            "the COM inspector returned an empty library name".into(),
+        ));
+    }
+    validate_guid(&guid)?;
+    validate_guid(&class_guid)?;
+    Ok(Schema {
+        name,
+        guid,
+        class_guid,
+        root_interface,
         methods,
     })
 }
@@ -328,57 +752,93 @@ fn interfaces(s: &Schema) -> Vec<String> {
 
 fn render_jet(lib: &str, s: &Schema) -> String {
     let abi = format!("jet_com_{lib}");
-    let mut o=format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) => String = \"{abi}_dynamic\"\n");
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Com)
+        .expect("COM binder descriptor is registered")
+        .stamp();
+    let mut o = format!(
+        "// jet-ffi-descriptor={descriptor}\n#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) String = \"{abi}_dynamic\"\n"
+    );
     for m in &s.methods {
         let name = method_name(m);
         o.push_str(&format!("    fn {name}(handle: Int"));
         for p in &m.params {
-            o.push_str(&format!(", {}: {}", p.name, p.kind.jet()))
+            o.push_str(&format!(", {}: {}", p.name, p.kind.abi_jet()))
         }
         o.push(')');
         if m.result != Kind::Unit {
-            o.push_str(&format!(" => {}", m.result.jet()))
+            o.push_str(&format!(" {}", m.result.abi_jet()))
         }
         o.push_str(&format!(" = \"{abi}_{name}\"\n"));
     }
-    o.push_str(&format!(
-        "}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"
-    ));
+    o.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"));
     for interface in interfaces(s) {
         o.push_str(&format!("pub struct {interface} {{ value: Int }}\n"))
     }
-    o.push_str("pub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n");
-    o.push_str(&format!("pub fn open() => {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",s.root_interface,s.root_interface));
+    o.push_str(
+        "#Error\npub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n",
+    );
+    o.push_str(&format!(
+        "pub fn open() {} !ComError -[FFI.Com]> {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
+        s.root_interface, s.root_interface
+    ));
+    o.push_str(&format!(
+        "pub fn close(^object: {}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n",
+        s.root_interface
+    ));
     for interface in interfaces(s) {
-        o.push_str(&format!("impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"));
-        o.push_str(&format!("#Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) => DataTree !ComError {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"));
+        o.push_str(&format!(
+            "impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
+        ));
+        o.push_str(&format!(
+            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) DataTree !ComError -[FFI.Com]> {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
+        ));
     }
-    o.push_str("fn error(code: Int) => ComError {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
+    o.push_str("fn error(code: Int) ComError !Never -[]> {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
     for m in &s.methods {
         let name = method_name(m);
         o.push_str(&format!("pub fn {name}(object: {}", m.interface));
         for p in &m.params {
             o.push_str(&format!(", {}: {}", p.name, p.kind.jet()))
         }
-        o.push_str(&format!(") => {} !ComError {{\n    ", m.result.jet()));
+        if m.result == Kind::Unit {
+            o.push_str(") !ComError -[FFI.Com]> {\n    ");
+        } else {
+            o.push_str(&format!(") {} !ComError -[FFI.Com]> {{\n    ", m.result.jet()));
+        }
         if m.result != Kind::Unit {
             o.push_str("value :: ")
         }
         o.push_str(&format!("abi.{name}(object.value"));
         for p in &m.params {
-            o.push_str(&format!(", {}", p.name))
+            o.push_str(&format!(", {}", abi_call_arg(p)))
         }
         o.push_str(
             ")\n    code :: abi.take_error()\n    if code != 0 { return Err(error(code)) }\n",
         );
         if m.result == Kind::Unit {
-            o.push_str("    return Ok(Void)\n")
+            o.push_str("    return Ok()\n")
         } else {
-            o.push_str("    return Ok(value)\n")
+            match &m.result {
+                Kind::Data => o.push_str(
+                    "    value := json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n",
+                ),
+                Kind::Object(interface) => o.push_str(&format!(
+                    "    return Ok({interface}{{ value: value }})\n"
+                )),
+                _ => o.push_str("    return Ok(value)\n"),
+            }
         }
         o.push_str("}\n\n");
     }
     o
+}
+
+fn abi_call_arg(param: &Param) -> String {
+    match &param.kind {
+        Kind::Data => format!("json.to_string({})", param.name),
+        Kind::Object(_) => format!("{}.value", param.name),
+        _ => param.name.clone(),
+    }
 }
 
 fn render_c(lib: &str, s: &Schema) -> String {
@@ -443,22 +903,24 @@ const RUNTIME_C: &str = r#"#define COBJMACROS
 #include <string.h>
 #define SLOTS 256
 #define LIMIT 1048576
-typedef struct { IDispatch* value; DWORD owner; uint32_t generation; } Slot;
+typedef struct { IUnknown* value; DWORD owner; uint32_t generation; } Slot;
 static Slot slots[SLOTS]; static CRITICAL_SECTION lock; static INIT_ONCE once=INIT_ONCE_STATIC_INIT;
 static _Thread_local int64_t failed; static _Thread_local char text[LIMIT+1];
 static BOOL CALLBACK initialize(PINIT_ONCE o,PVOID p,PVOID*c){(void)o;(void)p;(void)c;InitializeCriticalSection(&lock);return TRUE;}
 static void ready(void){InitOnceExecuteOnce(&once,initialize,0,0);}
 static void fail_hr(HRESULT hr){if(hr==RPC_E_CHANGED_MODE)failed=1;else if(hr==E_INVALIDARG||hr==DISP_E_BADPARAMCOUNT||hr==DISP_E_PARAMNOTOPTIONAL)failed=3;else if(hr==DISP_E_TYPEMISMATCH||hr==DISP_E_OVERFLOW)failed=5;else if(hr==E_OUTOFMEMORY)failed=6;else failed=4;}
-static int64_t store(IDispatch*v){if(!v){failed=5;return 0;}HRESULT hr=CoInitializeEx(0,COINIT_APARTMENTTHREADED);if(FAILED(hr)){fail_hr(hr);return 0;}ready();EnterCriticalSection(&lock);for(int i=0;i<SLOTS;i++)if(!slots[i].value){slots[i].generation++;if(!slots[i].generation)slots[i].generation=1;slots[i].value=v;IDispatch_AddRef(v);slots[i].owner=GetCurrentThreadId();int64_t h=((int64_t)slots[i].generation<<16)|(i+1);LeaveCriticalSection(&lock);return h;}LeaveCriticalSection(&lock);CoUninitialize();failed=6;return 0;}
-static IDispatch* get(int64_t h){int i=(int)(h&65535)-1;uint32_t g=(uint32_t)((uint64_t)h>>16);if(i<0||i>=SLOTS){failed=2;return 0;}ready();EnterCriticalSection(&lock);IDispatch*v=slots[i].value;if(!v||slots[i].generation!=g){LeaveCriticalSection(&lock);failed=2;return 0;}if(slots[i].owner!=GetCurrentThreadId()){LeaveCriticalSection(&lock);failed=1;return 0;}IDispatch_AddRef(v);LeaveCriticalSection(&lock);return v;}
+static int64_t store(IUnknown*v){if(!v){failed=5;return 0;}ready();EnterCriticalSection(&lock);for(int i=0;i<SLOTS;i++)if(!slots[i].value){slots[i].generation++;if(!slots[i].generation)slots[i].generation=1;slots[i].value=v;IUnknown_AddRef(v);slots[i].owner=GetCurrentThreadId();int64_t h=((int64_t)slots[i].generation<<16)|(i+1);LeaveCriticalSection(&lock);return h;}LeaveCriticalSection(&lock);failed=6;return 0;}
+static IUnknown* get_unknown(int64_t h){int i=(int)(h&65535)-1;uint32_t g=(uint32_t)((uint64_t)h>>16);if(i<0||i>=SLOTS){failed=2;return 0;}ready();EnterCriticalSection(&lock);IUnknown*u=slots[i].value;if(!u||slots[i].generation!=g){LeaveCriticalSection(&lock);failed=2;return 0;}if(slots[i].owner!=GetCurrentThreadId()){LeaveCriticalSection(&lock);failed=1;return 0;}IUnknown_AddRef(u);LeaveCriticalSection(&lock);return u;}
+static IDispatch* get_dispatch(int64_t h){IUnknown*u=get_unknown(h);if(!u)return 0;IDispatch*d=0;HRESULT hr=IUnknown_QueryInterface(u,&IID_IDispatch,(void**)&d);IUnknown_Release(u);if(FAILED(hr)||!d){if(d)IDispatch_Release(d);if(SUCCEEDED(hr))hr=E_NOINTERFACE;fail_hr(hr);return 0;}return d;}
+static IDispatch* get(int64_t h){return get_dispatch(h);}
 int64_t @ABI@_take_error(void){int64_t v=failed;failed=0;return v;}
-int64_t @ABI@_open(void){failed=0;HRESULT hr=CoInitializeEx(0,COINIT_APARTMENTTHREADED);if(FAILED(hr)){fail_hr(hr);return 0;}CLSID clsid;hr=CLSIDFromString(L"@CLASS@",&clsid);if(FAILED(hr)){CoUninitialize();fail_hr(hr);return 0;}IDispatch*v=0;hr=CoCreateInstance(&clsid,0,CLSCTX_LOCAL_SERVER|CLSCTX_INPROC_SERVER,&IID_IDispatch,(void**)&v);if(FAILED(hr)){CoUninitialize();fail_hr(hr);return 0;}int64_t h=store(v);IDispatch_Release(v);CoUninitialize();return h;}
-void @ABI@_close(int64_t h){failed=0;int i=(int)(h&65535)-1;uint32_t g=(uint32_t)((uint64_t)h>>16);ready();if(i<0||i>=SLOTS){failed=2;return;}EnterCriticalSection(&lock);if(!slots[i].value||slots[i].generation!=g){LeaveCriticalSection(&lock);failed=2;return;}if(slots[i].owner!=GetCurrentThreadId()){LeaveCriticalSection(&lock);failed=1;return;}IDispatch*v=slots[i].value;slots[i].value=0;slots[i].owner=0;LeaveCriticalSection(&lock);IDispatch_Release(v);CoUninitialize();}
+int64_t @ABI@_open(void){failed=0;HRESULT hr=CoInitializeEx(0,COINIT_APARTMENTTHREADED);if(FAILED(hr)){fail_hr(hr);return 0;}CLSID clsid;hr=CLSIDFromString(L"@CLASS@",&clsid);if(FAILED(hr)){CoUninitialize();fail_hr(hr);return 0;}IUnknown*u=0;hr=CoCreateInstance(&clsid,0,CLSCTX_LOCAL_SERVER|CLSCTX_INPROC_SERVER,&IID_IUnknown,(void**)&u);if(FAILED(hr)){CoUninitialize();fail_hr(hr);return 0;}int64_t h=store(u);if(u)IUnknown_Release(u);if(!h)CoUninitialize();return h;}
+void @ABI@_close(int64_t h){failed=0;int i=(int)(h&65535)-1;uint32_t g=(uint32_t)((uint64_t)h>>16);ready();if(i<0||i>=SLOTS){failed=2;return;}EnterCriticalSection(&lock);if(!slots[i].value||slots[i].generation!=g){LeaveCriticalSection(&lock);failed=2;return;}if(slots[i].owner!=GetCurrentThreadId()){LeaveCriticalSection(&lock);failed=1;return;}IUnknown*u=slots[i].value;slots[i].value=0;slots[i].owner=0;LeaveCriticalSection(&lock);IUnknown_Release(u);CoUninitialize();}
 static void clear_args(VARIANT*a,size_t n){for(size_t i=0;i<n;i++)VariantClear(&a[i]);}
-static int invoke_member(int64_t h,DISPID id,WORD flags,VARIANT*a,UINT n,VARIANT*r){IDispatch*v=get(h);if(!v)return 0;DISPID named=DISPID_PROPERTYPUT;DISPPARAMS p={a,flags&(DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF)?&named:0,n,flags&(DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF)?1:0};EXCEPINFO ex={0};UINT bad=0;HRESULT hr=IDispatch_Invoke(v,id,&IID_NULL,LOCALE_USER_DEFAULT,flags,&p,r,&ex,&bad);IDispatch_Release(v);if(ex.bstrSource)SysFreeString(ex.bstrSource);if(ex.bstrDescription)SysFreeString(ex.bstrDescription);if(ex.bstrHelpFile)SysFreeString(ex.bstrHelpFile);if(FAILED(hr)){fail_hr(hr);return 0;}return 1;}
+static int invoke_member(int64_t h,DISPID id,WORD flags,VARIANT*a,UINT n,VARIANT*r){IDispatch*v=get_dispatch(h);if(!v)return 0;DISPID named=DISPID_PROPERTYPUT;DISPPARAMS p={a,flags&(DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF)?&named:0,n,flags&(DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF)?1:0};EXCEPINFO ex={0};UINT bad=0;HRESULT hr=IDispatch_Invoke(v,id,&IID_NULL,LOCALE_USER_DEFAULT,flags,&p,r,&ex,&bad);IDispatch_Release(v);if(ex.bstrSource)SysFreeString(ex.bstrSource);if(ex.bstrDescription)SysFreeString(ex.bstrDescription);if(ex.bstrHelpFile)SysFreeString(ex.bstrHelpFile);if(FAILED(hr)){fail_hr(hr);return 0;}return 1;}
 static BSTR utf8_bstr(const char*s){if(!s){failed=3;return 0;}int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s,-1,0,0);if(n<1){failed=3;return 0;}BSTR b=SysAllocStringLen(0,n-1);if(!b){failed=6;return 0;}if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s,-1,b,n)){SysFreeString(b);failed=3;return 0;}return b;}
 static int text_arg(const char*s,VARIANT*v){BSTR b=utf8_bstr(s);if(!b)return 0;V_VT(v)=VT_BSTR;V_BSTR(v)=b;return 1;}
-static int object_arg(int64_t h,VARIANT*v){IDispatch*d=get(h);if(!d)return 0;V_VT(v)=VT_DISPATCH;V_DISPATCH(v)=d;return 1;}
+static int object_arg(int64_t h,VARIANT*v){IDispatch*d=get_dispatch(h);if(!d)return 0;V_VT(v)=VT_DISPATCH;V_DISPATCH(v)=d;return 1;}
 typedef struct{const char*p;const char*e;} JSON;
 static void ws(JSON*j){while(j->p<j->e&&(*j->p==' '||*j->p=='\n'||*j->p=='\r'||*j->p=='\t'))j->p++;}
 static int json_string(JSON*j,BSTR*out){if(j->p>=j->e||*j->p++!='\"')return 0;char*buf=malloc((size_t)(j->e-j->p)+1);if(!buf){failed=6;return 0;}size_t n=0;while(j->p<j->e&&*j->p!='\"'){unsigned char c=(unsigned char)*j->p++;if(c=='\\'){if(j->p>=j->e){free(buf);return 0;}c=(unsigned char)*j->p++;if(c=='n')c='\n';else if(c=='r')c='\r';else if(c=='t')c='\t';else if(c!='\\'&&c!='\"'&&c!='/'){free(buf);return 0;}}if(c<0x20){free(buf);return 0;}buf[n++]=(char)c;}if(j->p>=j->e){free(buf);return 0;}j->p++;buf[n]=0;*out=utf8_bstr(buf);free(buf);return *out!=0;}
@@ -469,8 +931,7 @@ static int64_t variant_int(VARIANT*v){VARIANT x;if(!change(v,VT_I8,&x))return 0;
 static double variant_float(VARIANT*v){VARIANT x;if(!change(v,VT_R8,&x))return 0;double n=V_R8(&x);VariantClear(&x);return n;}
 static int64_t variant_bool(VARIANT*v){VARIANT x;if(!change(v,VT_BOOL,&x))return 0;int64_t n=V_BOOL(&x)!=VARIANT_FALSE;VariantClear(&x);return n;}
 static const char* bstr_text(BSTR b){int n=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,b,SysStringLen(b),0,0,0,0);if(n<0||n>LIMIT){failed=6;text[0]=0;return text;}WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,b,SysStringLen(b),text,n,0,0);text[n]=0;return text;}
-static const char* variant_text(VARIANT*v){VARIANT x;if(!change(v,VT_BSTR,&x)){text[0]=0;return text;}bstr_text(V_BSTR(&x));VariantClear(&x);return text;}
-static int64_t variant_object(VARIANT*v){IDispatch*d=0;if(V_VT(v)==VT_DISPATCH)d=V_DISPATCH(v);else if(V_VT(v)==VT_UNKNOWN&&V_UNKNOWN(v))IUnknown_QueryInterface(V_UNKNOWN(v),&IID_IDispatch,(void**)&d);else{failed=5;return 0;}int64_t h=store(d);if(V_VT(v)==VT_UNKNOWN&&d)IDispatch_Release(d);return h;}
+static int64_t variant_object(VARIANT*v){IUnknown*u=0;HRESULT hr;if(V_VT(v)==VT_DISPATCH&&V_DISPATCH(v))hr=IUnknown_QueryInterface((IUnknown*)V_DISPATCH(v),&IID_IUnknown,(void**)&u);else if(V_VT(v)==VT_UNKNOWN&&V_UNKNOWN(v))hr=IUnknown_QueryInterface(V_UNKNOWN(v),&IID_IUnknown,(void**)&u);else{failed=5;return 0;}if(FAILED(hr)||!u){if(u)IUnknown_Release(u);if(SUCCEEDED(hr))hr=E_NOINTERFACE;fail_hr(hr);return 0;}HRESULT apartment=CoInitializeEx(0,COINIT_APARTMENTTHREADED);if(FAILED(apartment)){IUnknown_Release(u);fail_hr(apartment);return 0;}int64_t h=store(u);IUnknown_Release(u);if(!h)CoUninitialize();return h;}
 typedef struct{char*p;size_t n;} Out;
 static int put(Out*o,const char*s,size_t n){if(o->n+n>LIMIT){failed=6;return 0;}memcpy(o->p+o->n,s,n);o->n+=n;return 1;}
 static int encode_variant(Out*o,VARIANT*v,int depth);
@@ -492,8 +953,8 @@ static void utf8(BSTR b,char*out,size_t cap){if(!b||WideCharToMultiByte(CP_UTF8,
 static void guid_text(REFGUID g,char*out,size_t cap){wchar_t w[40];StringFromGUID2(g,w,40);WideCharToMultiByte(CP_UTF8,0,w,-1,out,(int)cap,0,0);}
 static int info_name(ITypeInfo*info,char*out,size_t cap){BSTR b=0;HRESULT hr=ITypeInfo_GetDocumentation(info,MEMBERID_NIL,&b,0,0,0);if(FAILED(hr)||!b){out[0]=0;return 0;}utf8(b,out,cap);SysFreeString(b);return out[0]!=0;}
 static int type_token(TYPEDESC*t,ITypeInfo*owner,char*out,size_t cap){
- VARTYPE v=t->vt&~VT_BYREF;if(v&VT_ARRAY){strcpy(out,"data");return 1;}
- switch(v){case VT_EMPTY:case VT_VOID:strcpy(out,"unit");return 1;case VT_I1:case VT_I2:case VT_I4:case VT_I8:case VT_UI1:case VT_UI2:case VT_UI4:case VT_UI8:case VT_INT:case VT_UINT:strcpy(out,"int");return 1;case VT_R4:case VT_R8:strcpy(out,"float");return 1;case VT_BOOL:strcpy(out,"bool");return 1;case VT_BSTR:strcpy(out,"text");return 1;case VT_VARIANT:case VT_SAFEARRAY:strcpy(out,"data");return 1;case VT_DISPATCH:case VT_UNKNOWN:strcpy(out,"object=Object");return 1;case VT_PTR:return type_token(t->lptdesc,owner,out,cap);case VT_USERDEFINED:{ITypeInfo*r=0;TYPEATTR*a=0;if(FAILED(ITypeInfo_GetRefTypeInfo(owner,t->hreftype,&r)))return 0;if(FAILED(ITypeInfo_GetTypeAttr(r,&a))){ITypeInfo_Release(r);return 0;}int ok=0;if(a->typekind==TKIND_ENUM){strcpy(out,"int");ok=1;}else if(a->typekind==TKIND_DISPATCH||a->typekind==TKIND_INTERFACE||a->typekind==TKIND_COCLASS){char name[512];if(info_name(r,name,sizeof(name))&&strlen(name)+8<cap){snprintf(out,cap,"object=%s",name);ok=1;}}ITypeInfo_ReleaseTypeAttr(r,a);ITypeInfo_Release(r);return ok;}default:return 0;}
+ if(t->vt&VT_BYREF)return 0;VARTYPE v=t->vt;if(v&VT_ARRAY){strcpy(out,"data");return 1;}
+ switch(v){case VT_EMPTY:case VT_VOID:strcpy(out,"unit");return 1;case VT_I1:case VT_I2:case VT_I4:case VT_I8:case VT_UI1:case VT_UI2:case VT_UI4:case VT_UI8:case VT_INT:case VT_UINT:strcpy(out,"int");return 1;case VT_R4:case VT_R8:strcpy(out,"float");return 1;case VT_BOOL:strcpy(out,"bool");return 1;case VT_BSTR:strcpy(out,"text");return 1;case VT_VARIANT:case VT_SAFEARRAY:strcpy(out,"data");return 1;case VT_DISPATCH:case VT_UNKNOWN:strcpy(out,"object=Object");return 1;case VT_USERDEFINED:{ITypeInfo*r=0;TYPEATTR*a=0;if(FAILED(ITypeInfo_GetRefTypeInfo(owner,t->hreftype,&r)))return 0;if(FAILED(ITypeInfo_GetTypeAttr(r,&a))){ITypeInfo_Release(r);return 0;}int ok=0;if(a->typekind==TKIND_ENUM){strcpy(out,"int");ok=1;}else if(a->typekind==TKIND_DISPATCH||a->typekind==TKIND_INTERFACE||a->typekind==TKIND_COCLASS){char name[512];if(info_name(r,name,sizeof(name))&&strlen(name)+8<cap){snprintf(out,cap,"object=%s",name);ok=1;}}ITypeInfo_ReleaseTypeAttr(r,a);ITypeInfo_Release(r);return ok;}default:return 0;}
 }
 static int default_interface(ITypeInfo*coclass,TYPEATTR*a,char*out,size_t cap){for(UINT i=0;i<a->cImplTypes;i++){INT flags=0;HREFTYPE ref=0;ITypeInfo*info=0;if(FAILED(ITypeInfo_GetImplTypeFlags(coclass,i,&flags))||!(flags&IMPLTYPEFLAG_FDEFAULT)||(flags&IMPLTYPEFLAG_FSOURCE))continue;if(FAILED(ITypeInfo_GetRefTypeOfImplType(coclass,i,&ref))||FAILED(ITypeInfo_GetRefTypeInfo(coclass,ref,&info)))continue;int ok=info_name(info,out,cap);ITypeInfo_Release(info);if(ok)return 1;}return 0;}
 int wmain(int argc,wchar_t**argv){
@@ -503,8 +964,8 @@ int wmain(int argc,wchar_t**argv){
  TLIBATTR*la=0;if(FAILED(ITypeLib_GetLibAttr(lib,&la))){ITypeLib_Release(lib);OleUninitialize();return 4;}BSTR library=0;ITypeLib_GetDocumentation(lib,-1,&library,0,0,0);char name[512],guid[64];utf8(library,name,sizeof(name));guid_text(&la->guid,guid,sizeof(guid));printf("LIB\t%s\t%s\n",name,guid);if(library)SysFreeString(library);ITypeLib_ReleaseTLibAttr(lib,la);
  UINT count=ITypeLib_GetTypeInfoCount(lib);int found_class=0,found_method=0;
  for(UINT i=0;i<count;i++){ITypeInfo*info=0;TYPEATTR*a=0;if(FAILED(ITypeLib_GetTypeInfo(lib,i,&info))||FAILED(ITypeInfo_GetTypeAttr(info,&a))){if(info)ITypeInfo_Release(info);continue;}
-  if(a->typekind==TKIND_COCLASS&&!found_class&&(a->wTypeFlags&TYPEFLAG_FCANCREATE)){char cls[64],root[512];if(default_interface(info,a,root,sizeof(root))){guid_text(&a->guid,cls,sizeof(cls));printf("CLASS\t%s\t%s\n",cls,root);found_class=1;}}
-  if(a->typekind==TKIND_DISPATCH){char interface_name[512];if(!info_name(info,interface_name,sizeof(interface_name))){ITypeInfo_ReleaseTypeAttr(info,a);ITypeInfo_Release(info);continue;}for(UINT f=0;f<a->cFuncs;f++){FUNCDESC*d=0;if(FAILED(ITypeInfo_GetFuncDesc(info,f,&d)))continue;if(d->wFuncFlags&(FUNCFLAG_FHIDDEN|FUNCFLAG_FRESTRICTED)){ITypeInfo_ReleaseFuncDesc(info,d);continue;}BSTR names[65]={0};UINT got=0;ITypeInfo_GetNames(info,d->memid,names,65,&got);char member[512];utf8(got?names[0]:0,member,sizeof(member));TYPEDESC*ret=&d->elemdescFunc.tdesc;int retval=-1,bad=member[0]==0;for(UINT p=0;p<d->cParams;p++){USHORT flags=d->lprgelemdescParam[p].paramdesc.wParamFlags;if(flags&PARAMFLAG_FRETVAL){retval=(int)p;ret=&d->lprgelemdescParam[p].tdesc;}else if(flags&PARAMFLAG_FOUT)bad=1;}char result[520];if(!type_token(ret,info,result,sizeof(result)))bad=1;char kinds[64][520];for(UINT p=0;p<d->cParams;p++)if((int)p!=retval&&!type_token(&d->lprgelemdescParam[p].tdesc,info,kinds[p],sizeof(kinds[p])))bad=1;if(!bad){printf("METHOD\t%s\t%s\t%ld\t%u\t%s",interface_name,member,(long)d->memid,(unsigned)d->invkind,result);for(UINT p=0;p<d->cParams;p++)if((int)p!=retval){char param[512];if(p+1<got)utf8(names[p+1],param,sizeof(param));else snprintf(param,sizeof(param),"arg%u",p+1);printf("\t%s:%s",param,kinds[p]);}putchar('\n');found_method=1;}for(UINT n=0;n<got;n++)if(names[n])SysFreeString(names[n]);ITypeInfo_ReleaseFuncDesc(info,d);}}
+  if(a->typekind==TKIND_COCLASS&&!found_class&&(a->wTypeFlags&TYPEFLAG_FCANCREATE)&&!(a->wTypeFlags&(TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED))){char cls[64],root[512];if(default_interface(info,a,root,sizeof(root))){guid_text(&a->guid,cls,sizeof(cls));printf("CLASS\t%s\t%s\n",cls,root);found_class=1;}}
+  if((a->typekind==TKIND_DISPATCH||(a->typekind==TKIND_INTERFACE&&(a->wTypeFlags&TYPEFLAG_FDUAL)))&&!(a->wTypeFlags&(TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED))){char interface_name[512];if(!info_name(info,interface_name,sizeof(interface_name))){ITypeInfo_ReleaseTypeAttr(info,a);ITypeInfo_Release(info);continue;}for(UINT f=0;f<a->cFuncs;f++){FUNCDESC*d=0;if(FAILED(ITypeInfo_GetFuncDesc(info,f,&d)))continue;if(d->wFuncFlags&(FUNCFLAG_FHIDDEN|FUNCFLAG_FRESTRICTED)||d->cParams>64){ITypeInfo_ReleaseFuncDesc(info,d);continue;}BSTR names[65]={0};UINT got=0;ITypeInfo_GetNames(info,d->memid,names,65,&got);char member[512];utf8(got?names[0]:0,member,sizeof(member));TYPEDESC*ret=&d->elemdescFunc.tdesc;int retval=-1,bad=member[0]==0;for(UINT p=0;p<d->cParams;p++){USHORT flags=d->lprgelemdescParam[p].paramdesc.wParamFlags;if(flags&PARAMFLAG_FRETVAL){retval=(int)p;ret=&d->lprgelemdescParam[p].tdesc;}else if(flags&PARAMFLAG_FOUT)bad=1;}char result[520];if(!type_token(ret,info,result,sizeof(result)))bad=1;char kinds[64][520];for(UINT p=0;p<d->cParams;p++)if((int)p!=retval&&!type_token(&d->lprgelemdescParam[p].tdesc,info,kinds[p],sizeof(kinds[p])))bad=1;if(!bad){printf("METHOD\t%s\t%s\t%ld\t%u\t%s",interface_name,member,(long)d->memid,(unsigned)d->invkind,result);for(UINT p=0;p<d->cParams;p++)if((int)p!=retval){char param[512];if(p+1<got)utf8(names[p+1],param,sizeof(param));else snprintf(param,sizeof(param),"arg%u",p+1);printf("\t%s:%s",param,kinds[p]);}putchar('\n');found_method=1;}for(UINT n=0;n<got;n++)if(names[n])SysFreeString(names[n]);ITypeInfo_ReleaseFuncDesc(info,d);}}
   ITypeInfo_ReleaseTypeAttr(info,a);ITypeInfo_Release(info);
  }
  ITypeLib_Release(lib);OleUninitialize();return found_class&&found_method?0:5;
@@ -523,22 +984,36 @@ mod tests {
         let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n";
         let schema = super::parse_schema(metadata).unwrap();
         let jet = super::render_jet("office", &schema);
-        assert!(jet.contains("pub fn open() => Application !ComError"));
+        assert!(jet.contains("pub fn open() Application !ComError -[FFI.Com]>"));
         assert!(jet.contains("impl Application.Close"));
         assert!(jet.contains("fn close(^self)"));
         assert!(!jet.contains("pub fn close_Application"));
-        assert!(jet
-            .contains("pub fn Application_Workbooks(object: Application) => Workbooks !ComError"));
         assert!(jet.contains(
-            "pub fn Workbooks_Open_Book(object: Workbooks, path: String) => Workbook !ComError"
+            "pub fn Application_Workbooks(object: Application) Workbooks !ComError -[FFI.Com]>"
         ));
-        assert!(jet.contains("pub fn Range_Values(object: Range) => DataTree !ComError"));
-        assert!(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_Application"));
+        assert!(jet.contains(
+            "pub fn Workbooks_Open_Book(object: Workbooks, path: String) Workbook !ComError -[FFI.Com]>"
+        ));
+        assert!(jet.contains(
+            "pub fn Range_Values(object: Range) DataTree !ComError -[FFI.Com]>"
+        ));
+        assert!(jet.contains(
+            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_Application"
+        ));
         let c = super::render_c("office", &schema);
         assert!(c.contains("jet_com_office_Workbooks_Open_Book"));
         for needle in [
             "CoInitializeEx",
+            "HRESULT apartment=CoInitializeEx",
             "CoCreateInstance",
+            "&IID_IUnknown",
+            "get_unknown",
+            "get_dispatch",
+            "IUnknown_AddRef",
+            "IUnknown_Release",
+            "VT_UNKNOWN",
+            "IUnknown_Release(u);if(!h)CoUninitialize();return h;",
+            "if(!h)CoUninitialize();return h;",
             "IDispatch_Invoke",
             "SafeArrayGetElement",
             "VariantChangeType",
@@ -548,6 +1023,21 @@ mod tests {
             assert!(c.contains(needle), "missing {needle}")
         }
     }
+
+    #[test]
+    fn discovery_covers_dual_automation_interfaces() {
+        assert!(super::DISCOVERY_C.contains("TKIND_INTERFACE"));
+        assert!(super::DISCOVERY_C.contains("TYPEFLAG_FDUAL"));
+        assert!(super::DISCOVERY_C.contains("TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED"));
+    }
+
+    #[test]
+    fn schema_rejects_duplicate_projected_parameter_names() {
+        let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tOpen\t1\t1\tunit\tbook-name:text\tbook_name:text\n";
+        let error = super::parse_schema(metadata).unwrap_err();
+        assert!(error.to_string().contains("duplicate parameter name"));
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn generated_windows_sources_cross_compile_with_winegcc() {

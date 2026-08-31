@@ -619,6 +619,12 @@ impl<'a> StateCtx<'a> {
     /// return the to-state the produced value starts in.
     fn entry_state_of(&self, init: &Expr) -> Option<String> {
         match init {
+            Expr::OrFallback { value, .. }
+            | Expr::Copy(value, _)
+            | Expr::Place(value, _, _)
+            | Expr::Paren(value, _)
+            | Expr::Ok(value, _)
+            | Expr::Try(value, _, _, _) => self.entry_state_of(value),
             // D-CONC-UNIT1: the canonical spawn expression enters the task
             // lifecycle in `Running`.
             Expr::MethodCall { method, .. }
@@ -847,14 +853,23 @@ impl<'a> StateCtx<'a> {
     /// tracked transition. Used to thread `r := r.confirm()` rebinding.
     fn result_state_of(&self, e: &Expr) -> Option<String> {
         match e {
-            Expr::OrFallback { value, .. } | Expr::Paren(value, _) => self.result_state_of(value),
+            Expr::OrFallback { value, .. }
+            | Expr::Copy(value, _)
+            | Expr::Place(value, _, _)
+            | Expr::Paren(value, _)
+            | Expr::Ok(value, _)
+            | Expr::Try(value, _, _, _) => self.result_state_of(value),
             Expr::MethodCall {
                 receiver,
                 method,
                 recv_type,
                 ..
             } => {
-                let ty = recv_type.as_ref()?;
+                let static_ty = recv_type
+                    .is_none()
+                    .then(|| Self::static_method_type_name(receiver))
+                    .flatten();
+                let ty = recv_type.as_deref().or(static_ty.as_deref())?;
                 // A task transition discharges the handle; its result is not
                 // another task row.
                 if ty == crate::Syntax::TYPE_TASK {
@@ -868,14 +883,12 @@ impl<'a> StateCtx<'a> {
                 ) {
                     return None;
                 }
-                // Only meaningful when the receiver is a tracked local.
-                if let Expr::Ident(_, _) = receiver.as_ref() {
-                    Some(to.clone())
-                } else {
-                    None
-                }
+                // A transition's result carries the to-state even when the
+                // receiver is not a tracked local (for example, a static
+                // entry constructor).
+                Some(to.clone())
             }
-            Expr::Call(Call { name, args, .. }) => {
+            Expr::Call(Call { name, .. }) => {
                 let (_, to) = self.tbl.fn_transitions.get(name)?;
                 if !crate::Sema::knowledge_gate_allows(
                     KnowledgePlane::State,
@@ -883,17 +896,14 @@ impl<'a> StateCtx<'a> {
                 ) {
                     return None;
                 }
-                // The first argument is the tracked value.
-                if let Some(first) = args.first() {
-                    if let Expr::Ident(_, _) = &first.expr {
-                        return Some(to.clone());
-                    }
-                }
-                None
+                // A transition's result carries the to-state regardless of
+                // whether its first argument is a local binding.
+                Some(to.clone())
             }
             _ => None,
         }
     }
+
 
     /// Walk an expression for typestate violations and apply in-place transitions
     /// (a transition call in expression-statement position advances the receiver).
@@ -1100,6 +1110,7 @@ impl<'a> StateCtx<'a> {
             | Expr::Int(..)
             | Expr::Float(..)
             | Expr::Bool(..)
+            | Expr::Unit(..)
             | Expr::Char(..)
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
@@ -1312,10 +1323,10 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
     }
     let suggestion = best.filter(|_| !ambiguous).map(|(candidate, _)| candidate);
     let fix = if let Some(c) = suggestion {
-        format!("did you mean `{c}`?  Check the `state {type_name} {{ … }}` block for valid names")
+        format!("did you mean `{c}`? Check the `struct {type_name} {{ state {{ … }} }}` declaration for valid names")
     } else {
         format!(
-            "add `{state}` to the `state {type_name} {{ … }}` declaration, or correct the spelling"
+            "add `{state}` inside `struct {type_name} {{ state {{ … }} }}`, or correct the spelling"
         )
     };
     let mut diagnostic = Diagnostic::error(

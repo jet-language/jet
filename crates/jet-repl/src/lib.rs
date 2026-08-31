@@ -2422,6 +2422,19 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
     let n = diags.len();
     eprintln!("{} problem{} found", n, if n == 1 { "" } else { "s" });
 }
+/// REPL wrappers add generated source before the user's input, but diagnostics
+/// render against the input line alone. Shift every returned span back to that
+/// source before rendering; checked subtraction preserves zero-width spans and
+/// clamps only diagnostics that point into the generated wrapper.
+fn reanchor_repl_diagnostic(diagnostic: &mut Diagnostic, input_start: usize) {
+    let Some(span) = diagnostic.span else {
+        return;
+    };
+    let start = span.start.checked_sub(input_start).unwrap_or(0);
+    let end = span.end.checked_sub(input_start).unwrap_or(start);
+    diagnostic.span = Some(crate::Diagnostics::Span::new(start, end.max(start)));
+}
+
 
 // ── main REPL loop ─────────────────────────────────────────────────────────
 
@@ -2756,10 +2769,21 @@ pub(crate) fn execute_line(
         }
 
         InputKind::Stmts(stmts, suppress, check_src) => {
+            // `stmts` came from the generated wrapper. The first statement
+            // marks that wrapper's body start; `check_src` tells us whether
+            // the body begins with an echo sentinel or the user's text.
+            let input_start = stmts
+                .first()
+                .map(|stmt| stmt.span().start)
+                .unwrap_or(0)
+                .saturating_add(check_src.find(trimmed).unwrap_or(0));
             let (checked_stmts, checked_core_imports) =
                 match type_check_stmts(session, &stmts, session.step, &check_src) {
                     Ok(checked) => checked,
-                    Err(errors) => {
+                    Err(mut errors) => {
+                        for diagnostic in &mut errors {
+                            reanchor_repl_diagnostic(diagnostic, input_start);
+                        }
                         if !quiet {
                             render_diags(&step_src, trimmed, &errors, color);
                         }
@@ -2775,6 +2799,7 @@ pub(crate) fn execute_line(
                         return false;
                     }
                 };
+
 
             // D-REPL8=A: detect which session bindings are moved by this input.
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
@@ -2933,11 +2958,12 @@ pub(crate) fn execute_line(
                 }
                 Err(crate::Comptime::ReplStepError::Diagnostic(d)) => {
                     let d = restore_move_diagnostic(d, &session.moved_names);
-                    let d = if d.code == "E2202" {
+                    let mut d = if d.code == "E2202" {
                         e1801(REPL_FUEL_BUDGET)
                     } else {
                         d
                     };
+                    reanchor_repl_diagnostic(&mut d, input_start);
                     if !quiet {
                         render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
                     }

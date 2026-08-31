@@ -75,7 +75,9 @@ fn blake2b(data: &[u8], out_len: usize) -> Vec<u8> {
     h[0] ^= 0x0101_0000 ^ (out_len as u64);
     let mut offset = 0usize;
     let mut t = 0u128;
-    while offset + 128 <= data.len() {
+    // An exact final block is already the last block. Passing it through the
+    // non-final path and then compressing an empty block changes the digest.
+    while offset + 128 < data.len() {
         let mut block = [0u8; 128];
         block.copy_from_slice(&data[offset..offset + 128]);
         t += 128;
@@ -459,15 +461,31 @@ mod tests {
     }
 
     #[test]
-    fn rfc9106_section_5_3_argon2id() {
-        // RFC 9106 §5.3 with secret/ad — Jet expert path omits secret/ad (zeros).
-        // Use argon2 crate known-answer for expert params: m=8192 t=1 p=1 out=32
-        // with password/salt from a fixed vector we assert round-trip via seal/open style.
+    fn blake2b_exact_block_matches_standard_kat() {
+        let actual = blake2b(&[0; 128], 64);
+        let expected = [
+            0x86, 0x59, 0x39, 0xe1, 0x20, 0xe6, 0x80, 0x54, 0x38, 0x47, 0x88, 0x4a, 0xfb,
+            0x73, 0x9a, 0xe4, 0x25, 0x0c, 0xf3, 0x72, 0x65, 0x30, 0x78, 0xa0, 0x65, 0xcd,
+            0xcf, 0xfa, 0x4c, 0xaf, 0x79, 0x8e, 0x6d, 0x46, 0x2b, 0x65, 0xd6, 0x58, 0xfc,
+            0x16, 0x57, 0x82, 0x64, 0x0e, 0xde, 0xd7, 0x09, 0x63, 0x44, 0x9a, 0xe1, 0x50,
+            0x0f, 0xb0, 0x0f, 0x24, 0x98, 0x1d, 0x77, 0x27, 0xe2, 0x2c, 0x41,
+        ];
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn argon2id_matches_standard_known_answer() {
         let password = b"password";
         let salt = b"somesalt";
-        let out = hash(password, salt, 8_192, 1, 1, 32).expect("argon2id");
-        assert_eq!(out.len(), 32);
-        // Determinism
-        assert_eq!(hash(password, salt, 8_192, 1, 1, 32).unwrap(), out);
+        let out = hash(password, salt, 65_536, 2, 1, 32).expect("argon2id");
+        let expected = vec![
+            0x09, 0x31, 0x61, 0x15, 0xd5, 0xcf, 0x24, 0xed, 0x5a, 0x15, 0xa3, 0x1a,
+            0x3b, 0xa3, 0x26, 0xe5, 0xcf, 0x32, 0xed, 0xc2, 0x47, 0x02, 0x98, 0x7c,
+            0x02, 0xb6, 0x56, 0x6f, 0x61, 0x91, 0x3c, 0xf7,
+        ];
+        assert_eq!(
+            out,
+            expected
+        );
     }
 }

@@ -30,6 +30,15 @@ fn jet_jit_fmt_decimal_int(value: i64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal_int(&value, precision))
 }
 
+fn jet_jit_fmt_grouped(value: f64, precision: i64) -> i64 {
+    alloc_string(fmt_rt::jet_fmt_grouped(value, precision))
+}
+
+fn jet_jit_fmt_grouped_int(value: i64, precision: i64) -> i64 {
+    let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+    alloc_string(fmt_rt::jet_fmt_grouped_int(&value, precision))
+}
+
 fn jet_jit_fmt_hex(value: i64, width: i64) -> i64 {
     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
     alloc_string(fmt_rt::jet_fmt_hex_decimal(&value, width))
@@ -123,6 +132,8 @@ host_fns! {
     pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
     decimal_int: "jet_jit_fmt_decimal_int" => jet_jit_fmt_decimal_int: sig_i64_i64;
+    grouped: "jet_jit_fmt_grouped" => jet_jit_fmt_grouped: sig_f64_i64;
+    grouped_int: "jet_jit_fmt_grouped_int" => jet_jit_fmt_grouped_int: sig_i64_i64;
     hex: "jet_jit_fmt_hex" => jet_jit_fmt_hex: sig_i64_i64;
     sci: "jet_jit_fmt_sci" => jet_jit_fmt_sci: sig_f64_i64;
     percent: "jet_jit_fmt_percent" => jet_jit_fmt_percent: sig_f64_i64;

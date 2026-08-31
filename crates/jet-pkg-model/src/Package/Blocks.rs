@@ -310,6 +310,51 @@ pub enum DepSource {
     },
 }
 
+/// Render one `DepSource` for a public package view.
+///
+/// Dependency declarations stay useful to tools, but transport credentials
+/// must never cross the public projection. Git URL user information and
+/// query/fragment text are removed; all other dependency forms retain the
+/// ordinary [`dep_display`] spelling.
+pub fn dep_display_redacted(source: &DepSource) -> String {
+    match source {
+        DepSource::Git { url, selector } => {
+            let (field, value) = match selector {
+                crate::Manifest::GitSelector::Tag(value) => ("tag", value),
+                crate::Manifest::GitSelector::Branch(value) => ("branch", value),
+                crate::Manifest::GitSelector::Rev(value) => ("rev", value),
+            };
+            format!(
+                "{{ git: {:?}, {field}: {value:?} }}",
+                redact_dependency_url(url)
+            )
+        }
+        _ => dep_display(source),
+    }
+}
+
+fn redact_dependency_url(value: &str) -> String {
+    let value = value.split(['?', '#']).next().unwrap_or(value);
+    let Some(separator) = value.find("://") else {
+        return value.to_string();
+    };
+    let authority_start = separator + 3;
+    let authority_end = value[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|offset| authority_start + offset)
+        .unwrap_or(value.len());
+    let authority = &value[authority_start..authority_end];
+    let Some(at) = authority.rfind('@') else {
+        return value.to_string();
+    };
+    format!(
+        "{}{}{}",
+        &value[..authority_start],
+        &authority[at + 1..],
+        &value[authority_end..]
+    )
+}
+
 /// Render one `DepSource` back to its display/audit string form.
 pub fn dep_display(source: &DepSource) -> String {
     match source {
@@ -420,20 +465,49 @@ pub(super) fn validate_dependency_name(name: &str) -> bool {
         && name != ".."
         && !name.contains(['/', '\\', ':'])
         && !name.chars().any(char::is_control)
-        && matches!(Path::new(name).components().next(), Some(Component::Normal(_)))
+        && matches!(
+            Path::new(name).components().next(),
+            Some(Component::Normal(_))
+        )
         && Path::new(name).components().nth(1).is_none()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_dependency_name;
+    use super::{dep_display_redacted, validate_dependency_name, DepSource};
 
     #[test]
     fn dependency_names_reject_path_components() {
-        for name in ["../escape", "..", "escape/name", r"escape\name", "escape:name"] {
-            assert!(!validate_dependency_name(name), "accepted unsafe name: {name}");
+        for name in [
+            "../escape",
+            "..",
+            "escape/name",
+            r"escape\name",
+            "escape:name",
+        ] {
+            assert!(
+                !validate_dependency_name(name),
+                "accepted unsafe name: {name}"
+            );
         }
         assert!(validate_dependency_name("safe-name"));
+    }
+
+    #[test]
+    fn public_dependency_display_redacts_git_credentials_and_parameters() {
+        let source = DepSource::Git {
+            url: "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private"
+                .to_string(),
+            selector: crate::Manifest::GitSelector::Rev("abc123".to_string()),
+        };
+        let display = dep_display_redacted(&source);
+        assert_eq!(
+            display,
+            r#"{ git: "https://example.test/acme/tool", rev: "abc123" }"#
+        );
+        assert!(!display.contains("build-secret"));
+        assert!(!display.contains("query-secret"));
+        assert!(!display.contains("private"));
     }
 }
 
@@ -1325,17 +1399,34 @@ pub(super) fn parse_policy(
                 replacement: format!("authority.{name}"),
             });
         }
+        // D-TEAMPOLICY1=A: these controls belong to the package policy
+        // namespace, not the source PolicyKey ladder. `unsafe` is also a
+        // source gate name, so skip it before PolicyKey parsing.
+        if package_only_fields
+            && matches!(
+                name.as_str(),
+                Syntax::POLICY_FIELD_EFFECTS
+                    | Syntax::POLICY_FIELD_UNSAFE
+                    | Syntax::POLICY_FIELD_EXPERT
+                    | Syntax::POLICY_FIELD_DEPS
+            )
+        {
+            continue;
+        }
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
             let replacement = match name.as_str() {
                 "no_alloc" => Some("`authority: .{ holds: { deny: [Mem.Alloc] } }`".to_string()),
                 "zero_rc" => Some("`authority: .{ holds: { deny: [Mem.Rc] } }`".to_string()),
-                "arena_bounded" => raw.parse::<u64>().ok().filter(|bytes| *bytes > 0).map(
-                    |bytes| {
-                        format!(
+                "arena_bounded" => {
+                    raw.parse::<u64>()
+                        .ok()
+                        .filter(|bytes| *bytes > 0)
+                        .map(|bytes| {
+                            format!(
                             "`authority: .{{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`"
                         )
-                    },
-                ),
+                        })
+                }
                 _ => None,
             };
             if let Some(replacement) = replacement {
@@ -1395,10 +1486,10 @@ pub(super) fn parse_policy(
     }
     Ok(out)
 }
-
-/// Parse the package-policy fields that govern package metadata rather than
-/// source-level policy declarations. These fields stay in the one `policy:`
-/// namespace but are carried as typed package facts for the resolver.
+/// Parse the package-policy fields that govern package metadata and team
+/// ceilings rather than source-level policy declarations. These fields stay
+/// in the one `policy:` namespace but are carried as typed package facts for
+/// the resolver.
 pub(super) fn parse_package_policy_surface(
     body: &str,
 ) -> Result<
@@ -1406,17 +1497,95 @@ pub(super) fn parse_package_policy_surface(
         Option<Vec<String>>,
         Vec<(String, Vec<String>)>,
         Vec<super::PackagePolicyException>,
+        BTreeMap<String, BTreeSet<String>>,
+        Option<Vec<String>>,
+        Option<bool>,
+        Option<Vec<String>>,
     ),
     PackageParseError,
 > {
     let mut licenses = None;
     let mut source_maps = Vec::new();
     let mut exceptions = Vec::new();
+    let mut effects = BTreeMap::new();
+    let mut unsafe_paths = None;
+    let mut expert = None;
+    let mut deps = None;
     let mut seen_sources = HashSet::new();
     let mut sources_seen = false;
     let mut exceptions_seen = false;
+    let mut effects_seen = false;
+    let mut unsafe_seen = false;
+    let mut expert_seen = false;
+    let mut deps_seen = false;
     for (name, raw) in key_value_entries(body)? {
         match name.as_str() {
+            Syntax::POLICY_FIELD_EFFECTS => {
+                if effects_seen {
+                    return Err(bad_policy("`policy.effects` is declared more than once"));
+                }
+                effects_seen = true;
+                let effects_body = record_value_body(&raw, "policy.effects")?;
+                let mut paths_seen = HashSet::new();
+                for (raw_path, ceiling) in key_value_entries(effects_body)? {
+                    let path = parse_policy_path(&raw_path, "policy.effects")?;
+                    if !paths_seen.insert(path.clone()) {
+                        return Err(bad_policy(format!(
+                            "`policy.effects.{path}` is declared more than once"
+                        )));
+                    }
+                    effects.insert(
+                        path.clone(),
+                        parse_effect_ceiling(&ceiling, &format!("policy.effects.{path}"))?,
+                    );
+                }
+            }
+            Syntax::POLICY_FIELD_UNSAFE => {
+                if unsafe_seen {
+                    return Err(bad_policy("`policy.unsafe` is declared more than once"));
+                }
+                unsafe_seen = true;
+                let value = raw.trim();
+                unsafe_paths = Some(if value == ".Deny" {
+                    Vec::new()
+                } else if let Some(list) = value
+                    .strip_prefix(".Paths(")
+                    .and_then(|value| value.strip_suffix(')'))
+                {
+                    parse_policy_path_list(list, "policy.unsafe")?
+                } else {
+                    return Err(bad_policy(
+                        "`policy.unsafe` must be `.Deny` or `.Paths([\"src/audited\"])`",
+                    ));
+                });
+            }
+            Syntax::POLICY_FIELD_EXPERT => {
+                if expert_seen {
+                    return Err(bad_policy("`policy.expert` is declared more than once"));
+                }
+                expert_seen = true;
+                expert = Some(match raw.trim() {
+                    ".Deny" => false,
+                    ".Allow" => true,
+                    _ => return Err(bad_policy("`policy.expert` must be `.Deny` or `.Allow`")),
+                });
+            }
+            Syntax::POLICY_FIELD_DEPS => {
+                if deps_seen {
+                    return Err(bad_policy("`policy.deps` is declared more than once"));
+                }
+                deps_seen = true;
+                let value = raw.trim();
+                let Some(list) = value
+                    .strip_prefix(".List(")
+                    .and_then(|value| value.strip_suffix(')'))
+                else {
+                    return Err(bad_policy(
+                        "`policy.deps` must use the canonical `.List([\"dependency\"])` allow-list",
+                    ));
+                };
+                deps = Some(parse_dependency_policy_list(list)?);
+            }
             Syntax::POLICY_FIELD_LICENSES => {
                 if licenses.is_some() {
                     return Err(bad_policy("`policy.licenses` is declared more than once"));
@@ -1500,7 +1669,159 @@ pub(super) fn parse_package_policy_surface(
             _ => {}
         }
     }
-    Ok((licenses, source_maps, exceptions))
+    Ok((
+        licenses,
+        source_maps,
+        exceptions,
+        effects,
+        unsafe_paths,
+        expert,
+        deps,
+    ))
+}
+
+fn record_value_body<'a>(raw: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
+    let value = raw.trim();
+    let Some(open) = value.find('{') else {
+        return Err(bad_policy(format!("`{field}` must be a record")));
+    };
+    let Some(close) = value.rfind('}') else {
+        return Err(bad_policy(format!("`{field}` is missing `}}`")));
+    };
+    if !value[..open].trim().is_empty() && value[..open].trim() != "." {
+        return Err(bad_policy(format!("`{field}` must be a record")));
+    }
+    if !value[close + 1..].trim().is_empty() {
+        return Err(bad_policy(format!("`{field}` has trailing content")));
+    }
+    Ok(&value[open + 1..close])
+}
+
+fn parse_policy_path(raw: &str, field: &str) -> Result<String, PackageParseError> {
+    let raw = raw.trim();
+    if raw.len() < 2 || !raw.starts_with('"') || !raw.ends_with('"') {
+        return Err(bad_policy(format!(
+            "`{field}` paths must be quoted project-relative paths"
+        )));
+    }
+    let value = unquote(raw);
+    if value.is_empty() || value.contains(['\\', '*', '?']) {
+        return Err(bad_policy(format!(
+            "`{field}` contains an invalid project-relative path"
+        )));
+    }
+    let mut components = Vec::new();
+    for component in Path::new(&value).components() {
+        match component {
+            Component::Normal(component) => {
+                let Some(component) = component.to_str() else {
+                    return Err(bad_policy(format!(
+                        "`{field}` contains a non-UTF-8 path component"
+                    )));
+                };
+                if component.chars().any(char::is_control) {
+                    return Err(bad_policy(format!(
+                        "`{field}` contains an invalid project-relative path"
+                    )));
+                }
+                components.push(component.to_string());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(bad_policy(format!(
+                    "`{field}` must stay within the project root"
+                )));
+            }
+        }
+    }
+    if components.is_empty() {
+        Ok(".".to_string())
+    } else {
+        Ok(components.join("/"))
+    }
+}
+
+fn parse_policy_path_list(raw: &str, field: &str) -> Result<Vec<String>, PackageParseError> {
+    let inner = raw
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| bad_policy(format!("`{field}` must contain a path list")))?;
+    let mut paths = BTreeSet::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return Err(bad_policy(format!(
+                "`{field}` cannot contain an empty path"
+            )));
+        }
+        let path = parse_policy_path(entry, field)?;
+        paths.insert(path);
+    }
+    Ok(paths.into_iter().collect())
+}
+
+fn parse_effect_ceiling(raw: &str, field: &str) -> Result<BTreeSet<String>, PackageParseError> {
+    let inner = raw
+        .trim()
+        .strip_prefix("-[")
+        .and_then(|value| value.strip_suffix("]>"))
+        .ok_or_else(|| {
+            bad_policy(format!(
+                "`{field}` must be an effect ceiling such as `-[]>` or `-[IO.Net]>`"
+            ))
+        })?;
+    let mut effects = BTreeSet::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return Err(bad_policy(format!(
+                "`{field}` cannot contain an empty effect"
+            )));
+        }
+        if entry.contains('(') {
+            return Err(bad_policy(format!(
+                "`{field}` accepts only positive effect names, not parameterized rights"
+            )));
+        }
+        let Some(effect) = crate::Sema::parse_effect_name(entry) else {
+            return Err(bad_policy(format!(
+                "`{entry}` is not a registered effect name for `{field}`"
+            )));
+        };
+        effects.insert(effect.to_string());
+        if effect == "Panic" {
+            return Err(bad_policy(
+                "`Panic` is deny-only and cannot appear in a positive effect ceiling",
+            ));
+        }
+    }
+    Ok(effects)
+}
+
+fn parse_dependency_policy_list(raw: &str) -> Result<Vec<String>, PackageParseError> {
+    let inner = raw
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| bad_policy("`policy.deps` must contain a dependency-name list"))?;
+    let mut dependencies = BTreeSet::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return Err(bad_policy(
+                "`policy.deps` cannot contain an empty dependency",
+            ));
+        }
+        let dependency = unquote(entry);
+        if !validate_dependency_name(&dependency) {
+            return Err(bad_policy(format!(
+                "`policy.deps` name `{dependency}` must be one safe path component"
+            )));
+        }
+        dependencies.insert(dependency);
+    }
+    Ok(dependencies.into_iter().collect())
 }
 
 fn parse_policy_exceptions(
@@ -2140,4 +2461,16 @@ fn word_at(bytes: &[u8], at: usize, word: &[u8]) -> bool {
 
 fn is_ident_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+#[cfg(test)]
+mod security_tests {
+    #[test]
+    fn build_profile_rejects_retired_environment_payload() {
+        let hostile = r#"release: Build.{ optimize: "full", env: "RUSTFLAGS=--cfg=hostile; touch pwned" }"#;
+        assert!(
+            super::parse_build(hostile).is_err(),
+            "retired build-profile environment data must not reach rustc"
+        );
+    }
 }

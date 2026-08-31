@@ -1141,8 +1141,11 @@ fn jet_new_creates_project() {
     );
     let source = fs::read_to_string(&run).unwrap();
     assert!(
-        source.contains("fn run()") && source.contains("print("),
-        "jet new must emit an executable fn run template: {source}"
+        source.contains("#CLI")
+            && source.contains("struct GreetingArgs")
+            && source.contains("fn run(args: GreetingArgs)")
+            && source.contains("print("),
+        "jet new must emit the typed CLI starter: {source}"
     );
     let explicit = Command::new(&jet)
         .args(["run", "run.jet"])
@@ -1249,6 +1252,7 @@ fn bare_package_project(label: &str, jet: &Path) -> PathBuf {
         String::from_utf8_lossy(&created.stdout),
         String::from_utf8_lossy(&created.stderr)
     );
+    fs::write(dir.join("run.jet"), "fn run() {}\n").unwrap();
     dir
 }
 
@@ -1288,7 +1292,42 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
 }
 
 #[test]
-fn bare_jet_test_reports_no_tests_once_for_a_testless_package() {
+fn jet_test_package_directory_aggregates_mixed_modules() {
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("package_directory", &jet);
+    fs::write(dir.join("helper.jet"), "fn helper() Int -> 1\n").unwrap();
+    fs::write(
+        dir.join("math.jet"),
+        "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(&jet)
+        .args(["test", dir.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "mixed package directory failed:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("mixed package test: pass"),
+        "test-bearing module never ran:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("E0601"),
+        "test-free package modules must not emit E0601:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_test_package_directory_reports_no_tests_once() {
     // #2066 criterion 2: E0601 fires only when the whole package has zero
     // `#Test` blocks — once for the package, not once per member file.
     let jet = jet_bin();
@@ -1298,7 +1337,7 @@ fn bare_jet_test_reports_no_tests_once_for_a_testless_package() {
     let dir = bare_package_project("bare_testless", &jet);
     fs::write(dir.join("math.jet"), "fn double(n: Int) Int -> (n * 2)\n").unwrap();
     let out = Command::new(&jet)
-        .arg("test")
+        .args(["test", dir.to_str().unwrap()])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -1677,4 +1716,105 @@ fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
     );
 
     let _ = fs::remove_dir_all(&corpus);
+}
+
+#[test]
+fn jet_test_harness_keeps_helper_functions_on_their_own_error_family() {
+    // #2350: `--test` emission used a build-wide `test_mode` flag to pick the
+    // failure representation, so an ordinary function that happens to live in a
+    // file with `#Test` blocks emitted `return Err(<String>)` for `assert`,
+    // `assert_eq`, and `?? panic(…)`. Those functions do not return
+    // `Result<_, String>`, so the generated Rust failed to build and the whole
+    // harness never ran. Only `jet_test_N`/`jet_prop_N` carry the String ABI;
+    // every other function keeps the same stop it has under `jet run`.
+    // The same emission also bound both `assert_eq` operands by value, which
+    // moved a non-Copy value out of a borrowed parameter (E0507); they are read
+    // windows now, so a helper may compare its borrowed arguments.
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_test_helper_family_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("helpers.jet");
+    fs::write(
+        &source,
+        r#"#Error
+struct HelperError {
+    message: String
+}
+
+fn first(values: [Int]) Int -> {
+    return values.get(0) ?? panic("empty list")
+}
+
+fn checked(flag: Bool) Bool -> {
+    assert(flag, "flag must hold")
+    assert_eq(flag, true)
+    return true
+}
+
+fn port(text: String) Int !HelperError -> {
+    number :: text.trim().to_int() ?? panic("not a port number")
+    if number < 0 -> return Err(HelperError{message: "negative port"})
+    return Ok(number)
+}
+
+struct Recorded {
+    argv: [String]
+}
+
+// #2350 part 2: both operands are read windows into borrowed non-scalar
+// parameters. Binding them by value moved out of a shared reference (E0507),
+// so the generated Rust never compiled.
+fn same_argv(expected: Recorded, oracle_argv: [String]) Bool -> {
+    assert_eq(expected.argv, oracle_argv)
+    return true
+}
+
+#Test("helpers with assert and ?? panic build inside a test harness") {
+    assert(checked(true))
+    assert_eq(first([7]), 7)
+    resolved :: port("  8080  ") ?? -1
+    assert_eq(resolved, 8080)
+    recorded :: Recorded{argv: ["jet", "run"]}
+    assert(same_argv(recorded, ["jet", "run"]))
+}
+
+#Test("a failing harness assertion is still a caught failure") {
+    assert_eq(first([1]), 2)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(&jet)
+        .args(["test", "--show-default", "--serial"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("helpers with assert and ?? panic build inside a test harness: pass"),
+        "helper functions must not borrow the harness String failure ABI:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    // The harness ABI itself is unchanged: an assertion in a `#Test` body is
+    // reported as one caught failure, not a process-wide stop.
+    assert!(
+        stdout.contains("a failing harness assertion is still a caught failure: FAIL"),
+        "the `#Test` body assertion must still report as a caught failure:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    assert!(
+        !out.status.success(),
+        "a failing test must fail the run:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    let _ = fs::remove_dir_all(&dir);
 }

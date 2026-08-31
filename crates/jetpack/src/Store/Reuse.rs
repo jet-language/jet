@@ -1085,15 +1085,8 @@ pub fn find_verified_by_reference(
     reference: &str,
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
-    let phase_started = std::time::Instant::now();
-    let result = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let phase_started = std::time::Instant::now();
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let graph = Closure::closure_graph_structure_unlocked(roots)?;
-        super::timing(
-            &format!("verify {reference} closure-structure"),
-            phase_started.elapsed(),
-        );
-        let phase_started = std::time::Instant::now();
         let entry = list_unlocked(roots)?
             .into_iter()
             .filter(|entry| entry.reference == reference)
@@ -1102,26 +1095,12 @@ pub fn find_verified_by_reference(
                     .trusted()
             })
             .max_by_key(|entry| entry.last_used_at);
-        super::timing(
-            &format!("verify {reference} entry-check"),
-            phase_started.elapsed(),
-        );
         let Some(entry) = entry else {
             return Ok(None);
         };
-        let phase_started = std::time::Instant::now();
-        let lease = snapshot_lease_unlocked(roots, &entry)?;
-        super::timing(
-            &format!("verify {reference} lease"),
-            phase_started.elapsed(),
-        );
+        let lease = snapshot_lease_unlocked(roots, &entry, None, true)?;
         Ok(Some(VerifiedCacheHit { entry, lease }))
-    });
-    super::timing(
-        &format!("verify {reference} total"),
-        phase_started.elapsed(),
-    );
-    result
+    })
 }
 
 /// Reuse the exact user-profile realization for a package ref. User-profile
@@ -1152,12 +1131,81 @@ pub(crate) fn find_verified_user_profile_by_reference(
 
 pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        snapshot_lease_unlocked(roots, entry)
+        snapshot_lease_unlocked(roots, entry, None, true)
     })
+}
+
+struct NixProjectionIndex<'a> {
+    by_digest: BTreeMap<&'a str, Vec<&'a StoreEntry>>,
+}
+
+impl<'a> NixProjectionIndex<'a> {
+    fn from_entries(entries: &'a [StoreEntry]) -> std::io::Result<Self> {
+        let mut by_digest = BTreeMap::new();
+        for entry in entries {
+            let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+                continue;
+            };
+            if producer.provider != "nix" {
+                continue;
+            }
+            for digest in std::iter::once(entry.envelope.output_hash.as_str())
+                .chain(entry.named_outputs.values().map(String::as_str))
+            {
+                if digest.is_empty() {
+                    continue;
+                }
+                by_digest.entry(digest).or_insert_with(Vec::new).push(entry);
+            }
+        }
+        for entries in by_digest.values_mut() {
+            entries.sort_by(|left, right| left.id.cmp(&right.id));
+        }
+        Ok(Self { by_digest })
+    }
+}
+
+pub(crate) fn snapshot_leases_with_entries_unlocked(
+    roots: &Roots,
+    selected: &[StoreEntry],
+    entries: &[StoreEntry],
+) -> std::io::Result<Vec<CacheLease>> {
+    let projection_index = NixProjectionIndex::from_entries(entries)?;
+    let leases = selected
+        .iter()
+        .map(|entry| snapshot_lease_unlocked(roots, entry, Some(&projection_index), false))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    if leases
+        .iter()
+        .any(|lease| !matches!(lease.status(), ConsumptionStatus::Consumable))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "a warm environment output disappeared while leasing",
+        ));
+    }
+    Ok(leases)
+}
+
+#[cfg(target_os = "linux")]
+fn direct_cas_candidate(roots: &Roots, entry: &StoreEntry) -> bool {
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return false;
+    };
+    producer.provider == "nix"
+        && !entry.envelope.output_hash.is_empty()
+        && Path::new(&entry.out)
+            == roots
+                .hangar_dir()
+                .join(OBJECTS_DIR)
+                .join(&entry.envelope.output_hash)
 }
 
 #[cfg(target_os = "linux")]
 fn direct_cas_entry(roots: &Roots, entry: &StoreEntry) -> bool {
+    if !direct_cas_candidate(roots, entry) {
+        return false;
+    }
     let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
         return false;
     };
@@ -1165,14 +1213,38 @@ fn direct_cas_entry(roots: &Roots, entry: &StoreEntry) -> bool {
         .hangar_dir()
         .join(OBJECTS_DIR)
         .join(&entry.envelope.output_hash);
+    let seal = roots
+        .hangar_dir()
+        .join(SEALS_DIR)
+        .join(&entry.envelope.output_hash);
     let Ok(metadata) = fs::symlink_metadata(&expected) else {
         return false;
     };
+    let Ok(seal_metadata) = fs::symlink_metadata(&seal) else {
+        return false;
+    };
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
     producer.provider == "nix"
         && Path::new(&entry.out) == expected
         && !entry.envelope.output_hash.is_empty()
         && metadata.is_dir()
         && !metadata.file_type().is_symlink()
+        && seal_metadata.is_file()
+        && {
+            #[cfg(unix)]
+            {
+                metadata.permissions().mode() & 0o222 == 0
+            }
+            #[cfg(not(unix))]
+            {
+                metadata.permissions().readonly()
+            }
+        }
+        && check_seal(&expected, &roots.hangar_dir())
+            .ok()
+            .flatten()
+            .is_some_and(|digest| digest == entry.envelope.output_hash)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1180,7 +1252,12 @@ fn direct_cas_entry(_roots: &Roots, _entry: &StoreEntry) -> bool {
     false
 }
 
-fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
+fn snapshot_lease_unlocked(
+    roots: &Roots,
+    entry: &StoreEntry,
+    projection_index: Option<&NixProjectionIndex<'_>>,
+    validate_provider_facts: bool,
+) -> std::io::Result<CacheLease> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     use std::sync::atomic::Ordering;
 
@@ -1206,8 +1283,25 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             "cache lease identity exceeds the recovery bound",
         ));
     }
-    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
-        crate::Provider::validate_nix_build_facts(&producer)?;
+    if validate_provider_facts {
+        if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+            crate::Provider::validate_nix_build_facts(&producer)?;
+        }
+    }
+    let direct_cas = direct_cas_entry(roots, entry);
+    if !validate_provider_facts {
+        let producer = ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+            std::io::Error::other(format!(
+                "warm cache entry `{}` has an invalid producer record: {error}",
+                entry.id
+            ))
+        })?;
+        if cfg!(target_os = "linux") && producer.provider == "nix" && !direct_cas {
+            return Err(std::io::Error::other(format!(
+                "warm Nix entry `{}` has no valid direct-CAS seal witness",
+                entry.id
+            )));
+        }
     }
     let lease_root = leases.join(&lease_name);
     fs::create_dir(&lease_root)?;
@@ -1219,14 +1313,12 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             return Err(error);
         }
     };
-    let direct_cas = direct_cas_entry(roots, entry);
     let lease_snapshot_root = lease_root.join("snapshot");
     let snapshot_root = if direct_cas {
         PathBuf::from(&entry.out)
     } else {
         lease_snapshot_root.clone()
     };
-    let phase_started = std::time::Instant::now();
     let result = (|| {
         if !Path::new(&entry.out).exists() {
             Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
@@ -1299,27 +1391,31 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
             (sealed_digest, snapshot_dir_handle, files)
         };
-        super::timing(
-            &format!("lease {} snapshot", entry.reference),
-            phase_started.elapsed(),
-        );
-        let phase_started = std::time::Instant::now();
-        let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
-        super::timing(
-            &format!("lease {} projections", entry.reference),
-            phase_started.elapsed(),
-        );
+        let projections = if let Some(index) = projection_index {
+            nix_store_projection_for_entry_index(roots, entry, &snapshot_root, index)?
+        } else {
+            nix_store_projection_for_entry(roots, entry, &snapshot_root)?
+        };
+        if direct_cas {
+            validate_direct_projection_seals(roots, &projections)?;
+        }
         let mut output_sources = vec![(PathBuf::from(&entry.out), snapshot_root.clone())];
         let mut seen_output_digests = BTreeSet::from([entry.envelope.output_hash.clone()]);
         for digest in entry.named_outputs.values() {
             if !seen_output_digests.insert(digest.clone()) {
                 continue;
             }
-            let source = projections
+            let source = if let Some(source) = projections
                 .iter()
                 .find(|projection| projection.digest == *digest)
                 .map(|projection| projection.source.clone())
-                .unwrap_or(hangar_projection_object(roots, digest, "named output")?);
+            {
+                source
+            } else if direct_cas {
+                sealed_hangar_projection_object(roots, digest, "named output")?
+            } else {
+                hangar_projection_object(roots, digest, "named output")?
+            };
             output_sources.push((roots.hangar_dir().join(OBJECTS_DIR).join(digest), source));
         }
         #[cfg(target_os = "linux")]
@@ -1387,11 +1483,11 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             projected_bin_root.as_deref().unwrap_or(&snapshot_root),
             bin_relative.as_deref(),
         )?;
-        super::timing(
-            &format!("lease {} executable-open", entry.reference),
-            phase_started.elapsed(),
-        );
-        let wrappers = create_exec_wrappers(&lease_snapshot_root, &executables)?;
+        let wrappers = if direct_cas {
+            None
+        } else {
+            create_exec_wrappers(&lease_snapshot_root, &executables)?
+        };
         let (protocol_lease_id, protocol_generation, protocol_owner_scope, protocol_owner_lock) =
             if direct_cas {
                 (String::new(), 0, String::new(), None)
@@ -1552,6 +1648,146 @@ fn open_nix_projection_sources(
         });
     }
     Ok((stable, bindings))
+}
+
+/// Build a Nix projection from the read-only package metadata index. Warm
+/// environments already load this index to match their receipt selections, so
+/// following the recorded digest edges avoids replaying and scanning the full
+/// closure graph. An incomplete index is a warm miss; the caller takes the
+/// normal cold path rather than rebuilding the graph once per package.
+fn nix_store_projection_for_entry_index(
+    roots: &Roots,
+    entry: &StoreEntry,
+    snapshot_root: &Path,
+    index: &NixProjectionIndex<'_>,
+) -> std::io::Result<Vec<NixStoreProjection>> {
+    if entry.producer_record.is_empty() {
+        return Ok(Vec::new());
+    }
+    let producer = match ProducerRecord::decode(&entry.producer_record) {
+        Ok(producer) => producer,
+        Err(error) => {
+            return Err(std::io::Error::other(format!(
+                "cache entry `{}` has an invalid producer record: {error}",
+                entry.id
+            )));
+        }
+    };
+    if producer.provider != "nix" {
+        return Ok(Vec::new());
+    }
+
+    let mut pending = BTreeSet::from([entry.envelope.output_hash.clone()]);
+    pending.extend(entry.named_outputs.values().cloned());
+    let mut visited = BTreeSet::new();
+    let mut logical_digests = BTreeMap::new();
+    while let Some(digest) = pending.pop_first() {
+        if !visited.insert(digest.clone()) {
+            continue;
+        }
+        let candidates = if digest == entry.envelope.output_hash {
+            vec![entry]
+        } else {
+            index
+                .by_digest
+                .get(digest.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    std::io::Error::other(format!(
+                        "Nix closure object `{digest}` is missing from the warm reuse index"
+                    ))
+                })?
+        };
+        for candidate in candidates {
+            let candidate_producer = match ProducerRecord::decode(&candidate.producer_record) {
+                Ok(producer) => producer,
+                Err(error) => {
+                    return Err(std::io::Error::other(format!(
+                        "Nix closure entry `{}` has invalid producer facts: {error}",
+                        candidate.id
+                    )));
+                }
+            };
+            if candidate_producer.provider != "nix" {
+                return Err(std::io::Error::other(format!(
+                    "Nix closure object `{digest}` is owned by `{}`",
+                    candidate_producer.provider
+                )));
+            }
+            let mut output_fact = false;
+            for key in candidate_producer.facts.keys() {
+                let Some(name) = key.strip_prefix("nix.output.") else {
+                    continue;
+                };
+                if name.contains('.') {
+                    continue;
+                }
+                let output_digest = if name == "out" {
+                    candidate.envelope.output_hash.clone()
+                } else {
+                    let Some(output_digest) = candidate.named_outputs.get(name) else {
+                        return Err(std::io::Error::other(format!(
+                            "Nix output `{name}` has no verified named-output digest"
+                        )));
+                    };
+                    output_digest.clone()
+                };
+                let path = match canonical_nix_output_path(&candidate_producer, name) {
+                    Ok(path) => path,
+                    Err(error) => return Err(error),
+                };
+                if output_digest == digest {
+                    output_fact = true;
+                }
+                if let Err(error) =
+                    add_nix_projection_path(&mut logical_digests, path, &output_digest)
+                {
+                    return Err(error);
+                }
+            }
+            if !output_fact {
+                if let Ok(path) = canonical_nix_output_path(&candidate_producer, "out") {
+                    if let Err(error) = add_nix_projection_path(
+                        &mut logical_digests,
+                        path,
+                        &candidate.envelope.output_hash,
+                    ) {
+                        return Err(error);
+                    }
+                }
+            }
+            pending.extend(candidate.references.iter().cloned());
+        }
+    }
+    if logical_digests.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "Nix cache entry `{}` has no canonical output path for projection",
+            entry.id
+        )));
+    }
+
+    let primary_logical = ["out", "bin"]
+        .into_iter()
+        .find_map(|name| canonical_nix_output_path(&producer, name).ok());
+    let mut projection = Vec::new();
+    for (logical, digest) in logical_digests {
+        let primary = primary_logical == Some(logical.as_str());
+        let source = if primary {
+            snapshot_root.to_path_buf()
+        } else {
+            match hangar_projection_object(roots, &digest, logical.as_str()) {
+                Ok(source) => source,
+                Err(error) => return Err(error),
+            }
+        };
+        projection.push(NixStoreProjection {
+            logical,
+            digest,
+            primary,
+            source,
+        });
+    }
+    Ok(projection)
 }
 
 pub(crate) fn nix_store_projection_for_entry(
@@ -1799,6 +2035,44 @@ fn hangar_projection_object(
         )));
     }
     Ok(object)
+}
+
+fn sealed_hangar_projection_object(
+    roots: &Roots,
+    digest: &str,
+    logical: &str,
+) -> std::io::Result<PathBuf> {
+    let object = hangar_projection_object(roots, digest, logical)?;
+    #[cfg(target_os = "linux")]
+    if check_seal(&object, &roots.hangar_dir())?.as_deref() != Some(digest) {
+        return Err(std::io::Error::other(format!(
+            "Nix output `{logical}` Hangar object `{digest}` has no valid seal witness"
+        )));
+    }
+    Ok(object)
+}
+
+fn validate_direct_projection_seals(
+    roots: &Roots,
+    projections: &[NixStoreProjection],
+) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    for projection in projections {
+        if projection.primary {
+            continue;
+        }
+        if check_seal(&projection.source, &roots.hangar_dir())?.as_deref()
+            != Some(projection.digest.as_str())
+        {
+            return Err(std::io::Error::other(format!(
+                "Nix output `{}` Hangar object `{}` has no valid seal witness",
+                projection.logical, projection.digest
+            )));
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (roots, projections);
+    Ok(())
 }
 
 struct ExecWrappers {

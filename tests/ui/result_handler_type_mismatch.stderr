@@ -1,26 +1,26 @@
-Error [E1308]: `run`'s parameter isn't a CLI-derived type
-  --> tests/ui/result_handler_type_mismatch.jet:1:15
+Error [E0305]: This pattern belongs to a fallible result, not Int
+  --> tests/ui/result_handler_type_mismatch.jet:2:21
     |
-  1 | fn run(value: Int!) {
-    |               ^^^^
- Why: a typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived program struct.
- Fix: mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)
-More: jet-lang.dev/e/E1308
+  2 |     result :: value ? ok -> 1 ! error -> "bad"
+    |                     ^^^^
+ Why: Use `== Ok(...)` or `== Err(...)` on `T !E`
+ Fix: Check the type of the value being tested
+More: jet-lang.dev/e/E0305
 
-Error [E0124]: this `if`'s branches produce different types: Int (a whole number) and String (text)
+Error [E0305]: This pattern belongs to a fallible result, not Int
+  --> tests/ui/result_handler_type_mismatch.jet:2:31
+    |
+  2 |     result :: value ? ok -> 1 ! error -> "bad"
+    |                               ^^^^^^^
+ Why: Use `== Ok(...)` or `== Err(...)` on `T !E`
+ Fix: Check the type of the value being tested
+More: jet-lang.dev/e/E0305
+
+Error [E0124]: This `if`'s branches produce different types: Int (a whole number) and String (text)
   --> tests/ui/result_handler_type_mismatch.jet:2:15
     |
   2 |     result :: value ? ok -> 1 ! error -> "bad"
     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: an `if` used as a value must give the same type on every path (S68)
- Fix: make both branches produce Int (a whole number) (or the same type)
+ Why: An `if` used as a value must give the same type on every path (S68)
+ Fix: Make both branches produce Int (a whole number) (or the same type)
 More: jet-lang.dev/e/E0124
-
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/result_handler_type_mismatch.jet:3:5
-    |
-  3 |     print(result)
-    |     ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116

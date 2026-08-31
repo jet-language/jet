@@ -170,7 +170,7 @@ fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
 
     let sentinel = project.path.join("command-ran");
     let output = jetpack()
-        .args(["run", "-p", "hello", "--offline", "--fixtures"])
+        .args(["run", "-p", "hello", "--offline", "--trust", "--fixtures"])
         .arg(&fixtures.path)
         .args(["--", "sh", "-c", "printf executed > \"$1\"", "jet-test"])
         .arg(&sentinel)

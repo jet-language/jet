@@ -659,6 +659,7 @@ fn decode_body(data: &[u8], start: usize) -> Option<WarmModule> {
 /// unreported run reads as a program that reached no tier at all, which is how
 /// a silent deopt would look too.
 pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
+    let _loaded_mod_scope = crate::Mod::LoadScope;
     if !super::api_debug::cranelift_host_supported() {
         return Err("cranelift host unsupported".into());
     }

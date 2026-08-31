@@ -3,8 +3,8 @@ Error [E0151]: `Stuffed` is not a declared state of `Crate`
     |
  13 |     #State(Stuffed) fn get(self) Int -> { return self.data }
     |     ^^^^^^^^^^^^^^^
- Why: typestate (D-STATE-HOME1=A): `struct Crate { state { … } }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
- Fix: add `Stuffed` to the `state { … }` section inside `struct Crate`, or correct the spelling
+ Why: Typestate (D-STATE-HOME1=A): `struct Crate { state { … } }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
+ Fix: Add `Stuffed` inside `struct Crate { state { … } }`, or correct the spelling
 More: jet-lang.dev/e/E0151
 
 Error [E0150]: `get` needs `Crate` in state `Stuffed`, but `b` is in state `Full`
@@ -12,6 +12,6 @@ Error [E0150]: `get` needs `Crate` in state `Stuffed`, but `b` is in state `Full
     |
  18 |     print(b.get())
     |             ^^^
- Why: typestate (D-STATE1): `get` is only valid in state `Stuffed`; calling it in `Full` is the out-of-order-events bug it prevents
- Fix: transition `b` into state `Stuffed` before calling `get`
+ Why: Typestate (D-STATE1): `get` is only valid in state `Stuffed`; calling it in `Full` is the out-of-order-events bug it prevents
+ Fix: Transition `b` into state `Stuffed` before calling `get`
 More: jet-lang.dev/e/E0150

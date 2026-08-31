@@ -4,7 +4,7 @@
   "cells": ["concurrency.app"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "go"],
+  "languages": ["jet", "rust", "python", "go", "node"],
   "spec": {
     "behavior": "Scan every .txt file under the given directory concurrently, count non-overlapping substring occurrences of the needle per line, print matching paths sorted lexicographically, then print files matched/scanned and the total occurrence count.",
     "args": ["files", "needle-7f"],
@@ -15,6 +15,7 @@
     "jet": {"author": "luna-max", "turns": 14, "retries": 12, "diagnosticsHit": ["E2105: can't find the file `main.jet`", "E0329: a nested one-line control body needs braces", "E0107: nothing named `process` exists here", "E0112: `scan_one` wants String (text) for argument 2, but this is Int (a whole number)", "L1101: `__jet_tg_0` still owes `join`", "E0113: this lambda should return `Ordering`, not Bool (true or false)", "E0113: this lambda should return `Ordering`, not Int (a whole number)", "E0956: `core.files.glob()` isn't supported by the current evaluator yet", "E1803: application authority is undecided for `Env`", "E3001: `panic: list failed`", "E0109: text isn't joined with `+`", "E0002: this `{` never gets a matching `}`", "L0508: arrow_loop_value_drop", "rustc E0308: internal compiler error, generated Rust did not compile (Task<Result<...>> mismatch)"], "notes": "Used list_dir plus absolute cwd because default evaluator rejected glob and relative FS lookup failed in scratch. Effectful task handles currently generate internal Task<Result<...>> in AOT; detached children synchronize through channel receives inside task.group."},
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0373: closure may outlive the current function, but it borrows `path`"], "notes": "Added move to scoped worker closure."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""}
+    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node fs/promises rail with concurrent file reads and the same non-overlapping per-line count."}
   }
 }

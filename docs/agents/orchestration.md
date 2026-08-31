@@ -2,6 +2,8 @@
 
 Law for any agent that dispatches other agents (burndowns, sweeps, multi-card waves).
 `AGENTS.md` still governs everything else; this file adds only what it does not cover.
+Read `docs/agents/owner-guidance.md` before any dispatch. It is the owner's
+operational source of truth and is read-only for agents.
 
 ## Results, not activity
 
@@ -20,9 +22,7 @@ problems only.
   implementation.
 - **Workers:** implement one bounded source slice and return commit, source evidence, and
   blockers. They do not write the board or claim an unrun proof passed.
-- **Model routing:** use GPT-5.6 Luna with medium reasoning for mechanical changes and high
-  for normal semantic fixes. Use max only for one narrow root-cause problem after a concrete
-  proof failed under high reasoning. Never launch broad max-reasoning card waves.
+- **Agent routing:** dispatch through OMP's `task` tool with the most specific agent. `docs/agents/owner-guidance.md` and OMP role aliases choose model and reasoning; this file never does.
 
 ## Never stop while work is in flight
 
@@ -63,24 +63,51 @@ Workers still never label a runtime, tier, golden, snapshot, or generated-artifa
 criterion met: type-checking is not testing. They name the command that would prove it,
 runnable as written.
 
-## Dispatching codex workers
+## Dispatching workers
 
-Launch from the assigned worktree with an explicit effort override and wall-clock limit:
+Orchestrators MUST dispatch workers with the OMP `task` tool and steer them
+with `hub`. That is the only first path. Submit one `tasks[]` batch for
+genuinely independent slices. Choose the most specific available agent.
+Omit `agent` only when bundled `task` is the correct implementation worker
+(owner-guide `@implementation` / GPT-5.6 Luna max). OMP role aliases resolve
+model and reasoning; task prompts never override them.
 
-```sh
-timeout 720 codex exec -p luna -c model_reasoning_effort=\"high\" \
-  --skip-git-repo-check - < /tmp/luna/<brief>.md
+Never start workers with `codex exec`, `setsid`, `nohup`, `run.sh`, or
+`lane-dispatch.mjs launch` as the first attempt. Those are fallbacks after
+an OMP `task` spawn fails. Record the exact harness error in
+`JET_OMP_FALLBACK_REASON` before any CLI launch.
+
+Use `hub` to steer, harvest, cancel, and inspect liveness. Keep each prompt
+self-contained and each writable path set disjoint. Wall-clock limits remain
+300 seconds for mechanical fixture work, 720 seconds for normal work, and
+1,200 seconds only for one narrow semantic root cause. At the limit, cancel,
+salvage only a coherent owned commit or diff, and rebrief a smaller slice.
+
+Direct CLI execution and `codex-rescue` remain fallbacks, not alternate
+defaults. An unchanged specialized skill may own direct invocation only when
+owner guidance explicitly allows it. Never choose CLI because its command is
+familiar.
+
+Any direct Codex fallback runs from the assigned worktree with the owner-guide
+adapter, full access, explicit timeout, and brief on standard input.
+`workspace-write` cannot write worktree `.git` pointers or reach the Nix
+daemon socket. Every brief still forbids sibling worktrees and `plugins/tower`.
+
+### Cross-model ballot dissent
+
+Every new, draft, or updated full ballot must use an adversarial review from a
+model family different from the author. Keep the existing string field and put
+these exact sentences first:
+
+```text
+Author model family: family-a. Adversarial model family: family-b. The rival-family review attacked the recommendation.
 ```
 
-Use 300 seconds and medium reasoning for mechanical fixture changes. Use 1,200 seconds and
-max reasoning only for a narrow semantic root cause after high reasoning failed on a concrete
-repro. At the limit, cancel, salvage only a coherent owned commit or diff, and rebrief a
-smaller slice.
-
-The `luna` profile pins the model, no approvals, and full access. Full access is required:
-codex `workspace-write` protects worktree `.git` pointers and blocks the Nix daemon socket.
-Every brief therefore restricts the worker to its assigned worktree and forbids the main
-checkout, sibling worktrees, and `plugins/tower`.
+Use an OMP review agent mapped to a rival family: `cavecrew-reviewer` for an
+OpenAI-authored ballot, or `reviewer` for an Anthropic-authored ballot. Record the result
+in `reviewPasses.adversarial`. If OMP cannot supply that family, apply the fallback rule above.
+The validator compares normalized names and rejects the author's family.
+Ratified decisions are immutable history.
 
 Implementation workers type-check but never test. The orchestrator integrates each
 result on its `CHECK OK` receipt and runs the smallest proof that can reject the patch, in
@@ -111,36 +138,39 @@ lying-ledger failure mode structurally impossible: no command, no evidence row.
 
 ## The burndown loop
 
-Use `scripts/agent/lane-dispatch.mjs`. It encodes this loop, and the loop is the
-difference between a few cards a day and forty in a session.
+Dispatch workers with the OMP `task` tool. Use
+`scripts/agent/lane-dispatch.mjs` only for `brief`, `status`, and `harvest`.
+It does not set stream count. `launch` is a CLI fallback after OMP `task`
+spawn fails, with `JET_OMP_FALLBACK_REASON` set to that failure.
 
 ```sh
-node scripts/agent/lane-dispatch.mjs status          # running, yielded, died, headroom
-node scripts/agent/lane-dispatch.mjs brief --auto 12 # briefs straight from Tower
-node scripts/agent/lane-dispatch.mjs launch c1234 …  # detached, staggered, capped
-node scripts/agent/lane-dispatch.mjs harvest         # each unread lane's final message
+node scripts/agent/lane-dispatch.mjs brief --auto 12
+node scripts/agent/lane-dispatch.mjs status
+node scripts/agent/lane-dispatch.mjs harvest
 ```
 
-Poll every five minutes: harvest what finished, close what is done, refill the
-freed lanes, and repair anything that broke. Never let the loop idle.
+Poll with `hub jobs` / `hub wait`: harvest what finished, integrate and prove
+it, then submit the next OMP `tasks[]` batch. Do not refill merely to keep
+capacity occupied.
 
-### The five rules, and what each one cost before it existed
+### Concurrency and closure
 
-1. **Parallelism is the whole game.** Run 25-30 lanes, not five. Cards are mostly
-   independent, and every lane shares one working tree, so there is no merge
-   afterwards. Serial dispatch was the single largest source of elapsed time.
-2. **Launch detached.** `(sh run.sh x &)` inside a tool call loses most of the
-   batch when the parent shell exits. Measured: 9 of 27 lanes survived and the
-   other 18 were silently absent for twenty minutes. Use `setsid nohup … </dev/null`.
-3. **Never hand-write a brief.** Generate it from the card, which already holds
-   the title, body, plan and exit criteria. Hand-write only for a defect that has
-   no card yet.
-4. **Workers type-check; they do not test.** `scripts/agent/lane-check.sh` and
-   nothing heavier. Before this rule the orchestrator became a serial repair
-   queue — nine build breaks in one session from source-only patches.
-5. **Close on implementation; batch the proof.** A card closes when its criteria
-   have concrete implementation evidence and the patch is integrated. Deferred
-   test runs, found defects and owner gates all go to one sweep ledger.
+1. **Start with one delivery stream.** Add workers only for disjoint writable
+   paths and tests, a clean integration target, sufficient machine and model
+   capacity, and one close owner. Contract around shared seams, dirty ownership,
+   build contention, memory pressure, or reintegration cost.
+2. **Use the smallest complete brief.** Generate it from the card when possible;
+   hand-write only for a defect with no card. Each brief names its exact slice,
+   paths, invariants, proof, and return shape.
+3. **Workers type-check; they do not test.** Run `scripts/agent/lane-check.sh`
+   and nothing heavier. The orchestrator owns the composed proof.
+4. **Close on integrated observable evidence.** A card closes when all robust
+   criteria have evidence from the integrated tree. Milestone proof and the
+   fresh-context review remain separate gates; deferred proof does not close a
+   card.
+5. **Keep the loop bounded.** Harvest, integrate, prove, and refill while work
+   remains. Cancel or rebrief a lane at its limit; never create a fixed-size
+   wave just to keep capacity occupied.
 
 ### Liveness is a process question
 
@@ -178,6 +208,34 @@ tree, so the risk is two lanes writing one file; the snapshot interval bounds
 what that can cost. `/tmp` is RAM-backed here — a session has already died of
 OOM with scratch in tmpfs, so every script exports `TMPDIR` to disk before
 `jet-env` and caps `CARGO_BUILD_JOBS`.
+
+### Proof runs in parallel, or the burndown stalls
+
+A wave of thirty workers feeding one serial proof queue closes nothing. If the
+orchestrator runs suites one at a time while lanes pile up, the session ends with
+recorded criteria and zero cards in `done` — that is a failed session no matter how
+much code moved. Proof is the bottleneck, so proof is what must be parallel.
+
+- Run independent suites **concurrently**, each in its own background job, and collect
+  them together. Different test binaries are independent; a shared `target/` serializes
+  only the build, not the run.
+- **The OOM risk is test threads, not agent count.** `cargo test` defaults to one thread
+  per core, and Jet's suites fork a real `rustc` or `jet` per test, so one unbounded suite
+  can spawn thirty compilers. Always pass `-- --test-threads=N` with a small `N`, cap
+  `CARGO_BUILD_JOBS`, and keep `TMPDIR` on disk. Concurrent *agents* editing source cost
+  almost nothing; concurrent *unbounded suites* killed a machine.
+- Workers never build. Give implementation lanes an explicit "no cargo, no tests" rule and
+  keep every build in the orchestrator, which is the only process that can see total load.
+- Close each card the moment its own criteria are proven. Never hold proven cards waiting
+  for a batch, and never let one red suite block cards that do not depend on it.
+- Prefer a proof that closes a card over a proof that merely informs. When one command
+  settles the last criterion on two cards, run it first.
+
+### Redirects in backgrounded subshells
+
+`( … ) &` in an agent shell does not reliably inherit an exported `TMPDIR`, and
+`> $TMPDIR/x.txt` then silently expands to `/x.txt` and dies with `Permission denied`.
+Write literal absolute paths in redirects inside backgrounded subshells.
 
 ## Board hygiene
 

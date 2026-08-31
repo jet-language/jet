@@ -16,10 +16,13 @@ fn service_run(jetpack: String, project: String, home: String, root: String, sta
         .run() ?? panic("jetpack command failed to launch")
 }
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: service_lifecycle INPUT_ROOT")
-    input :: args.get(1) ?? panic("missing input root")
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
     case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
     jetpack :: env.get("JET_CORPUS_JETPACK") ?? panic("missing jetpack binary")
     host_path :: env.get("PATH") ?? panic("missing PATH")

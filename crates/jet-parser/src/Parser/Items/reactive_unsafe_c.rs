@@ -1,6 +1,52 @@
 use super::super::{describe, Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind};
 
 impl<'a> Parser<'a> {
+    /// D-ADOPT-GUEST1=A: parse the per-callable C import form. The ordinary
+    /// function parser still owns the Jet signature; its one string body is
+    /// moved into the marker's compile-time symbol fact and never reaches
+    /// expression checking or codegen.
+    pub(super) fn guest_import_fn_from_markers(
+        &mut self,
+        mut markers: Vec<crate::AST::Marker>,
+    ) -> Result<Func, Diagnostic> {
+        let function = self.func()?;
+        let symbol = match function.body.as_slice() {
+            [crate::AST::Stmt::Expr(crate::AST::Expr::Str(parts, span))]
+                if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(symbol) if !symbol.is_empty() => symbol.clone(),
+                    _ => return Err(Self::guest_import_body_error(*span)),
+                },
+            _ => return Err(Self::guest_import_body_error(function.span)),
+        };
+        let marker = markers
+            .iter_mut()
+            .find(|marker| Self::is_c_guest_import_marker(marker))
+            .expect("guest import parser branch has a C import marker");
+        marker.ct = Some(crate::AST::CtValue::Str(symbol.clone()));
+        if let Some(application) = self
+            .rule_facts
+            .iter_mut()
+            .rev()
+            .find(|application| application.marker.name_span == marker.name_span)
+        {
+            application.marker.ct = Some(crate::AST::CtValue::Str(symbol));
+        }
+        let mut function = function;
+        function.body.clear();
+        self.apply_function_markers(function, markers)
+    }
+
+    fn guest_import_body_error(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E3212",
+            "a `#Import(c)` declaration needs one non-empty symbol string".to_string(),
+            "the Jet signature is checked by sema and the string after `=` names the stable C symbol"
+                .to_string(),
+            "write `#Import(c) fn name(args) Return = \"c_symbol\"`".to_string(),
+            Some(span),
+        )
+    }
+
     pub(super) fn ffi_fn_from_markers(
         &mut self,
         markers: Vec<crate::AST::Marker>,
@@ -163,9 +209,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
-    /// module …` or `#Bindgen module …`? Retired lowercase markers are also
-    /// recognized here so E0060 can recover to the canonical form.
+    /// D-ADOPT-GUEST1=A: is the cursor at the start of a C FFI module —
+    /// `#Import module …` or `#Bindgen module …`? Retired markers are
+    /// recognized only long enough to teach the move.
     pub(super) fn at_c_module(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Hash) {
             return false;
@@ -173,7 +219,8 @@ impl<'a> Parser<'a> {
         let intro_is_c = match &self.peek2().kind {
             TokKind::KwExtern => true,
             TokKind::Ident(n) => {
-                n == Syntax::MARKER_EXTERN_MODULE
+                n == Syntax::MARKER_IMPORT
+                    || n == Syntax::MARKER_EXTERN_MODULE_RETIRED
                     || n == Syntax::MARKER_BINDGEN
                     || n == Syntax::MARKER_BINDGEN_RETIRED
             }
@@ -194,22 +241,28 @@ impl<'a> Parser<'a> {
         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
     }
 
-    /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
+    /// D-ADOPT-GUEST1=A: parse `#Import module c.<lib> { … }` (overlay) or
     /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
     /// declarations share the `extern_fn` shape (`fn name(args) T = "Sym";`).
     pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
         use crate::AST::CModuleKind;
-        if matches!(
-            &self.peek2().kind,
-            TokKind::Ident(name)
-                if name == Syntax::MARKER_EXTERN_MODULE || name == Syntax::MARKER_BINDGEN
-        ) {
+        if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_IMPORT) {
+            // `#Import` is a guest boundary marker, not an applied-rule row.
+            // Keep the module parser on the same path as the per-function
+            // marker while recording its module site for sema.
+            let marker = self.parse_rule_marker()?;
+            let kind = CModuleKind::Extern;
+            let module = self.c_module_after_kind(marker.span, kind)?;
+            self.bind_rule_fact(
+                marker.name_span,
+                Some(module.span),
+                crate::Policy::RuleSite::Module,
+            );
+            return Ok(module);
+        }
+        if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_BINDGEN) {
             let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Module)?;
-            let kind = if marker.name == Syntax::MARKER_EXTERN_MODULE {
-                CModuleKind::Extern
-            } else {
-                CModuleKind::Bindgen
-            };
+            let kind = CModuleKind::Bindgen;
             let module = self.c_module_after_kind(marker.span, kind)?;
             self.bind_rule_fact(
                 marker.name_span,
@@ -224,11 +277,20 @@ impl<'a> Parser<'a> {
                 let span = Span::new(start.start, self.bump().span.end);
                 let old = format!("#{}", "extern");
                 self.diags
-                    .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
+                    .push(self.retired_c_module_marker_diag(&old, "#Import", span));
                 CModuleKind::Extern
             }
-            TokKind::Ident(n) if n == Syntax::MARKER_EXTERN_MODULE => {
+            TokKind::Ident(n) if n == Syntax::MARKER_IMPORT => {
                 self.bump();
+                CModuleKind::Extern
+            }
+            TokKind::Ident(n) if n == Syntax::MARKER_EXTERN_MODULE_RETIRED => {
+                let span = Span::new(start.start, self.bump().span.end);
+                self.diags.push(self.retired_c_module_marker_diag(
+                    &format!("#{}", Syntax::MARKER_EXTERN_MODULE_RETIRED),
+                    &format!("#{}", Syntax::MARKER_IMPORT),
+                    span,
+                ));
                 CModuleKind::Extern
             }
             TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN => {
@@ -247,12 +309,12 @@ impl<'a> Parser<'a> {
                         "E0003",
                         format!(
                             "expected `{}` or `{}` after `@`, found {}",
-                            Syntax::MARKER_EXTERN_MODULE,
+                            Syntax::MARKER_IMPORT,
                             Syntax::MARKER_BINDGEN,
                             describe(other)
                         ),
-                        "a C FFI module begins with `#Extern module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
-                        "write: #Extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                        "a C FFI module begins with `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
+                        "write: #Import module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
                         Some(self.peek().span),
                     ));
             }
@@ -268,7 +330,7 @@ impl<'a> Parser<'a> {
                 let span = Span::new(start.start, self.bump().span.end);
                 let old = format!("#{}", "extern");
                 self.diags
-                    .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
+                    .push(self.retired_c_module_marker_diag(&old, "#Import", span));
                 CModuleKind::Extern
             }
             TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN_RETIRED => {
@@ -317,7 +379,7 @@ impl<'a> Parser<'a> {
                 format!(
                     "write: {} module {}.<lib> {{ … }}",
                     match kind {
-                        CModuleKind::Extern => "#Extern",
+                        CModuleKind::Extern => "#Import",
                         CModuleKind::Bindgen => "#Bindgen",
                     },
                     Syntax::C_MODULE_ROOT
@@ -340,7 +402,7 @@ impl<'a> Parser<'a> {
                         "E0003",
                         format!("a C FFI module path can't have a `.{}` segment", seg),
                         "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
-                        format!("write: #Extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
+                        format!("write: #Import module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
                         Some(seg_span),
                     ));
             }
@@ -357,11 +419,11 @@ impl<'a> Parser<'a> {
                     ),
                     format!(
                         "autogen lives in `{}.<lib>.{}`; users declare overlays as `#{} module {}.<lib>` only",
-                        Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT
+                        Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT
                     ),
                     format!(
                         "drop `{}` from your module path, or use `#{} module {}.{} {{ … }}`",
-                        Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
+                        Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT, lib
                     ),
                     Some(path_span),
                 ));

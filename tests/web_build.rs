@@ -161,6 +161,86 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected W
     let _ = fs::remove_dir_all(dir);
 }
 
+/// D-CONC-ALLNAMED1=A: the web adapters preserve heterogeneous named fields
+/// when the first authored branch yields after the second branch. The nested
+/// task makes that reverse completion observable in JavaScript; Wasm uses its
+/// synchronous adapter but must preserve the same field mapping.
+#[test]
+fn web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping named task.all web parity test (need rustc + node)");
+        return;
+    }
+    let src = r#"
+#Target(Web)
+fn slow() String -> {
+    turns := 0
+    loop _ in 0..<50000 {
+        turns += 1
+    }
+    return "slow"
+}
+fn fast() Int -> {
+    return 7
+}
+fn run() {
+    values :: (task.all {
+        z: slow(),
+        a: fast()
+    }) ?? panic("named task.all failed")
+    print(values.z)
+    print(values.a)
+}
+"#;
+    let expected = "slow\n7\n";
+    let js_src = src
+        .replace("fn slow()", "#Target(JS)\nfn slow()")
+        .replace("fn fast()", "#Target(JS)\nfn fast()")
+        .replace("fn run()", "#Target(JS)\nfn run()");
+    let js_dir = build_web_fixture(
+        "named_task_all_reverse_completion_js",
+        &js_src,
+        "tests/fixtures/web_named_task_all_reverse_completion.jet",
+    );
+    assert_eq!(
+        run_web_app(&js_dir),
+        expected,
+        "JS named task.all mapping changed"
+    );
+    let app = fs::read_to_string(js_dir.join("build/app.js")).unwrap();
+    assert!(
+        app.contains("await jet_task_all_named(")
+            && app.contains("[\"z\", \"a\"]")
+            && app.contains("[\"a\", \"z\"]"),
+        "JS must pass authored fields and project canonical fields:\n{app}"
+    );
+    let _ = fs::remove_dir_all(js_dir);
+
+    let wasm_dir = build_web_fixture(
+        "named_task_all_reverse_completion_wasm",
+        src,
+        "tests/fixtures/web_named_task_all_reverse_completion.jet",
+    );
+    let harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#;
+    assert_eq!(
+        run_node_harness(&wasm_dir, "named_task_all_wasm_harness.mjs", harness),
+        expected,
+        "Wasm named task.all mapping changed"
+    );
+    let wasm = fs::read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("__jet_z: __jet_named_all_value_")
+            && wasm.contains("__jet_a: __jet_named_all_value_"),
+        "Wasm must assemble the named result by field:\n{wasm}"
+    );
+    let _ = fs::remove_dir_all(wasm_dir);
+}
+
 fn run_web_app(dir: &PathBuf) -> String {
     let node = Command::new("node")
         .current_dir(dir.join("build"))
@@ -699,10 +779,8 @@ fn jet_cli_infers_web_target_from_manifest() {
 /// `jet build --target=web` for web artifacts.
 #[test]
 fn jet_cli_rejects_native_run_for_web_marker() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_web_target_run_rejects_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_web_target_run_rejects_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -877,11 +955,88 @@ fn compile_web_file_loads() {
     assert!(out.web.is_some());
 }
 
+/// D-FMT-PLAIN1=A / I9: web keeps the plain and grouped selectors on the
+/// shared formatter rail, including exact `Int` calls.
+#[test]
+fn web_decimal_and_grouped_formatters_use_shared_helpers() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping decimal/grouped web parity test (need rustc + node)");
+        return;
+    }
+    let source = r#"
+#Target(Web)
+use core.text.fmt as fmt
+
+fn run() {
+    print(fmt.decimal(Float{1234.5678}, 2))
+    print(fmt.grouped(Float{1234.5678}, 2))
+    print(fmt.decimal(1234, 2))
+    print(fmt.grouped(1234, 2))
+}
+"#;
+    let dir = build_web_fixture(
+        "decimal_grouped",
+        source,
+        "tests/fixtures/web_decimal_grouped.jet",
+    );
+    let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    let js_app = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    for helper in [
+        "jet_fmt_decimal(",
+        "jet_fmt_grouped(",
+        "jet_fmt_decimal_int(",
+        "jet_fmt_grouped_int(",
+    ] {
+        assert!(wasm_rust.contains(helper), "missing {helper} in wasm Rust");
+    }
+    assert!(js_app.contains("function jet_fmt_decimal("));
+    assert!(js_app.contains("function jet_fmt_grouped("));
+    assert!(js_app.contains("function jet_fmt_decimal_int("));
+    assert!(js_app.contains("function jet_fmt_grouped_int("));
+    let expected = "1234.57\n1,234.57\n1234.00\n1,234.00\n";
+    assert_eq!(run_web_app(&dir), expected, "JS formatter output changed");
+    let harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "decimal_grouped_wasm_harness.mjs", harness),
+        expected,
+        "Wasm formatter output changed",
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_template_literals_keep_hostile_text_as_data() {
+    let source = r#"#Target(JS)
+fn run() {
+    value :: "safe"
+    print("`\\${owned}\n{value}")
+}
+"#;
+    let web = jet::compile_web_with_path(source, "tests/fixtures/web_template_hostile.jet")
+        .expect("hostile template literal should compile")
+        .web
+        .expect("web artifacts");
+    assert!(web.js_app.contains(r"\`"), "backtick escaped in JS:\n{}", web.js_app);
+    assert!(
+        web.js_app.contains(r"\${owned}"),
+        "literal interpolation marker escaped in JS:\n{}",
+        web.js_app
+    );
+    assert!(web.js_app.contains(r"\\"), "backslash escaped in JS:\n{}", web.js_app);
+    assert!(web.js_app.contains(r"\n"), "newline escaped in JS:\n{}", web.js_app);
+}
+
 /// D-AUTHORITY-SCOPE1 / I9: the web TIR path accepts the same named `#FX`
 /// scope as native code and erases its sema-only handle before emission.
 #[test]
 fn web_named_authority_scope_uses_shared_tir() {
-    let source = "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        value :: 1 + 1\n    }\n}\n";
+    let source =
+        "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        value :: 1 + 1\n    }\n}\n";
     let out = jet::compile_web_with_path(source, "tests/fixtures/web_named_authority_scope.jet")
         .expect("web should accept the canonical #FX scope")
         .web
@@ -1229,9 +1384,9 @@ fn run() {}
         wasm.contains("jet_wasm_tick()"),
         "void body side effect was dropped:\n{wasm}"
     );
-    assert!(wasm.contains(
-        "fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetOutcome<JetWasmInt, JetErr>"
-    ));
+    assert!(
+        wasm.contains("fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetOutcome<JetWasmInt, JetErr>")
+    );
     assert!(
         wasm.contains("jet_wasm_twice("),
         "export did not call internal helper:\n{wasm}"
@@ -1695,6 +1850,75 @@ fn run() { print(classify(2)) }
     );
     assert_eq!(run_web_app(&dir), "2\n");
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_time_checked_formats_and_epoch_overflow_match_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web time parity test (need rustc + node)");
+        return;
+    }
+    let template = r#"#TARGET#
+use core.time as time
+
+
+fn run() {
+    datetime :: time.datetime(2024, 3, 9, 12, 34, 56)
+    zoned :: time.zoned(datetime, time.utc())
+    if datetime.format_checked("'day' EEEE 'month' MMMM") == {
+        .Ok(value) -> { print("names:ok:{value}") }
+        .Err(_) -> { print("names:err:unexpected") }
+    }
+    if zoned.format_checked("VV XXX") == {
+        .Ok(value) -> { print("zone:ok:{value}") }
+        .Err(_) -> { print("zone:err:unexpected") }
+    }
+    if zoned.format_checked("yyyy|MM|dd|DDD|HH|mm|ss|SSS|SSSSSS|SSSSSSSSS|EEE|EEEE|MMM|MMMM|VV|XXX") == {
+        .Ok(value) -> { print("all-jet:ok:{value}") }
+        .Err(_) -> { print("all-jet:err:unexpected") }
+    }
+    if zoned.format_checked("%%|%A|%a|%B|%b|%Y|%y|%m|%d|%e|%j|%H|%I|%M|%S|%p|%z|%Z|%F|%T|%R|%D|%f") == {
+        .Ok(value) -> { print("all-percent:ok:{value}") }
+        .Err(_) -> { print("all-percent:err:unexpected") }
+    }
+    if datetime.format_checked("%Q") == {
+        .Ok(value) -> { print("token:ok:{value}") }
+        .Err(error) -> { print("token:err:{error.message}") }
+    }
+    if datetime.format_checked("VV") == {
+        .Ok(value) -> { print("missing-zone:ok:{value}") }
+        .Err(error) -> { print("missing-zone:err:{error.message}") }
+    }
+    wide :: time.from_unix_seconds(10000000000000)
+    if wide.to_unix_ns() == {
+        .Ok(value) -> { print("overflow:ok:{value}") }
+        .Err(error) -> { print("overflow:err:{error.reason}") }
+    }
+    return
+}
+"#;
+    let expected = concat!(
+        "names:ok:day Saturday month March\n",
+        "zone:ok:UTC +00:00\n",
+        "all-jet:ok:2024|03|09|069|12|34|56|000|000000|000000000|Sat|Saturday|Mar|March|UTC|+00:00\n",
+        "all-percent:ok:%|Saturday|Sat|March|Mar|2024|24|03|09| 9|069|12|12|34|56|PM|+00:00|UTC|2024-03-09|12:34:56|12:34|03/09/24|000000000\n",
+        "token:err:E2703: unsupported format token `%Q`\n",
+        "missing-zone:err:E2703: format token `VV` requires a zone\n",
+        "overflow:err:E2704: Unix epoch nanoseconds do not fit in Int\n",
+    );
+    for (stem, target) in [
+        ("time_checked_js", "#Target(JS)"),
+        ("time_checked_wasm", "#Target(Wasm)"),
+    ] {
+        let source = template.replace("#TARGET#", target);
+        let dir = build_web_fixture(stem, &source, "tests/fixtures/web_time_checked.jet");
+        assert_eq!(
+            run_web_app(&dir),
+            expected,
+            "{target} time behavior changed"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
 }
 
 /// I9 / #1485: whole numbers on the JS tier are BigInt, so powers (and
@@ -3043,15 +3267,11 @@ fn run() { print(total()) }
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains(
-            "fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"
-        ),
+        wasm.contains("fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"),
         "left Wasm identity was dropped:\n{wasm}"
     );
     assert!(
-        wasm.contains(
-            "fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"
-        ),
+        wasm.contains("fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"),
         "right Wasm identity was dropped:\n{wasm}"
     );
     assert!(
@@ -3121,15 +3341,11 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains(
-            "fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"
-        ),
+        wasm.contains("fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"),
         "left identity was dropped:\n{wasm}"
     );
     assert!(
-        wasm.contains(
-            "fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"
-        ),
+        wasm.contains("fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"),
         "right identity was dropped:\n{wasm}"
     );
     assert!(
@@ -3415,6 +3631,36 @@ fn run() { print("host") }
         compiled.rust.contains("Component::Prefix")
             && compiled.rust.contains("windows_drive_prefix"),
         "generated devserver must reject Windows drive and rooted paths"
+    );
+    assert!(
+        compiled.rust.contains("fn jet_devserver_open_beneath")
+            && compiled.rust.contains("openat")
+            && compiled.rust.contains("O_NOFOLLOW"),
+        "generated devserver must use the shared descriptor-relative no-follow opener"
+    );
+    assert!(
+        compiled.rust.matches("jet_devserver_read_bounded(").count() >= 2,
+        "generated devserver must cap source and static reads before allocation"
+    );
+    assert!(
+        !compiled.rust.contains("std::fs::read(&file_path)"),
+        "generated devserver must not pathname-read after a containment check"
+    );
+    assert!(
+        compiled.rust.contains("nlink()")
+            && compiled.rust.contains("GetFileInformationByHandleEx")
+            && compiled.rust.contains("renameat")
+            && compiled.rust.contains("SetFileInformationByHandle")
+            && compiled.rust.contains("fchdir")
+            && !compiled.rust.contains("std::fs::rename"),
+        "generated devserver output must use identity checks and held-directory publication"
+    );
+    assert!(
+        compiled.rust.contains("std::str::from_utf8(&bytes)")
+            && !compiled
+                .rust
+                .contains("String::from_utf8_lossy(&bytes).into_owned()"),
+        "generated HTML injection must validate and stream the original bytes"
     );
     let _ = fs::remove_file(source_path);
 }

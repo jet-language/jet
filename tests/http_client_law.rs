@@ -133,6 +133,56 @@ fn run() {{
 }
 
 #[test]
+fn h1_rejects_user_framing_headers_before_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    length :: http.request("POST", "http://{addr}/length")
+        .header("Content-Length", "0")
+        .body("body")
+    if length.send() == {{
+        .Ok(_) -> print("length accepted")
+        .Err(_) -> print("length rejected")
+        else -> print("length unexpected")
+    }}
+    transfer :: http.request("POST", "http://{addr}/transfer")
+        .header("Transfer-Encoding", "chunked")
+        .body("body")
+    if transfer.send() == {{
+        .Ok(_) -> print("transfer accepted")
+        .Err(_) -> print("transfer rejected")
+        else -> print("transfer unexpected")
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "user_framing_headers", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "length rejected\ntransfer rejected\n");
+    assert!(!server.join().unwrap(), "user-controlled framing reached the socket");
+}
+
+#[test]
 fn h1_skips_early_hints_reuses_final_response_and_rejects_upgrade() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

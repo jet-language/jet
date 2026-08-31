@@ -1,8 +1,17 @@
-Error [E3401]: `validate` calls the impure function `leaky`
-  --> tests/ui/validate_impure_rule.jet:10:15
+Error [E2404]: This implicit fallible call can't turn a `Err` into a `[FieldError]` here
+  --> tests/ui/validate_impure_rule.jet:9:22
     |
- 10 |         check(leaky(), at: email, "required")
-    |               ^^^^^
- Why: `leaky` is impure, but `validate` declares `=[]=>`
- Fix: give `leaky` an explicit `=[]=>` bound, or remove the call from `validate`
+  9 |     validate { check(leaky(), at: email, "required") }
+    |                      ^^^^^
+ Why: Ordinary fallible calls propagate automatically; there's no declared way to turn `Err` into `[FieldError]`
+ Fix: Add `impl Err -> [FieldError] { … }` before this function
+More: jet-lang.dev/e/E2404
+
+Error [E3401]: `validate` calls the impure function `leaky`
+  --> tests/ui/validate_impure_rule.jet:9:22
+    |
+  9 |     validate { check(leaky(), at: email, "required") }
+    |                      ^^^^^
+ Why: `leaky` is impure, but `validate` declares `-[]>`
+ Fix: Give `leaky` an explicit `-[]>` bound, or remove the call from `validate`
 More: jet-lang.dev/e/E3401

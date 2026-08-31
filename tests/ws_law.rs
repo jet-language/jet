@@ -206,6 +206,13 @@ fn jet_observe_task_register_at_with_control(
 fn jet_observe_task_failure_message(_id: usize, reason: String) -> String {
     reason
 }
+fn jet_observe_task_set_label(_id: usize, _label: &str) {}
+fn jet_observe_task_identity(id: usize) -> String {
+    format!("task #{id}")
+}
+fn jet_observe_task_failure_message_for_identity(identity: &str, reason: String) -> String {
+    format!("{identity}: {reason}")
+}
 fn jet_observe_has_parked_tasks() -> bool {
     false
 }
@@ -673,8 +680,14 @@ fn accept_key_matches_rfc6455_example() {
 
 #[test]
 fn hostile_url_controls_are_rejected_before_handshake_serialization() {
-    assert!(jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes").is_err());
-    assert!(jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path").is_err());
+    assert!(matches!(
+        jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes"),
+        Err(JetWsError::InvalidUrl)
+    ));
+    assert!(matches!(
+        jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path"),
+        Err(JetWsError::InvalidUrl)
+    ));
 }
 
 #[test]

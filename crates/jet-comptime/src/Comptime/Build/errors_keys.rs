@@ -9,7 +9,7 @@ use super::handles::{ActionId, ProbeId, SigningIdentityId, TargetId, ToolchainId
 use super::plan_graph::BuildPlan;
 use super::provenance_toolchains::{
     BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind, ProvenanceSource,
-    ReproducibilityClass, ToolchainRole,
+    ReproducibilityClass, ToolchainResolution, ToolchainRole,
 };
 use super::targets::BuildPath;
 use crate::SHA256;
@@ -565,6 +565,22 @@ fn encode_toolchain(w: &mut KeyWriter, toolchain: &BuildToolchain) {
     }
     w.str("tools");
     w.map_str(&toolchain.tools);
+    w.str("resolution");
+    match toolchain.resolution {
+        ToolchainResolution::Ambient => w.str("ambient"),
+        ToolchainResolution::DeclaredOnly => w.str("declared-only"),
+    }
+    w.str("mounts");
+    for mount in &toolchain.mounts {
+        w.str(&mount.destination);
+        if mount.identity.is_empty() {
+            w.str("path");
+            w.str(&mount.source);
+        } else {
+            w.str("identity");
+            w.str(&mount.identity);
+        }
+    }
     encode_provenance(w, &toolchain.provenance);
 }
 

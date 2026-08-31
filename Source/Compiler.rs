@@ -6,9 +6,32 @@ use crate::Lexer::{TokKind, Token};
 use crate::AST::{CtValue, Type};
 use crate::{Lexer, Parser, AST};
 use jet_foundation::Report::render_status_json;
+use std::path::{Path, PathBuf};
+
+use jet_driver::Authority::{AuthorityError, AuthorityResolver};
+use jet_driver::{Lock, Package};
+use jet_env_model::ModuleEval::{evaluate_env_with_source_loader, SourceLoader};
 
 pub const API_VERSION: u32 = 1;
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// Version 1 package-view field matrix.
+///
+/// `manifest` is the uncomposed declaration view and `package` is the
+/// composed package-facts view. Both expose only manifest metadata that has no
+/// `@build.*` spelling; current-package identity stays exclusively at
+/// `@build.package.name` and `@build.package.version`. `dependencies` and
+/// `outputs` use the underlying `BTreeMap` key order. `packages` and
+/// `build_profiles` retain model order. Lock package and root-dependency lists
+/// retain lock-model order. Profile sets and collision maps use key order;
+/// profile `extends`, `packages`, and `sources` retain declaration order.
+/// Optional source fields are `Option<String>` and collections are present as
+/// empty lists when the model has no declarations. Every operation returns a
+/// `Result` whose failure is `PackageReadError { code, file, message, cause }`;
+/// the Jet carrier is `CompilerPackageError` with the same four fields. The
+/// retained model records no per-field source positions, so the views expose
+/// no fabricated position data.
+pub const PACKAGE_MODEL_SCHEMA_VERSION: u32 = 1;
 
 fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> CtValue {
     ct_struct(
@@ -17,6 +40,800 @@ fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> C
             ("code", CtValue::Str(code.to_string())),
             ("message", CtValue::Str(message.into())),
             ("span", span_value(span.into())),
+        ],
+    )
+}
+
+fn compiler_package_error_value(error: &PackageReadError) -> CtValue {
+    ct_struct(
+        "CompilerPackageError",
+        vec![
+            ("code", CtValue::Str(error.code.clone())),
+            ("message", CtValue::Str(error.message.clone())),
+            ("file", CtValue::Str(error.file.clone())),
+            ("cause", CtValue::Str(error.cause.clone())),
+        ],
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageReadError {
+    pub code: String,
+    pub message: String,
+    pub file: String,
+    pub cause: String,
+}
+
+impl PackageReadError {
+    pub fn new(
+        code: impl Into<String>,
+        file: impl Into<String>,
+        message: impl Into<String>,
+        cause: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            file: file.into(),
+            cause: cause.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyView {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageTargetView {
+    pub name: String,
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputView {
+    pub name: String,
+    pub kind: String,
+    pub entry: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildProfileView {
+    pub name: String,
+    pub optimize: String,
+    pub debug_info: bool,
+    pub small: bool,
+    pub panic: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestView {
+    pub schema_version: u32,
+    pub file: String,
+    pub jet: Option<String>,
+    pub edition: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    pub repository: Option<String>,
+    pub layer: Option<String>,
+    pub target: Option<String>,
+    pub dependencies: Vec<DependencyView>,
+    pub packages: Vec<PackageTargetView>,
+    pub outputs: Vec<OutputView>,
+    pub build_profiles: Vec<BuildProfileView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageView {
+    pub schema_version: u32,
+    pub file: String,
+    pub jet: Option<String>,
+    pub edition: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    pub repository: Option<String>,
+    pub layer: Option<String>,
+    pub target: Option<String>,
+    pub dependencies: Vec<DependencyView>,
+    pub packages: Vec<PackageTargetView>,
+    pub outputs: Vec<OutputView>,
+    pub build_profiles: Vec<BuildProfileView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedPackageView {
+    pub name: String,
+    pub version: String,
+    pub source_kind: String,
+    pub source: Option<String>,
+    pub revision: Option<String>,
+    pub fingerprint: String,
+    pub content_hash: Option<String>,
+    pub dependencies: Vec<String>,
+    pub layer: Option<String>,
+    pub inferred_layer: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockView {
+    pub schema_version: u32,
+    pub file: String,
+    pub version: u32,
+    pub root_dependencies: Vec<String>,
+    pub packages: Vec<LockedPackageView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyValueView {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileView {
+    pub name: String,
+    pub extends: Vec<String>,
+    pub packages: Vec<String>,
+    pub collisions: Vec<KeyValueView>,
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileSetView {
+    pub schema_version: u32,
+    pub file: String,
+    pub profiles: Vec<ProfileView>,
+}
+
+fn package_read_error(
+    file: impl Into<String>,
+    message: impl Into<String>,
+    cause: impl Into<String>,
+) -> PackageReadError {
+    PackageReadError::new("E0956", file, message, cause)
+}
+
+fn authority_read_error(
+    file: impl Into<String>,
+    message: impl Into<String>,
+    cause: AuthorityError,
+) -> PackageReadError {
+    package_read_error(file, message, cause.to_string())
+}
+
+fn diagnostic_cause(diagnostic: &Diagnostic) -> String {
+    match &diagnostic.detail {
+        Some(detail) => format!("{}: {}; {}", diagnostic.code, diagnostic.what, detail),
+        None => format!("{}: {}", diagnostic.code, diagnostic.what),
+    }
+}
+
+fn record_checked_file(file: &jet_driver::Authority::CheckedFile) {
+    let path = file
+        .relative
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    crate::Comptime::record_package_input(path, crate::SHA256::sha256_hex(&file.bytes));
+}
+
+fn record_checked_package_inputs(
+    resolver: &AuthorityResolver,
+    package: &jet_driver::Authority::CheckedPackage,
+) -> Result<(), PackageReadError> {
+    record_checked_file(&package.member.manifest.file);
+    for path in &package.facts.resolved_config_paths {
+        let file = resolver.checked_file(Path::new(path)).map_err(|cause| {
+            authority_read_error(
+                path.clone(),
+                "could not revalidate a package configuration input",
+                cause,
+            )
+        })?;
+        record_checked_file(&file);
+    }
+    Ok(())
+}
+
+fn option_layer(layer: Option<crate::Syntax::RuntimeLayer>) -> Option<String> {
+    layer.map(|layer| layer.as_str().to_string())
+}
+
+fn dependency_views(
+    dependencies: &std::collections::BTreeMap<String, Package::DepSource>,
+) -> Vec<DependencyView> {
+    dependencies
+        .iter()
+        .map(|(name, source)| DependencyView {
+            name: name.clone(),
+            source: Package::dep_display_redacted(source),
+        })
+        .collect()
+}
+
+fn target_name(target: &Package::Target) -> &'static str {
+    match target {
+        Package::Target::Library => "library",
+        Package::Target::Executable => "executable",
+        Package::Target::Test => "test",
+        Package::Target::Example => "example",
+        Package::Target::Plugin { .. } => "plugin",
+    }
+}
+
+fn package_target_views(packages: &[Package::PackageEntry]) -> Vec<PackageTargetView> {
+    packages
+        .iter()
+        .map(|package| PackageTargetView {
+            name: package.name.clone(),
+            targets: package
+                .targets
+                .iter()
+                .map(|target| target_name(target).to_string())
+                .collect(),
+        })
+        .collect()
+}
+
+fn output_kind_name(kind: Package::PackageOutputKind) -> &'static str {
+    match kind {
+        Package::PackageOutputKind::Library => "library",
+        Package::PackageOutputKind::Executable => "executable",
+        Package::PackageOutputKind::Service => "service",
+        Package::PackageOutputKind::Check => "check",
+        Package::PackageOutputKind::Environment => "environment",
+        Package::PackageOutputKind::Image => "image",
+        Package::PackageOutputKind::Bundle => "bundle",
+        Package::PackageOutputKind::System => "system",
+        Package::PackageOutputKind::Fleet => "fleet",
+    }
+}
+
+fn output_views(
+    outputs: &std::collections::BTreeMap<String, Package::OutputFact>,
+) -> Vec<OutputView> {
+    outputs
+        .values()
+        .map(|output| OutputView {
+            name: output.name.clone(),
+            kind: output_kind_name(output.kind).to_string(),
+            entry: output.entry.clone(),
+        })
+        .collect()
+}
+
+fn build_profile_views(profiles: &[Package::BuildProfileDef]) -> Vec<BuildProfileView> {
+    profiles
+        .iter()
+        .map(|profile| BuildProfileView {
+            name: profile.name.clone(),
+            optimize: profile.optimize.as_str().to_string(),
+            debug_info: profile.debug_info,
+            small: profile.small,
+            panic: profile.panic.map(|panic| match panic {
+                Package::BuildPanic::Unwind => "unwind".to_string(),
+                Package::BuildPanic::Abort => "abort".to_string(),
+            }),
+        })
+        .collect()
+}
+
+fn manifest_view_from_facts(facts: &Package::PackageFacts) -> ManifestView {
+    ManifestView {
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: crate::Syntax::PACKAGE_FILE.to_string(),
+        jet: facts.jet.clone(),
+        edition: facts.edition.clone(),
+        description: facts.description.clone(),
+        license: facts.license.clone(),
+        repository: facts.repository.clone(),
+        layer: option_layer(facts.layer),
+        target: facts.target.clone(),
+        dependencies: dependency_views(&facts.deps),
+        packages: package_target_views(&facts.packages),
+        outputs: output_views(&facts.outputs),
+        build_profiles: build_profile_views(&facts.build_profiles),
+    }
+}
+
+fn package_view_from_facts(facts: &Package::PackageFacts) -> PackageView {
+    PackageView {
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: crate::Syntax::PACKAGE_FILE.to_string(),
+        jet: facts.jet.clone(),
+        edition: facts.edition.clone(),
+        description: facts.description.clone(),
+        license: facts.license.clone(),
+        repository: facts.repository.clone(),
+        layer: option_layer(facts.layer),
+        target: facts.target.clone(),
+        dependencies: dependency_views(&facts.deps),
+        packages: package_target_views(&facts.packages),
+        outputs: output_views(&facts.outputs),
+        build_profiles: build_profile_views(&facts.build_profiles),
+    }
+}
+
+fn lock_source_kind(source: &Lock::LockSource) -> &'static str {
+    match source {
+        Lock::LockSource::Root => "root",
+        Lock::LockSource::Path(_) => "path",
+        Lock::LockSource::Git { .. } => "git",
+        Lock::LockSource::Nix { .. } => "nix",
+        Lock::LockSource::Cran { .. } => "cran",
+        Lock::LockSource::LuaRocks { .. } => "lua_rocks",
+        Lock::LockSource::Registry { .. } => "registry",
+        Lock::LockSource::Foreign { .. } => "foreign",
+    }
+}
+
+fn lock_source_reference(source: &Lock::LockSource) -> Option<String> {
+    match source {
+        Lock::LockSource::Root | Lock::LockSource::Path(_) => None,
+        Lock::LockSource::Git { selector, .. } => Some(selector.clone()),
+        Lock::LockSource::Nix { reference, .. }
+        | Lock::LockSource::Cran { reference, .. }
+        | Lock::LockSource::LuaRocks { reference, .. }
+        | Lock::LockSource::Registry { reference, .. }
+        | Lock::LockSource::Foreign { reference, .. } => Some(reference.clone()),
+    }
+}
+
+fn lock_view_from_lock(lock: &Lock::LockFile) -> LockView {
+    LockView {
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: crate::Syntax::UNIFIED_LOCK_FILE.to_string(),
+        version: lock.version,
+        root_dependencies: lock.root_dependencies.clone(),
+        packages: lock
+            .packages
+            .iter()
+            .map(|package| LockedPackageView {
+                name: package.name.clone(),
+                version: package.version.clone(),
+                source_kind: lock_source_kind(&package.source).to_string(),
+                source: lock_source_reference(&package.source),
+                revision: package.locked.as_ref().map(|revision| revision.rev.clone()),
+                fingerprint: package.fingerprint.clone(),
+                content_hash: package.content_hash.clone(),
+                dependencies: package.dependencies.clone(),
+                layer: option_layer(package.layer),
+                inferred_layer: option_layer(package.inferred_layer),
+            })
+            .collect(),
+    }
+}
+
+fn profile_view(profile: &jet_env_model::ModuleEval::PackageProfileSpec) -> ProfileView {
+    ProfileView {
+        name: profile.name.clone(),
+        extends: profile.extends.clone(),
+        packages: profile.packages.clone(),
+        collisions: profile
+            .collisions
+            .iter()
+            .map(|(key, value)| KeyValueView {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+        sources: profile.sources.clone(),
+    }
+}
+
+fn profile_set_view(
+    profiles: &jet_env_model::ModuleEval::PackageProfileSet,
+) -> ProfileSetView {
+    ProfileSetView {
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: crate::Syntax::ENV_FILE.to_string(),
+        profiles: profiles.profiles.values().map(profile_view).collect(),
+    }
+}
+
+pub fn read_manifest(root: &Path) -> Result<ManifestView, PackageReadError> {
+    let resolver = AuthorityResolver::open(root).map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::PACKAGE_FILE,
+            "could not open the pinned package root",
+            cause,
+        )
+    })?;
+    let manifest = resolver
+        .checked_manifest(Path::new("."))
+        .map_err(|cause| {
+            authority_read_error(
+                crate::Syntax::PACKAGE_FILE,
+                "could not read the package manifest",
+                cause,
+            )
+        })?;
+    record_checked_file(&manifest.file);
+    Ok(manifest_view_from_facts(&manifest.facts))
+}
+
+pub fn read_package(root: &Path) -> Result<PackageView, PackageReadError> {
+    let resolver = AuthorityResolver::open(root).map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::PACKAGE_FILE,
+            "could not open the pinned package root",
+            cause,
+        )
+    })?;
+    let package = resolver.checked_root_package().map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::PACKAGE_FILE,
+            "could not compose the package facts",
+            cause,
+        )
+    })?;
+    record_checked_package_inputs(&resolver, &package)?;
+    Ok(package_view_from_facts(&package.facts))
+}
+
+pub fn read_lock(root: &Path) -> Result<LockView, PackageReadError> {
+    let resolver = AuthorityResolver::open(root).map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::UNIFIED_LOCK_FILE,
+            "could not open the pinned package root",
+            cause,
+        )
+    })?;
+    let file = resolver
+        .checked_file(Path::new(crate::Syntax::UNIFIED_LOCK_FILE))
+        .map_err(|cause| {
+            authority_read_error(
+                crate::Syntax::UNIFIED_LOCK_FILE,
+                "could not read the package lock",
+                cause,
+            )
+        })?;
+    record_checked_file(&file);
+    let text = file.text().map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::UNIFIED_LOCK_FILE,
+            "could not decode the package lock",
+            cause,
+        )
+    })?;
+    let lock = Lock::parse(&text).map_err(|cause| {
+        package_read_error(
+            crate::Syntax::UNIFIED_LOCK_FILE,
+            "could not parse the package lock",
+            cause,
+        )
+    })?;
+    resolver
+        .revalidate_file(&file)
+        .map_err(|cause| {
+            authority_read_error(
+                crate::Syntax::UNIFIED_LOCK_FILE,
+                "the package lock changed while it was being read",
+                cause,
+            )
+        })?;
+    Ok(lock_view_from_lock(&lock))
+}
+
+struct PackageSourceLoader {
+    resolver: AuthorityResolver,
+    checked_inputs: Vec<jet_driver::Authority::CheckedFile>,
+    last_file: String,
+}
+
+impl SourceLoader for PackageSourceLoader {
+    fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic> {
+        self.last_file = relative
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let file = self
+            .resolver
+            .checked_file(relative)
+            .map_err(|cause| cause.diagnostic())?;
+        record_checked_file(&file);
+        let text = file.text().map_err(|cause| cause.diagnostic())?;
+        self.checked_inputs.push(file);
+        Ok(text)
+    }
+
+    fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+        self.last_file = relative
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let files = self
+            .resolver
+            .discover_files(relative, Some(crate::Syntax::FILE_EXT))
+            .map_err(|cause| cause.diagnostic())?;
+        for file in &files {
+            record_checked_file(file);
+        }
+        self.checked_inputs.extend(files.iter().cloned());
+        Ok(files.into_iter().map(|file| file.relative).collect())
+    }
+
+    fn package_facts(&mut self) -> Result<Option<Package::PackageFacts>, Diagnostic> {
+        self.last_file = crate::Syntax::PACKAGE_FILE.to_string();
+        let package = self
+            .resolver
+            .checked_root_package()
+            .map_err(|cause| cause.diagnostic())?;
+        record_checked_package_inputs(&self.resolver, &package).map_err(|error| {
+            Diagnostic::error(
+                error.code,
+                error.message,
+                error.cause,
+                "restore the package inputs and try again".to_string(),
+                None,
+            )
+        })?;
+        Ok(Some(package.facts))
+    }
+}
+
+pub fn read_profiles(root: &Path) -> Result<ProfileSetView, PackageReadError> {
+    let resolver = AuthorityResolver::open(root).map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::ENV_FILE,
+            "could not open the pinned package root",
+            cause,
+        )
+    })?;
+    let env_file = resolver
+        .checked_file(Path::new(crate::Syntax::ENV_FILE))
+        .map_err(|cause| {
+            authority_read_error(
+                crate::Syntax::ENV_FILE,
+                "could not read the profile source",
+                cause,
+            )
+        })?;
+    record_checked_file(&env_file);
+    let source = env_file.text().map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::ENV_FILE,
+            "could not decode the profile source",
+            cause,
+        )
+    })?;
+    let base_dir = resolver.root().to_path_buf();
+    let mut loader = PackageSourceLoader {
+        resolver,
+        checked_inputs: vec![env_file],
+        last_file: crate::Syntax::ENV_FILE.to_string(),
+    };
+    let plan = match evaluate_env_with_source_loader(&source, &base_dir, &mut loader, None, None) {
+        Ok(plan) => plan,
+        Err(cause) => {
+            return Err(package_read_error(
+                loader.last_file.clone(),
+                "could not evaluate the profile source",
+                diagnostic_cause(&cause),
+            ));
+        }
+    };
+    for file in &loader.checked_inputs {
+        let file_name = file
+            .relative
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        loader
+            .resolver
+            .revalidate_file(file)
+            .map_err(|cause| {
+                authority_read_error(
+                    file_name,
+                    "a profile input changed while it was being read",
+                    cause,
+                )
+            })?;
+    }
+    let mut profiles = jet_env_model::ModuleEval::PackageProfileSet::default();
+    for profile in plan.package_profiles {
+        profiles.insert_checked(profile).map_err(|cause| {
+            package_read_error(
+                crate::Syntax::ENV_FILE,
+                "could not compose the profile set",
+                cause.to_string(),
+            )
+        })?;
+    }
+    Ok(profile_set_view(&profiles))
+}
+
+fn optional_string(value: Option<&String>) -> CtValue {
+    compiler_option_string(value.map(String::as_str))
+}
+
+fn dependency_value(dependency: &DependencyView) -> CtValue {
+    ct_struct(
+        "CompilerDependency",
+        vec![
+            ("name", CtValue::Str(dependency.name.clone())),
+            ("source", CtValue::Str(dependency.source.clone())),
+        ],
+    )
+}
+
+fn package_target_value(package: &PackageTargetView) -> CtValue {
+    ct_struct(
+        "CompilerPackageTarget",
+        vec![
+            ("name", CtValue::Str(package.name.clone())),
+            ("targets", compiler_string_list(package.targets.clone())),
+        ],
+    )
+}
+
+fn output_value(output: &OutputView) -> CtValue {
+    ct_struct(
+        "CompilerPackageOutput",
+        vec![
+            ("name", CtValue::Str(output.name.clone())),
+            ("kind", CtValue::Str(output.kind.clone())),
+            ("entry", optional_string(output.entry.as_ref())),
+        ],
+    )
+}
+
+fn build_profile_value(profile: &BuildProfileView) -> CtValue {
+    ct_struct(
+        "CompilerBuildProfile",
+        vec![
+            ("name", CtValue::Str(profile.name.clone())),
+            ("optimize", CtValue::Str(profile.optimize.clone())),
+            ("debug_info", CtValue::Bool(profile.debug_info)),
+            ("small", CtValue::Bool(profile.small)),
+            ("panic", optional_string(profile.panic.as_ref())),
+        ],
+    )
+}
+
+fn manifest_value(view: &ManifestView) -> CtValue {
+    ct_struct(
+        "CompilerManifest",
+        vec![
+            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            ("file", CtValue::Str(view.file.clone())),
+            ("jet", optional_string(view.jet.as_ref())),
+            ("edition", optional_string(view.edition.as_ref())),
+            ("description", optional_string(view.description.as_ref())),
+            ("license", optional_string(view.license.as_ref())),
+            ("repository", optional_string(view.repository.as_ref())),
+            ("layer", optional_string(view.layer.as_ref())),
+            ("target", optional_string(view.target.as_ref())),
+            (
+                "dependencies",
+                CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
+            ),
+            (
+                "packages",
+                CtValue::List(view.packages.iter().map(package_target_value).collect()),
+            ),
+            (
+                "outputs",
+                CtValue::List(view.outputs.iter().map(output_value).collect()),
+            ),
+            (
+                "build_profiles",
+                CtValue::List(view.build_profiles.iter().map(build_profile_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn package_value(view: &PackageView) -> CtValue {
+    ct_struct(
+        "CompilerPackage",
+        vec![
+            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            ("file", CtValue::Str(view.file.clone())),
+            ("jet", optional_string(view.jet.as_ref())),
+            ("edition", optional_string(view.edition.as_ref())),
+            ("description", optional_string(view.description.as_ref())),
+            ("license", optional_string(view.license.as_ref())),
+            ("repository", optional_string(view.repository.as_ref())),
+            ("layer", optional_string(view.layer.as_ref())),
+            ("target", optional_string(view.target.as_ref())),
+            (
+                "dependencies",
+                CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
+            ),
+            (
+                "packages",
+                CtValue::List(view.packages.iter().map(package_target_value).collect()),
+            ),
+            (
+                "outputs",
+                CtValue::List(view.outputs.iter().map(output_value).collect()),
+            ),
+            (
+                "build_profiles",
+                CtValue::List(view.build_profiles.iter().map(build_profile_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn locked_package_value(package: &LockedPackageView) -> CtValue {
+    ct_struct(
+        "CompilerLockedPackage",
+        vec![
+            ("name", CtValue::Str(package.name.clone())),
+            ("version", CtValue::Str(package.version.clone())),
+            ("source_kind", CtValue::Str(package.source_kind.clone())),
+            ("source", optional_string(package.source.as_ref())),
+            ("revision", optional_string(package.revision.as_ref())),
+            ("fingerprint", CtValue::Str(package.fingerprint.clone())),
+            ("content_hash", optional_string(package.content_hash.as_ref())),
+            (
+                "dependencies",
+                compiler_string_list(package.dependencies.clone()),
+            ),
+            ("layer", optional_string(package.layer.as_ref())),
+            (
+                "inferred_layer",
+                optional_string(package.inferred_layer.as_ref()),
+            ),
+        ],
+    )
+}
+
+fn key_value_value(value: &KeyValueView) -> CtValue {
+    ct_struct(
+        "CompilerKeyValue",
+        vec![
+            ("key", CtValue::Str(value.key.clone())),
+            ("value", CtValue::Str(value.value.clone())),
+        ],
+    )
+}
+
+fn profile_value(profile: &ProfileView) -> CtValue {
+    ct_struct(
+        "CompilerProfile",
+        vec![
+            ("name", CtValue::Str(profile.name.clone())),
+            ("extends", compiler_string_list(profile.extends.clone())),
+            ("packages", compiler_string_list(profile.packages.clone())),
+            (
+                "collisions",
+                CtValue::List(profile.collisions.iter().map(key_value_value).collect()),
+            ),
+            ("sources", compiler_string_list(profile.sources.clone())),
+        ],
+    )
+}
+
+fn lock_value(view: &LockView) -> CtValue {
+    ct_struct(
+        "CompilerLock",
+        vec![
+            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            ("file", CtValue::Str(view.file.clone())),
+            ("version", CtValue::Int(i64::from(view.version))),
+            (
+                "root_dependencies",
+                compiler_string_list(view.root_dependencies.clone()),
+            ),
+            (
+                "packages",
+                CtValue::List(view.packages.iter().map(locked_package_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn profile_set_value(view: &ProfileSetView) -> CtValue {
+    ct_struct(
+        "CompilerProfileSet",
+        vec![
+            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            ("file", CtValue::Str(view.file.clone())),
+            (
+                "profiles",
+                CtValue::List(view.profiles.iter().map(profile_value).collect()),
+            ),
         ],
     )
 }
@@ -47,6 +864,43 @@ pub fn eval_core_call_with_type(
 ) -> Option<Result<CtValue, Diagnostic>> {
     if module != "core.compiler" {
         return None;
+    }
+    if matches!(method, "manifest" | "package" | "lock" | "profiles") {
+        if !args.is_empty() {
+            return Some(Ok(CtValue::failed(Box::new(
+                compiler_package_error_value(&PackageReadError::new(
+                    "E0956",
+                    "",
+                    format!("`core.compiler.{method}` takes no arguments"),
+                    "call the package view from `fn build` or a comptime binding without a path argument",
+                )),
+            ))));
+        }
+        let Some(root) = crate::Comptime::package_read_root() else {
+            return Some(Ok(CtValue::failed(Box::new(
+                compiler_package_error_value(&PackageReadError::new(
+                    "E0956",
+                    "",
+                    format!("`core.compiler.{method}` is available only during package-aware compile-time evaluation"),
+                    "call the package view from `fn build` or a comptime binding; the compiler pins the package root for you",
+                )),
+            ))));
+        };
+        let result = match method {
+            "manifest" => read_manifest(&root).map(|view| manifest_value(&view)),
+            "package" => read_package(&root).map(|view| package_value(&view)),
+            "lock" => read_lock(&root).map(|view| lock_value(&view)),
+            "profiles" => read_profiles(&root).map(|view| profile_set_value(&view)),
+            _ => Err(package_read_error(
+                "",
+                "unknown package view operation",
+                "the compiler package view dispatcher received an unsupported operation",
+            )),
+        };
+        return Some(Ok(match result {
+            Ok(value) => CtValue::Present(Box::new(value)),
+            Err(error) => CtValue::failed(Box::new(compiler_package_error_value(&error))),
+        }));
     }
     let source = match args.first() {
         Some(CtValue::Str(source)) if args.len() == 1 && method != "check" => source.clone(),
@@ -335,7 +1189,10 @@ fn compiler_arithmetic_value(value: &jet_semindex::ArithmeticOperationFact) -> C
             ("operation", CtValue::Str(value.operation.clone())),
             ("policy", CtValue::Str(value.policy.clone())),
             ("module", CtValue::Str(value.module_path.clone())),
-            ("operation_span", compiler_semantic_span(value.operation_span)),
+            (
+                "operation_span",
+                compiler_semantic_span(value.operation_span),
+            ),
             ("scope_span", compiler_semantic_span(value.scope_span)),
         ],
     )

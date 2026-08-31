@@ -1,8 +1,8 @@
 Error [E1116]: `Shared.read(…)` is the retired closure form for shared access.
-  --> tests/ui/shared_retired_closure_access.jet:5:18
+  --> tests/ui/shared_retired_closure_access.jet:7:18
     |
-  5 |     print(config.read(value => value.hits))
+  7 |     print(config.read(value -> value.hits))
     |                  ^^^^
  Why: D-CONC-SHARE1=A made a shared value read and write like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step. The closure per touch proved nothing the compiler did not already know.
- Fix: read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact { … }`, or take an expert guard with `.guard_edit()`.
+ Fix: Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact { … }`, or take an expert guard with `.guard_edit()`.
 More: jet-lang.dev/e/E1116

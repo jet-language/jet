@@ -315,12 +315,35 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
         let name = &function.jet;
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() Session !PerlError -[FFI.Perl]> {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() Session !PerlError -[FFI.Perl]> {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "PerlError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
     for function in functions {
         let name = &function.jet;
-        out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PerlError -[FFI.Perl]> {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(PerlError.NotRunning) }}\n    if code == 2 {{ return Err(PerlError.Timeout) }}\n    if code == 3 {{ return Err(PerlError.Cancelled) }}\n    if code == 5 {{ return Err(PerlError.Limit) }}\n    if code != 0 {{ return Err(PerlError.Protocol) }}\n    response := json.parse(raw) ?? return Err(PerlError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(PerlError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
+        out.push_str(&format!(
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PerlError -[FFI.Perl]> {{
+    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
+}}
+
+"#
+        ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet(
+        "registry",
+        &[BoundFunction {
+            perl: "Transform".into(),
+            jet: "transform".into(),
+        }],
+    )
 }
 
 fn tool_path(tool: &str) -> Option<PathBuf> {
@@ -428,7 +451,10 @@ fn snake(value: &str) -> String {
 }
 
 fn reserved(value: &str) -> bool {
-    matches!(value, "open" | "cancel" | "close" | "Session" | "PerlError")
+    matches!(
+        value,
+        "open" | "cancel" | "close" | "decode_response" | "Session" | "PerlError"
+    )
         || crate::Syntax::JET_KEYWORD_LIST.contains(&value)
         || crate::Syntax::JET_TYPE_LIST.contains(&value)
 }
@@ -462,6 +488,34 @@ mod tests {
             assert!(!jet.contains(&format!("pub fn {foreign}(")));
             assert!(worker.contains(&format!("'{foreign}' => 1")));
         }
+    }
+
+    #[test]
+    fn source_discovery_does_not_evaluate_perl_compile_time_code() {
+        let functions = super::parse_function_names(
+            br#"BEGIN { die "compile-time code must not execute" }
+use Hostile::Module;
+sub Safe { }
+"#,
+        )
+        .expect("source discovery must not invoke Perl");
+        assert_eq!(
+            functions
+                .iter()
+                .map(|function| function.perl.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Safe"]
+        );
+    }
+
+    #[test]
+    fn renders_one_response_decoder_for_perl_operations() {
+        let functions = super::parse_function_names(b"sub Transform { }\n").unwrap();
+        let jet = super::render_jet("ops", &functions);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
+        assert_eq!(jet.matches("return decode_response(raw, code)").count(), 1);
     }
 
     #[test]

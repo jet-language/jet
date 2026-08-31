@@ -1,8 +1,9 @@
-Error [E0121]: `arena` was given away earlier, so it can't be used here
+Error [E0121]: `arena` was consumed by `close`, so it can't be used here
   --> tests/ui/mem_use_after_reset.jet:9:10
     |
   9 |     y :: arena.alloc(2)
     |          ^^^^^
- Why: after a value moves to another name, the old name no longer gives access to it
- Fix: acquire a new ``Arena`` resource; closed resources cannot be copied or reused
+ Why: After a value moves to another name, the old name no longer gives access to it
+ Fix: Acquire a new ``Arena`` resource; closed resources cannot be copied or reused
+move site: source bytes 164..169; reuse site: source bytes 180..185; consuming callee: close
 More: jet-lang.dev/e/E0121

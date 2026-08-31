@@ -8,7 +8,19 @@ mod tir_support;
 use std::fs;
 use std::process::Command;
 
-use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_multi, build_release_and_run_multi, compile,
+    have_rustc, run_default_multi, run_interpret_multi,
+};
+
+fn assert_function_tier(trace: &str, function: &str, tier: &str) {
+    assert!(
+        trace
+            .lines()
+            .any(|line| line.starts_with(function) && line.contains(tier)),
+        "missing `{function}` {tier} row:\n{trace}"
+    );
+}
 
 fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
     for entry in fs::read_dir(path).expect("read Codegen source directory") {
@@ -151,6 +163,518 @@ fn run() {
         "tir_generated_trait_protocols",
         src,
         "true\ntrue\ntrue\ntrue\n7\n",
+    );
+}
+
+/// #2252: a generated Codable error struct remains a valid field receiver
+/// after the evaluator carries its successful decode through a fallible bind.
+#[test]
+fn generated_error_struct_decode_field_read_matches_every_tier() {
+    let src = r#"
+use core.encoding.json as json
+
+#[Error, Codable]
+struct CLIError {
+    message: String
+}
+
+fn run() ![FieldError] {
+    raw :: "{{\"message\":\"bad\"}}"
+    decoded :: json.decode<CLIError>(raw)
+    print(decoded.message)
+}
+"#;
+    assert_tiers_agree("tir_generated_error_struct_field", src, "bad\n");
+}
+
+/// #2252: a generated codec is a top-level item of the module that DECLARES
+/// the type, so it lowers under that module's canonical owner while every
+/// expression inside that module still names the type by its local leaf. The
+/// default `jet run` lens must resolve both spellings instead of deopting with
+/// an unsupported `Encode`/`Decode` body.
+///
+/// The consumer side of the same seam: a cross-module call answers with the
+/// success view its own return lowering added, so every payload consumer --
+/// a field read, a codec's text argument, a builtin or user method receiver --
+/// must read through that view instead of refusing the value.
+#[test]
+fn imported_generated_codec_runs_on_the_default_tier() {
+    let plan_src = "\
+use core.encoding.json as json
+
+#Codable
+pub struct ListReport {
+    pub schema: String
+    pub status: String
+}
+
+impl ListReport {
+    pub fn label(self) String -> self.status
+}
+
+pub fn list_json(status: String) String -> {
+    return json.to_string(ListReport{schema: \"jet.report/v1\", status: status})
+}
+
+pub fn mk() ListReport -> ListReport{schema: \"jet.report/v1\", status: \"ok\"}
+
+pub fn round_trip(wire: String) String -> {
+    report :: json.decode<ListReport>(wire) ?? panic(\"declaring module decode\")
+    return report.status
+}
+";
+    let main_src = "\
+use plan
+use core.encoding.json as json
+
+fn run() {
+    wire :: plan.list_json(\"ok\")
+    print(wire)
+    print(plan.round_trip(wire))
+    report :: json.decode<plan.ListReport>(wire) ?? panic(\"consumer decode\")
+    print(report.schema)
+    print(plan.mk().label())
+    print(wire.len())
+}
+";
+    let files = [("main.jet", main_src), ("plan.jet", plan_src)];
+    let expected = "{\"schema\":\"jet.report/v1\",\"status\":\"ok\"}\nok\njet.report/v1\nok\n40\n";
+    let (code, stdout, stderr) = run_default_multi("imported_generated_codec", "main.jet", &files);
+    assert!(
+        !stderr.contains("E0956"),
+        "imported generated codec deopted on the default tier: {stderr}"
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    // I9: the same imported shape rows, generated codecs, and impl-block
+    // methods must answer on the forced interpreter, which has no Cranelift
+    // host to deopt into.
+    let (interp_code, interp_stdout, interp_stderr) =
+        run_interpret_multi("imported_generated_codec", "main.jet", &files);
+    assert!(
+        !interp_stderr.contains("E0956"),
+        "imported generated codec is unsupported on the forced interpreter: {interp_stderr}"
+    );
+    assert_eq!(interp_code, 0, "{interp_stderr}");
+    assert_eq!(interp_stdout, expected, "{interp_stderr}");
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_generated_codec", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// #2252: imported generated codecs must include private declaring-module
+/// nominals. The public function body constructs private nested records, so
+/// the resident route must lower both codecs from the declaring context.
+#[test]
+fn imported_private_generated_codec_runs_on_the_default_tier() {
+    let plan_src = "\
+use core.encoding.json as json
+
+#Codable
+struct PackageRow {
+    name: String
+}
+
+#Codable
+struct ListReport {
+    schema: String
+    packages: [PackageRow]
+}
+
+pub fn list_json() String -> {
+    return json.to_string(ListReport{
+        schema: \"jet.report/v1\",
+        packages: [PackageRow{name: \"jet\"}]
+    })
+}
+";
+    let main_src = "\
+use plan
+
+fn run() {
+    print(plan.list_json())
+}
+";
+    let files = [("main.jet", main_src), ("plan.jet", plan_src)];
+    let expected = "{\"schema\":\"jet.report/v1\",\"packages\":[{\"name\":\"jet\"}]}\n";
+    let (code, stdout, stderr) =
+        run_default_multi("imported_private_generated_codec", "main.jet", &files);
+    assert!(
+        !stderr.contains("E0956"),
+        "private imported generated codec deopted on the default tier: {stderr}"
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    let (interp_code, interp_stdout, interp_stderr) =
+        run_interpret_multi("imported_private_generated_codec", "main.jet", &files);
+    assert_eq!(interp_code, 0, "{interp_stderr}");
+    assert_eq!(interp_stdout, expected, "{interp_stderr}");
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_private_generated_codec", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// #2252: a zero-argument imported function returning an ordinary `String`
+/// must preserve its successful value through the resident module-call ABI.
+/// The implicit `Result` carrier used by AOT must not leak into default JIT
+/// or forced-interpreter output.
+#[test]
+fn imported_zero_arg_string_result_matches_every_tier() {
+    let plan_src = "pub fn greeting() String -> \"hello\"\n";
+    let main_src = "\
+use plan
+
+fn run() {
+    print(plan.greeting())
+}
+";
+    let files = [("main.jet", main_src), ("plan.jet", plan_src)];
+    let expected = "hello\n";
+
+    let (code, stdout, stderr) =
+        run_default_multi("imported_zero_arg_string_result", "main.jet", &files);
+    assert_eq!(code, 0, "default run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    assert!(
+        !stderr.contains("E0956"),
+        "default imported String call deoptimized:\n{stderr}"
+    );
+
+    let (code, stdout, stderr) =
+        run_interpret_multi("imported_zero_arg_string_result", "main.jet", &files);
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    assert!(
+        !stderr.contains("E0956"),
+        "interpreter imported String call failed:\n{stderr}"
+    );
+
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_zero_arg_string_result", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// #2350: an imported function that constructs `Bytes` must qualify the
+/// generated `JetByteBuffer` constructor from its nested module.
+#[test]
+fn imported_byte_buffer_constructor_uses_module_root_in_aot() {
+    if !have_rustc() {
+        return;
+    }
+
+    let plan_src = "\
+pub fn bytes() Int -> {
+    buffer := Bytes.new()
+    buffer.write_u8(7)
+    return buffer.len()
+}
+";
+    let main_src = "\
+use plan
+
+fn run() {
+    print(plan.bytes())
+}
+";
+    let files = [("main.jet", main_src), ("plan.jet", plan_src)];
+    let (code, stdout) =
+        build_and_run_multi("tir_imported_byte_buffer_constructor", "main.jet", &files);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
+}
+
+/// #2252: the eager List path must retain its nested String carrier through
+/// `lines().map(...).flatten()` instead of treating the final result type as
+/// the receiver type and deopting the actual collection operation.
+#[test]
+fn mapped_string_lists_flatten_on_each_hosted_tier() {
+    let src = r#"
+fn flatten_words(contents: String) [String] -> {
+    return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
+}
+fn flatten_string_rows() [String] -> [[String]]{{"red"}, {"blue", "green"}}.flatten()
+fn run() {
+    words :: flatten_words("one two\nthree four")
+    neighbors :: flatten_words("five six")
+    rows :: flatten_string_rows()
+    print(words.len())
+    print(words[0])
+    print(words[3])
+    print(neighbors[1])
+    print(rows[2])
+}
+"#;
+    let expected = "4\none\nfour\nsix\ngreen\n";
+    let files = [("main.jet", src)];
+    let (code, stdout, stderr) =
+        run_default_multi("mapped_string_lists_flatten", "main.jet", &files);
+    assert_eq!(code, 0, "default run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    assert_function_tier(&stderr, "flatten_words", "tier1 native");
+    assert_function_tier(&stderr, "flatten_string_rows", "tier1 native");
+    assert_function_tier(&stderr, "run", "tier1 native");
+    assert!(!stderr.contains("tier0 interp"), "{stderr}");
+    assert!(!stderr.contains("E0956"), "{stderr}");
+
+    let (code, stdout, stderr) =
+        run_interpret_multi("mapped_string_lists_flatten", "main.jet", &files);
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    assert_function_tier(&stderr, "run", "tier0 interp");
+    assert!(!stderr.contains("tier1 native"), "{stderr}");
+    assert!(!stderr.contains("E0956"), "{stderr}");
+
+    if have_rustc() {
+        let (code, stdout, stderr) =
+            build_release_and_run_multi("mapped_string_lists_flatten", "main.jet", &files);
+        assert_eq!(code, 0, "release AOT failed: {stderr}");
+        assert_eq!(stdout, expected, "{stderr}");
+    }
+    let unsupported_src = r#"
+fn flatten_float_rows(rows: [[Float]]) [Float] -> rows.flatten()
+fn run() {
+    values :: flatten_float_rows([[Float]{1.5}, [Float]{2.5}])
+    print(values.len())
+    print(values[1])
+}
+"#;
+    let unsupported_files = [("main.jet", unsupported_src)];
+    let (code, stdout, stderr) =
+        run_default_multi("float_rows_flatten_fallback", "main.jet", &unsupported_files);
+    assert_eq!(code, 0, "unsupported-shape fallback failed: {stderr}");
+    assert_eq!(stdout, "2\n2.5\n", "{stderr}");
+    assert_function_tier(&stderr, "flatten_float_rows", "tier0 interp");
+}
+
+
+/// #2360/#2252: Float-list arguments, ordering, and typed helper operations
+/// must stay native instead of entering a silent tier-0 fallback.
+#[test]
+fn float_list_arguments_stay_native_on_the_default_tier() {
+    let src = r#"
+fn first(values: [Float]) Float -> values.first() ?? 0.0
+fn last(values: [Float]) Float -> values.last() ?? 0.0
+fn sorted_first(values: [Float]) Float -> {
+    sorted_values := values.copy()
+    sorted_values.sort()
+    return sorted_values.first() ?? 0.0
+}
+fn ordered(left: Float, right: Float) Bool -> left < right
+fn list_ordered(left: [Float], right: [Float]) Bool -> left < right
+fn run() {
+    values :: [Float]{1.0, 2.0}
+    print(first(values))
+    print(last(values))
+    print(sorted_first([Float]{2.0, 1.0}))
+    print(ordered(values[0], values[1]))
+    print(list_ordered(values, [Float]{1.0, 3.0}))
+}
+"#;
+    let expected = "1.0\n2.0\n1.0\ntrue\ntrue\n";
+    let files = [("main.jet", src)];
+    let (code, stdout, stderr) = run_default_multi("float_list_argument_call", "main.jet", &files);
+    assert_eq!(code, 0, "default run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    for function in ["first", "last", "sorted_first", "ordered", "list_ordered"] {
+        assert_function_tier(&stderr, function, "tier1 native");
+    }
+    assert!(!stderr.contains("tier0 interp"), "{stderr}");
+    assert!(!stderr.contains("E0956"), "{stderr}");
+
+    let (code, stdout, stderr) =
+        run_interpret_multi("float_list_argument_call", "main.jet", &files);
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    assert_function_tier(&stderr, "run", "tier0 interp");
+    assert!(!stderr.contains("tier1 native"), "{stderr}");
+    assert!(!stderr.contains("E0956"), "{stderr}");
+
+    if have_rustc() {
+        let (code, stdout, stderr) =
+            build_release_and_run_multi("float_list_argument_call", "main.jet", &files);
+        assert_eq!(code, 0, "release AOT failed: {stderr}");
+        assert_eq!(stdout, expected, "{stderr}");
+    }
+}
+
+/// D-DISPLAYDBG1: map iteration's tuple-like record can display its DataTree
+/// value through the shared value projection on every execution tier.
+#[test]
+fn datatree_map_iteration_display_matches_every_tier() {
+    let src = r#"
+fn run() {
+    fields :: [String:DataTree]{
+        "key": DataTree.Object(["nested": DataTree.Int(1)])
+    }
+    loop (key, value) in fields {
+        print("{key}:{value}")
+        print("{key}:{value:Debug}")
+    }
+}
+"#;
+    assert_tiers_agree(
+        "datatree_map_iteration_display",
+        src,
+        "key:{\"nested\":1}\nkey:{\"nested\":1}\n",
+    );
+}
+
+
+/// #2252: an imported `Bool !Never` call is a value condition, not a raw
+/// Result handle. Keep the condition's success payload intact on every tier.
+#[test]
+fn imported_never_bool_condition_runs_on_all_tiers() {
+    let helper_src = "\
+pub fn helper(value: Bool) Bool !Never -> {
+    return value
+}
+";
+    let main_src = "\
+use helper
+
+fn run() {
+    if helper.helper(false) {
+        print(\"yes\")
+    } else {
+        print(\"no\")
+    }
+}
+";
+    let files = [("main.jet", main_src), ("helper.jet", helper_src)];
+    let expected = "no\n";
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_never_bool_condition", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+    let (code, stdout, stderr) =
+        run_default_multi("imported_never_bool_condition", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    let (interp_code, interp_stdout, interp_stderr) =
+        run_interpret_multi("imported_never_bool_condition", "main.jet", &files);
+    assert_eq!(interp_code, 0, "{interp_stderr}");
+    assert_eq!(interp_stdout, expected, "{interp_stderr}");
+}
+
+/// Local `Bool !Never` calls keep the same Result carrier ABI as imported
+/// calls, including a deep scalar branch-dispatch chain. Carrier views must
+/// remain carriers so `??` does not unwrap twice.
+#[test]
+fn local_never_calls_cross_the_result_abi_once() {
+    let src = r#"
+fn bool_level_10(left: Bool, right: Bool) Bool !Never -> {
+    return left == right
+}
+
+fn bool_level_9(left: Bool, right: Bool) Bool !Never -> {
+    return if {
+        left -> bool_level_10(left, right)
+        else -> bool_level_10(right, left)
+    }
+}
+
+fn bool_level_8(left: Bool, right: Bool) Bool !Never -> {
+    return bool_level_9(left, right)
+}
+
+fn bool_level_7(left: Bool, right: Bool) Bool !Never -> {
+    return if {
+        right -> bool_level_8(left, right)
+        else -> bool_level_8(right, left)
+    }
+}
+
+fn bool_level_6(left: Bool, right: Bool) Bool !Never -> {
+    return bool_level_7(left, right)
+}
+
+fn bool_level_5(left: Bool, right: Bool) Bool !Never -> {
+    return if {
+        left -> bool_level_6(left, right)
+        else -> bool_level_6(right, left)
+    }
+}
+
+fn bool_level_4(left: Bool, right: Bool) Bool !Never -> {
+    return bool_level_5(left, right)
+}
+
+fn bool_level_3(left: Bool, right: Bool) Bool !Never -> {
+    return if {
+        right -> bool_level_4(left, right)
+        else -> bool_level_4(right, left)
+    }
+}
+
+fn bool_level_2(left: Bool, right: Bool) Bool !Never -> {
+    return bool_level_3(left, right)
+}
+
+fn bool_level_1(left: Bool, right: Bool) Bool !Never -> {
+    return if {
+        left -> bool_level_2(left, right)
+        else -> bool_level_2(right, left)
+    }
+}
+
+fn int_helper(value: Int) Int !Never -> {
+    return value
+}
+
+fn run() {
+    if bool_level_1(false, true) -> print("wrong") else -> print("no")
+    if int_helper(7) == 7 {
+        print("int")
+    }
+    print(bool_level_1(true, true) ?? false)
+    print(int_helper(9) ?? 0)
+}
+"#;
+    assert_tiers_agree("tir_local_never_calls", src, "no\nint\ntrue\n9\n");
+}
+
+/// #2252: typed CLI construction uses the same resident struct field and
+/// fallback lowering as an ordinary program. Its defaulted `Int`, plain `Bool`,
+/// and absent optional `String` must not route the entry through whole-program
+/// deopt when the optional fallback resets the error trace.
+#[test]
+fn typed_cli_default_struct_entry_stays_resident() {
+    let src = r#"
+#CLI
+struct ServeArgs {
+    port: Int{3000}
+    verbose: Bool
+    config: ?String
+}
+
+fn run(args: ServeArgs) {
+    print(args.port)
+    print(args.verbose)
+    print((~args.config) ?? "(none)")
+}
+"#;
+    let (code, stdout, stderr) =
+        run_default_multi("typed_cli_default_struct", "main.jet", &[("main.jet", src)]);
+    assert_eq!(code, 0, "typed CLI default run failed: {stderr}");
+    assert_eq!(stdout, "3000\nfalse\n(none)\n", "{stderr}");
+    assert!(
+        stderr.contains("tier1 native"),
+        "typed CLI default entry did not reach resident JIT:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("tier0 interp") && !stderr.contains("E0956"),
+        "typed CLI default entry deoptimized:\n{stderr}"
     );
 }
 
@@ -652,6 +1176,18 @@ fn run() {
     assert_eq!(stdout, "[10, 20, 30]\n20\n");
 }
 
+#[test]
+fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
+    let src = r#"
+@tower :: 99
+fn choose(tower: Int) Int -> tower
+fn run() {
+    print(choose(7))
+}
+"#;
+    assert_tiers_agree("parameter_shadows_const", src, "7\n");
+}
+
 /// c109 Phase 6b: a `Shared<T>` value passed to a FREE (non-method) call inside a loop
 /// auto-clones the handle — `emit_call_args` emits `(…).clone()` (D-MEM1 S6: `Shared<T>`
 /// lowers to `jet_std::JetShared<T>`, a newtype with its own cheap-handle `Clone` impl,
@@ -1010,14 +1546,15 @@ fn run() {
         out.rust
     );
     // The compound form still goes through a CHECKED add, never Rust's `+`:
-    // `Int` addition is the one Prelude spine `jet_std::jet_int_add`, which
-    // `checked_add`s the packed small case and promotes to the arbitrary-
-    // precision value instead of wrapping (`Prelude/CoreLib/JetStd/
-    // CommonTypes.rs`). The element it reads comes from the bounds-checked
-    // `jet_index_vec`, and the write is the same element place as above.
+    // `Int` addition is the one Prelude spine `jet_std::jet_int_add_hot!`,
+    // which checks the packed small case and promotes to the arbitrary-
+    // precision value instead of wrapping through the shared slow rail
+    // (`Prelude/CoreLib/JetStd/CommonTypes.rs`). The element it reads comes
+    // from the bounds-checked `jet_index_vec`, and the write is the same
+    // element place as above.
     assert!(
         out.rust.contains(
-            "{ let __jet___v = jet_std::jet_int_add((jet_index_vec(&(__jet_points), 0i64, \"input.jet\", 7)).__jet_x, 1i64); (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
+            "{ let __jet___v = jet_std::jet_int_add_hot!(((jet_index_vec(&(__jet_points), 0i64, \"input.jet\", 7)).__jet_x), (1i64)); (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
         ),
         "compound indexed field assignment did not use the checked add spine:\n{}",
         out.rust

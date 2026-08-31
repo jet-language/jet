@@ -693,6 +693,13 @@ fn jet_http_mux_add_handler(mux: &JetHTTPMux, method: &str, pattern: &str, handl
     mux.add_handler(method, pattern, handler);
 }
 
+fn jet_http_mux_add_zero_handler<F>(mux: &JetHTTPMux, method: &str, pattern: &str, handler: F)
+where
+    F: Fn() -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync + 'static,
+{
+    mux.add_handler(method, pattern, std::sync::Arc::new(move |_| handler()));
+}
+
 fn jet_http_srv_response(status: i64, body: &String) -> JetHTTPResponse {
     if !(100..=599).contains(&status) {
         return JetHTTPResponse {
@@ -872,6 +879,12 @@ fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -
     use std::sync::atomic::Ordering;
     let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);
     if already_requested { return jet_http_server_wait_for_report(server); }
+    // Claim the terminal state for an unserved server. Otherwise teardown can
+    // clear the JIT handles while a racing `serve` still wins the 0 -> 1 CAS
+    // and starts a worker with callbacks from the old resident image.
+    if server.inner.lifecycle.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        return Err("HTTP server is not serving".to_string());
+    }
     if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
     let grace_ms = grace.as_millis().max(0) as u64;
     // Publish the absolute drain deadline before the shutdown flag so H2 and the
@@ -1887,14 +1900,44 @@ impl Drop for JetHTTP2RequestStream {
     }
 }
 
+struct JetHTTP2DispatchTasks {
+    tasks: Vec<(JetSchedulerJoin<()>, std::sync::Arc<JetTaskControl>)>,
+}
+
+impl JetHTTP2DispatchTasks {
+    fn push(&mut self, task: JetSchedulerJoin<()>, control: std::sync::Arc<JetTaskControl>) {
+        self.tasks.push((task, control));
+    }
+
+    fn drain(&mut self) {
+        for (task, control) in std::mem::take(&mut self.tasks) {
+            control.cancel();
+            task.drain();
+        }
+    }
+}
+
+impl Default for JetHTTP2DispatchTasks {
+    fn default() -> Self {
+        Self { tasks: Vec::new() }
+    }
+}
+
+impl Drop for JetHTTP2DispatchTasks {
+    fn drop(&mut self) {
+        self.drain();
+    }
+}
+
 struct JetHTTP2Outgoing {
-    receiver: std::sync::mpsc::Receiver<JetHTTP2ResponsePart>,
+    receiver: Option<std::sync::mpsc::Receiver<JetHTTP2ResponsePart>>,
     chunk: Vec<u8>,
     offset: usize,
     expected: Option<usize>,
     sent: usize,
     control: std::sync::Arc<JetTaskControl>,
     source_closer: Option<std::sync::Arc<JetHTTPBodyCloser>>,
+    producer: Option<JetSchedulerJoin<()>>,
     trailer_block: Vec<u8>,
 }
 
@@ -1906,8 +1949,13 @@ enum JetHTTP2ResponsePart {
 
 impl Drop for JetHTTP2Outgoing {
     fn drop(&mut self) {
+        // Disconnect the queue before joining. A producer may be blocked in
+        // `send` while the connection is being reset; leaving this receiver
+        // alive would make the cancellation join wait forever.
+        self.receiver.take();
         self.control.cancel();
         if let Some(closer) = &self.source_closer { closer.close(); }
+        if let Some(producer) = self.producer.take() { producer.drain(); }
     }
 }
 
@@ -1964,13 +2012,14 @@ fn jet_http2_start_response(
                 sender.send(JetHTTP2ResponsePart::End).map_err(|_| "HTTP/2 trailer queue failed".to_string())?;
                 drop(sender);
                 return Ok(Some(JetHTTP2Outgoing {
-                    receiver,
+                    receiver: Some(receiver),
                     chunk: Vec::new(),
                     offset: 0,
                     expected: Some(0),
                     sent: 0,
                     control: JetTaskControl::new(),
                     source_closer: None,
+                    producer: None,
                     trailer_block,
                 }));
             }
@@ -1979,7 +2028,7 @@ fn jet_http2_start_response(
             let (sender, receiver) = std::sync::mpsc::sync_channel(1);
             let control = JetTaskControl::new();
             let task_control = control.clone();
-            let _task = jet_scheduler_spawn_blocking_with_control(move || loop {
+            let producer = jet_scheduler_spawn_blocking_with_control(move || loop {
                 let part = {
                     let _wait = JetHTTPSchedulerBlockingWait::enter();
                     match chunks.next() {
@@ -2001,13 +2050,14 @@ fn jet_http2_start_response(
                 if done || !sent { break; }
             }, task_control);
             Ok(Some(JetHTTP2Outgoing {
-                receiver,
+                receiver: Some(receiver),
                 chunk: Vec::new(),
                 offset: 0,
                 expected: length,
                 sent: 0,
                 control,
                 source_closer,
+                producer: Some(producer),
                 trailer_block,
             }))
         })
@@ -2023,7 +2073,12 @@ fn jet_http2_flush_body(
 ) -> Result<bool, String> {
     loop {
         if outgoing.offset == outgoing.chunk.len() {
-            match outgoing.receiver.try_recv() {
+            match outgoing
+                .receiver
+                .as_ref()
+                .expect("HTTP/2 response receiver missing")
+                .try_recv()
+            {
                 Ok(JetHTTP2ResponsePart::Chunk(chunk)) => {
                     outgoing.chunk = chunk;
                     outgoing.offset = 0;
@@ -2163,6 +2218,7 @@ fn jet_http2_serve_inner(
     stream.flush().map_err(|_| "HTTP/2 settings write failed".to_string())?;
     let poll_timeout = options.read_idle_timeout.min(std::time::Duration::from_millis(10));
     stream.jet_http_set_read_timeout(Some(poll_timeout.max(std::time::Duration::from_millis(1))))?;
+    let mut dispatch_tasks = JetHTTP2DispatchTasks::default();
     let mut requests = std::collections::BTreeMap::<u32, JetHTTP2RequestStream>::new();
     let mut outgoing = std::collections::BTreeMap::<u32, JetHTTP2Outgoing>::new();
     let mut stream_windows = std::collections::BTreeMap::<u32, i64>::new();
@@ -2395,10 +2451,11 @@ fn jet_http2_serve_inner(
                 let task_mux = mux.clone();
                 let task_completed = completed_tx.clone();
                 let stream_id = frame.stream;
-                let _task = jet_scheduler_spawn_blocking_with_control(move || {
+                let task = jet_scheduler_spawn_blocking_with_control(move || {
                     let result = jet_http2_dispatch(&task_mux, request);
                     let _ = task_completed.send((stream_id, result));
                 }, task_control);
+                dispatch_tasks.push(task, control.clone());
                 let mut request = JetHTTP2RequestStream {
                     sender: body_tx,
                     pending: std::collections::VecDeque::new(),
@@ -2493,6 +2550,8 @@ fn jet_http2_serve_inner(
     for request in requests.values() {
         if let Some(control) = &request.control { control.cancel(); }
     }
+    drop(requests);
+    dispatch_tasks.drain();
     if !goaway_sent {
         jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(*last_stream, 0))?;
     }
@@ -2507,12 +2566,17 @@ struct JetHTTPContinueReader<R> {
     deadline: std::time::Instant,
 }
 
+fn jet_http_body_deadline_remaining(
+    deadline: std::time::Instant,
+) -> std::io::Result<std::time::Duration> {
+    deadline
+        .checked_duration_since(std::time::Instant::now())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "request body timed out"))
+}
+
 impl<R: std::io::Read> std::io::Read for JetHTTPContinueReader<R> {
     fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-        let remaining = self
-            .deadline
-            .checked_duration_since(std::time::Instant::now())
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "request body timed out"))?;
+        let remaining = jet_http_body_deadline_remaining(self.deadline)?;
         if let Some(stream) = self.timeout_stream.as_ref() {
             stream.set_read_timeout(Some(remaining))?;
         }
@@ -2526,6 +2590,7 @@ impl<R: std::io::Read> std::io::Read for JetHTTPContinueReader<R> {
 
 struct JetHTTPChunkedSocketReader {
     stream: std::net::TcpStream,
+    deadline: std::time::Instant,
     remaining: usize,
     need_crlf: bool,
     done: bool,
@@ -2542,10 +2607,14 @@ impl JetHTTPChunkedSocketReader {
     }
 
     fn read_exact_framing(&mut self, bytes: &mut [u8]) -> std::io::Result<()> {
-        std::io::Read::read_exact(&mut self.stream, bytes)?;
-        self.framing = self.framing.saturating_add(bytes.len());
-        if self.framing > JET_HTTP_MAX_CHUNK_FRAMING_BYTES {
-            return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "chunk framing is too large"));
+        for byte in bytes {
+            let remaining = jet_http_body_deadline_remaining(self.deadline)?;
+            self.stream.set_read_timeout(Some(remaining))?;
+            std::io::Read::read_exact(&mut self.stream, std::slice::from_mut(byte))?;
+            self.framing = self.framing.saturating_add(1);
+            if self.framing > JET_HTTP_MAX_CHUNK_FRAMING_BYTES {
+                return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "chunk framing is too large"));
+            }
         }
         Ok(())
     }
@@ -2627,6 +2696,8 @@ impl std::io::Read for JetHTTPChunkedSocketReader {
             }
         }
         let wanted = output.len().min(self.remaining);
+        let remaining = jet_http_body_deadline_remaining(self.deadline)?;
+        self.stream.set_read_timeout(Some(remaining))?;
         let read = self.stream.read(&mut output[..wanted])?;
         if read == 0 {
             return Err(std::io::Error::new(
@@ -2775,6 +2846,7 @@ fn jet_http_srv_read_streaming(
                     limit: options.max_body_bytes,
                     trailer_names: head.trailer_names.clone(),
                     trailers: trailers.clone(),
+                    deadline: body_deadline,
                 },
                 stream: continue_stream,
                 timeout_stream: Some(timeout_stream),

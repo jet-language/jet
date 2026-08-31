@@ -1,8 +1,8 @@
 Error [E-WEB-ABI-TYPE]: `Fn { params: [Int], ret: Some(Int), effect_bound: None }` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
   --> tests/ui/web_abi_callback.jet:4:4
     |
-  4 | fn apply(cb: fn(Int) => Int, n: Int) => Int :: cb(n)
+  4 | fn apply(cb: fn(Int) Int, n: Int) Int -> cb(n)
     |    ^^^^^
- Why: web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
- Fix: use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe
+ Why: Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
+ Fix: Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe
 More: jet-lang.dev/e/E-WEB-ABI-TYPE

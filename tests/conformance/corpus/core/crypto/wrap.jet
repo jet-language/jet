@@ -3,7 +3,7 @@ use core.crypto as crypto
 
 fn run() {
     secret :: crypto.Secret.from_bytes([U8]{0x01, 0x02, 0x03})
-    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient")
-    result :: crypto.wrap(secret, recipient.public_key()) ?? return Err("wrap")
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    result :: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
     print(result.bytes().len() == 111)
 }

@@ -1,0 +1,112 @@
+// Gradle script plugin for a native Jet Library output.
+// The task is an Exec adapter; Jet remains the only compiler and exporter.
+
+class JetLibraryExtension {
+    final project
+    Object toolsDir
+    String jetExecutable = System.getenv("JET_EXECUTABLE") ?: "jet"
+    String entry = "library.jet"
+    String output = "core"
+    String library = "library"
+    String kind = "static"
+    String profile = "dev"
+    String toolchain = System.getenv("CC") ?: "cc"
+    boolean loadable = false
+    List<String> inputs = []
+
+    JetLibraryExtension(project) { this.project = project }
+
+    File artifactDirectory() {
+        project.file("${project.buildDir}/jet/${library}")
+    }
+
+    File staticLibrary() { project.file("${artifactDirectory()}/lib${library}.a") }
+    File sharedLibrary() {
+        def extension = System.getProperty("os.name").toLowerCase().contains("windows") ? "dll" : (System.getProperty("os.name").toLowerCase().contains("mac") ? "dylib" : "so")
+        project.file("${artifactDirectory()}/lib${library}.${extension}")
+    }
+    File header() { project.file("${artifactDirectory()}/${library}.h") }
+    File jetlib() { project.file("${artifactDirectory()}/${library}.jetlib") }
+    File receipt() { project.file("${artifactDirectory()}/jet-host.receipt") }
+    File stamp() { project.file("${artifactDirectory()}/jet-host.stamp") }
+
+    File tools() {
+        toolsDir ? project.file(toolsDir) : project.file("${project.rootDir}/tools/foreign-build-hosts")
+    }
+
+    File runner() {
+        def extension = System.getProperty("os.name").toLowerCase().contains("windows") ? "ps1" : "sh"
+        project.file("${tools()}/jet-library.${extension}")
+    }
+
+    File plugin() {
+        project.file("${tools()}/gradle/jet-library.gradle")
+    }
+
+    List<String> runtimeLinkOptions() {
+        def os = System.getProperty("os.name").toLowerCase()
+        os.contains("windows") ? [] : (os.contains("mac") ? ["-lpthread", "-lm"] : ["-ldl", "-lpthread", "-lm"])
+    }
+}
+
+def jetLibrary = extensions.create("jetLibrary", JetLibraryExtension, project)
+def jetTask = tasks.register("jetLibrary", Exec)
+
+jetTask.configure {
+    doFirst {
+        def toolRoot = jetLibrary.tools()
+        def windows = System.getProperty("os.name").toLowerCase().contains("windows")
+        def arg = { unix, powershell -> windows ? powershell : unix }
+        def inputArg = arg("--input", "-InputPath")
+        def lockPath = windows ? ".jet\\lock" : ".jet/lock"
+        def inputPaths = ["package.jet", lockPath, jetLibrary.entry] + jetLibrary.inputs
+        def runnerArgs = [
+            arg("--jet", "-Jet"), jetLibrary.jetExecutable,
+            arg("--project", "-Project"), project.projectDir.absolutePath,
+            arg("--entry", "-Entry"), jetLibrary.entry,
+            arg("--output", "-Output"), jetLibrary.output,
+            arg("--library", "-Library"), jetLibrary.library,
+            arg("--dest", "-Dest"), jetLibrary.artifactDirectory().absolutePath,
+            arg("--kind", "-Kind"), jetLibrary.kind,
+            arg("--profile", "-Profile"), jetLibrary.profile,
+            arg("--toolchain", "-Toolchain"), jetLibrary.toolchain,
+        ]
+        if (windows) {
+            runnerArgs += [inputArg, inputPaths.join("|")]
+        } else {
+            inputPaths.each { runnerArgs += [inputArg, it] }
+        }
+        if (jetLibrary.loadable) runnerArgs += arg("--loadable", "-Loadable")
+        if (windows) {
+            commandLine(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${toolRoot}/jet-library.ps1"] + runnerArgs)
+        } else {
+            commandLine(["bash", "${toolRoot}/jet-library.sh"] + runnerArgs)
+        }
+        workingDir project.projectDir
+    }
+}
+
+afterEvaluate {
+    def declaredInputs = ["package.jet", ".jet/lock", jetLibrary.entry] + jetLibrary.inputs
+    jetTask.configure {
+        inputs.files(declaredInputs.collect { project.file(it) })
+        inputs.file(jetLibrary.runner())
+        inputs.file(jetLibrary.plugin())
+        inputs.properties([
+            jetExecutable: jetLibrary.jetExecutable,
+            entry: jetLibrary.entry,
+            output: jetLibrary.output,
+            library: jetLibrary.library,
+            kind: jetLibrary.kind,
+            profile: jetLibrary.profile,
+            toolchain: jetLibrary.toolchain,
+            loadable: jetLibrary.loadable
+        ])
+        def jetFile = project.file(jetLibrary.jetExecutable)
+        if (jetFile.isFile()) inputs.file(jetFile)
+        outputs.files(jetLibrary.header(), jetLibrary.receipt(), jetLibrary.stamp())
+        if (jetLibrary.kind == "static" || jetLibrary.kind == "both") outputs.file(jetLibrary.staticLibrary())
+        if (jetLibrary.kind == "shared" || jetLibrary.kind == "both") outputs.file(jetLibrary.sharedLibrary())
+        if (jetLibrary.loadable) outputs.file(jetLibrary.jetlib())
+    }
+}

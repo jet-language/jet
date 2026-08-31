@@ -1,6 +1,8 @@
 use super::*;
 use crate::Collections;
-use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::Diagnostics::{
+    Diagnostic, FixApplicability, FixSafety, Span, TextEdit,
+};
 use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Sema::Diagnostics::{is_cloneable, type_requires_owned_iteration};
 use crate::Syntax;
@@ -1240,6 +1242,7 @@ impl<'a> Checker<'a> {
             | Expr::Int(..)
             | Expr::Float(..)
             | Expr::Bool(..)
+            | Expr::Unit(..)
             | Expr::Char(..)
             | Expr::Ident(..)
             | Expr::UnitLit { .. }
@@ -3294,7 +3297,10 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if let Some(root) = root {
-            self.flow.moved.set(root, span);
+            self.flow.moved.set(
+                root,
+                crate::Sema::FlowFacts::MoveOrigin::new(span, None),
+            );
             self.clear_origin(root);
         }
     }
@@ -3310,7 +3316,10 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        self.flow.moved.set(name, *span);
+        self.flow.moved.set(
+            name,
+            crate::Sema::FlowFacts::MoveOrigin::new(*span, None),
+        );
         self.clear_origin(name);
         true
     }
@@ -3714,7 +3723,8 @@ impl<'a> Checker<'a> {
         let owner = crate::Sema::current_view_fact(&self.flow.views, name)
             .map(|fact| fact.place.owner.name.clone())
             .unwrap_or_else(|| "its owner".to_string());
-        self.diags.push(Diagnostic::error(
+        let source_ty = Type::String;
+        let diagnostic = Diagnostic::error(
             "E2307",
             format!("`{}` cannot {} without an owning copy", name, what),
             format!(
@@ -3723,6 +3733,11 @@ impl<'a> Checker<'a> {
             ),
             format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
             Some(span),
+        );
+        self.diags.push(self.with_ownership_copy_edit(
+            diagnostic,
+            span,
+            Some(&source_ty),
         ));
     }
 
@@ -3979,40 +3994,24 @@ impl<'a> Checker<'a> {
             .retain(|moved, _| !Self::contains_place(&place, moved));
     }
 
-    pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {
-        let Some(place) = self.capture_place_from_expr(expr) else {
-            return false;
-        };
-        let place_name = Self::place_name(&place);
-        let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-            self.flow
-                .moved
-                .get(&place_name)
-                .copied()
-                .map(|at| (place_name.clone(), at))
-        } else {
-            self.flow
-                .moved
-                .iter()
-                .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-                .min_by_key(|(moved, _)| moved.len())
-                .map(|(moved, at)| (moved.to_string(), *at))
-        };
-        let Some((moved_place, _moved_at)) = moved else {
-            return false;
-        };
-        let root = place.owner.name;
-        let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
-        let fix = if moved_ty
-            .as_ref()
-            .is_some_and(|ty| self.is_resource_type(ty))
-        {
+    fn moved_use_diagnostic(
+        &self,
+        moved_place: &str,
+        moved_at: &crate::Sema::FlowFacts::MoveOrigin,
+        reuse_span: Span,
+        moved_ty: Option<&Type>,
+    ) -> Diagnostic {
+        let consuming_callee = moved_at
+            .consumer
+            .as_deref()
+            .unwrap_or("the earlier consuming operation");
+        let fix = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
             format!(
                 "acquire a new `{}` resource; closed resources cannot be copied or reused",
-                moved_ty.as_ref().map(Type::show).unwrap_or_default()
+                moved_ty.map(Type::show).unwrap_or_default()
             )
-        } else if moved_ty.as_ref().is_some_and(is_one_pass_source) {
-            match moved_ty.as_ref().and_then(one_pass_materializer) {
+        } else if moved_ty.is_some_and(is_one_pass_source) {
+            match moved_ty.and_then(one_pass_materializer) {
                 Some(method) => format!(
                     "`{moved_place}` is one-pass — materialize it first with `{moved_place}{method}`, or create a fresh source for the second drive"
                 ),
@@ -4027,19 +4026,88 @@ impl<'a> Checker<'a> {
                 moved_place
             )
         };
-        self.diags.push(Diagnostic::error(
+        Diagnostic::from_row(
             "E0121",
-            format!("`{moved_place}` was given away earlier, so it can't be used here"),
-            "after a value moves to another name, the old name no longer gives access to it"
-                .to_string(),
-            fix,
-            Some(span),
+            &[
+                ("name", moved_place),
+                ("consumer", consuming_callee),
+                ("fix", fix.as_str()),
+            ],
+            Some(reuse_span),
+        )
+        .with_detail(format!(
+            "move site: source bytes {}..{}; reuse site: source bytes {}..{}; consuming callee: {consuming_callee}",
+            moved_at.span.start,
+            moved_at.span.end,
+            reuse_span.start,
+            reuse_span.end
+        ))
+    }
+
+    fn push_moved_use_diagnostic(&mut self, diagnostic: Diagnostic) {
+        let duplicate = self.diags.iter().any(|previous| {
+            previous.code == "E0121"
+                && previous.span == diagnostic.span
+                && previous.what == diagnostic.what
+        });
+        if !duplicate {
+            self.diags.push(diagnostic);
+        }
+    }
+
+    pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {
+        let Some(place) = self.capture_place_from_expr(expr) else {
+            return false;
+        };
+        let place_name = Self::place_name(&place);
+        let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
+            self.flow
+                .moved
+                .get(&place_name)
+                .cloned()
+                .map(|at| (place_name.clone(), at))
+        } else {
+            self.flow
+                .moved
+                .iter()
+                .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
+                .min_by_key(|(moved, _)| moved.len())
+                .map(|(moved, at)| (moved.to_string(), at.clone()))
+        };
+        let Some((moved_place, moved_at)) = moved else {
+            return false;
+        };
+        let root = place.owner.name;
+        let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
+        self.push_moved_use_diagnostic(self.moved_use_diagnostic(
+            &moved_place,
+            &moved_at,
+            span,
+            moved_ty.as_ref(),
         ));
         true
     }
-
     pub(crate) fn mark_moved_place(&mut self, place: ViewPlace, span: Span) {
+        self.mark_moved_place_with_consumer(place, span, None);
+    }
+
+    pub(crate) fn mark_moved_place_by(
+        &mut self,
+        place: ViewPlace,
+        span: Span,
+        consumer: impl Into<String>,
+    ) {
+        self.mark_moved_place_with_consumer(place, span, Some(consumer.into()));
+    }
+
+    fn mark_moved_place_with_consumer(
+        &mut self,
+        place: ViewPlace,
+        span: Span,
+        consumer: Option<String>,
+    ) {
         let name = place.owner.name.clone();
+        let place_name = Self::place_name(&place);
         if !tracks_named_move(&name) {
             return;
         }
@@ -4049,17 +4117,37 @@ impl<'a> Checker<'a> {
         self.check_owner_change(&name, "be moved", span);
         if let Some(info) = self.lookup(&name) {
             if info.decl_loop_depth < self.loop_depth {
-                self.diags.push(Diagnostic::error(
-                    "E0121",
-                    format!("`{}` is given away inside a loop that may run again", name),
-                    "after a value is given away it's gone, but the next time around the loop would need it again".to_string(),
-                    format!("give away a copy instead: `{}{}`", Syntax::SIGIL_COPY, name),
-                    Some(span),
-                ));
+                // A second visit to a loop is a reuse of the first move. Keep
+                // that original provenance so E0121 can name both the first
+                // consuming call and the later re-move site. The fallback is
+                // needed when this is the first move seen on a loop path.
+                let moved = self
+                    .flow
+                    .moved
+                    .iter()
+                    .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
+                    .min_by_key(|(moved, _)| moved.len())
+                    .map(|(moved, origin)| (moved.to_string(), origin.clone()))
+                    .unwrap_or_else(|| {
+                        (
+                            place_name.clone(),
+                            crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
+                        )
+                    });
+                let diagnostic = self.moved_use_diagnostic(
+                    &moved.0,
+                    &moved.1,
+                    span,
+                    Some(&info.ty),
+                );
+                self.push_moved_use_diagnostic(diagnostic);
                 return;
             }
         }
-        self.flow.moved.set(&Self::place_name(&place), span);
+        self.flow.moved.set(
+            &place_name,
+            crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
+        );
         if place.projections.is_empty() {
             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
             // origin fact; no stale metadata survives a move.
@@ -4075,6 +4163,52 @@ impl<'a> Checker<'a> {
             },
             span,
         );
+    }
+
+    pub(crate) fn mark_moved_by(
+        &mut self,
+        name: String,
+        span: Span,
+        consumer: impl Into<String>,
+    ) {
+        self.mark_moved_place_by(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+            consumer,
+        );
+    }
+
+    /// Attach the canonical `~` copy edit to an ownership diagnostic. A copy
+    /// is safe only when the checker has proved a cloneable, non-resource type;
+    /// all other cases remain a reviewable suggestion.
+    pub(crate) fn with_ownership_copy_edit(
+        &self,
+        diagnostic: Diagnostic,
+        anchor: Span,
+        ty: Option<&Type>,
+    ) -> Diagnostic {
+        let safe = ty.is_some_and(|ty| {
+            !self.is_resource_type(ty) && is_cloneable(ty, self.registry)
+        });
+        let (applicability, safety) = if safe {
+            (
+                FixApplicability::Safe,
+                FixSafety::BehaviorPreserving,
+            )
+        } else {
+            (FixApplicability::Suggested, FixSafety::NeedsReview)
+        };
+        diagnostic.with_edit_grade(
+            TextEdit {
+                span: Span::new(anchor.start, anchor.start),
+                new_text: Syntax::SIGIL_COPY.to_string(),
+            },
+            applicability,
+            safety,
+        )
     }
 
     pub(crate) fn non_name_write_argument_fix(&self, expr: &Expr) -> String {
@@ -5167,30 +5301,39 @@ impl<'a> Checker<'a> {
                 } else {
                     "move the list into a local this scope owns first".to_string()
                 };
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0120",
                     format!("`{name}` was not moved here, so this loop can't take its handles"),
                     why,
                     fix,
                     Some(collection.span()),
+                );
+                self.diags.push(self.with_ownership_copy_edit(
+                    diagnostic,
+                    collection.span(),
+                    coll_ty.as_ref(),
                 ));
             }
             // Field / index / slice: the root's type is not the list, so do not
             // rewrite it as `root: ^[Task<…>]`; the field or index itself must
             // first be copied into a local this scope owns.
             _ => {
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0120",
                     "this loop can't take handles out of a field or index".to_string(),
                     why,
                     "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`"
                         .to_string(),
                     Some(collection.span()),
+                );
+                self.diags.push(self.with_ownership_copy_edit(
+                    diagnostic,
+                    collection.span(),
+                    coll_ty.as_ref(),
                 ));
             }
         }
     }
-
     pub(crate) fn consume_builtin_receiver(&mut self, receiver: &Expr, method: &str) {
         if let Expr::Ident(name, span) = receiver {
             if let Some(info) = self.lookup(name) {
@@ -5200,7 +5343,8 @@ impl<'a> Checker<'a> {
                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
                     )
                 {
-                    self.diags.push(Diagnostic::error(
+                    let receiver_ty = info.ty.clone();
+                    let diagnostic = Diagnostic::error(
                         "E0120",
                         format!(
                             "`{}` was not moved here, so `.{}()` can't take it",
@@ -5211,14 +5355,19 @@ impl<'a> Checker<'a> {
                             "call it on a copy, or take ownership with the move marker `^`: `{}: {}{}`",
                             name,
                             Syntax::SIGIL_MOVE,
-                            info.ty.name()
+                            receiver_ty.name()
                         ),
                         Some(*span),
+                    );
+                    self.diags.push(self.with_ownership_copy_edit(
+                        diagnostic,
+                        *span,
+                        Some(&receiver_ty),
                     ));
                     return;
                 }
                 if !info.ty.is_scalar() {
-                    self.mark_moved(name.clone(), *span);
+                    self.mark_moved_by(name.clone(), *span, format!(".{method}()"));
                 }
             }
         }
@@ -5389,7 +5538,7 @@ impl<'a> Checker<'a> {
             AccessConvention::Move => {
                 if let Expr::Ident(name, span) = &arg.expr {
                     if !type_is_copy(param_ty) {
-                        self.mark_moved(name.clone(), *span);
+                        self.mark_moved_by(name.clone(), *span, call_name.to_string());
                     }
                 }
             }
@@ -5469,7 +5618,7 @@ impl<'a> Checker<'a> {
             (AccessConvention::Move, AccessConvention::Move) => {
                 if let Expr::Ident(name, span) = &arg.expr {
                     if !type_is_copy(param_ty) {
-                        self.mark_moved(name.clone(), *span);
+                        self.mark_moved_by(name.clone(), *span, call_name.to_string());
                     }
                 }
             }
@@ -5648,7 +5797,7 @@ impl<'a> Checker<'a> {
                 format!("`Cell<{}>.get()` cannot copy its value", inner.show()),
                 "`get` returns an independent owned value, so the stored type must support copying"
                     .to_string(),
-                "use `.read(value => ...)` to inspect it without making a copy".to_string(),
+                "use `.read(value -> ...)` to inspect it without making a copy".to_string(),
                 Some(span),
             ));
         }
@@ -5727,7 +5876,7 @@ impl<'a> Checker<'a> {
                 "E0112",
                 "`get_or_set` needs a zero-parameter lambda".to_string(),
                 "the initializer runs only when the cell is empty".to_string(),
-                "write `.get_or_set(() => value)`".to_string(),
+                "write `.get_or_set(() -> value)`".to_string(),
                 Some(args[0].expr.span()),
             ));
         }
@@ -5755,7 +5904,7 @@ impl<'a> Checker<'a> {
                 ),
                 "`get_or_set` returns an independent owned value, so `T` must support copying"
                     .to_string(),
-                "use `.edit(value => ...)` when the cached value cannot be copied".to_string(),
+                "use `.edit(value -> ...)` when the cached value cannot be copied".to_string(),
                 Some(span),
             ));
         }
@@ -5798,7 +5947,7 @@ impl<'a> Checker<'a> {
                 "`guard.map` needs a field projection".to_string(),
                 "a mapped guard must point into the value covered by its original dynamic loan"
                     .to_string(),
-                "write `.map(value => value.field)`".to_string(),
+                "write `.map(value -> value.field)`".to_string(),
                 Some(args[0].expr.span()),
             ));
         }
@@ -5841,7 +5990,7 @@ impl<'a> Checker<'a> {
                     "E0112",
                     "`guard.split` needs two field projections".to_string(),
                     "each split guard must point into the value covered by the original dynamic loan".to_string(),
-                    "write `.split(value => value.left, value => value.right)`".to_string(),
+                    "write `.split(value -> value.left, value -> value.right)`".to_string(),
                     Some(arg.expr.span()),
                 ));
             }
@@ -5925,7 +6074,7 @@ impl<'a> Checker<'a> {
                 "E0104",
                 format!("`{}` expects 1 argument, got {}", method, args.len()),
                 format!("`.{}` takes exactly one closure", method),
-                format!("call `.{}(value => ...)` with a closure", method),
+                format!("call `.{}(value -> ...)` with a closure", method),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -5941,7 +6090,7 @@ impl<'a> Checker<'a> {
                     "`.{}` runs a short function against the locked value",
                     method
                 ),
-                format!("write `.{}(value => …)`", method),
+                format!("write `.{}(value -> …)`", method),
                 Some(args[0].expr.span()),
             ));
             self.infer(&mut args[0].expr);
@@ -6022,7 +6171,7 @@ impl<'a> Checker<'a> {
                         "E0215",
                         "`SharedGuard.map` needs a stored field projection".to_string(),
                         "a mapped guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places".to_string(),
-                        "write a direct projection such as `guard.map(value => value.field)`"
+                        "write a direct projection such as `guard.map(value -> value.field)`"
                             .to_string(),
                         Some(args[0].expr.span()),
                     ));
@@ -6041,7 +6190,7 @@ impl<'a> Checker<'a> {
                         "E0104",
                         format!("`split` expects 2 arguments, got {}", args.len()),
                         "splitting a guard needs two field projections".to_string(),
-                        "write `guard.split(value => value.left, value => value.right)`"
+                        "write `guard.split(value -> value.left, value -> value.right)`"
                             .to_string(),
                         Some(span),
                     ));
@@ -6105,7 +6254,7 @@ impl<'a> Checker<'a> {
                         "E0104",
                         format!("`wait` expects 2 arguments, got {}", args.len()),
                         "waiting needs one Condition and one predicate".to_string(),
-                        "write `guard.wait(condition, value => predicate)`".to_string(),
+                        "write `guard.wait(condition, value -> predicate)`".to_string(),
                         Some(span),
                     ));
                     for arg in args {
@@ -6368,7 +6517,7 @@ pub(crate) fn e0140_discarded_wildcard(span: Span) -> Diagnostic {
 pub(crate) fn l1101_unjoined_task(subject: &str, why: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "L1101",
-        format!("{subject} still owes `join`"),
+        format!("`{subject}` still owes `join`"),
         why.to_string(),
         "join it with `.join()`, use its result, or write `.detach()` to let it go free"
             .to_string(),

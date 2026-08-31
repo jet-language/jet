@@ -715,6 +715,7 @@ mod tests {
         assert!(authority_of("https://example.test/x\r\nInjected: yes").is_err());
         assert!(authority_of("https://127.0.0.1/x").is_err());
         assert!(authority_of("https://169.254.169.254/latest").is_err());
+        assert!(authority_of("https://192.0.0.1/x").is_err());
         assert!(jet_net::resolve_public_addresses("localhost", 443).is_err());
         let authority = Authority {
             provider: "php".into(),

@@ -9,11 +9,12 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { findDataDir, projectRoot, readJSON, writeJSON, historyFile } from './paths.mjs';
+import { findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON, historyFile } from './paths.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
 import { findDuplicateCandidates } from './card-matching.mjs';
+import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 
@@ -55,12 +56,16 @@ const COMMAND_FLAGS = {
   state: { flags: [] },
   help: { flags: ['check'] },
   card: { verbs: {
-    list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent'],
-    show: [],
+    list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
+    show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force'),
+      'checkSteps', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
+      'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
+      'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev'),
+      'checkSteps', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
+      'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
+      'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     claim: by(),
     release: by('handoff'),
     delete: by(),
@@ -175,7 +180,9 @@ const FLAG_VALUE = {
   unarchive: null, archived: null, draft: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
-  manifest: 'FILE', dryRun: null,
+  manifest: 'FILE', dryRun: null, hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
+  hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
+  hardeningFindingId: 'ID', hardeningFixture: 'PATH',
 };
 
 const flagToken = (key) => {
@@ -345,6 +352,18 @@ function cmdStatus(store, { flags }) {
   console.log('');
 }
 
+const HARDENING_CARD_FLAGS = [
+  'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
+  'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture',
+];
+
+function cardPayload(flags, payload, by) {
+  const result = { ...(payload || {}), by };
+  for (const key of ['title', 'body', ...HARDENING_CARD_FLAGS])
+    if (flags[key] !== undefined) result[key] = flags[key];
+  return result;
+}
+
 function cmdCard(store, { pos, flags }) {
   const [verb, ref] = pos;
   const by = flags.by;
@@ -369,6 +388,9 @@ function cmdCard(store, { pos, flags }) {
         if (!parent) throw new TowerError('E_NOT_FOUND', `no card ${flags.parent}`);
         cs = cs.filter(c => c.parentId === parent.id);
       }
+      if (flags.hardeningDedupKey !== undefined)
+        cs = cs.filter(c => c.hardeningDedupKey === String(flags.hardeningDedupKey)
+          || (c.hardeningDedupAliases || []).includes(String(flags.hardeningDedupKey)));
       if (flags.json) return out(flags, null, cs);
       for (const c of cs) console.log(cardLine(c));
       if (!cs.length) console.log('(no cards match)');
@@ -376,15 +398,26 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'show': {
       const s = store.project();
-      const c = db.findCard({ cards: s.cards }, ref);
-      if (c) return out(flags, null, s.cards.find(x => x.id === c.id));
+      const lookup = flags.hardeningDedupKey !== undefined ? flags.hardeningDedupKey : ref;
+      const hardeningMatch = flags.hardeningDedupKey !== undefined
+        ? db.findHardeningMatch(s, store.loadHistory(), lookup)
+        : null;
+      const c = hardeningMatch?.card || db.findCard({ cards: s.cards }, lookup);
+      if (c && !hardeningMatch?.archived) return out(flags, null, s.cards.find(x => x.id === c.id));
       // #461: fall through to history once it's not live any more.
-      const arch = db.findInHistory(store.loadHistory(), ref);
+      const arch = hardeningMatch?.archived ? hardeningMatch.card : db.findInHistory(store.loadHistory(), lookup);
       if (arch) return out(flags, null, { ...arch, archived: true });
-      throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
+      throw new TowerError('E_NOT_FOUND', `no card ${lookup}`);
     }
     case 'add': {
       const p = readPayload(flags) || {};
+      const hardening = cardPayload(flags, p, by);
+      if (hasHardeningPayload(hardening)) {
+        if (flags.force) throw new TowerError('E_USAGE', 'hardening card writes cannot use --force');
+        const { result } = store.mutate((s, cfg, history) => db.addOrUpdateHardeningCard(s, hardening, cfg, history));
+        const action = result.action === 'added' ? 'added' : `${result.action} existing`;
+        return out(flags, `${action} hardening card #${result.card.num}`, result.card);
+      }
       const title = flags.title ?? p.title;
       const body = flags.body ?? p.body;
       const candidates = !flags.force
@@ -422,6 +455,11 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'update': {
       const p = readPayload(flags) || {};
+      const hardening = cardPayload(flags, p, by);
+      if (hasHardeningPayload(hardening)) {
+        const { result } = store.mutate((s, cfg, history) => db.updateHardeningCard(s, ref, hardening, cfg, history), { expectRev: flags.expectRev });
+        return out(flags, `updated hardening card #${result.card.num}`, result.card);
+      }
       const patch = { ...p, by };
       for (const [f, k] of [['title', 'title'], ['body', 'body'], ['kind', 'kind'], ['track', 'track'], ['epoch', 'epoch'],
         ['milestone', 'milestoneId'], ['phase', 'phase'], ['priority', 'priority'], ['plan', 'plan'],
@@ -1052,10 +1090,9 @@ function cmdImport({ pos, flags }) {
 
 function cmdUndo(store, { flags }) {
   const bdir = join(store.dataDir, 'backups');
-  const files = existsSync(bdir) ? readdirSync(bdir).filter(f => f.startsWith('tower-')).sort() : [];
-  if (!files.length) throw new TowerError('E_INVALID', 'nothing to undo (no backups yet)');
   const cur = store.load();
-  const prev = readJSON(join(bdir, files.at(-1)));
+  const prev = readLatestJSON(bdir, 'tower-', null);
+  if (!prev) throw new TowerError('E_INVALID', 'nothing to undo (no backups yet)');
   store.restore(prev, { expectRev: flags.expectRev ?? cur.meta.rev });
   return out(flags, `undid last write — board back to rev ${prev.meta?.rev ?? '?'} content (now rev ${cur.meta.rev + 1})`, { ok: true });
 }

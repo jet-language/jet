@@ -1739,6 +1739,7 @@ fn validate_compile_metadata(
         &[
             "backend",
             "cache_state",
+            "clock",
             "compiler_digest",
             "core_digest",
             "edit_bytes",
@@ -1762,6 +1763,11 @@ fn validate_compile_metadata(
         &fields["cache_state"],
         "compile.cache_state",
         &["Clean", "NoChange", "Edit"],
+    )?;
+    one_of(
+        &fields["clock"],
+        "compile.clock",
+        &["process_cpu"],
     )?;
     hex64(&fields["compiler_digest"], "compile.compiler_digest")?;
     hex64(&fields["core_digest"], "compile.core_digest")?;
@@ -1854,6 +1860,7 @@ fn validate_compile_record(
         &[
             "backend",
             "cache_state",
+            "clock",
             "compiler_digest",
             "core_digest",
             "edit_bytes",
@@ -1871,6 +1878,7 @@ fn validate_compile_record(
     for key in [
         "backend",
         "cache_state",
+        "clock",
         "compiler_digest",
         "core_digest",
         "edit_bytes",

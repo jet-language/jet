@@ -1,11 +1,14 @@
 use core.db as db
+use core.encoding.csv as csv
 use core.files as fs
-use core.process as process
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: database_access INPUT_FILE")
-    input :: args.get(1) ?? panic("missing input file")
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
     text :: fs.read(input) ?? panic("cannot read input")
     conn :: db.open_memory()
     policy :: db.policy("agent_rows", "true") ?? panic("policy")
@@ -13,37 +16,35 @@ fn run() {
     _created :: db.migrate(scoped, "agent-rows-v1", [
         "CREATE TABLE agent_rows (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"
     ]) ?? panic("create")
-    line_number := 0
-    loop line in text.split("\n") {
-        line_number += 1
-        if line_number != 1 && line != "" {
-            fields :: line.split("\t").to_list()
-            if fields.len() != 2 {
-                print("invalid-row|{line_number}|field-count")
-                _closed :: scoped.close()
-                return
-            }
-            id :: Int.parse(fields[0]) ?? 0
-            if id <= 0 {
-                print("invalid-row|{line_number}|id")
-                _closed :: scoped.close()
-                return
-            }
-            _inserted :: scoped.execute(
-                "INSERT INTO agent_rows (id, name) VALUES (?, ?)",
-                [DBValue.Int(id), DBValue.Text(fields[1])]
-            ) ?? panic("insert")
+    rows :: csv.rows(
+        text, delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("cannot parse input")
+    loop row in rows {
+        fields :: row.fields
+        line_number :: row.line
+        if fields.len() != 2 {
+            print("invalid-row|{line_number}|field-count")
+            _closed :: scoped.close()
+            return
         }
+        id :: Int.parse(fields[0]) ?? 0
+        if id <= 0 {
+            print("invalid-row|{line_number}|id")
+            _closed :: scoped.close()
+            return
+        }
+        _inserted :: scoped.execute(
+            "INSERT INTO agent_rows (id, name) VALUES (?, ?)",
+            [DBValue.Int(id), DBValue.Text(fields[1])]
+        ) ?? panic("insert")
     }
     count_opt :: scoped.query_one("SELECT COUNT(*) AS n FROM agent_rows", []) ?? panic("count")
-    count_row :: count_opt ?? panic("missing count")
-    count :: db.row_int(count_row, "n") ?? 0
+    count :: db.row_int(count_opt, "n") ?? 0
     selected_opt :: scoped.query_one(
         "SELECT name FROM agent_rows WHERE id = ?",
         [DBValue.Int(2)]
     ) ?? panic("selected")
-    selected_row :: selected_opt ?? panic("missing selected")
-    selected :: db.row_text(selected_row, "name") ?? "missing"
+    selected :: db.row_text(selected_opt, "name") ?? "missing"
     print("rows={count}")
     print("selected={selected}")
     print("table=present")

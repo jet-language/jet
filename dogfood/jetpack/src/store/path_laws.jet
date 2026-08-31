@@ -3,37 +3,6 @@ pub struct PathLawError {
     pub message: String
 }
 
-fn ascii_fold(name: String) String !PathLawError -> {
-    folded := name
-    folded = folded.replace("A", "a")
-    folded = folded.replace("B", "b")
-    folded = folded.replace("C", "c")
-    folded = folded.replace("D", "d")
-    folded = folded.replace("E", "e")
-    folded = folded.replace("F", "f")
-    folded = folded.replace("G", "g")
-    folded = folded.replace("H", "h")
-    folded = folded.replace("I", "i")
-    folded = folded.replace("J", "j")
-    folded = folded.replace("K", "k")
-    folded = folded.replace("L", "l")
-    folded = folded.replace("M", "m")
-    folded = folded.replace("N", "n")
-    folded = folded.replace("O", "o")
-    folded = folded.replace("P", "p")
-    folded = folded.replace("Q", "q")
-    folded = folded.replace("R", "r")
-    folded = folded.replace("S", "s")
-    folded = folded.replace("T", "t")
-    folded = folded.replace("U", "u")
-    folded = folded.replace("V", "v")
-    folded = folded.replace("W", "w")
-    folded = folded.replace("X", "x")
-    folded = folded.replace("Y", "y")
-    folded = folded.replace("Z", "z")
-    return Ok(folded)
-}
-
 fn reserved_stem(name: String) String !PathLawError -> {
     pieces :: name.split(".").to_list()
     return Ok(pieces.get(0) ?? name)
@@ -80,7 +49,7 @@ pub fn reject_casefold_collisions(names: [String]) Bool !PathLawError -> {
     seen := [String:String]{}
     loop name in names {
         validate_component(~name) ?? return Err(PathLawError{message: "directory contains an unsafe name"})
-        key :: ascii_fold(~name)
+        key :: name.to_ascii_lower()
         if seen.has_key(key) && seen[key] != name {
             return Err(PathLawError{message: "directory contains names that collide under ASCII case folding"})
         }

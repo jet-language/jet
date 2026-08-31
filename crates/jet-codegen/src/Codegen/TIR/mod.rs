@@ -5,17 +5,24 @@
 //! Today codegen (`emit_func` and friends) re-derives semantic facts while it
 //! emits Rust: it calls `expr_jet_ty` to re-infer expression types and
 //! `operand_is_integer` to re-decide which operator traps on overflow. That is
-//! exactly the "codegen re-derives / falls back" smell that invariant I3 ("codegen
-//! is dumb") forbids, and it is the bug class that produced the I2 holes the
-//! checked-IR effort was built to kill.
+//! exactly the "codegen re-derives / falls back" smell that invariant I3
+//! ("codegen is dumb") forbids, and it is the bug class that produced the I2
+//! holes the checked-IR effort was built to kill.
 //!
 //! The TIR is the fix. It is a distinct, post-sema representation whose defining
-//! property is **TOTALITY**: every fact codegen needs is carried *concretely* on
+//! property is **TOTALITY**: every fact codegen needs is carried concretely on
 //! the node — never re-inferred, never an `Option` codegen has to fall back from.
-//! Every `TExpr` carries its resolved `Type`; every `Binary` carries its overflow
-//! decision as a plain `bool`; every `Let` carries the resolved binding type. The
-//! emitter (`emit_tir_func`) makes ZERO decisions: it pattern-matches TIR fields
-//! and formats Rust. It never calls `expr_jet_ty` or `operand_is_integer`.
+//! Every `TExpr` carries its resolved `Type`; every `Binary` carries its
+//! overflow decision as a plain `bool`; every `Let` carries the resolved binding
+//! type. The borrowed `TFactChannel` below exposes the optimizer-relevant
+//! sema facts without allocating a side table or introducing another IR.
+//! Consumers treat an absent channel fact as "not proven" and keep the checked
+//! Prelude operation.
+//!
+//! The emitter (`emit_tir_func`) makes ZERO semantic decisions: it
+//! pattern-matches TIR fields and formats Rust. It never calls `expr_jet_ty` or
+//! `operand_is_integer`.
+
 //!
 //! ## Coverage contract
 //!
@@ -74,7 +81,7 @@ pub(crate) fn unmatched_enum_match_guard(
     eval::unmatched_enum_match_guard(fallthrough, span)
 }
 
-use crate::Codegen::{mangle, mangle_generated, mangle_path};
+use crate::Codegen::{mangle, mangle_path};
 use crate::AST::{
     AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
     VariantPayload,
@@ -194,6 +201,9 @@ pub struct TJitSpawnLambda {
     pub frozen_captures: Vec<String>,
     pub body: TJitSpawnBody,
     pub ret: Type,
+    /// D-HARDENED1 / D-MEM-SENTRY1: the task body mints an address from its
+    /// own frame storage and must execute through the shared lifetime token.
+    pub uses_stack_sentry: bool,
 }
 
 pub struct JitSpawnCapture {
@@ -318,6 +328,17 @@ pub struct JitProgram {
         std::collections::HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     /// Canonical typeable paths used by interpreter reflection.
     pub reflect_paths: std::collections::HashMap<String, String>,
+    /// #2252: the ONE projection from a TIR nominal spelling to the canonical
+    /// module-qualified identity every shape, codec, and method table is keyed
+    /// by. TIR carries three spellings of the same imported type - the bare
+    /// local leaf inside the module that declares it, the alias-qualified
+    /// source name in a consumer (`plan.ListReport`), and the canonical
+    /// identity a qualified call return already resolves to - while the tables
+    /// hold exactly one. Both engines resolve through this map instead of
+    /// searching table keys by suffix; a spelling two modules could claim is
+    /// absent, so an ambiguous name still reports the ordinary missing-shape
+    /// diagnostic rather than silently picking a module.
+    pub nominal_identities: std::collections::HashMap<String, String>,
     /// Declared generic parameter names per struct, in source order.
     pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
     /// M5: mangled variant names per enum type (discriminant order).
@@ -638,6 +659,11 @@ pub struct TLocal {
     pub name: String,
     pub generated: bool,
     pub deref: bool,
+    /// Storage provenance for a place whose Rust shape does not carry it.
+    /// `&self` is represented as the bare Rust receiver so ordinary field and
+    /// method emission stays unchanged, but its address still belongs to the
+    /// caller's storage rather than this method's frame.
+    pub address_lifetime: Option<TAddressLifetime>,
     /// D-PERSIST-DEVSTATE1=A: canonical module-store identity for a pinned
     /// binding. Persistent slots do not enter the ordinary local variable map.
     pub persist_key: Option<String>,
@@ -645,6 +671,11 @@ pub struct TLocal {
     /// The Rust binding is mutable. This is a TIR ownership fact, not an
     /// emitter-side repair for a generated spelling.
     pub mutable: bool,
+    /// A dead `String.from_bytes(local)` binding may be fused into the following
+    /// map update. This carries the source place only when lowering proved the
+    /// binding is not read after that update; other engines ignore the AOT
+    /// representation hint and retain the ordinary binding semantics.
+    pub string_bytes_source: Option<Box<TLocal>>,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -658,9 +689,11 @@ impl TLocal {
             name: name.into(),
             generated: false,
             deref: false,
+            address_lifetime: None,
             persist_key: None,
             persist_ty: None,
             mutable: false,
+            string_bytes_source: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -678,9 +711,11 @@ impl TLocal {
             name,
             generated: true,
             deref: false,
+            address_lifetime: None,
             persist_key: None,
             persist_ty: None,
             mutable: false,
+            string_bytes_source: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -698,9 +733,11 @@ impl TLocal {
             name: name.clone(),
             generated: false,
             deref: false,
+            address_lifetime: None,
             persist_key: Some(format!("{module}::{name}")),
             persist_ty: Some(ty),
             mutable: true,
+            string_bytes_source: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -712,6 +749,11 @@ impl TLocal {
 
     pub fn as_mutable(mut self) -> TLocal {
         self.mutable = true;
+        self
+    }
+
+    pub fn with_string_bytes_source(mut self, source: TLocal) -> TLocal {
+        self.string_bytes_source = Some(Box::new(source));
         self
     }
 
@@ -728,6 +770,11 @@ impl TLocal {
     /// The same slot read through a by-reference deref.
     pub fn through_ref(mut self) -> TLocal {
         self.deref = true;
+        self
+    }
+
+    pub fn with_address_lifetime(mut self, lifetime: TAddressLifetime) -> TLocal {
+        self.address_lifetime = Some(lifetime);
         self
     }
 
@@ -750,6 +797,63 @@ impl TLocal {
         } else {
             rust
         }
+    }
+}
+
+/// Storage provenance for an address-producing TIR expression. This is a
+/// lowering fact, not a second address-admission policy: sema still decides
+/// which source forms are legal, and each engine only marshals this fact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TAddressLifetime {
+    /// A value in the current Jet function/lambda/task frame.
+    Stack,
+    /// Storage owned by a Jet allocator or collection buffer.
+    Heap,
+    /// A persistent/static slot whose lifetime is not the current frame.
+    Static,
+    /// A by-reference slot owned by an enclosing caller or boundary.
+    Borrowed,
+    /// An address whose owner is outside Jet's allocation ledger.
+    Foreign,
+    /// Lowering cannot prove a more precise owner.
+    Unknown,
+}
+
+/// Classify the storage reached by an address-producing TIR expression.
+/// Unknown and borrowed forms retain the established unowned registration
+/// path; only a proven current-frame place receives an expiring sentry token.
+pub fn tir_address_lifetime(expr: &TExpr) -> TAddressLifetime {
+    match &expr.kind {
+        TExprKind::Local(local) => local.address_lifetime.unwrap_or_else(|| {
+            if local.is_persistent() {
+                TAddressLifetime::Static
+            } else if local.deref {
+                TAddressLifetime::Borrowed
+            } else {
+                TAddressLifetime::Stack
+            }
+        }),
+        TExprKind::ConstRef(_) => TAddressLifetime::Static,
+        TExprKind::Field { recv, .. } => tir_address_lifetime(recv),
+        TExprKind::Index { base, .. } => match &base.ty {
+            Type::FixedList { .. } => tir_address_lifetime(base),
+            Type::List(_) => TAddressLifetime::Heap,
+            _ => TAddressLifetime::Unknown,
+        },
+        // Distinct values are transparent to the resident raw-place lowering:
+        // it takes the address of the same local slot after the nominal wrapper
+        // is erased. Preserve that storage fact here so the JIT admission gate
+        // and every emitter choose the same frame token.
+        TExprKind::DistinctCtor { arg, .. } => tir_address_lifetime(arg),
+        TExprKind::PoolSlot { .. } => TAddressLifetime::Heap,
+        TExprKind::HandleMethod {
+            op: THandleOp::AllocAlloc,
+            ..
+        } => TAddressLifetime::Heap,
+        TExprKind::Borrow { place, .. } => tir_address_lifetime(place),
+        TExprKind::RawOf(inner) => tir_address_lifetime(inner),
+        TExprKind::Deref(_) | TExprKind::PtrFromAddr { .. } => TAddressLifetime::Foreign,
+        _ => TAddressLifetime::Unknown,
     }
 }
 
@@ -1382,75 +1486,74 @@ fn memo_dependency_facts(
 /// `jet build` and stops at E0956 under the default `jet run`. One program, two
 /// meanings by tier — the I9 split this closes.
 ///
-/// The codec is lowered against the IMPORTING context, not the declaring one.
-/// `register_imported_struct_shapes` registers an imported nominal under its
-/// canonical bundle identity (`open_dep::Badge`) with canonically qualified field
-/// types, while the declaring module's own context knows the type only by its
-/// local leaf (`Badge`). Lowering here therefore gives the codec the same owner
-/// identity every other TIR node already uses for that type — including the
-/// nominal its `decode` body constructs, which must match the value an
-/// `alias.Type.{ … }` literal builds, or structural equality on a decoded value
-/// would compare two spellings of one type and answer `false`.
-fn lower_imported_generated_codecs(bundle: &ProgramBundle, cx: &Cx, funcs: &mut Vec<TFunc>) {
-    for (module_idx, imported) in bundle.modules.iter().enumerate() {
-        if module_idx == bundle.entry {
+/// The codec is lowered against its DECLARING context. That context owns
+/// private nominals that an importing context must not expose, while
+/// `register_own_struct_shapes` also registers each local leaf under its
+/// canonical bundle identity. The generated body, its return type, and every
+/// imported call therefore use one nominal identity without making private
+/// declarations visible to consumers.
+fn lower_imported_generated_codecs(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+) {
+    if module_idx == bundle.entry {
+        return;
+    }
+    let imported = &bundle.modules[module_idx];
+    for item in &imported.items {
+        let Item::Impl(implementation) = item else {
+            continue;
+        };
+        if !implementation.is_generated_serde {
             continue;
         }
-        for item in &imported.items {
-            let Item::Impl(implementation) = item else {
-                continue;
-            };
-            if !implementation.is_generated_serde {
+        let Some(trait_name) = &implementation.trait_name else {
+            continue;
+        };
+        // D-PUBSCHEMA: a published schema's unknown-field holder is registered
+        // only in the declaring module's context, so its codec cannot be
+        // reproduced faithfully from here. Leave it refused rather than lower a
+        // codec that silently drops the merge AOT performs.
+        if imported.items.iter().any(|candidate| {
+            matches!(candidate, Item::Struct(definition)
+                if definition.name == implementation.type_name
+                    && definition.is_published_schema)
+        }) {
+            continue;
+        }
+        for owner in imported_type_owners(bundle, module_idx) {
+            let qualified = imported_type_name(&owner, &implementation.type_name);
+            if !cx.struct_fields.contains_key(&qualified)
+                && !cx.enum_variants.contains_key(&qualified)
+            {
                 continue;
             }
-            let Some(trait_name) = &implementation.trait_name else {
-                continue;
-            };
-            // D-PUBSCHEMA: a published schema's unknown-field holder is registered
-            // only in the declaring module's context, so its codec cannot be
-            // reproduced faithfully from here. Leave it refused rather than lower a
-            // codec that silently drops the merge AOT performs.
-            if imported.items.iter().any(|candidate| {
-                matches!(candidate, Item::Struct(definition)
-                    if definition.name == implementation.type_name
-                        && definition.is_published_schema)
-            }) {
-                continue;
-            }
-            for owner in imported_type_owners(bundle, module_idx) {
-                let qualified = imported_type_name(&owner, &implementation.type_name);
-                // Only a nominal this context actually resolved carries a canonical
-                // shape here; anything else would lower against an unknown owner.
-                if !cx.struct_fields.contains_key(&qualified)
-                    && !cx.enum_variants.contains_key(&qualified)
-                {
+            for method in &implementation.methods {
+                if !method.type_params.is_empty() {
                     continue;
                 }
-                for method in &implementation.methods {
-                    if !method.type_params.is_empty() {
-                        continue;
-                    }
-                    let name = format!("{qualified}::{}", method.name);
-                    if funcs.iter().any(|function| function.name == name) {
-                        continue;
-                    }
-                    let mut lowered = lower_trait_method(
-                        method,
-                        &qualified,
-                        cx,
-                        trait_name,
-                        implementation.is_generated_serde && method.compiler_generated,
-                    );
-                    // `decode` declares `Result<Badge, [FieldError]>` with the
-                    // declaring module's leaf; carry it to the same canonical
-                    // identity the owner and the body already use.
-                    lowered.ret = lowered
-                        .ret
-                        .as_ref()
-                        .map(|ty| qualify_imported_type(bundle, module_idx, &owner, ty));
-                    lowered.name = name;
-                    funcs.push(lowered);
+                let name = format!("{qualified}::{}", method.name);
+                if funcs.iter().any(|function| function.name == name) {
+                    continue;
                 }
+                let mut lowered = lower_trait_method(
+                    method,
+                    &qualified,
+                    cx,
+                    trait_name,
+                    implementation.is_generated_serde && method.compiler_generated,
+                );
+                // `decode` declares `Result<Badge, [FieldError]>` with the
+                // declaring module's leaf; carry it to the same canonical
+                // identity the owner and the body already use.
+                lowered.ret = lowered
+                    .ret
+                    .as_ref()
+                    .map(|ty| qualify_imported_type(bundle, module_idx, &owner, ty));
+                lowered.name = name;
+                funcs.push(lowered);
             }
         }
     }
@@ -1479,6 +1582,128 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     program
 }
 
+/// #2252: build [`JitProgram::nominal_identities`].
+///
+/// The name ledger already owns both halves of this fact: `nominal_identity`
+/// gives a declaration its canonical module-qualified name, and the recorded
+/// import aliases give every consumer spelling that reaches it. This is the one
+/// place the two are joined, so no engine reconstructs an owner by searching
+/// table keys for a matching suffix.
+///
+/// Two rules keep the projection honest:
+/// - The entry module's own nominals keep their source spelling: the shape
+///   tables register them that way, so remapping them would break the rows the
+///   entry itself lowers against.
+/// - A spelling that two declarations could claim (the same leaf exported by
+///   two modules, or one alias bound to different modules in two consumers) is
+///   dropped. The lookup then misses exactly as it does today and the ordinary
+///   missing-shape diagnostic stands, instead of one module answering for
+///   another.
+fn nominal_identity_projection(
+    bundle: &ProgramBundle,
+) -> std::collections::HashMap<String, String> {
+    let mut claims: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    // Loaded dependency items may be copied into the entry module's merged
+    // item list. Only ledger-owned declarations are entry-local; imported
+    // leaves must remain eligible for the declaring module's bare spelling.
+    let entry_names = bundle
+        .modules
+        .get(bundle.entry)
+        .map(|module| {
+            module_owned_type_names(&module.items)
+                .into_iter()
+                .filter(|name| bundle.name_ledger.declaration(bundle.entry, name).is_some())
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        // Every spelling a program can write for an imported nominal: the bare
+        // leaf inside its declaring module, and `alias.Leaf` in each consumer.
+        let mut spellings: Vec<String> = Vec::new();
+        if module_idx != bundle.entry {
+            spellings.extend(module_owned_type_names(&module.items));
+        }
+        for import in &module.imports {
+            let alias = import.import_alias();
+            let Some(target) = bundle
+                .name_ledger
+                .effective_alias(module_idx, &alias)
+                .and_then(|alias| alias.target_module)
+            else {
+                continue;
+            };
+            spellings.extend(
+                module_owned_type_names(&bundle.modules[target].items)
+                    .into_iter()
+                    .map(|leaf| format!("{alias}.{leaf}")),
+            );
+        }
+        for spelling in spellings {
+            if !spelling.contains('.') && entry_names.contains(&spelling) {
+                continue;
+            }
+            let Some(identity) = canonical_nominal_from(bundle, module_idx, &spelling) else {
+                continue;
+            };
+            claims.entry(spelling).or_default().insert(identity);
+        }
+    }
+    claims
+        .into_iter()
+        .filter_map(|(spelling, identities)| {
+            let mut identities = identities.into_iter();
+            let identity = identities.next()?;
+            identities.next().is_none().then_some((spelling, identity))
+        })
+        .collect()
+}
+/// Name a selected zero-argument imported Executable or Service the way the
+/// imported function table does. Local Outputs deliberately stay on the
+/// original entry selection path below; Check Outputs are plural test-harness
+/// entries, not a singular JIT entry.
+fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
+    let module = bundle.modules.get(bundle.entry)?;
+    module.items.iter().find_map(|item| {
+        let Item::Const(value) = item else {
+            return None;
+        };
+        let output = value.resolved_output.as_ref()?;
+        if !output.selected
+            || output.module == bundle.entry
+            || !output.params.is_empty()
+            || !matches!(
+                output.kind,
+                crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
+            )
+        {
+            return None;
+        }
+        Some(output.lowered_name.clone())
+    })
+}
+fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
+    let module = bundle.modules.get(bundle.entry)?;
+    selected_imported_zero_arg_tir_entry(bundle)
+        .or_else(|| {
+            module.items.iter().find_map(|item| match item {
+                Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+                    (output.selected && output.module == bundle.entry && output.params.is_empty())
+                        .then(|| output.semantic_name.clone())
+                }),
+                _ => None,
+            })
+        })
+        .or_else(|| {
+            module.items.iter().find_map(|item| match item {
+                Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                    Some("run".to_string())
+                }
+                _ => None,
+            })
+        })
+}
+
 fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
         LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
@@ -1494,28 +1719,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
         let type_shapes = collect_type_shapes(&module.items);
         let mut funcs = Vec::new();
-        let zero_arg_entry = module
-            .items
-            .iter()
-            .find_map(|item| {
-                let Item::Const(value) = item else {
-                    return None;
-                };
-                value.resolved_output.as_ref().and_then(|output| {
-                    (output.selected && output.module == bundle.entry && output.params.is_empty())
-                        .then(|| output.semantic_name.clone())
-                })
-            })
-            .or_else(|| {
-                module.items.iter().find_map(|item| match item {
-                    Item::Func(function)
-                        if function.name == "run" && function.params.is_empty() =>
-                    {
-                        Some("run".to_string())
-                    }
-                    _ => None,
-                })
-            });
+        let zero_arg_entry = selected_zero_arg_tir_entry(bundle);
         let cli_schema = zero_arg_entry
             .is_none()
             .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
@@ -1549,9 +1753,6 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                         continue;
                     }
                     let covered = tir_covers(f, &cx);
-                    if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() && !covered {
-                        eprintln!("skip TIR fn {}: {}", f.name, subset::refusal::describe(&cx));
-                    }
                     if !f.type_params.is_empty() || !covered {
                         continue;
                     }
@@ -1597,8 +1798,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &s.name,
                                     &cx,
                                     &implementation.trait_name,
-                                    implementation.compiler_generated
-                                        && method.compiler_generated,
+                                    implementation.compiler_generated && method.compiler_generated,
                                 );
                                 lowered.name = format!("{}::{}", s.name, method.name);
                                 funcs.push(lowered);
@@ -1639,8 +1839,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &e.name,
                                     &cx,
                                     &implementation.trait_name,
-                                    implementation.compiler_generated
-                                        && method.compiler_generated,
+                                    implementation.compiler_generated && method.compiler_generated,
                                 );
                                 lowered.name = format!("{}::{}", e.name, method.name);
                                 funcs.push(lowered);
@@ -1801,22 +2000,8 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 _ => {}
             }
         }
-        lower_imported_generated_codecs(bundle, &cx, &mut funcs);
         lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
         specialize_generic_free_functions(&module.items, &cx, &mut funcs);
-        let entry_ok = if entry_name == super::mangle_generated("cli_main") {
-            // A program-struct CLI has no literal `run`: argv selects one of its
-            // lowered methods or bound functions at execution time. `cli::prepare`
-            // resolves that target from the checked schema, and the evaluator
-            // reports a missing selected TIR entry instead of rejecting the whole
-            // program before dispatch.
-            cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
-        } else {
-            funcs.iter().any(|function| function.name == entry_name)
-        };
-        if !entry_ok {
-            return None;
-        }
         let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
         let mut reflect_paths = cx.reflect_paths.clone();
         let mut memo_dependencies = memo_dependency_facts(&cx);
@@ -1839,7 +2024,17 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 &extern_funcs,
             );
             populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            // #2252: this pass lowers the module's OWN items under their
+            // canonical owner (`{owner}::{Leaf}::{method}` below), so the
+            // context needs the same canonical shape rows a consumer context
+            // already holds. `populate_cx_from_bundle` registers only what this
+            // module imports, leaving its own nominals keyed by bare leaf: the
+            // structural gate then refused every method whose owner is the
+            // qualified name, and the default tier deopted (E0956) on methods
+            // and generated codecs the program plainly declares.
+            register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
             imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
+            lower_imported_generated_codecs(bundle, module_idx, &imported_cx, &mut funcs);
             for (owner, sources) in memo_dependency_facts(&imported_cx) {
                 let target = memo_dependencies.entry(owner).or_default();
                 for (source, fields) in sources {
@@ -1972,6 +2167,54 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                             }
                         }
                     }
+                    Item::Impl(implementation) if implementation.trait_name.is_none() => {
+                        let owner_is_generic = imported.items.iter().any(|item| match item {
+                            Item::Struct(definition) => {
+                                definition.name == implementation.type_name
+                                    && !definition.type_params.is_empty()
+                            }
+                            Item::Enum(definition) => {
+                                definition.name == implementation.type_name
+                                    && !definition.type_params.is_empty()
+                            }
+                            _ => false,
+                        });
+                        if owner_is_generic || implementation.is_generated_serde {
+                            continue;
+                        }
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("{}::", mangle(&imported.alias)));
+                        for owner in imported_type_owners(bundle, module_idx) {
+                            let qualified = imported_type_name(&owner, &implementation.type_name);
+                            for method in &implementation.methods {
+                                if !method.type_params.is_empty()
+                                    || !tir_covers_method(
+                                        method,
+                                        &implementation.type_name,
+                                        &imported_cx,
+                                    )
+                                {
+                                    continue;
+                                }
+                                let name = format!("{qualified}::{}", method.name);
+                                if funcs.iter().any(|function| function.name == name) {
+                                    continue;
+                                }
+                                let mut lowered = lower_method_for_owner(
+                                    method,
+                                    &qualified,
+                                    Type::Named(qualified.clone()),
+                                    &imported_cx,
+                                    false,
+                                );
+                                lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                });
+                                lowered.name = name;
+                                funcs.push(lowered);
+                            }
+                        }
+                    }
                     Item::Impl(implementation)
                         if implementation.trait_name.as_deref()
                             == Some(crate::Syntax::TRAIT_DISPLAY)
@@ -2002,12 +2245,104 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                             funcs.push(lowered);
                         }
                     }
+                    Item::Impl(implementation) => {
+                        // #2252: an imported module's `impl` blocks are ordinary
+                        // top-level items, exactly as in the entry module, but
+                        // this loop only lowered the methods written INSIDE the
+                        // struct or enum. An `impl Type { ... }` method was
+                        // therefore absent from the program while the consumer's
+                        // projected key named it correctly, so the resident tier
+                        // reported a missing method and the whole program
+                        // deopted to the interpreter. Generated codecs stay with
+                        // `lower_imported_generated_codecs`, the one pass that
+                        // owns their provenance.
+                        if implementation.is_generated_serde {
+                            continue;
+                        }
+                        let owner_params = imported
+                            .items
+                            .iter()
+                            .find_map(|item| match item {
+                                Item::Struct(definition)
+                                    if definition.name == implementation.type_name =>
+                                {
+                                    Some(definition.type_params.as_slice())
+                                }
+                                Item::Enum(definition)
+                                    if definition.name == implementation.type_name =>
+                                {
+                                    Some(definition.type_params.as_slice())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or(&[]);
+                        if !owner_params.is_empty() {
+                            continue;
+                        }
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("{}::", mangle(&imported.alias)));
+                        for owner in imported_type_owners(bundle, module_idx) {
+                            let qualified = imported_type_name(&owner, &implementation.type_name);
+                            for method in &implementation.methods {
+                                if !method.type_params.is_empty() {
+                                    continue;
+                                }
+                                let mut lowered =
+                                    if let Some(trait_name) = &implementation.trait_name {
+                                        if !tir_covers_trait_method(
+                                            method,
+                                            &qualified,
+                                            &imported_cx,
+                                            trait_name,
+                                        ) {
+                                            continue;
+                                        }
+                                        lower_trait_method(
+                                            method,
+                                            &qualified,
+                                            &imported_cx,
+                                            trait_name,
+                                            false,
+                                        )
+                                    } else {
+                                        if !tir_covers_method(method, &qualified, &imported_cx) {
+                                            continue;
+                                        }
+                                        lower_method_for_owner(
+                                            method,
+                                            &qualified,
+                                            Type::Named(qualified.clone()),
+                                            &imported_cx,
+                                            false,
+                                        )
+                                    };
+                                lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                });
+                                lowered.name = format!("{}::{}", qualified, method.name);
+                                funcs.push(lowered);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
             spawn_lambdas.extend(std::mem::take(
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
+        }
+        let entry_ok = if entry_name == super::mangle_generated("cli_main") {
+            // A program-struct CLI has no literal `run`: argv selects one of its
+            // lowered methods or bound functions at execution time. `cli::prepare`
+            // resolves that target from the checked schema, and the evaluator
+            // reports a missing selected TIR entry instead of rejecting the whole
+            // program before dispatch.
+            cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
+        } else {
+            funcs.iter().any(|function| function.name == entry_name)
+        };
+        if !entry_ok {
+            return None;
         }
         let mut struct_fields = std::collections::HashMap::new();
         let mut struct_field_types = std::collections::HashMap::new();
@@ -2076,9 +2411,6 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         let mut constants = std::collections::HashMap::new();
         // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
         let persist_prep = jet_foundation::Persist::prepare_bundle(bundle);
-        for msg in &persist_prep.messages {
-            eprintln!("{msg}");
-        }
         let persist_overrides = persist_prep.by_name;
         for item in &module.items {
             match item {
@@ -2429,10 +2761,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             source_file: module.display.clone(),
             source_text: module.source.clone(),
             package_hardened: bundle.package_guarantees.harden,
-            application_authority: bundle
-                .package_guarantees
-                .application_authority
-                .clone(),
+            application_authority: bundle.package_guarantees.application_authority.clone(),
             edition: bundle.edition.clone(),
             entry: entry_name,
             funcs,
@@ -2442,6 +2771,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             memo_dependencies,
             reflection_fields,
             reflect_paths,
+            nominal_identities: nominal_identity_projection(bundle),
             struct_type_params,
             enum_variants,
             enum_variant_payload_types,
@@ -2485,28 +2815,10 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let selected = module
-        .items
-        .iter()
-        .find_map(|item| match item {
-            Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-                (output.selected && output.module == bundle.entry && output.params.is_empty())
-                    .then(|| output.semantic_name.clone())
-            }),
-            _ => None,
-        })
-        .or_else(|| {
-            module.items.iter().find_map(|item| match item {
-                Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                    Some("run".to_string())
-                }
-                _ => None,
-            })
-        })
-        .or_else(|| {
-            jet_foundation::CLISchema::entry_schema_for_bundle(bundle)
-                .map(|_| super::mangle_generated("cli_main"))
-        });
+    let selected = selected_zero_arg_tir_entry(bundle).or_else(|| {
+        jet_foundation::CLISchema::entry_schema_for_bundle(bundle)
+            .map(|_| super::mangle_generated("cli_main"))
+    });
     let Some(selected) = selected else {
         return NO_RUNNABLE_ENTRY.to_string();
     };
@@ -2655,12 +2967,39 @@ pub struct TFunc {
     /// D-FIELDMEMO1=A: the synthetic getter stores its result in this hidden
     /// owner field. `None` keeps ordinary functions and methods unchanged.
     pub memo_field: Option<String>,
+    /// D-HARDENED1 / D-MEM-SENTRY1: lowering proved that this body mints an
+    /// address from current-frame storage. Engines install one shared Prelude
+    /// frame token before executing such a body.
+    pub uses_stack_sentry: bool,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn __jet_name(<self>, …)`
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
     pub kind: TFuncKind,
+}
+
+impl TFunc {
+    /// Return function-level facts without copying a side bundle.
+    ///
+    /// `is_pure` is a sema proof, not an inference from the body. A false bit
+    /// therefore remains `Unknown`, so an optimizer cannot treat an ordinary
+    /// function as impure merely because no purity proof was attached.
+    pub fn fact_channel(&self) -> TFactChannel<'_> {
+        TFactChannel {
+            ty: self.ret.as_ref(),
+            integer_bounds: self.ret.as_ref().and_then(integer_bounds_for_type),
+            exclusivity: TExclusivity::Unknown,
+            purity: if self.is_pure {
+                TPurity::Pure
+            } else {
+                TPurity::Unknown
+            },
+            no_cross_iteration_deps: false,
+            comptime_value: None,
+            cost: None,
+        }
+    }
 }
 
 /// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
@@ -2952,8 +3291,9 @@ pub enum THostCall {
         parts: Vec<crate::AST::StrMatchPart>,
         probe: TMatchProbe,
     },
-    /// D-BINPAT1: binary-pattern scan against `__jet_switch_subject`.
+    /// D-BINPAT1: binary-pattern scan against the lowered subject.
     BinMatchScan {
+        subject: Box<TExpr>,
         parts: Vec<crate::AST::BinMatchPart>,
         probe: TMatchProbe,
     },
@@ -3618,6 +3958,19 @@ pub enum TStmt {
     SourceSpan(crate::Diagnostics::Span),
 }
 
+impl TStmt {
+    /// Return the loop proof, if this statement carries one.
+    pub fn fact_channel(&self) -> TFactChannel<'_> {
+        match self {
+            TStmt::Range {
+                auto_vectorization: Some(facts),
+                ..
+            } => TFactChannel::from_auto_vectorization(facts),
+            _ => TFactChannel::unknown(),
+        }
+    }
+}
+
 /// D-BRANCH-CODEGEN1=B: total lowering classification for one arm table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchClass {
@@ -3708,20 +4061,2094 @@ impl TPattern {
     }
 }
 
+/// Compact, typed bounds carried by a sema proof.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TIntegerBounds {
+    pub lo: i128,
+    pub hi: i128,
+}
+
+impl TIntegerBounds {
+    pub const fn exact(value: i128) -> Self {
+        Self {
+            lo: value,
+            hi: value,
+        }
+    }
+}
+
+/// A fully typed expression. The resolved type is carried on every node,
+/// so codegen never recomputes it.
+pub struct TExpr {
+    pub ty: Type,
+    pub kind: TExprKind,
+}
+
+/// The semantic operation whose cost can remain after optimization.  These
+/// categories are deliberately small and typed: reporting must consume the
+/// same fact that lowering gave to every backend, not infer a cost from Rust
+/// text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TCostKind {
+    /// A read-only view crossed an owning boundary and must be copied.
+    ViewMaterialization,
+    /// A shared map backing store needs `Arc::make_mut` before an edit.
+    CollectionCopyOnWrite,
+    /// An exact `Int` operation may leave the packed signed-63-bit rail.
+    ExactIntSpill,
+    /// A `Result`/`Option` carrier is constructed at a call or explicit
+    /// constructor site.
+    OutcomeConstruction,
+    /// A generic collection representation remains because no shape proof
+    /// selected the direct representation.
+    RepresentationFallback,
+}
+
+impl TCostKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ViewMaterialization => "view materialization",
+            Self::CollectionCopyOnWrite => "map copy-on-write",
+            Self::ExactIntSpill => "exact Int spill",
+            Self::OutcomeConstruction => "outcome construction",
+            Self::RepresentationFallback => "generic representation fallback",
+        }
+    }
+
+    pub const fn operation(self) -> &'static str {
+        match self {
+            Self::ViewMaterialization => "materializing a read-only view",
+            Self::CollectionCopyOnWrite => "editing a shared map backing store",
+            Self::ExactIntSpill => "an exact Int operation may spill to bigint",
+            Self::OutcomeConstruction => "constructing an Outcome carrier",
+            Self::RepresentationFallback => "using a generic collection representation",
+        }
+    }
+
+    pub const fn fix(self) -> &'static str {
+        match self {
+            Self::ViewMaterialization => {
+                "keep the value in its view form, or make the copy explicit outside the loop"
+            }
+            Self::CollectionCopyOnWrite => {
+                "mutate an exclusive map place, or move the edit outside the loop"
+            }
+            Self::ExactIntSpill => {
+                "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
+            }
+            Self::OutcomeConstruction => {
+                "consume the outcome through an immediate fast path when one exists"
+            }
+            Self::RepresentationFallback => {
+                "provide the collection shape proof that selects the direct representation"
+            }
+        }
+    }
+}
+
+/// Whether a typed cost is still present in emitted semantics.  `Removed` is
+/// retained for `jet explain --cost`, while lint consumers only surface
+/// `SemanticRemainder`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TCostState {
+    SemanticRemainder,
+    OptimizerRemoved,
+}
+
+/// One cost fact projected through the same borrowed channel as type, bounds,
+/// access, and purity facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TCostFact {
+    pub kind: TCostKind,
+    pub state: TCostState,
+}
+
+impl TCostFact {
+    pub const fn semantic(kind: TCostKind) -> Self {
+        Self {
+            kind,
+            state: TCostState::SemanticRemainder,
+        }
+    }
+}
+
+/// A lowered cost site.  The span is the nearest source marker available in
+/// TIR; function-level attribution remains total when debug line markers are
+/// not present.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TCostSite {
+    pub function: String,
+    pub span: crate::Diagnostics::Span,
+    pub kind: TCostKind,
+    pub state: TCostState,
+    pub loop_depth: usize,
+}
+
+/// A cost projection must never turn a filtered TIR program into a green
+/// report.  A lowerer refusal is therefore part of the public projection
+/// result, not an empty report that an adapter can accidentally ignore.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TCostReportError {
+    Lowering { reason: String },
+    Incomplete { surfaces: Vec<String> },
+}
+
+impl TCostReportError {
+    pub fn message(&self) -> String {
+        match self {
+            Self::Lowering { reason } => {
+                format!("typed TIR lowering failed for cost projection: {reason}")
+            }
+            Self::Incomplete { surfaces } => format!(
+                "cost projection is incomplete: reachable sema surface(s) omitted by typed TIR: {}",
+                surfaces.join(", ")
+            ),
+        }
+    }
+}
+
+/// Complete cost projection for one checked program.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TCostReport {
+    pub sites: Vec<TCostSite>,
+}
+
+/// The access fact available to an optimizer consumer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TExclusivity {
+    /// Sema did not prove an access mode at this subject.
+    Unknown,
+    /// A shared/read access. It does not authorize mutation or reordering.
+    Shared,
+    /// A sema-proven exclusive/write access.
+    Exclusive,
+    /// A sema-proven consuming/move access.
+    Move,
+}
+
+/// Three-state purity fact. `Unknown` is the conservative default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TPurity {
+    Unknown,
+    Pure,
+    Impure,
+}
+
+/// One read-only fact channel shared by TIR optimization consumers.
+///
+/// This is deliberately a borrowed view over facts already carried by the
+/// frozen TIR (`TExpr.ty`/`CtLit`, `TCallArg` access flags, `TStmt` loop proofs,
+/// and `TFunc.is_pure`). It has no per-node allocation and no parallel schema.
+/// A missing field means sema did not prove that fact; consumers must retain
+/// the checked Prelude operation or other conservative dependency.
+#[derive(Clone, Copy, Debug)]
+pub struct TFactChannel<'a> {
+    pub ty: Option<&'a Type>,
+    pub integer_bounds: Option<TIntegerBounds>,
+    pub exclusivity: TExclusivity,
+    pub purity: TPurity,
+    /// Sema's loop-level proof that one iteration cannot observe another's
+    /// writes. Unknown stays false so vectorizers never infer independence.
+    pub no_cross_iteration_deps: bool,
+    pub comptime_value: Option<&'a crate::AST::CtValue>,
+    /// Typed cost evidence. `SemanticRemainder` is a real cost; `OptimizerRemoved`
+    /// is a proof that the same operation remains semantically available but
+    /// its dynamic fallback is unreachable for the carried bounds.
+    pub cost: Option<TCostFact>,
+}
+
+impl<'a> TFactChannel<'a> {
+    pub const fn unknown() -> Self {
+        Self {
+            ty: None,
+            integer_bounds: None,
+            exclusivity: TExclusivity::Unknown,
+            purity: TPurity::Unknown,
+            no_cross_iteration_deps: false,
+            comptime_value: None,
+            cost: None,
+        }
+    }
+
+    /// Project the complete sema loop proof into the common channel.
+    pub fn from_auto_vectorization(facts: &'a crate::AST::AutoVectorizationFacts) -> Self {
+        Self {
+            ty: Some(&facts.element_type),
+            integer_bounds: None,
+            exclusivity: if facts.no_aliasing {
+                TExclusivity::Exclusive
+            } else {
+                TExclusivity::Unknown
+            },
+            purity: if facts.effect_free_body {
+                TPurity::Pure
+            } else {
+                TPurity::Unknown
+            },
+            no_cross_iteration_deps: facts.no_cross_iteration_deps,
+            comptime_value: None,
+            cost: None,
+        }
+    }
+}
+
+fn integer_bounds_for_type(ty: &Type) -> Option<TIntegerBounds> {
+    ty.integer_range().map(|(lo, hi)| TIntegerBounds { lo, hi })
+}
+
+fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
+    match &expr.kind {
+        TExprKind::IntLit(value, _) => Some(TIntegerBounds::exact(*value as i128)),
+        TExprKind::CtLit(crate::AST::CtValue::Int(value)) => {
+            Some(TIntegerBounds::exact(*value as i128))
+        }
+        TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => {
+            value.try_i128().map(TIntegerBounds::exact)
+        }
+        TExprKind::NumericMethod {
+            op: TNumericOp::InlineRange { lo, hi, .. },
+            ..
+        } => Some(TIntegerBounds {
+            lo: *lo as i128,
+            hi: *hi as i128,
+        }),
+        _ => integer_bounds_for_type(&expr.ty),
+    }
+}
+/// D-INTBIG1: the inline rail is a signed 63-bit payload, represented by the
+/// same half-i64 bounds as `Prelude/Core/JetInt`. Keep this projection in TIR
+/// so cost consumers share one proof rather than reading backend constants.
+const INT_SMALL_MIN: i128 = -(1i128 << 62);
+const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
+
+fn bounds_fit_inline(bounds: TIntegerBounds) -> bool {
+    bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX
+}
+
+fn combine_integer_bounds(
+    op: BinOp,
+    lhs: TIntegerBounds,
+    rhs: TIntegerBounds,
+) -> Option<TIntegerBounds> {
+    let candidates = match op {
+        BinOp::Add => [
+            lhs.lo.checked_add(rhs.lo)?,
+            lhs.hi.checked_add(rhs.hi)?,
+            0,
+            0,
+        ],
+        BinOp::Sub => [
+            lhs.lo.checked_sub(rhs.hi)?,
+            lhs.hi.checked_sub(rhs.lo)?,
+            0,
+            0,
+        ],
+        BinOp::Mul => [
+            lhs.lo.checked_mul(rhs.lo)?,
+            lhs.lo.checked_mul(rhs.hi)?,
+            lhs.hi.checked_mul(rhs.lo)?,
+            lhs.hi.checked_mul(rhs.hi)?,
+        ],
+        _ => return None,
+    };
+    let mut lo = candidates[0];
+    let mut hi = candidates[0];
+    for value in candidates.into_iter().skip(1) {
+        lo = lo.min(value);
+        hi = hi.max(value);
+    }
+    Some(TIntegerBounds { lo, hi })
+}
+
+fn integer_cost_fact(op: BinOp, lhs: &TExpr, rhs: &TExpr) -> TCostFact {
+    let state = match (integer_bounds_for_expr(lhs), integer_bounds_for_expr(rhs)) {
+        (Some(lhs), Some(rhs)) => match combine_integer_bounds(op, lhs, rhs) {
+            Some(result)
+                if bounds_fit_inline(lhs)
+                    && bounds_fit_inline(rhs)
+                    && bounds_fit_inline(result) =>
+            {
+                TCostState::OptimizerRemoved
+            }
+            _ => TCostState::SemanticRemainder,
+        },
+        _ => TCostState::SemanticRemainder,
+    };
+    TCostFact {
+        kind: TCostKind::ExactIntSpill,
+        state,
+    }
+}
+
+fn integer_unary_cost_fact(operand: &TExpr) -> TCostFact {
+    let state = match integer_bounds_for_expr(operand).and_then(|bounds| {
+        bounds.lo.checked_neg().map(|_| TIntegerBounds {
+            lo: -bounds.hi,
+            hi: -bounds.lo,
+        })
+    }) {
+        Some(result)
+            if integer_bounds_for_expr(operand).is_some_and(bounds_fit_inline)
+                && bounds_fit_inline(result) =>
+        {
+            TCostState::OptimizerRemoved
+        }
+        _ => TCostState::SemanticRemainder,
+    };
+    TCostFact {
+        kind: TCostKind::ExactIntSpill,
+        state,
+    }
+}
+
+fn is_outcome_type(ty: &Type) -> bool {
+    matches!(ty, Type::Result { .. } | Type::Option(_))
+}
+
+fn is_outcome_constructor(kind: &TExprKind) -> bool {
+    matches!(
+        kind,
+        TExprKind::Absent
+            | TExprKind::Present(_)
+            | TExprKind::Ok(_)
+            | TExprKind::Err(_)
+            | TExprKind::Call { .. }
+            | TExprKind::MethodCall { .. }
+            | TExprKind::FnFieldCall { .. }
+            | TExprKind::StaticCall { .. }
+            | TExprKind::BuiltinMethod { .. }
+            | TExprKind::ClosureMethod { .. }
+            | TExprKind::HandleMethod { .. }
+            | TExprKind::CoreCall { .. }
+            | TExprKind::ModuleCall { .. }
+            | TExprKind::ExternCall { .. }
+            | TExprKind::HostCall(_)
+            | TExprKind::RangeCheckedCtor { .. }
+            | TExprKind::DistinctConvert { fallible: true, .. }
+            | TExprKind::UnitConvert { fallible: true, .. }
+            | TExprKind::DecodeUnder { .. }
+            | TExprKind::OptionLift2 { .. }
+            | TExprKind::OptField { .. }
+            | TExprKind::TaskGroupAll { .. }
+            | TExprKind::TaskGroupRace { .. }
+            | TExprKind::TaskGroupAny { .. }
+    )
+}
+
+fn outcome_fast_path_available(expr: &TExpr) -> bool {
+    if !is_outcome_type(&expr.ty) {
+        return false;
+    }
+    match &expr.kind {
+        TExprKind::BuiltinMethod { op, args, .. } if args.is_empty() => {
+            op.outcome_fast_path().is_some()
+        }
+        TExprKind::HandleMethod { op, args, .. } if args.is_empty() => {
+            op.outcome_fast_path().is_some()
+        }
+        _ => false,
+    }
+}
+
+fn outcome_cost_state(expr: &TExpr) -> Option<TCostState> {
+    // The collector below only records a site when the expression carries an
+    // outcome-construction fact. The operation capability is the complete
+    // removal proof, so do not duplicate that fact match here: it can turn a
+    // successfully lowered immediate handler back into a semantic warning.
+    outcome_fast_path_available(expr).then_some(TCostState::OptimizerRemoved)
+}
+
+fn cost_fact_for_expr(expr: &TExpr) -> Option<TCostFact> {
+    match &expr.kind {
+        TExprKind::MaterializeView(_) => Some(TCostFact::semantic(TCostKind::ViewMaterialization)),
+        TExprKind::BuiltinMethod { recv, op, .. }
+            if matches!(&recv.ty, Type::Map { .. }) && op.needs_mut_receiver_place() =>
+        {
+            Some(TCostFact::semantic(TCostKind::CollectionCopyOnWrite))
+        }
+        TExprKind::Binary { op, lhs, rhs, .. }
+            if matches!(&expr.ty, Type::Int)
+                && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) =>
+        {
+            Some(integer_cost_fact(*op, lhs, rhs))
+        }
+        TExprKind::Unary {
+            op: UnOp::Neg,
+            operand,
+        } if matches!(&expr.ty, Type::Int) => Some(integer_unary_cost_fact(operand)),
+        TExprKind::Index {
+            base,
+            is_map: false,
+            uninit_fixed: false,
+            ..
+        } if matches!(&base.ty, Type::List(_) | Type::FixedList { .. }) => {
+            Some(TCostFact::semantic(TCostKind::RepresentationFallback))
+        }
+        _ if is_outcome_type(&expr.ty) && is_outcome_constructor(&expr.kind) => {
+            Some(TCostFact::semantic(TCostKind::OutcomeConstruction))
+        }
+        _ => None,
+    }
+}
+
 /// One piece of a D-VARIADIC1 list spread literal — either a single element or `...list`.
 pub enum ListSpreadPart {
     Elem(TExpr),
     Spread(TExpr),
 }
 
-/// A lowered expression: a resolved `Type` plus its kind. `ty` is **total** — it
-/// is never absent, and codegen never recomputes it.
-pub struct TExpr {
-    pub ty: Type,
-    pub kind: TExprKind,
+impl TExpr {
+    /// Return the optimizer facts already established for this expression.
+    ///
+    /// `ty` and `CtLit` are sema's resolved type/value carriers. The
+    /// `InlineRange` operation is retained in the structured kind after the
+    /// runtime range carrier is canonicalized, so its interval remains a fact
+    /// rather than a codegen guess. Access facts are exposed only for explicit
+    /// borrow/resource nodes; all other expressions stay conservative.
+    pub fn fact_channel(&self) -> TFactChannel<'_> {
+        let exclusivity = match &self.kind {
+            TExprKind::Borrow { mutable: true, .. } => TExclusivity::Exclusive,
+            TExprKind::Borrow { mutable: false, .. } => TExclusivity::Shared,
+            TExprKind::ResourceTake(_) => TExclusivity::Move,
+            _ => TExclusivity::Unknown,
+        };
+        let comptime_value = match &self.kind {
+            TExprKind::CtLit(value) => Some(value),
+            _ => None,
+        };
+        TFactChannel {
+            ty: Some(&self.ty),
+            integer_bounds: integer_bounds_for_expr(self),
+            exclusivity,
+            purity: TPurity::Unknown,
+            no_cross_iteration_deps: false,
+            comptime_value,
+            cost: cost_fact_for_expr(self),
+        }
+    }
+}
+fn collect_cost_lambda(
+    lambda: &TLambda,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match &lambda.executable {
+        TLambdaBody::Expr(expr) => {
+            collect_cost_expr(expr, function, span, loop_depth, sites);
+        }
+        TLambdaBody::Block(body) => {
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TLambdaBody::SharedBlock(body) => {
+            collect_cost_stmts(body.as_ref(), function, span, loop_depth, sites);
+        }
+    }
 }
 
-impl TExpr {
+fn collect_cost_place(
+    place: &TPlace,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    if let TPlace::Expr(expr) = place {
+        collect_cost_expr(expr, function, span, loop_depth, sites);
+    }
+}
+
+fn collect_cost_enum_payload(
+    payload: &TEnumPayload,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match payload {
+        TEnumPayload::Unit => {}
+        TEnumPayload::Positional(args) => {
+            for arg in args {
+                collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+            }
+        }
+        TEnumPayload::Named(args) => {
+            for (_, arg) in args {
+                collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+            }
+        }
+    }
+}
+
+fn collect_cost_require(
+    require: &TRequireKind,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match require {
+        TRequireKind::Require { cond, msg } => {
+            collect_cost_expr(cond, function, span, loop_depth, sites);
+            if let Some(msg) = msg {
+                collect_cost_expr(msg, function, span, loop_depth, sites);
+            }
+        }
+        TRequireKind::RequireEq { left, right } => {
+            collect_cost_expr(left, function, span, loop_depth, sites);
+            collect_cost_expr(right, function, span, loop_depth, sites);
+        }
+        TRequireKind::Panic { msg } => {
+            collect_cost_expr(msg, function, span, loop_depth, sites);
+        }
+    }
+}
+
+fn collect_cost_core_closure(
+    kind: &TCoreClosureKind,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match kind {
+        TCoreClosureKind::Spawn {
+            group, executable, ..
+        } => {
+            if let Some(group) = group {
+                collect_cost_expr(group, function, span, loop_depth, sites);
+            }
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
+        TCoreClosureKind::Serve { addr, .. } => {
+            collect_cost_expr(addr, function, span, loop_depth, sites);
+        }
+        TCoreClosureKind::OnInterrupt { callback } => {
+            collect_cost_expr(callback, function, span, loop_depth, sites);
+        }
+        TCoreClosureKind::Guard { executable, .. }
+        | TCoreClosureKind::OnCommit { executable, .. }
+        | TCoreClosureKind::OnRollback { executable, .. }
+        | TCoreClosureKind::ReactiveDerived { executable, .. }
+        | TCoreClosureKind::ReactiveEffect { executable, .. }
+        | TCoreClosureKind::UiReactiveRender { executable, .. } => {
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
+        TCoreClosureKind::UiButtonOnClick {
+            label, executable, ..
+        } => {
+            collect_cost_expr(label, function, span, loop_depth, sites);
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
+    }
+}
+
+fn collect_cost_fn_value(
+    kind: &TFnValueKind,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match kind {
+        TFnValueKind::NamedFn { lambda, .. } => {
+            if let Some(lambda) = lambda {
+                collect_cost_lambda(lambda, function, span, loop_depth, sites);
+            }
+        }
+        TFnValueKind::Policy {
+            callee,
+            policy_args,
+            ..
+        } => {
+            collect_cost_expr(callee, function, span, loop_depth, sites);
+            collect_cost_call_args(policy_args, function, span, loop_depth, sites);
+        }
+        TFnValueKind::Call { callee, args } => {
+            collect_cost_expr(callee, function, span, loop_depth, sites);
+            collect_cost_call_args(args, function, span, loop_depth, sites);
+        }
+        TFnValueKind::Interrupt { value } => {
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+    }
+}
+
+fn collect_cost_host_arg(
+    arg: &THostArg,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match arg {
+        THostArg::Expr(value) | THostArg::Borrow(value) => {
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        THostArg::Lambda(lambda) => {
+            collect_cost_lambda(lambda, function, span, loop_depth, sites);
+        }
+    }
+}
+
+fn collect_cost_call_args(
+    args: &[TCallArg],
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    for arg in args {
+        collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+    }
+}
+
+fn collect_cost_expr(
+    expr: &TExpr,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    collect_cost_expr_with_state(expr, function, span, loop_depth, sites, None);
+}
+
+fn collect_cost_expr_with_state(
+    expr: &TExpr,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+    state_override: Option<TCostState>,
+) {
+    let expr_span = match &expr.kind {
+        TExprKind::CoreCall { source_span, .. } => *source_span,
+        _ => span,
+    };
+    if let Some(fact) = expr.fact_channel().cost {
+        sites.push(TCostSite {
+            function: function.to_string(),
+            span: expr_span,
+            kind: fact.kind,
+            state: state_override.unwrap_or(fact.state),
+            loop_depth,
+        });
+    }
+
+    match &expr.kind {
+        TExprKind::InlineBlock(body) => {
+            collect_cost_stmts(body, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::StrLit(parts) => {
+            for part in parts {
+                if let TStrPart::Interp(value, _) = part {
+                    collect_cost_expr(value, function, expr_span, loop_depth, sites);
+                }
+            }
+        }
+        TExprKind::HostCall(host) => match host.as_ref() {
+            THostCall::Helper { args, .. } => {
+                for arg in args {
+                    collect_cost_host_arg(arg, function, expr_span, loop_depth, sites);
+                }
+            }
+            THostCall::Method { recv, args, .. } => {
+                collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+                for arg in args {
+                    collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+                }
+            }
+            THostCall::CarrierFact { recv, .. }
+            | THostCall::CellGuardProject { recv, .. }
+            | THostCall::OptionProbe { inner: recv, .. }
+            | THostCall::TupleIndex { base: recv, .. } => {
+                collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+            }
+            THostCall::FixedListIndex { base, index, .. } => {
+                collect_cost_expr(base, function, expr_span, loop_depth, sites);
+                collect_cost_expr(index, function, expr_span, loop_depth, sites);
+            }
+            THostCall::TypedText { arg, .. } | THostCall::YieldSend { value: arg } => {
+                collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+            }
+            THostCall::GcEdit {
+                edit, index_temp, ..
+            } => {
+                collect_cost_expr(edit, function, expr_span, loop_depth, sites);
+                if let Some((_, index)) = index_temp {
+                    collect_cost_expr(index, function, expr_span, loop_depth, sites);
+                }
+            }
+            THostCall::StrMatchScan { subject, .. } => {
+                collect_cost_expr(subject, function, expr_span, loop_depth, sites);
+            }
+            THostCall::BinMatchScan { subject, .. } => {
+                collect_cost_expr(subject, function, expr_span, loop_depth, sites);
+            }
+            THostCall::TypedTextInterp { holes, .. } => {
+                for hole in holes {
+                    collect_cost_expr(hole, function, expr_span, loop_depth, sites);
+                }
+            }
+            THostCall::ExpectSnapshot { value, .. } => {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+            THostCall::EnvSet { name, value, .. } => {
+                collect_cost_expr(name, function, expr_span, loop_depth, sites);
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+            THostCall::ExpiringSecretNew {
+                value,
+                duration,
+                clock,
+                ..
+            }
+            | THostCall::ExpiringValueNew {
+                value,
+                duration,
+                clock,
+            } => {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+                collect_cost_expr(duration, function, expr_span, loop_depth, sites);
+                collect_cost_expr(clock, function, expr_span, loop_depth, sites);
+            }
+            THostCall::CCallback { lambda, .. } => {
+                collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
+            }
+            THostCall::FnName(_)
+            | THostCall::GcRead { .. }
+            | THostCall::SwitchSubjectField { .. }
+            | THostCall::SwitchSubjectValue
+            | THostCall::NumericBounds { .. } => {}
+        },
+        TExprKind::Call { args, .. }
+        | TExprKind::StaticCall { args, .. }
+        | TExprKind::ModuleCall { args, .. } => {
+            collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::DistinctCtor { arg, .. }
+        | TExprKind::RangeCheckedCtor { arg, .. }
+        | TExprKind::DistinctConvert { arg, .. }
+        | TExprKind::Print(arg)
+        | TExprKind::Drop(arg)
+        | TExprKind::Close(arg)
+        | TExprKind::ResourceNew(arg)
+        | TExprKind::DistinctRaw(arg)
+        | TExprKind::Present(arg)
+        | TExprKind::Ok(arg)
+        | TExprKind::Err(arg)
+        | TExprKind::Deref(arg)
+        | TExprKind::RawOf(arg)
+        | TExprKind::Clone(arg)
+        | TExprKind::ExplicitCopy(arg)
+        | TExprKind::MaterializeView(arg) => {
+            collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::UnitConvert { arg, rounding, .. } => {
+            collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+            if let Some((_, rounding)) = rounding {
+                collect_cost_expr(rounding, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::MathBuiltin { args, .. } | TExprKind::PreciseBuiltin { args, .. } => {
+            for arg in args {
+                collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::RequireStop { kind, .. } => {
+            collect_cost_require(kind, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::AmbientInput { prompt } => {
+            if let Some(prompt) = prompt {
+                collect_cost_expr(prompt, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::Binary { lhs, rhs, .. }
+        | TExprKind::LayoutCompare { lhs, rhs, .. }
+        | TExprKind::NumericBinaryMethod {
+            recv: lhs,
+            arg: rhs,
+            ..
+        }
+        | TExprKind::OverflowOpt { lhs, rhs, .. } => {
+            collect_cost_expr(lhs, function, expr_span, loop_depth, sites);
+            collect_cost_expr(rhs, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::CompareChain { operands, .. } => {
+            for operand in operands {
+                collect_cost_expr(operand, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::LayoutLit { inner }
+        | TExprKind::Unary { operand: inner, .. }
+        | TExprKind::Borrow { place: inner, .. } => {
+            collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::IncDec { place, .. } => {
+            collect_cost_place(place, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::StructLit { fields, .. } => {
+            for (_, value, _) in fields {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::Field { recv, .. }
+        | TExprKind::SharedGuardValue { guard: recv, .. }
+        | TExprKind::SharedGuardMap { guard: recv, .. }
+        | TExprKind::SharedGuardSplit { guard: recv, .. }
+        | TExprKind::PtrFromAddr { addr: recv, .. }
+        | TExprKind::MathSwizzleRead { recv, .. }
+        | TExprKind::PatternMatches { subj: recv, .. }
+        | TExprKind::TaskGroupAll { tasks: recv }
+        | TExprKind::TaskGroupRace { tasks: recv }
+        | TExprKind::TaskGroupAny { tasks: recv } => {
+            collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::SharedGuardWait {
+            guard,
+            condition,
+            predicate,
+        } => {
+            collect_cost_expr(guard, function, expr_span, loop_depth, sites);
+            collect_cost_expr(condition, function, expr_span, loop_depth, sites);
+            collect_cost_lambda(predicate, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::ConditionNotify { condition, .. } => {
+            collect_cost_expr(condition, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::EnumLit { payload, .. } => {
+            collect_cost_enum_payload(payload, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => {
+            if let Some(arg) = arg {
+                collect_cost_expr(&arg.0, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::ListLit(values) | TExprKind::ColumnarListLit { elems: values, .. } => {
+            for value in values {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::ListSpread { parts } => {
+            for part in parts {
+                match part {
+                    ListSpreadPart::Elem(value) | ListSpreadPart::Spread(value) => {
+                        collect_cost_expr(value, function, expr_span, loop_depth, sites);
+                    }
+                }
+            }
+        }
+        TExprKind::ColumnarGather { base, index, .. }
+        | TExprKind::ColumnarColumnRead { base, index, .. }
+        | TExprKind::Index { base, index, .. }
+        | TExprKind::IndexHook { base, index, .. }
+        | TExprKind::MathLaneIndex { base, index, .. } => {
+            collect_cost_expr(base, function, expr_span, loop_depth, sites);
+            collect_cost_expr(index, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::PoolSlot { pool, id, .. } => {
+            collect_cost_expr(pool, function, expr_span, loop_depth, sites);
+            collect_cost_expr(id, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            collect_cost_expr(base, function, expr_span, loop_depth, sites);
+            collect_cost_expr(start, function, expr_span, loop_depth, sites);
+            collect_cost_expr(end, function, expr_span, loop_depth, sites);
+            if let Some(range) = range {
+                collect_cost_expr(range, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::MethodCall { recv, args, .. } | TExprKind::FnFieldCall { recv, args, .. } => {
+            collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+            collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::DecodeUnder { segment, inner } => {
+            collect_cost_expr(segment, function, expr_span, loop_depth, sites);
+            collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::BuiltinMethod { recv, args, .. }
+        | TExprKind::ClosureMethod { recv, args, .. }
+        | TExprKind::HandleMethod { recv, args, .. } => {
+            collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+            for arg in args {
+                collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::CoreCall { args, .. } => {
+            for arg in args {
+                collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            collect_cost_cond(cond, function, expr_span, loop_depth, sites);
+            collect_cost_stmts(then_body, function, expr_span, loop_depth, sites);
+            collect_cost_expr(then_value, function, expr_span, loop_depth, sites);
+            collect_cost_stmts(else_body, function, expr_span, loop_depth, sites);
+            collect_cost_expr(else_value, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::Try { inner, note, .. } => {
+            collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+            if let Some(note) = note {
+                collect_cost_expr(note, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::OrFallback { value, fallback } => {
+            collect_cost_expr_with_state(
+                value,
+                function,
+                expr_span,
+                loop_depth,
+                sites,
+                outcome_cost_state(value),
+            );
+            match fallback {
+                TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
+                    collect_cost_expr(value, function, expr_span, loop_depth, sites);
+                }
+                TOrFallback::Panic { msg, .. } => {
+                    collect_cost_expr(msg, function, expr_span, loop_depth, sites);
+                }
+                TOrFallback::Return(None)
+                | TOrFallback::Break
+                | TOrFallback::Continue
+                | TOrFallback::BreakLabel(_)
+                | TOrFallback::ContinueLabel(_) => {}
+            }
+        }
+        TExprKind::OptField { base, .. } => {
+            collect_cost_expr(base, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::OptionLift2 { f, a, b } => {
+            collect_cost_expr(f, function, expr_span, loop_depth, sites);
+            collect_cost_expr(a, function, expr_span, loop_depth, sites);
+            collect_cost_expr(b, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::HostBorrowCallback { callable, .. } => {
+            collect_cost_expr(callable, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::Lambda(lambda) => {
+            collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::NumericMethod { recv, .. } => {
+            collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::SelectRecv { builder, channel } => {
+            collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+            collect_cost_expr(channel, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::SelectAfter {
+            builder,
+            duration,
+            value,
+        } => {
+            collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+            collect_cost_expr(duration, function, expr_span, loop_depth, sites);
+            if let Some(value) = value {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::SelectWait { builder, .. } => {
+            collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::CoreClosureCall { kind } => {
+            collect_cost_core_closure(kind, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::FnValue { kind } => {
+            collect_cost_fn_value(kind, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::ExternCall { args, .. } => {
+            for arg in args {
+                collect_cost_expr(&arg.value, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::TupleLit { fields, .. } => {
+            for (_, value) in fields {
+                collect_cost_expr(value, function, expr_span, loop_depth, sites);
+            }
+        }
+        TExprKind::MapLit(fields) => {
+            for (left, right) in fields {
+                collect_cost_expr(left, function, expr_span, loop_depth, sites);
+                collect_cost_expr(right, function, expr_span, loop_depth, sites);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_cost_cond(
+    cond: &TIfCond,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match cond {
+        TIfCond::Plain(expr)
+        | TIfCond::IfLet { subj: expr, .. }
+        | TIfCond::IsNone { subj: expr }
+        | TIfCond::Matches { subj: expr, .. } => {
+            collect_cost_expr(expr, function, span, loop_depth, sites);
+        }
+        TIfCond::And { left, right } => {
+            collect_cost_cond(left, function, span, loop_depth, sites);
+            collect_cost_cond(right, function, span, loop_depth, sites);
+        }
+        TIfCond::WithPrelude { prelude, cond } => {
+            collect_cost_stmts(prelude, function, span, loop_depth, sites);
+            collect_cost_cond(cond, function, span, loop_depth, sites);
+        }
+    }
+}
+
+fn collect_cost_stmts(
+    stmts: &[TStmt],
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    let mut current_span = span;
+    for stmt in stmts {
+        if let TStmt::SourceSpan(source_span) = stmt {
+            current_span = *source_span;
+            continue;
+        }
+        collect_cost_stmt(stmt, function, current_span, loop_depth, sites);
+    }
+}
+
+fn collect_cost_stmt(
+    stmt: &TStmt,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    match stmt {
+        TStmt::Contract { contract } => {
+            collect_cost_expr(&contract.condition, function, span, loop_depth, sites);
+            collect_cost_expr(&contract.message, function, span, loop_depth, sites);
+        }
+        TStmt::ContractScope {
+            pre, body, post, ..
+        } => {
+            for contract in pre.iter().chain(post) {
+                collect_cost_expr(&contract.condition, function, span, loop_depth, sites);
+                collect_cost_expr(&contract.message, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::Let { init, .. }
+        | TStmt::TupleDestructure { init, .. }
+        | TStmt::StructDestructure { init, .. }
+        | TStmt::ListDestructure { init, .. } => {
+            collect_cost_expr(init, function, span, loop_depth, sites);
+        }
+        TStmt::RefutableBind { init, fallback, .. } => {
+            collect_cost_expr(init, function, span, loop_depth, sites);
+            collect_cost_stmts(fallback, function, span, loop_depth, sites);
+        }
+        TStmt::GcEdit {
+            index_temp, stmt, ..
+        } => {
+            if let Some((_, index)) = index_temp {
+                collect_cost_expr(index, function, span, loop_depth, sites);
+            }
+            collect_cost_stmt(stmt, function, span, loop_depth, sites);
+        }
+        TStmt::SplitViews { owner, .. } => {
+            if let Some(owner) = owner {
+                collect_cost_expr(owner, function, span, loop_depth, sites);
+            }
+        }
+        TStmt::Assign { place, value, .. } => {
+            collect_cost_place(place, function, span, loop_depth, sites);
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        TStmt::Return(value) => {
+            if let Some(value) = value {
+                collect_cost_expr(value, function, span, loop_depth, sites);
+            }
+        }
+        TStmt::ExprStmt(expr) => collect_cost_expr(expr, function, span, loop_depth, sites),
+        TStmt::TaskGroup { limit, body, .. } => {
+            if let Some(limit) = limit {
+                collect_cost_expr(limit, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::DeferClose { close, .. } => {
+            collect_cost_expr(close, function, span, loop_depth, sites);
+        }
+        TStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_cost_cond(cond, function, span, loop_depth, sites);
+            collect_cost_stmts(then_body, function, span, loop_depth, sites);
+            if let Some(else_body) = else_body {
+                collect_cost_stmts(else_body, function, span, loop_depth, sites);
+            }
+        }
+        TStmt::Loop { body, .. } => {
+            collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+        }
+        TStmt::While { cond, body, .. } => {
+            collect_cost_expr(cond, function, span, loop_depth + 1, sites);
+            collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+        }
+        TStmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            collect_cost_stmt(init, function, span, loop_depth, sites);
+            collect_cost_expr(cond, function, span, loop_depth + 1, sites);
+            if let Some(step) = step {
+                collect_cost_stmt(step, function, span, loop_depth + 1, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+        }
+        TStmt::Range {
+            source,
+            start,
+            end,
+            step,
+            body,
+            ..
+        } => {
+            if let Some(source) = source {
+                collect_cost_expr(source, function, span, loop_depth, sites);
+            }
+            collect_cost_expr(start, function, span, loop_depth, sites);
+            collect_cost_expr(end, function, span, loop_depth, sites);
+            if let Some(step) = step {
+                collect_cost_expr(step, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+        }
+        TStmt::BreakValue { value, .. } => {
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        TStmt::EnumMatch {
+            scrutinee,
+            arms,
+            else_body,
+            ..
+        } => {
+            collect_cost_expr(scrutinee, function, span, loop_depth, sites);
+            for arm in arms {
+                collect_cost_stmts(&arm.body, function, span, loop_depth, sites);
+            }
+            if let Some(else_body) = else_body {
+                collect_cost_stmts(else_body, function, span, loop_depth, sites);
+            }
+        }
+        TStmt::RangeSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            collect_cost_expr(subject, function, span, loop_depth, sites);
+            for (_, _, body) in arms {
+                collect_cost_stmts(body, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(else_body, function, span, loop_depth, sites);
+        }
+        TStmt::IndexAssign {
+            base,
+            index,
+            value,
+            is_map,
+            ..
+        } => {
+            if *is_map {
+                sites.push(TCostSite {
+                    function: function.to_string(),
+                    span,
+                    kind: TCostKind::CollectionCopyOnWrite,
+                    state: TCostState::SemanticRemainder,
+                    loop_depth,
+                });
+            }
+            collect_cost_expr(base, function, span, loop_depth, sites);
+            collect_cost_expr(index, function, span, loop_depth, sites);
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        TStmt::IndexFieldAssign(assign) => {
+            if assign.is_map {
+                sites.push(TCostSite {
+                    function: function.to_string(),
+                    span,
+                    kind: TCostKind::CollectionCopyOnWrite,
+                    state: TCostState::SemanticRemainder,
+                    loop_depth,
+                });
+            }
+            collect_cost_expr(&assign.base, function, span, loop_depth, sites);
+            collect_cost_expr(&assign.index, function, span, loop_depth, sites);
+            collect_cost_expr(&assign.value, function, span, loop_depth, sites);
+        }
+        TStmt::IndexHookAssign {
+            base, index, value, ..
+        } => {
+            collect_cost_expr(base, function, span, loop_depth, sites);
+            collect_cost_expr(index, function, span, loop_depth, sites);
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        TStmt::MathSwizzleAssign { base, value, .. } => {
+            collect_cost_expr(base, function, span, loop_depth, sites);
+            collect_cost_expr(value, function, span, loop_depth, sites);
+        }
+        TStmt::ForIn {
+            source,
+            collection,
+            step,
+            body,
+            ..
+        } => {
+            collect_cost_expr(source, function, span, loop_depth, sites);
+            collect_cost_expr(collection, function, span, loop_depth, sites);
+            if let Some(step) = step {
+                collect_cost_expr(step, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+        }
+        TStmt::Inline(body)
+        | TStmt::DebugOnly(body)
+        | TStmt::Unsafe { body, .. }
+        | TStmt::SentryPolicy { body, .. }
+        | TStmt::Impure(body)
+        | TStmt::Region(body)
+        | TStmt::Live { body }
+        | TStmt::Shield { body } => {
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::Reactive { executable, .. } => {
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
+        TStmt::ScopeMember { kind, body } => {
+            if let ScopeMemberKind::Timeout(timeout) = kind {
+                collect_cost_expr(timeout, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::MixedSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            collect_cost_expr(subject, function, span, loop_depth, sites);
+            for (condition, body) in arms {
+                collect_cost_expr(condition, function, span, loop_depth, sites);
+                collect_cost_stmts(body, function, span, loop_depth, sites);
+            }
+            if let Some(else_body) = else_body {
+                collect_cost_stmts(else_body, function, span, loop_depth, sites);
+            }
+        }
+        TStmt::Layout { body, .. } => {
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::ContextBlock { guards, body } => {
+            for (_, guard) in guards {
+                collect_cost_expr(guard, function, span, loop_depth, sites);
+            }
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::Transact { body, .. } => {
+            collect_cost_stmts(body, function, span, loop_depth, sites);
+        }
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) | TStmt::Break(_) | TStmt::Continue(_) => {}
+    }
+}
+
+struct TCostCallable {
+    module: usize,
+    declaration_span: crate::Diagnostics::Span,
+    source_span: Option<crate::Diagnostics::Span>,
+    body_span: Option<crate::Diagnostics::Span>,
+    source_name: Option<String>,
+    declaration_name: String,
+    method: bool,
+    declaration_path: String,
+    label: String,
+    foreign: bool,
+    type_parameterized: bool,
+    root: bool,
+}
+
+fn find_cost_method(
+    methods: &[crate::AST::Func],
+    span: crate::Diagnostics::Span,
+) -> Option<&crate::AST::Func> {
+    methods.iter().find(|method| method.name_span == span)
+}
+
+fn find_cost_function(
+    items: &[Item],
+    span: crate::Diagnostics::Span,
+) -> Option<(&crate::AST::Func, bool)> {
+    for item in items {
+        match item {
+            Item::Func(function) if function.name_span == span => return Some((function, false)),
+            Item::Struct(definition) => {
+                if let Some(function) = find_cost_method(&definition.methods, span) {
+                    return Some((function, !definition.type_params.is_empty()));
+                }
+                for implementation in &definition.trait_impls {
+                    if let Some(function) = find_cost_method(&implementation.methods, span) {
+                        return Some((function, !definition.type_params.is_empty()));
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                if let Some(function) = find_cost_method(&definition.methods, span) {
+                    return Some((function, !definition.type_params.is_empty()));
+                }
+                for implementation in &definition.trait_impls {
+                    if let Some(function) = find_cost_method(&implementation.methods, span) {
+                        return Some((function, !definition.type_params.is_empty()));
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                let owner_is_generic = items.iter().any(|candidate| match candidate {
+                    Item::Struct(definition) => {
+                        definition.name == implementation.type_name
+                            && !definition.type_params.is_empty()
+                    }
+                    Item::Enum(definition) => {
+                        definition.name == implementation.type_name
+                            && !definition.type_params.is_empty()
+                    }
+                    _ => false,
+                });
+                if let Some(function) = find_cost_method(&implementation.methods, span) {
+                    return Some((function, owner_is_generic));
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(function) = find_cost_function(body, span) {
+                        return Some(function);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn selected_cost_output(
+    items: &[Item],
+    target_module: usize,
+    target_span: crate::Diagnostics::Span,
+) -> bool {
+    items.iter().any(|item| match item {
+        Item::Const(value) => value.resolved_output.as_ref().is_some_and(|output| {
+            output.selected && output.module == target_module && output.definition == target_span
+        }),
+        Item::CodeModule(module) => module
+            .body
+            .as_deref()
+            .is_some_and(|body| selected_cost_output(body, target_module, target_span)),
+        _ => false,
+    })
+}
+
+fn cost_callable_is_root(
+    bundle: &ProgramBundle,
+    declaration: &jet_foundation::Names::NameDeclaration,
+    function: Option<&crate::AST::Func>,
+    app_graph: Option<&jet_foundation::App::AppGraph>,
+) -> bool {
+    let Some(function) = function else {
+        return false;
+    };
+    if function.is_job
+        || matches!(
+            function.web_marker,
+            Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
+        )
+        || (declaration.module == bundle.entry && function.name == "run")
+        || bundle
+            .modules
+            .iter()
+            .any(|module| selected_cost_output(&module.items, declaration.module, declaration.span))
+    {
+        return true;
+    }
+    if declaration.module != bundle.entry {
+        return false;
+    }
+    let Some(graph) = app_graph else { return false };
+    graph
+        .routes
+        .iter()
+        .any(|route| route.handler == function.name)
+        || graph
+            .actions
+            .iter()
+            .any(|action| action.handler == function.name)
+        || graph
+            .mounts
+            .iter()
+            .any(|mount| mount.handler == function.name)
+}
+
+fn cost_callables(
+    bundle: &ProgramBundle,
+    app_graph: Option<&jet_foundation::App::AppGraph>,
+) -> Vec<TCostCallable> {
+    let mut callables = Vec::new();
+    for declaration in bundle.name_ledger.declarations() {
+        if !matches!(declaration.kind.as_str(), "function" | "method" | "extern") {
+            continue;
+        }
+        let function = if declaration.kind == "extern" {
+            None
+        } else {
+            bundle
+                .modules
+                .get(declaration.module)
+                .and_then(|module| find_cost_function(&module.items, declaration.span))
+        };
+        if declaration.kind != "extern" && function.is_none() {
+            continue;
+        }
+        let (source_span, body_span, source_name, inline_foreign) = function.as_ref().map_or(
+            (None, None, None, false),
+            |(function, _owner_is_generic)| {
+                let inline_foreign = function.inline_foreign.is_some();
+                (
+                    Some(function.span),
+                    (!inline_foreign).then_some(function.span),
+                    Some(function.name.clone()),
+                    inline_foreign,
+                )
+            },
+        );
+        let type_parameterized = function
+            .as_ref()
+            .is_some_and(|(function, owner_is_generic)| {
+                *owner_is_generic || !function.type_params.is_empty()
+            });
+        let root = cost_callable_is_root(
+            bundle,
+            declaration,
+            function.map(|(function, _)| function),
+            app_graph,
+        );
+        let module_label = bundle
+            .modules
+            .get(declaration.module)
+            .map(|module| module.display.as_str())
+            .unwrap_or("<unknown module>");
+        callables.push(TCostCallable {
+            module: declaration.module,
+            declaration_span: declaration.span,
+            source_span,
+            body_span,
+            source_name,
+            declaration_name: declaration.name.clone(),
+            method: declaration.kind == "method",
+            declaration_path: declaration.path.clone(),
+            label: format!("{module_label}:{}", declaration.path),
+            foreign: declaration.kind == "extern" || inline_foreign,
+            type_parameterized,
+            root,
+        });
+    }
+    callables
+}
+
+fn cost_module_path_matches(bundle: &ProgramBundle, module: usize, path: &str) -> bool {
+    bundle
+        .name_ledger
+        .module_path(module)
+        .is_some_and(|candidate| candidate == path)
+        || bundle
+            .modules
+            .get(module)
+            .is_some_and(|candidate| candidate.display.as_str() == path)
+}
+
+fn reachable_cost_callables(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Vec<bool> {
+    let mut reachable = callables
+        .iter()
+        .map(|callable| callable.root)
+        .collect::<Vec<_>>();
+    loop {
+        let mut changed = false;
+        for ((source, start, end), reference) in bundle.name_ledger.references() {
+            if reference.kind != "function" {
+                continue;
+            }
+            let caller = callables
+                .iter()
+                .enumerate()
+                .filter(|(_, callable)| {
+                    cost_module_path_matches(bundle, callable.module, source)
+                        && callable
+                            .body_span
+                            .is_some_and(|span| *start >= span.start && *end <= span.end)
+                })
+                .min_by_key(|(_, callable)| {
+                    callable
+                        .body_span
+                        .map_or(usize::MAX, |span| span.end.saturating_sub(span.start))
+                })
+                .map(|(index, _)| index);
+            let Some(caller) = caller else { continue };
+            if !reachable[caller] {
+                continue;
+            }
+            let target = callables
+                .iter()
+                .enumerate()
+                .find(|(_, callable)| {
+                    callable.declaration_span == reference.def_span
+                        && cost_module_path_matches(bundle, callable.module, &reference.module_path)
+                })
+                .map(|(index, _)| index);
+            if let Some(target) = target {
+                if !reachable[target] {
+                    reachable[target] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return reachable;
+        }
+    }
+}
+
+fn lowered_cost_method_matches(lowered: &str, expected: &str) -> bool {
+    if lowered == expected || lowered.starts_with(&format!("{expected}__generic__")) {
+        return true;
+    }
+    let Some((owner, method)) = expected.rsplit_once("::") else {
+        return false;
+    };
+    lowered.starts_with(&format!("{owner}<")) && lowered.ends_with(&format!("::{method}"))
+}
+
+fn lowered_cost_function_matches(lowered: &str, expected: &str) -> bool {
+    lowered == expected || lowered.starts_with(&format!("{expected}__va"))
+}
+
+fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
+    if callable.module == bundle.entry {
+        return Some(if callable.method {
+            callable.declaration_name.replace('.', "::")
+        } else {
+            callable.declaration_name.clone()
+        });
+    }
+    if callable.method {
+        let owner = bundle.name_ledger.module_identity(callable.module)?;
+        return Some(format!(
+            "{owner}::{}",
+            callable.declaration_name.replace('.', "::")
+        ));
+    }
+    let module = bundle.modules.get(callable.module)?;
+    let module_alias = bundle.name_ledger.module_alias(callable.module)?;
+    let relative_path = callable
+        .declaration_path
+        .strip_prefix(&format!("{module_alias}."))
+        .unwrap_or(callable.declaration_path.as_str());
+    let namespace = relative_path
+        .rsplit_once('.')
+        .map(|(parent, _)| parent.rsplit('.').next().unwrap_or(parent))
+        .map_or_else(|| mangle(module.alias.as_str()), mangle);
+    let source_name = callable.source_name.as_deref()?;
+    Some(format!("{namespace}::{}", mangle(source_name)))
+}
+
+fn cost_callable_is_covered(
+    bundle: &ProgramBundle,
+    callable: &TCostCallable,
+    program: &JitProgram,
+) -> bool {
+    let Some(source_span) = callable.source_span else {
+        return false;
+    };
+    let Some(expected) = cost_callable_lowered_name(bundle, callable) else {
+        return false;
+    };
+    program.funcs.iter().any(|function| {
+        if function.source_span != source_span {
+            return false;
+        }
+        if callable.method {
+            lowered_cost_method_matches(&function.name, &expected)
+        } else {
+            lowered_cost_function_matches(&function.name, &expected)
+        }
+    })
+}
+
+fn collect_cost_typed_conversions(
+    body: &[crate::AST::Stmt],
+    names: &mut std::collections::BTreeSet<String>,
+) {
+    for statement in body {
+        statement.for_each_expr(|expression| {
+            if let Expr::Try(
+                _,
+                _,
+                crate::AST::TryConvert::Typed { fn_name, .. },
+                _,
+            ) = expression
+            {
+                names.insert(fn_name.clone());
+            }
+        });
+    }
+}
+
+fn find_cost_error_conversion<'a>(
+    items: &'a [Item],
+    name: &str,
+) -> Option<&'a crate::AST::ErrorConvDef> {
+    for item in items {
+        match item {
+            Item::ErrorConv(conversion)
+                if crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty)
+                    == name =>
+            {
+                return Some(conversion);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(conversion) = find_cost_error_conversion(body, name) {
+                        return Some(conversion);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn cost_error_conversion_gaps(
+    bundle: &ProgramBundle,
+    program: &JitProgram,
+    callables: &[TCostCallable],
+    reachable: &[bool],
+) -> Vec<String> {
+    let mut required = std::collections::BTreeSet::new();
+    for (callable, is_reachable) in callables.iter().zip(reachable.iter().copied()) {
+        if !is_reachable || callable.foreign {
+            continue;
+        }
+        let Some(module) = bundle.modules.get(callable.module) else {
+            continue;
+        };
+        let Some((function, _)) = find_cost_function(&module.items, callable.declaration_span)
+        else {
+            continue;
+        };
+        collect_cost_typed_conversions(&function.body, &mut required);
+    }
+
+    // A conversion body is itself checked code. Keep following its typed
+    // conversions so a filtered conversion cannot hide a second omitted body.
+    loop {
+        let mut changed = false;
+        for name in required.iter().cloned().collect::<Vec<_>>() {
+            let Some(conversion) = bundle
+                .modules
+                .iter()
+                .find_map(|module| find_cost_error_conversion(&module.items, &name))
+            else {
+                continue;
+            };
+            let before = required.len();
+            collect_cost_typed_conversions(&conversion.body, &mut required);
+            changed |= required.len() != before;
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    required
+        .into_iter()
+        .filter_map(|name| {
+            let conversion = bundle
+                .modules
+                .iter()
+                .enumerate()
+                .find_map(|(module, data)| {
+                    find_cost_error_conversion(&data.items, &name)
+                        .map(|conversion| (module, conversion))
+                });
+            let Some((module, conversion)) = conversion else {
+                return Some(format!(
+                    "typed error conversion `{name}` has no checked declaration"
+                ));
+            };
+            let covered = program.funcs.iter().any(|function| {
+                function.name == name && function.source_span == conversion.from_span
+            });
+            if covered {
+                return None;
+            }
+            let module_label = bundle
+                .modules
+                .get(module)
+                .map(|module| module.display.as_str())
+                .unwrap_or("<unknown module>");
+            Some(format!(
+                "{module_label}:{name} (reachable typed error conversion has no complete TIR body)"
+            ))
+        })
+        .collect()
+}
+
+fn cost_coverage_gaps(bundle: &ProgramBundle, program: &JitProgram) -> Vec<String> {
+    let app_graph = crate::Sema::extract_app_graph(bundle).0;
+    let callables = cost_callables(bundle, app_graph.as_ref());
+    let reachable = reachable_cost_callables(bundle, &callables);
+    let mut gaps = callables
+        .iter()
+        .zip(reachable.iter().copied())
+        .filter_map(|(callable, reachable)| {
+            (reachable && !cost_callable_is_covered(bundle, callable, program)).then(|| {
+                let reason = if callable.foreign {
+                    "foreign callable has no typed TIR body"
+                } else if callable.type_parameterized {
+                    "type-parameterized callable has no complete TIR specialization"
+                } else {
+                    "sema-checked callable is outside typed TIR coverage"
+                };
+                format!("{} ({reason})", callable.label)
+            })
+        })
+        .collect::<Vec<_>>();
+    gaps.extend(cost_error_conversion_gaps(
+        bundle, program, &callables, &reachable,
+    ));
+    gaps.sort();
+    gaps.dedup();
+    gaps
+}
+
+/// Project typed cost facts from the frozen TIR.  Lowering remains the sole
+/// producer of the fact channel; CLI tooling and linting consume this one
+/// report instead of reconstructing cost from emitted Rust.
+pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportError> {
+    let Some(program) = lower_jit_program(bundle) else {
+        let reason = lower_jit_program_fail_reason(bundle);
+        if matches!(reason.as_str(), NO_RUNNABLE_ENTRY | CLI_ENTRY_MISSING_RUN) {
+            return Ok(TCostReport::default());
+        }
+        return Err(TCostReportError::Lowering { reason });
+    };
+    let gaps = cost_coverage_gaps(bundle, &program);
+    if !gaps.is_empty() {
+        return Err(TCostReportError::Incomplete { surfaces: gaps });
+    }
+    let mut report = TCostReport::default();
+    for function in &program.funcs {
+        collect_cost_stmts(
+            &function.body,
+            &function.name,
+            function.source_span,
+            0,
+            &mut report.sites,
+        );
+    }
+    Ok(report)
+}
+
+/// The result of the read-only lowering coverage pass used by project checks.
+///
+/// This is deliberately separate from [`cost_report`].  The cost projection
+/// consumes a completed JIT program; a check must not use that lowerer's
+/// omission behavior as a coverage oracle.  This pass walks the sema-owned
+/// callable denominator and asks the same TIR coverage predicates that the
+/// emitters use, without emitting Rust, invoking rustc, or starting a runtime.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TirCoverageIssue {
+    /// Adapter whose checked route could not cover the callable.
+    pub tier: &'static str,
+    /// Stable sema declaration label, including its module path.
+    pub callable: String,
+    /// The structural refusal or missing route that needs attention.
+    pub reason: String,
+    /// Source declaration span for the diagnostic row.
+    pub span: crate::Diagnostics::Span,
+}
+
+/// Validate the native AOT and default JIT TIR routes without probing either
+/// emitter.  `AOT` validates every callable the native item emitter would
+/// visit; `JIT` validates only sema-reachable callables, matching the existing
+/// call-graph denominator used by cost coverage.
+pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
+    let app_graph = crate::Sema::extract_app_graph(bundle).0;
+    let callables = cost_callables(bundle, app_graph.as_ref());
+    let reachable = reachable_cost_callables(bundle, &callables);
+    let mut contexts = std::collections::HashMap::new();
+    let mut issues = Vec::new();
+
+    for (index, callable) in callables.iter().enumerate() {
+        if callable.foreign {
+            // Foreign and inline-foreign bodies are checked by their bridge,
+            // not by Jet TIR. They remain in the denominator for graph
+            // reachability but are not a TIR coverage miss.
+            continue;
+        }
+        let Some(module) = bundle.modules.get(callable.module) else {
+            issues.push(TirCoverageIssue {
+                tier: "AOT",
+                callable: callable.label.clone(),
+                reason: "callable points at a missing module".to_string(),
+                span: callable.declaration_span,
+            });
+            if reachable[index] {
+                issues.push(TirCoverageIssue {
+                    tier: "JIT",
+                    callable: callable.label.clone(),
+                    reason: "callable points at a missing module".to_string(),
+                    span: callable.declaration_span,
+                });
+            }
+            continue;
+        };
+        let cx = contexts.entry(callable.module).or_insert_with(|| {
+            let extern_funcs = bundle_extern_funcs(bundle);
+            let mut cx = build_cx_items(
+                &module.items,
+                &module.source,
+                &module.display,
+                None,
+                &extern_funcs,
+            );
+            populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            register_foreign_enum_variants(&mut cx, bundle, callable.module);
+            update_cloneability_with_foreign_types(&mut cx, &module.items);
+            cx
+        });
+        let outcome = validate_tir_callable(&module.items, callable.declaration_span, cx);
+        match outcome {
+            Some(Ok(())) => {}
+            Some(Err(reason)) => {
+                issues.push(TirCoverageIssue {
+                    tier: "AOT",
+                    callable: callable.label.clone(),
+                    reason: reason.clone(),
+                    span: callable.declaration_span,
+                });
+                if reachable[index] {
+                    issues.push(TirCoverageIssue {
+                        tier: "JIT",
+                        callable: callable.label.clone(),
+                        reason,
+                        span: callable.declaration_span,
+                    });
+                }
+            }
+            None => {
+                let reason = "checked callable has no TIR validation route".to_string();
+                issues.push(TirCoverageIssue {
+                    tier: "AOT",
+                    callable: callable.label.clone(),
+                    reason: reason.clone(),
+                    span: callable.declaration_span,
+                });
+                if reachable[index] {
+                    issues.push(TirCoverageIssue {
+                        tier: "JIT",
+                        callable: callable.label.clone(),
+                        reason,
+                        span: callable.declaration_span,
+                    });
+                }
+            }
+        }
+    }
+
+    issues.sort_by(|left, right| {
+        left.tier
+            .cmp(right.tier)
+            .then(left.callable.cmp(&right.callable))
+            .then(left.span.start.cmp(&right.span.start))
+    });
+    issues.dedup();
+    issues
+}
+
+/// Return `Some(Ok)` when the declaration is on the checked TIR route,
+/// `Some(Err)` when the route is known but unsupported, and `None` when the
+/// sema declaration cannot be matched to an AST item.
+fn validate_tir_callable(
+    items: &[Item],
+    declaration_span: crate::Diagnostics::Span,
+    cx: &mut Cx,
+) -> Option<Result<(), String>> {
+    for item in items {
+        match item {
+            Item::Func(function) if function.name_span == declaration_span => {
+                if function.inline_foreign.is_some() {
+                    return Some(Ok(()));
+                }
+                if tir_covers(function, cx) {
+                    return Some(Ok(()));
+                }
+                return Some(Err(format!(
+                    "function is outside tir_covers ({})",
+                    refusal::describe(cx)
+                )));
+            }
+            Item::Struct(definition) => {
+                if let Some(method) = definition
+                    .methods
+                    .iter()
+                    .find(|method| method.name_span == declaration_span)
+                {
+                    return Some(validate_tir_method(
+                        method,
+                        &definition.name,
+                        None,
+                        false,
+                        cx,
+                    ));
+                }
+                for implementation in &definition.trait_impls {
+                    if let Some(method) = implementation
+                        .methods
+                        .iter()
+                        .find(|method| method.name_span == declaration_span)
+                    {
+                        return Some(validate_tir_method(
+                            method,
+                            &definition.name,
+                            Some(implementation.trait_name.as_str()),
+                            implementation.compiler_generated,
+                            cx,
+                        ));
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                if let Some(method) = definition
+                    .methods
+                    .iter()
+                    .find(|method| method.name_span == declaration_span)
+                {
+                    return Some(validate_tir_method(
+                        method,
+                        &definition.name,
+                        None,
+                        false,
+                        cx,
+                    ));
+                }
+                for implementation in &definition.trait_impls {
+                    if let Some(method) = implementation
+                        .methods
+                        .iter()
+                        .find(|method| method.name_span == declaration_span)
+                    {
+                        return Some(validate_tir_method(
+                            method,
+                            &definition.name,
+                            Some(implementation.trait_name.as_str()),
+                            implementation.compiler_generated,
+                            cx,
+                        ));
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                if implementation
+                    .os_target
+                    .is_some_and(|target| target != cx.active_os)
+                {
+                    if implementation
+                        .methods
+                        .iter()
+                        .any(|method| method.name_span == declaration_span)
+                    {
+                        return Some(Ok(()));
+                    }
+                    continue;
+                }
+                if let Some(method) = implementation
+                    .methods
+                    .iter()
+                    .find(|method| method.name_span == declaration_span)
+                {
+                    return Some(validate_tir_method(
+                        method,
+                        &implementation.type_name,
+                        implementation.trait_name.as_deref(),
+                        implementation.is_generated_serde,
+                        cx,
+                    ));
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(result) = validate_tir_callable(body, declaration_span, cx) {
+                        return Some(result);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn validate_tir_method(
+    method: &crate::AST::Func,
+    owner: &str,
+    trait_name: Option<&str>,
+    compiler_generated: bool,
+    cx: &mut Cx,
+) -> Result<(), String> {
+    let covered = match trait_name {
+        Some(trait_name) => {
+            tir_covers_trait_method(method, owner, cx, trait_name)
+                || (compiler_generated && tir_covers_compiler_derive_method(method, cx))
+        }
+        None => tir_covers_method(method, owner, cx),
+    };
+    if covered {
+        Ok(())
+    } else {
+        Err(format!(
+            "method is outside tir_covers ({})",
+            refusal::describe(cx)
+        ))
+    }
 }
 
 /// D-MEM-COPYSEM1=A: the ONE mapping from a `MaterializeView` source type to
@@ -4321,8 +6748,8 @@ pub enum TExprKind {
     Err(Box<TExpr>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
-    /// bare propagate or a declared `Typed(fn)` conversion calls the
-    /// declared conversion. The frame-trace location (`file`, `line`, `fn_name`) is
+    /// bare propagate or a declared typed conversion calls the declared
+    /// conversion. The frame-trace location (`file`, `line`, `fn_name`) is
     /// resolved at lowering so the emitted `jet_trace_err(…)?` matches the AST path
     /// byte-for-byte (the emitter never reads `cx.current_fn`/`cx.src`).
     Try {
@@ -4576,6 +7003,9 @@ pub enum TCoreClosureKind {
     Spawn {
         group: Option<Box<TExpr>>,
         site: usize,
+        /// Optional direct named-call/function-reference identity. `None` keeps
+        /// the runtime's bounded `task@<site>` fallback for arbitrary bodies.
+        label: Option<String>,
         spawn_closure: String,
         executable: Box<TLambda>,
     },
@@ -4686,9 +7116,14 @@ pub enum TNumericOp {
     /// `(({recv}).{method}() as i64)` (Rust returns u32 → widen to Int).
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
-    BitCount { method: String, width: u32 },
+    BitCount {
+        method: String,
+        width: u32,
+    },
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
-    CastAs { dst_rust: String },
+    CastAs {
+        dst_rust: String,
+    },
     /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source
     /// type is not wholly exact. Every engine calls Prelude/NumericWiden.rs.
     CheckedIntToFloat {
@@ -4724,18 +7159,28 @@ pub enum TNumericOp {
     },
     /// Checked f64/Float to f32/F32 narrowing. Values outside F32's finite
     /// range fail instead of becoming infinity.
-    FloatNarrow { dst_spelling: String },
+    FloatNarrow {
+        dst_spelling: String,
+    },
     /// D-TYPE2-SPELL1: check an `Int` against an inline structural range. The
     /// range is carried by the resolved op; TIR and every engine erase the
     /// destination to the ordinary `Int` carrier.
-    InlineRange { lo: i64, hi: i64, fallible: bool },
+    InlineRange {
+        lo: i64,
+        hi: i64,
+        fallible: bool,
+    },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
     ToShow,
     /// D-GO127-STDLIB1=A: exact-Int Euclidean quotient/remainder. The source
     /// line is carried so divide-by-zero uses the normal arithmetic boundary.
-    EuclideanDiv { line: u32 },
-    EuclideanRem { line: u32 },
+    EuclideanDiv {
+        line: u32,
+    },
+    EuclideanRem {
+        line: u32,
+    },
 }
 
 /// c109 Phase 11: a resolved closure-taking collection-method op, one per
@@ -4791,6 +7236,10 @@ pub enum TClosureOp {
     SortBy,
     /// `sort_by_desc` — `{ jet_list_sort_by_desc(&mut recv, f); }`.
     SortByDesc,
+    /// Fallible `sort_by` — the callback keys are collected before the list moves.
+    TrySortBy,
+    /// Fallible `sort_by_desc` — the callback keys are collected before the list moves.
+    TrySortByDesc,
     /// `sort_by` with a binary `T -> T -> Ordering` comparator.
     SortByCompare,
     /// `reduce` — `jet_list_reduce((recv).clone(), seed, f)`.
@@ -4883,6 +7332,9 @@ pub struct TLambda {
     /// D-CONC-FREEZE1=A: frozen source names carried from sema's one flow-fact
     /// proof. This is metadata only; the capture slot is already owned.
     pub frozen_captures: Vec<String>,
+    /// D-HARDENED1 / D-MEM-SENTRY1: the closure body mints an address from its
+    /// current frame storage and needs a token around each invocation.
+    pub uses_stack_sentry: bool,
 }
 
 pub enum TLambdaBody {
@@ -4904,8 +7356,12 @@ pub enum TTryConvert {
     /// D-FAIL-ERROR1=A: construct the default `Err` value from a message.
     DefaultErr,
     /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
-    /// holds the mangled Rust conversion-function name.
-    Typed(String),
+    /// holds the mangled Rust conversion-function name and resolved error types.
+    Typed {
+        fn_name: String,
+        source: Type,
+        target: Type,
+    },
     /// D-UNIONTYPE1=A: wrap the error into a compiler-generated union enum.
     WidenUnion { enum_name: String, tag: String },
 }
@@ -4919,10 +7375,10 @@ pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool
             inner.ty.unwrap_result().map(|(_, error)| error),
             Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
         ),
-        TTryConvert::Typed(name) => name
-            .strip_prefix(&mangle_generated("errconv_"))
-            .and_then(|stem| stem.rsplit_once("_to_"))
-            .is_some_and(|(_, target)| target == crate::Syntax::TYPE_ERR),
+        TTryConvert::Typed { target, .. } => matches!(
+            target,
+            Type::Named(name) if name == crate::Syntax::TYPE_ERR
+        ),
         TTryConvert::Never | TTryConvert::WidenUnion { .. } => false,
     }
 }
@@ -5030,6 +7486,98 @@ pub(crate) enum TOutcomeFastPath {
 pub(crate) enum TOutcomeFastBuffer {
     Reader,
     Bytes,
+}
+
+/// The fixed-width Reader facts consumed by both immediate-outcome lowering
+/// and the AOT region rewrite. Keeping the payload type and byte order here
+/// prevents an emitter from recognizing a helper name and guessing how to
+/// decode its bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TReaderFixedWidth {
+    U8,
+    I8,
+    U16Le,
+    U16Be,
+    I16Le,
+    I16Be,
+    U32Le,
+    U32Be,
+    I32Le,
+    I32Be,
+    U64Le,
+    U64Be,
+    I64Le,
+    I64Be,
+    F32Le,
+    F32Be,
+    F64Le,
+    F64Be,
+}
+
+impl TReaderFixedWidth {
+    fn fast_path_facts(self) -> (&'static str, &'static str, usize) {
+        match self {
+            Self::U8 => ("jet_reader_read_u8_fast", "read_u8", 1),
+            Self::I8 => ("jet_reader_read_i8_fast", "read_i8", 1),
+            Self::U16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
+            Self::U16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
+            Self::I16Le => ("jet_reader_read_i16_le_fast", "read_i16_le", 2),
+            Self::I16Be => ("jet_reader_read_i16_be_fast", "read_i16_be", 2),
+            Self::U32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
+            Self::U32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
+            Self::I32Le => ("jet_reader_read_i32_le_fast", "read_i32_le", 4),
+            Self::I32Be => ("jet_reader_read_i32_be_fast", "read_i32_be", 4),
+            Self::U64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
+            Self::U64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
+            Self::I64Le => ("jet_reader_read_i64_le_fast", "read_i64_le", 8),
+            Self::I64Be => ("jet_reader_read_i64_be_fast", "read_i64_be", 8),
+            Self::F32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
+            Self::F32Be => ("jet_reader_read_f32_be_fast", "read_f32_be", 4),
+            Self::F64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
+            Self::F64Be => ("jet_reader_read_f64_be_fast", "read_f64_be", 8),
+        }
+    }
+
+    pub(crate) const fn width(self) -> usize {
+        match self {
+            Self::U8 | Self::I8 => 1,
+            Self::U16Le | Self::U16Be | Self::I16Le | Self::I16Be => 2,
+            Self::U32Le | Self::U32Be | Self::I32Le | Self::I32Be => 4,
+            Self::U64Le | Self::U64Be | Self::I64Le | Self::I64Be => 8,
+            Self::F32Le | Self::F32Be => 4,
+            Self::F64Le | Self::F64Be => 8,
+        }
+    }
+
+    /// Render one fixed-width payload load from already-proven byte access.
+    /// Both immediate `??` lowering and the bounded Reader region use this
+    /// operation table fact; neither emitter guesses byte order from a helper
+    /// name or duplicates the typed decode table.
+    pub(crate) fn emit_load(self, byte_at: impl Fn(usize) -> String) -> String {
+        let byte = |offset| byte_at(offset);
+        let (ty, endian) = match self {
+            Self::U8 => return byte(0),
+            Self::I8 => return format!("{} as i8", byte(0)),
+            Self::U16Le => ("u16", "from_le_bytes"),
+            Self::U16Be => ("u16", "from_be_bytes"),
+            Self::I16Le => ("i16", "from_le_bytes"),
+            Self::I16Be => ("i16", "from_be_bytes"),
+            Self::U32Le => ("u32", "from_le_bytes"),
+            Self::U32Be => ("u32", "from_be_bytes"),
+            Self::I32Le => ("i32", "from_le_bytes"),
+            Self::I32Be => ("i32", "from_be_bytes"),
+            Self::U64Le => ("u64", "from_le_bytes"),
+            Self::U64Be => ("u64", "from_be_bytes"),
+            Self::I64Le => ("i64", "from_le_bytes"),
+            Self::I64Be => ("i64", "from_be_bytes"),
+            Self::F32Le => ("f32", "from_le_bytes"),
+            Self::F32Be => ("f32", "from_be_bytes"),
+            Self::F64Le => ("f64", "from_le_bytes"),
+            Self::F64Be => ("f64", "from_be_bytes"),
+        };
+        let bytes = (0..self.width()).map(byte).collect::<Vec<_>>().join(", ");
+        format!("{ty}::{endian}([{bytes}])")
+    }
 }
 
 // Debug names the variant in engine rejection text: a JIT refusal is a silent
@@ -5163,6 +7711,14 @@ pub enum TBuiltinOp {
     ParseInt,
     /// c97/D-STRPARSE1: `Float.parse(text)` → checked floating-point parse.
     ParseFloat,
+    /// `Int.to_radix(base)` → exact lowercase text through the shared Int kernel.
+    IntToRadix {
+        line: u32,
+    },
+    /// `Int.from_radix(text, base)` → exact Int through the shared Int kernel.
+    IntFromRadix {
+        line: u32,
+    },
     /// `starts_with(s)` → `(recv).starts_with(&a0)`.
     StartsWith,
     /// `ends_with(s)` → `(recv).ends_with(&a0)`.
@@ -5173,6 +7729,10 @@ pub enum TBuiltinOp {
     ToUpper,
     /// `to_lower()` → pinned `jet_unicode_lower(&(recv))`.
     ToLower,
+    /// ASCII-only lowercasing; all non-ASCII code points remain unchanged.
+    ToAsciiLower,
+    /// ASCII-only uppercasing; all non-ASCII code points remain unchanged.
+    ToAsciiUpper,
     /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
     Repeat,
     /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
@@ -5672,6 +8232,12 @@ pub enum THandleOp {
     DurationIsZero,
     DurationTotalSeconds,
     DurationDifference,
+    /// D-TIMEDEPTH1=A: Temporal duration projections and exact rounding.
+    DurationAbs,
+    DurationNegated,
+    DurationSign,
+    DurationTotalIn,
+    DurationRound,
     /// D-TYPE2-TIME1=A: dimensional algebra reads canonical Time in seconds;
     /// the stored carrier remains i64 nanoseconds.
     DurationSecondsValue,
@@ -5934,6 +8500,11 @@ pub enum THandleOp {
     DataTreeBool,
     /// D-SERDE-ACCESS=B: `DataTree.float()` → `(recv).float()`.
     DataTreeFloat,
+    /// D-DATATREE-ERGO1=A: `DataTree.to_text()` → `(recv).to_text()`.
+    DataTreeToText,
+    /// D-DATATREE-ERGO1=A: `DataTree.equal_unordered(other)` →
+    /// `(recv).equal_unordered(&a0)`.
+    DataTreeEqualUnordered,
     /// D-SERDE16=A: `tree.decode<T>()` dispatches the public `T.Decode` protocol.
     DataTreeDecode(Type),
     /// D-SERDE2=A: `value.encode()` dispatches the public Encode protocol.
@@ -5945,6 +8516,8 @@ pub enum THandleOp {
     JSONText,
     JSONBool,
     JSONFloat,
+    JSONToText,
+    JSONEqualUnordered,
     /// D-PATHFS1: `Path.from(str)` constructor → `{root}jet_path_from(&(recv))`.
     PathFrom,
     /// D-CORE-PATH1: `Path.home()` reads the host home path through the shared
@@ -5960,6 +8533,8 @@ pub enum THandleOp {
     PathStem,
     /// D-PATHFS1: `path.normalize()` → `{root}jet_path_normalize(&(recv))` → `Path`.
     PathNormalize,
+    /// D-STDLIB-SMALL1: lexical candidate-within-base comparison.
+    PathIsWithin,
     /// D-PATHFS1: `path.to_string()` → `(recv).jet_show()` → `String`.
     PathToString,
     /// D-PATHFS1: `path.write_atomic(bytes)` → `{root}jet_path_write_atomic(&(recv), &(a0))` → `Result<(), IOError>`.
@@ -6093,30 +8668,39 @@ pub enum THandleOp {
 }
 
 impl THandleOp {
+    /// Publish the fixed-width Reader payload fact once for every consumer.
+    /// The AOT region path uses the typed variant; the ordinary immediate
+    /// outcome path below derives its helper and error facts from the same
+    /// table.
+    pub(crate) fn reader_fixed_width(&self) -> Option<TReaderFixedWidth> {
+        Some(match self {
+            Self::ReaderReadU8 => TReaderFixedWidth::U8,
+            Self::ReaderReadI8 => TReaderFixedWidth::I8,
+            Self::ReaderReadU16Le => TReaderFixedWidth::U16Le,
+            Self::ReaderReadU16Be => TReaderFixedWidth::U16Be,
+            Self::ReaderReadI16Le => TReaderFixedWidth::I16Le,
+            Self::ReaderReadI16Be => TReaderFixedWidth::I16Be,
+            Self::ReaderReadU32Le => TReaderFixedWidth::U32Le,
+            Self::ReaderReadU32Be => TReaderFixedWidth::U32Be,
+            Self::ReaderReadI32Le => TReaderFixedWidth::I32Le,
+            Self::ReaderReadI32Be => TReaderFixedWidth::I32Be,
+            Self::ReaderReadU64Le => TReaderFixedWidth::U64Le,
+            Self::ReaderReadU64Be => TReaderFixedWidth::U64Be,
+            Self::ReaderReadI64Le => TReaderFixedWidth::I64Le,
+            Self::ReaderReadI64Be => TReaderFixedWidth::I64Be,
+            Self::ReaderReadF32Le => TReaderFixedWidth::F32Le,
+            Self::ReaderReadF32Be => TReaderFixedWidth::F32Be,
+            Self::ReaderReadF64Le => TReaderFixedWidth::F64Le,
+            Self::ReaderReadF64Be => TReaderFixedWidth::F64Be,
+            _ => return None,
+        })
+    }
+
     /// Publish fixed-width Reader payload access for the same generic
     /// immediate-outcome optimization used by byte buffers.
     pub(crate) fn outcome_fast_path(&self) -> Option<TOutcomeFastPath> {
-        let (helper, method, width) = match self {
-            Self::ReaderReadU8 => ("jet_reader_read_u8_fast", "read_u8", 1),
-            Self::ReaderReadI8 => ("jet_reader_read_i8_fast", "read_i8", 1),
-            Self::ReaderReadU16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
-            Self::ReaderReadU16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
-            Self::ReaderReadI16Le => ("jet_reader_read_i16_le_fast", "read_i16_le", 2),
-            Self::ReaderReadI16Be => ("jet_reader_read_i16_be_fast", "read_i16_be", 2),
-            Self::ReaderReadU32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
-            Self::ReaderReadU32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
-            Self::ReaderReadI32Le => ("jet_reader_read_i32_le_fast", "read_i32_le", 4),
-            Self::ReaderReadI32Be => ("jet_reader_read_i32_be_fast", "read_i32_be", 4),
-            Self::ReaderReadU64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
-            Self::ReaderReadU64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
-            Self::ReaderReadI64Le => ("jet_reader_read_i64_le_fast", "read_i64_le", 8),
-            Self::ReaderReadI64Be => ("jet_reader_read_i64_be_fast", "read_i64_be", 8),
-            Self::ReaderReadF32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
-            Self::ReaderReadF32Be => ("jet_reader_read_f32_be_fast", "read_f32_be", 4),
-            Self::ReaderReadF64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
-            Self::ReaderReadF64Be => ("jet_reader_read_f64_be_fast", "read_f64_be", 8),
-            _ => return None,
-        };
+        let reader = self.reader_fixed_width()?;
+        let (helper, method, width) = reader.fast_path_facts();
         Some(TOutcomeFastPath::FixedRead {
             buffer: TOutcomeFastBuffer::Reader,
             helper,
@@ -6165,6 +8749,25 @@ pub struct TCallArg {
     /// the same slot-driven boxing a `[Shape]` list element already gets in
     /// `emit_tir_expr`'s `ListLit` arm, decided here so emit stays dumb.
     pub box_as_trait: Option<String>,
+}
+
+impl TCallArg {
+    /// Return the call-site access and value facts selected during lowering.
+    /// Ordinary by-value arguments stay unknown because a missing convention
+    /// is not proof of a move or an exclusive access.
+    pub fn fact_channel(&self) -> TFactChannel<'_> {
+        let mut facts = self.value.fact_channel();
+        facts.exclusivity = if self.mut_borrow {
+            TExclusivity::Exclusive
+        } else if self.borrow {
+            TExclusivity::Shared
+        } else if matches!(&self.value.kind, TExprKind::ResourceTake(_)) {
+            TExclusivity::Move
+        } else {
+            TExclusivity::Unknown
+        };
+        facts
+    }
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).

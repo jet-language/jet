@@ -15,6 +15,33 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[test]
+fn notebook_token_generation_has_no_zero_entropy_fallback() {
+    let source = include_str!("../Source/CmdNotebook.rs");
+    let mint_token = source
+        .split_once("fn mint_token()")
+        .and_then(|(_, rest)| rest.split_once("fn is_loopback"))
+        .map(|(body, _)| body)
+        .expect("notebook token minting must remain a distinct function");
+    assert!(mint_token.contains("read_exact(&mut bytes)"));
+    assert!(mint_token.contains("map_err(|error| error.to_string())"));
+    assert!(
+        !mint_token.contains("unwrap_or"),
+        "entropy read errors must not become a deterministic token"
+    );
+
+    let startup = source
+        .split_once("let token = match explicit_token")
+        .and_then(|(_, rest)| rest.split_once("let auto_open"))
+        .map(|(body, _)| body)
+        .expect("notebook startup must handle token creation explicitly");
+    assert!(startup.contains("exit(ExitCodes::ICE)"));
+    assert!(
+        !startup.contains("unwrap_or_default"),
+        "token creation failure must stop startup"
+    );
+}
+
+#[test]
 fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
     let mut kernel =
         Kernel::open(None, "entry-order-test").expect("open entry-order notebook kernel");

@@ -3,6 +3,15 @@ Error [E1004]: `SigningKey.generate` was retired
     |
   5 |     key :: crypto.SigningKey.generate()
     |                              ^^^^^^^^
- Why: constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)
- Fix: use `SigningKey.new_random()`
+ Why: Constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)
+ Fix: Use `SigningKey.new_random()`
 More: jet-lang.dev/e/E1004
+
+Error [E2402]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/retired_signing_key_generate.jet:5:30
+    |
+  5 |     key :: crypto.SigningKey.generate()
+    |                              ^^^^^^^^
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402

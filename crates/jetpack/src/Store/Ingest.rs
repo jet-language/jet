@@ -506,9 +506,8 @@ pub(crate) fn verified_output_hash_with_options(
     #[cfg(test)]
     note_verified_digest_miss(path);
     let digest = hash_output_content(path, hangar_root, allow_semantic_xattrs)?;
-    let canonical_digest = hangar_root.and_then(|hangar_root| {
-        super::object_digest_for_path(path, hangar_root)
-    });
+    let canonical_digest =
+        hangar_root.and_then(|hangar_root| super::object_digest_for_path(path, hangar_root));
     let reseal_needed = canonical_digest.as_deref() == Some(digest.as_str());
     let resealed = if write_seal && reseal_needed {
         let hangar_root = hangar_root.expect("canonical digest requires a Hangar root");

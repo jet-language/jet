@@ -102,6 +102,22 @@ pub(super) fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(),
             return Err(BuildError::EmptyIdentityField(name.to_string()));
         }
     }
+    for mount in &spec.mounts {
+        let destination = Path::new(&mount.destination);
+        if mount.source.trim().is_empty()
+            || mount.source.contains('\0')
+            || mount.destination.trim().is_empty()
+            || mount.destination.contains('\0')
+            || !destination.is_absolute()
+            || destination
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(BuildError::InvalidPath(format!(
+                "toolchain `{name}` has an invalid read-only mount"
+            )));
+        }
+    }
     validate_provenance(name, &spec.provenance)
 }
 

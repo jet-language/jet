@@ -192,7 +192,7 @@ pub(super) fn resolve_inline_module_imports(
                             if !st.funcs.contains_key(&mangled) {
                                 diags.push(Diagnostic::error(
                                     "E0611",
-                                    format!("{orig} is not defined in module {module_alias}"),
+                                    format!("`{orig}` is not defined in module `{module_alias}`"),
                                     "check the module body for the item you are importing"
                                         .to_string(),
                                     "make sure the name is spelled correctly".to_string(),
@@ -203,7 +203,7 @@ pub(super) fn resolve_inline_module_imports(
                                 if !name_ledger.exported(idx, &mangled) {
                                     diags.push(Diagnostic::error(
                                         "E0609",
-                                        format!("{orig} is private in module {module_alias}"),
+                                        format!("`{orig}` is private in module `{module_alias}`"),
                                         "only public items can be brought into scope with use"
                                             .to_string(),
                                         format!(
@@ -262,7 +262,7 @@ pub(super) fn resolve_inline_module_imports(
                             if !target.funcs.contains_key(orig) {
                                 diags.push(Diagnostic::error(
                                     "E0611",
-                                    format!("{orig} is not defined in module {module_alias}"),
+                                    format!("`{orig}` is not defined in module `{module_alias}`"),
                                     "check the module for the item you are importing".to_string(),
                                     "make sure the name is spelled correctly".to_string(),
                                     Some(module_alias_span),
@@ -271,7 +271,7 @@ pub(super) fn resolve_inline_module_imports(
                             } else if !visible {
                                 diags.push(Diagnostic::error(
                                     "E0609",
-                                    format!("{orig} is private in module {module_alias}"),
+                                    format!("`{orig}` is private in module `{module_alias}`"),
                                     "only public items can be brought into scope with use"
                                         .to_string(),
                                     format!("add pub before fn {orig} in the imported file"),

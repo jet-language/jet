@@ -1,0 +1,25 @@
+use core.files as fs
+
+fn run() {
+    base :: Path.from("/srv/root").normalize().to_string()
+    candidate :: Path.from("/srv/root/file").normalize().to_string()
+    #allow(path_containment_string_prefix) if candidate != base && !candidate.starts_with("{base}/") {
+        print("inside")
+    }
+
+    plain_base :: "/srv/root"
+    plain_candidate :: "/srv/root/file"
+    if plain_candidate != plain_base && !plain_candidate.starts_with("{plain_base}/") {
+        print("plain")
+    }
+
+    physical_base :: fs.canonicalize(Path.from("/srv/root")) ?? ""
+    physical_candidate :: fs.canonicalize(Path.from("/srv/root/file")) ?? ""
+    if physical_candidate != physical_base && !physical_candidate.starts_with("{physical_base}/") {
+        print("physical")
+    }
+
+    if candidate != base && !candidate.starts_with("{base}/") {
+        print("allowed")
+    }
+}

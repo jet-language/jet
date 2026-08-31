@@ -1,17 +1,17 @@
-Error [E2807]: route `/` is registered both by `builder` and `routes_collision/index.jet`
-  --> tests/ui/web_app_route_collision.jet:5:47
+Error [E2807]: Route `/` is registered both by `builder` and `routes_collision/index.jet`
+  --> tests/ui/web_app_route_collision.jet:6:44
     |
-  5 | fn run() => App :: web.app().route("/", home).routes(from: "routes_collision").csr()
-    |                                               ^^^^^^
- Why: explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)
- Fix: remove one registration, or rename the convention file
+  6 | fn run() App -> web.app().route("/", home).routes(from: "routes_collision").csr()
+    |                                            ^^^^^^
+ Why: Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)
+ Fix: Remove one registration, or rename the convention file
 More: jet-lang.dev/e/E2807
 
-Error [E2807]: earlier registration of route `/`
-  --> tests/ui/web_app_route_collision.jet:5:30
+Error [E2807]: Earlier registration of route `/`
+  --> tests/ui/web_app_route_collision.jet:6:27
     |
-  5 | fn run() => App :: web.app().route("/", home).routes(from: "routes_collision").csr()
-    |                              ^^^^^
- Why: both spans are kept so provenance stays audible
- Fix: delete or rename this registration
+  6 | fn run() App -> web.app().route("/", home).routes(from: "routes_collision").csr()
+    |                           ^^^^^
+ Why: Both spans are kept so provenance stays audible
+ Fix: Delete or rename this registration
 More: jet-lang.dev/e/E2807

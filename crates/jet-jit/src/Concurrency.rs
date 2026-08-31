@@ -27,6 +27,10 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
 /// Published for HTTP `std::thread` workers that are not jet-scheduler tasks.
 static HTTP_SHARED_RUNTIME: AtomicUsize = AtomicUsize::new(0);
+/// Changes whenever the published HTTP runtime is cleared or replaced. HTTP
+/// callbacks retain raw JIT code pointers, so a live replacement is not enough
+/// to make a callback from the previous resident image safe to invoke.
+static HTTP_RUNTIME_EPOCH: AtomicUsize = AtomicUsize::new(1);
 /// Task cancellation must stay live while a deopt host owns `RUNTIME_ACCESS`
 /// across an interpreter wait. The registry carries only weak control handles;
 /// heap and task-table ownership remain in `JitRuntime`.
@@ -342,12 +346,52 @@ pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
     // Publish on install only. Clearing TLS (spawn worker epilogue / post-drain)
     // must not drop the shared pointer while HTTP OS threads still serve.
     if let Some(p) = ptr {
-        HTTP_SHARED_RUNTIME.store(p as usize, Ordering::Release);
+        let _guard = RuntimeAccessGuard::enter();
+        let previous = HTTP_SHARED_RUNTIME.swap(p as usize, Ordering::AcqRel);
+        if previous != p as usize {
+            HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel);
+        }
     }
 }
 
+fn set_active_runtime_local(ptr: Option<*mut super::JitRuntime>) {
+    ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
+}
+
 pub(crate) fn clear_http_shared_runtime() {
+    let _guard = RuntimeAccessGuard::enter();
     HTTP_SHARED_RUNTIME.store(0, Ordering::Release);
+    HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Read a retained HTTP callable and the epoch that protects it as one
+/// snapshot. The runtime guard must cover both operations: otherwise a hot
+/// swap can replace the published runtime between the callable lookup and
+/// the epoch read, making an old code pointer appear current.
+pub(crate) fn http_callable_snapshot(
+    handle: i64,
+) -> Option<(usize, super::runtime_host::JitCallableSlot)> {
+    let _guard = RuntimeAccessGuard::enter();
+    let had = active_runtime_ptr().is_some();
+    if !had {
+        let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+        if addr != 0 {
+            ACTIVE_RUNTIME.with(|slot| {
+                *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+            });
+        }
+    }
+    let _restore = HttpRuntimeTlsRestore { clear: !had };
+    let current = active_runtime_ptr().map(|ptr| ptr as usize);
+    let published = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+    if published == 0 || current != Some(published) {
+        return None;
+    }
+    let epoch = HTTP_RUNTIME_EPOCH.load(Ordering::Acquire);
+    let ptr = active_runtime_ptr()?;
+    let callable = unsafe { ptr.as_ref() }
+        .and_then(|rt| super::runtime_host::jit_callable_parts(rt, handle))?;
+    Some((epoch, callable))
 }
 
 /// Run the HTTP teardown boundary while no worker can still be inside a JIT
@@ -381,11 +425,47 @@ where
             });
         }
     }
-    let out = f();
-    if !had {
-        ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
+    let _restore = HttpRuntimeTlsRestore { clear: !had };
+    f()
+}
+
+struct HttpRuntimeTlsRestore {
+    clear: bool,
+}
+
+impl Drop for HttpRuntimeTlsRestore {
+    fn drop(&mut self) {
+        if self.clear {
+            ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
+        }
     }
-    out
+}
+
+/// Invoke a retained HTTP callback only while its resident image is still the
+/// published one. A queued HTTP/2 task can outlive server shutdown and reach
+/// this boundary after a hot swap, so checking only for any live runtime would
+/// still call the old raw JIT function pointer.
+pub(crate) fn try_with_http_jet_runtime_at<F, R>(epoch: usize, f: F) -> Option<R>
+where
+    F: FnOnce() -> R,
+{
+    let _guard = RuntimeAccessGuard::enter();
+    let had = active_runtime_ptr().is_some();
+    if !had {
+        let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+        if addr != 0 {
+            ACTIVE_RUNTIME.with(|slot| {
+                *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+            });
+        }
+    }
+    let _restore = HttpRuntimeTlsRestore { clear: !had };
+    let current = active_runtime_ptr().map(|ptr| ptr as usize);
+    let published = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+    let live = epoch == HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)
+        && published != 0
+        && current == Some(published);
+    live.then(f)
 }
 
 /// Record a panic trap. Returns normally (caller yields a dummy value); JIT
@@ -900,6 +980,13 @@ where
         return 0;
     };
     let rt_addr = rt_ptr as usize;
+    let label = with_runtime_mut(|rt| {
+        rt.task_labels
+            .get(spawn_site)
+            .and_then(Option::as_deref)
+            .unwrap_or("")
+            .to_string()
+    });
     let inherited_deadline = jet_ctx_deadline_ms();
     let deopt_state = super::deopt::capture_deopt_state();
     let runtime_argv = jet_codegen::Comptime::runtime_argv();
@@ -913,6 +1000,7 @@ where
     let permit = take_pending_task_group_permit();
     let join = jet_scheduler_spawn_blocking_with_control_at(
         spawn_site,
+        &label,
         move || {
             worker_start.park(None);
             let _task_scope = enter_jit_task();
@@ -921,11 +1009,15 @@ where
             // SAFETY: `rt_ptr` is the resident heap for this JIT invocation; workers
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
-            set_active_runtime(Some(rt_ptr));
-            // Keep the runtime wired through the shared Prelude completion drain.
-            // Group callbacks are registered after this one, so reverse draining
-            // closes groups before clearing the worker's runtime pointer.
-            jet_scheduler_task_completion_register(|| set_active_runtime(None));
+            set_active_runtime_local(Some(rt_ptr));
+            // Keep the runtime and native module table wired through the shared
+            // Prelude completion drain. Group callbacks are registered after
+            // this one, so reverse draining closes groups before dropping
+            // worker-owned modules and clearing the runtime pointer.
+            jet_scheduler_task_completion_register(|| {
+                crate::Mod::clear();
+                set_active_runtime(None);
+            });
             clear_task_trap();
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
@@ -1366,6 +1458,7 @@ fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     let control = JetTaskControl::new();
     let _join = jet_scheduler_spawn_blocking_with_control_at(
         0,
+        "",
         move || {
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = wait_status(|| {
@@ -1558,6 +1651,7 @@ mod tests {
         let control = JetTaskControl::new();
         let child = jet_scheduler_spawn_blocking_with_control_at(
             0,
+            "",
             move || {
                 let _outer_permit = outer_permit;
                 ACTIVE_RUNTIME.with(|slot| {
@@ -1580,6 +1674,7 @@ mod tests {
                     let nested_join =
                         jet_scheduler_spawn_blocking_with_control_at(
                             0,
+                            "",
                             || 0,
                             nested_control.clone(),
                         );

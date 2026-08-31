@@ -40,6 +40,13 @@ const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const DEFAULT_JET_ENV = join(ROOT, "scripts/agent/jet-env");
 const MANIFEST_SCHEMA = "jet.hardening.surface.v1";
 
+export const NON_CALLABLE_EXCLUSION_REASON_BY_KIND = Object.freeze({
+  receiver_method: "not-a-callable:receiver_method",
+  field: "not-a-callable:field",
+  nominal_type: "not-a-callable:nominal_type",
+});
+const NON_CALLABLE_EXCLUSION_REASONS = new Set(Object.values(NON_CALLABLE_EXCLUSION_REASON_BY_KIND));
+
 function canonicalValue(value) {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalValue);
@@ -373,6 +380,18 @@ function requireTierList(value, label) {
   return tiers;
 }
 
+function nonCallableExclusionReason(kind) {
+  if (kind === "module_call") return null;
+  if (!Object.hasOwn(NON_CALLABLE_EXCLUSION_REASON_BY_KIND, kind)) {
+    throw new Error(`closed non-callable exclusion vocabulary has no reason for ${kind}`);
+  }
+  const reason = NON_CALLABLE_EXCLUSION_REASON_BY_KIND[kind];
+  if (!NON_CALLABLE_EXCLUSION_REASONS.has(reason)) {
+    throw new Error(`closed non-callable exclusion vocabulary contains invalid reason: ${reason}`);
+  }
+  return reason;
+}
+
 function validateStableId(stableId, kind) {
   const prefixes = {
     module_call: "module:",
@@ -532,14 +551,16 @@ function selfDiffOracle(row) {
 }
 
 function catalogRow(row) {
-  const executable = row.status === "covered";
+  const automaticReason = nonCallableExclusionReason(row.kind);
+  const executable = automaticReason === null && row.status === "covered";
   const external = executable ? oracleForRow(row) : null;
   const oracle = executable ? external || selfDiffOracle(row) : null;
+  const status = automaticReason === null ? row.status : "excluded";
   const rejection = executable
     ? null
     : {
-        status: row.status,
-        reason: row.exclusion?.reason || row.errors?.join("; ") || `manifest row is ${row.status}`,
+        status,
+        reason: automaticReason || row.exclusion?.reason || row.errors?.join("; ") || `manifest row is ${row.status}`,
         owner_decision: row.exclusion?.decision || row.exclusion?.owner || null,
       };
   return {
@@ -554,9 +575,9 @@ function catalogRow(row) {
     projections: clone(row.projections || []),
     dispatcher_arms: [...(row.dispatcher_arms || [])],
     membership_sources: [...(row.membership_sources || [])].sort(),
-    value_consuming: row.value_consuming === true,
-    sink: row.sink ? clone(row.sink) : null,
-    status: row.status,
+    value_consuming: executable && row.value_consuming === true,
+    sink: executable && row.sink ? clone(row.sink) : null,
+    status,
     executable,
     valid: executable,
     rejection,
@@ -603,17 +624,26 @@ function legacyCatalog(surfaceRows, sourceSnapshotHash) {
   const normalized = surfaceRows
     .map((row) => normalizeSurfaceRow(row, seen))
     .sort((left, right) => left.stable_id.localeCompare(right.stable_id));
-  const rows = normalized.map((row) => ({
-    ...row,
-    stable_surface_id: row.stable_id,
-    status: row.exclusion ? "excluded" : "covered",
-    executable: !row.exclusion,
-    valid: !row.exclusion,
-    rejection: row.exclusion ? { status: "excluded", reason: row.exclusion.reason, owner_decision: row.exclusion.owner_decision } : null,
-    tier_self_diff: !row.exclusion,
-    external_oracle: !row.exclusion,
-    oracle: row.exclusion ? null : oracleForRow(row) || selfDiffOracle(row),
-  }));
+  const rows = normalized.map((row) => {
+    const automaticReason = nonCallableExclusionReason(row.kind);
+    const excluded = Boolean(row.exclusion) || automaticReason !== null;
+    return {
+      ...row,
+      stable_surface_id: row.stable_id,
+      status: excluded ? "excluded" : "covered",
+      value_consuming: !excluded && row.value_consuming === true,
+      executable: !excluded,
+      valid: !excluded,
+      rejection: excluded ? {
+        status: "excluded",
+        reason: automaticReason || row.exclusion.reason,
+        owner_decision: row.exclusion?.owner_decision || null,
+      } : null,
+      tier_self_diff: !excluded,
+      external_oracle: !excluded,
+      oracle: excluded ? null : oracleForRow(row) || selfDiffOracle(row),
+    };
+  });
   const source_ids = Object.fromEntries(["module_call", "receiver_method", "field", "nominal_type"].map((kind) => [
     kind,
     rows.filter((row) => row.kind === kind).map((row) => row.stable_id),
@@ -629,9 +659,9 @@ function legacyCatalog(surfaceRows, sourceSnapshotHash) {
       counts: Object.fromEntries(Object.entries(source_ids).map(([kind, ids]) => [kind, ids.length])),
       total: rows.length,
     },
-    counts: { covered: rows.filter((row) => row.executable).length, excluded: rows.filter((row) => row.exclusion).length, executable: rows.filter((row) => row.executable).length, valid: rows.filter((row) => row.executable).length, unclassified: 0 },
+    counts: { covered: rows.filter((row) => row.status === "covered").length, excluded: rows.filter((row) => row.status === "excluded").length, executable: rows.filter((row) => row.executable).length, valid: rows.filter((row) => row.valid).length, unclassified: 0 },
     rows,
-    exclusions: rows.filter((row) => row.exclusion).length,
+    exclusions: rows.filter((row) => row.status === "excluded").length,
     executable: rows.filter((row) => row.executable).length,
   };
 }
@@ -1301,11 +1331,11 @@ function appendCapture(current, chunk, limit) {
   };
 }
 
-function stopChild(child) {
+function stopChild(child, signal = "SIGTERM") {
   if (!child?.pid || child.pid <= 1 || child.pid === process.pid) return;
   try {
-    if (process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
-    else child.kill("SIGTERM");
+    if (process.platform !== "win32") process.kill(-child.pid, signal);
+    else child.kill(signal);
   } catch { /* process exited */ }
 }
 
@@ -1347,9 +1377,14 @@ export async function executeCommand({
   };
   child.stdout?.on("data", (chunk) => { record.stdout = appendCapture(record.stdout, chunk, limit); });
   child.stderr?.on("data", (chunk) => { record.stderr = appendCapture(record.stderr, chunk, limit); });
+  let forceTimer = null;
   const timer = setTimeout(() => {
     record.timeout = true;
     stopChild(child);
+    forceTimer = setTimeout(() => stopChild(child, "SIGKILL"), 250);
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
   }, timeout);
   const closed = await new Promise((resolvePromise) => {
     let settled = false;
@@ -1362,10 +1397,11 @@ export async function executeCommand({
     child.once("close", (exit, signal) => finish({ exit, signal }));
   });
   clearTimeout(timer);
+  if (forceTimer) clearTimeout(forceTimer);
   if (closed.error) record.error = closed.error.message;
   record.exit = closed.exit ?? null;
   record.signal = closed.signal ?? null;
-  if (record.timeout) stopChild(child);
+  if (record.timeout) stopChild(child, "SIGKILL");
   return {
     ...record,
     stdout: record.stdout.bytes,
@@ -1861,6 +1897,37 @@ export function makeResultBundle(input) {
       ? null
       : requireTierList(input.applicable_tiers, "result bundle applicable_tiers"),
   };
+  const optionalStrings = [
+    "layer", "law_id", "construct_id", "mutant_id", "seam", "expected_layer",
+    "precondition", "generated_partition", "shrink_rule", "relation",
+  ];
+  for (const key of optionalStrings) {
+    if (input[key] === undefined) continue;
+    requireString(input[key], `result bundle ${key}`);
+    bundle[key] = input[key];
+  }
+  for (const key of ["generated_partitions", "type_constraints"]) {
+    if (input[key] === undefined) continue;
+    if (!Array.isArray(input[key]) || input[key].some((item) => typeof item !== "string" || item.length === 0)) {
+      throw new Error(`result bundle ${key} must be a named list`);
+    }
+    bundle[key] = [...new Set(input[key])].sort();
+  }
+  for (const key of ["observable_sink", "ast_mutation", "proof"]) {
+    if (input[key] === undefined) continue;
+    if (!input[key] || typeof input[key] !== "object" || Array.isArray(input[key])) {
+      throw new Error(`result bundle ${key} must be an object`);
+    }
+    bundle[key] = clone(input[key]);
+  }
+  if (input.mutated_source !== undefined) {
+    requireString(input.mutated_source, "result bundle mutated_source");
+    if (Buffer.byteLength(input.mutated_source, "utf8") > MAX_SOURCE_BYTES) {
+      throw new Error(`result bundle mutated_source exceeds ${MAX_SOURCE_BYTES} bytes`);
+    }
+    bundle.mutated_source = input.mutated_source;
+    bundle.mutated_source_sha256 = sha256(input.mutated_source);
+  }
   if (!TIERS.includes(bundle.tier)) throw new Error(`result bundle has invalid tier: ${bundle.tier}`);
   if (bundle.exit !== null && !Number.isInteger(bundle.exit)) throw new Error("result bundle exit must be an integer or null");
   if (bundle.exit === null && !bundle.signal && !bundle.timeout) throw new Error("result bundle null exit needs signal or timeout");
@@ -1949,16 +2016,17 @@ export const REGRESSION_SEEDS = Object.freeze([
   },
   {
     stable_surface_id: "regression:indexed-place",
-    control: "bool-matching",
-    domain: "numeric",
+    control: "nested-indexed-mutation",
+    domain: "collections",
     seed: "regression-indexed-place-001",
     source: `fn run() {
-    flag :: true
-    print(flag)
+    outer := [[1, 2], [3]]
+    outer[0].push(9)
+    print(outer)
 }
 `,
-    expected_value: true,
-    wrong_value: false,
+    expected_value: [[1, 2, 9], [3]],
+    wrong_value: [[1, 2], [3]],
     wrong_tier: "jet_run",
   },
   {
@@ -2143,9 +2211,10 @@ function walkFiles(directory, suffix) {
   if (!existsSync(directory)) return [];
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walkFiles(path, suffix));
-    else if (entry.isFile() && path.endsWith(suffix)) files.push(path);
+    else if (entry.isFile() && entry.name !== "package.jet" && path.endsWith(suffix)) files.push(path);
   }
   return files.sort((left, right) => left.localeCompare(right));
 }
@@ -2294,7 +2363,7 @@ function main(argv) {
       return 2;
     }
     const input = readSurfaceManifest(resolve(path));
-    console.log(canonicalJson(buildOracleCatalog(input.rows, input.source_snapshot_hash)));
+    console.log(canonicalJson(buildOracleCatalog(input.manifest || input.rows, input.source_snapshot_hash)));
     return 0;
   }
   printUsage();
@@ -2304,3 +2373,72 @@ function main(argv) {
 const invokedPath = process.argv[1] && resolve(process.argv[1]);
 const modulePath = resolve(fileURLToPath(import.meta.url));
 if (invokedPath === modulePath) process.exitCode = main(process.argv.slice(2));
+// Layer libraries reuse this canonical bundle and tier contract.  Re-export
+// their public APIs so callers do not need a second registry or result format.
+export {
+  PROPERTY_SCHEMA,
+  PROPERTY_SCHEMA_VERSION,
+  PROPERTY_MUTATOR_VERSION,
+  PROPERTY_DEFAULT_SEED,
+  PROPERTY_DEFAULT_MAX_CASES,
+  PROPERTY_MAX_CASES,
+  PROPERTY_LAWS,
+  PROPERTY_PACKS,
+  propertyLawCatalog,
+  propertyPackCatalog,
+  propertyLaw,
+  validatePropertyLawCatalog,
+  mapPropertySurfaces,
+  propertySurfaceCoverage,
+  validatePropertyCoverage,
+  generatePropertyCases,
+  comparePropertyObservations,
+  runPropertyCases,
+  checkPropertyPacks,
+  minimizePropertyCase,
+  propertyLayerSummary,
+} from "./hardening-property-layer.mjs";
+
+export {
+  GRAMMAR_SCHEMA,
+  GRAMMAR_SCHEMA_VERSION,
+  GRAMMAR_MUTATOR_VERSION,
+  GRAMMAR_DEFAULT_SEED,
+  GRAMMAR_DEFAULT_MAX_CASES,
+  GRAMMAR_MAX_CASES,
+  CONSTRUCT_FAMILIES,
+  diagnosticRegistryHash,
+  deriveConstructManifest,
+  constructManifestHash,
+  constructManifest,
+  validateConstructManifest,
+  generateTypedPrograms,
+  generateGrammarPrograms,
+  validateGeneratedProgram,
+  classifyGrammarObservation,
+  checkGrammarAgreement,
+  minimizeGrammarProgram,
+  runGrammarPrograms,
+  checkGrammarNegativeControls,
+} from "./hardening-grammar-layer.mjs";
+
+export {
+  MUTATION_SCHEMA,
+  MUTATION_SCHEMA_VERSION,
+  MUTATION_MAX_CASES,
+  MUTATION_DEFAULT_SEED,
+  EXPECTED_KILLER_LAYERS,
+  CRITICAL_SILENT_DATA_SEAMS,
+  MUTATION_CATALOG,
+  mutationCatalog,
+  validateMutationCatalog,
+  validateMustKillCatalog,
+  applyAstMutation,
+  mutateAstSource,
+  mutationCase,
+  runMutationSensitivity,
+  runMutationLayer,
+  deriveMutationScore,
+  mutationScore,
+  checkMutationCatalogShape,
+} from "./hardening-mutation-layer.mjs";

@@ -1,11 +1,35 @@
-use core.files as fs
-use core.process as process
+use core.files as files
 
-fn run() {
-    contents :: fs.read(process.argv().get(1) ?? "input.txt") ?? panic("read failed")
-    words :: contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
-    counts :: words.counts()
-    total :: counts.values().sum()
+#CLI
+struct Args {
+    input: String
+}
+
+fn run(args: Args) {
+    input :: files.read_bytes(Path.from(args.input)) ?? panic("read failed")
+    counts := [String:Int]{}
+    total := 0
+    token := [U8]{}
+    space :: U8{32}
+    ascii_ws_start :: U8{9}
+    ascii_ws_end :: U8{13}
+    loop byte in input {
+        if byte == space || (byte >= ascii_ws_start && byte <= ascii_ws_end) {
+            if !token.is_empty() {
+                word :: String.from_bytes(token) ?? panic("read failed")
+                counts[word] = (counts.get(word) ?? 0) + 1
+                total += 1
+                token.clear()
+            }
+        } else {
+            token.push(byte)
+        }
+    }
+    if !token.is_empty() {
+        word :: String.from_bytes(token) ?? panic("read failed")
+        counts[word] = (counts.get(word) ?? 0) + 1
+        total += 1
+    }
     loop item in counts.top_n(20) -> print("{item.value} {item.key}")
     print("distinct {counts.len()} total {total}")
 }

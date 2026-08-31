@@ -6,6 +6,12 @@ pub(crate) fn jet_fmt_number(value: i64) -> String {
 
 pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
     let precision = precision.max(0) as usize;
+    format!("{:.*}", precision, value)
+}
+
+/// D-FMT-PLAIN1=A: explicit human grouping keeps the former decimal display.
+pub(crate) fn jet_fmt_grouped(value: f64, precision: i64) -> String {
+    let precision = precision.max(0) as usize;
     comma_decimal(format!("{:.*}", precision, value))
 }
 
@@ -13,6 +19,16 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
 /// caller supplies the carrier's decimal spelling so native and spilled `Int`
 /// values use one kernel without a lossy float conversion.
 pub(crate) fn jet_fmt_decimal_int(value: &str, precision: i64) -> String {
+    format_decimal_int(value, precision, false)
+}
+
+/// D-FMT-PLAIN1=A: the grouped integer rail uses the same exact-int kernel as
+/// `jet_fmt_decimal_int`; only the explicit grouping policy differs.
+pub(crate) fn jet_fmt_grouped_int(value: &str, precision: i64) -> String {
+    format_decimal_int(value, precision, true)
+}
+
+fn format_decimal_int(value: &str, precision: i64, grouped: bool) -> String {
     let precision = precision.max(0) as usize;
     let value = value.trim();
     let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
@@ -28,7 +44,11 @@ pub(crate) fn jet_fmt_decimal_int(value: &str, precision: i64) -> String {
     let digits = digits.trim_start_matches('0');
     let digits = if digits.is_empty() { "0" } else { digits };
     let sign = if negative && digits != "0" { "-" } else { "" };
-    let whole = group_decimal_digits(digits);
+    let whole = if grouped {
+        group_decimal_digits(digits)
+    } else {
+        digits.to_string()
+    };
     if precision == 0 {
         format!("{sign}{whole}")
     } else {
@@ -262,7 +282,7 @@ fn split_top_level(value: &str) -> Vec<&str> {
 }
 
 pub(crate) fn jet_fmt_percent(value: f64, precision: i64) -> String {
-    format!("{}%", jet_fmt_decimal(value * 100.0, precision))
+    format!("{}%", jet_fmt_grouped(value * 100.0, precision))
 }
 
 pub(crate) fn jet_fmt_bytes(value: i64) -> String {

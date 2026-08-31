@@ -1,0 +1,27 @@
+use core.http.server as server
+use core.net as net
+use core.process as process
+
+struct State {
+    done: Bool
+}
+
+fn run() !(HTTPError | NetError | IOError) {
+    port :: process.argv().get(1) ?? "18080"
+    listener :: net.tcp_listen("127.0.0.1:{port}")
+    state :: shared State{done: false}
+    mux :: server.mux()
+    mux.get("/health", (_req: HTTPRequest) -> Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")))
+    mux.get("/hello/:name", (req: HTTPRequest) -> {
+        name :: req.param("name") ?? ""
+        Ok(server.response(200, "Hello, {name}").header("content-type", "text/plain"))
+    })
+    mux.get("/shutdown", (_req: HTTPRequest) -> {
+        state.done = true
+        Ok(server.response(200, "{{\"bye\":true}}"))
+    })
+    loop {
+        if state.done -> break
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
+}

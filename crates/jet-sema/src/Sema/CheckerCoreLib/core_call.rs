@@ -31,7 +31,11 @@ fn core_effect_for_call(module: &str, name: &str) -> Option<crate::Sema::Effects
 fn core_call_is_known(module: &str, name: &str) -> bool {
     matches!(
         (module, name),
-        ("core.compiler", "lex" | "parse" | "check" | "source_map")
+        (
+            "core.compiler",
+            "lex" | "parse" | "check" | "source_map" | "manifest" | "package"
+                | "lock" | "profiles",
+        )
             | ("core.service", "tree")
             | ("core.auth", "verify_jwt" | "verify_paseto")
             | ("core.net.tls", "client")
@@ -716,11 +720,20 @@ fn core_compiler_return(name: &str) -> Type {
         "parse" => "CompilerSyntaxTree",
         "check" => "CompilerChecked",
         "source_map" => "CompilerSourceMap",
+        "manifest" => "CompilerManifest",
+        "package" => "CompilerPackage",
+        "lock" => "CompilerLock",
+        "profiles" => "CompilerProfileSet",
         _ => "CompilerError",
+    };
+    let error = if matches!(name, "manifest" | "package" | "lock" | "profiles") {
+        "CompilerPackageError"
+    } else {
+        "CompilerError"
     };
     Type::Result {
         ok: Box::new(Type::Named(value.to_string())),
-        err: Box::new(Type::Named("CompilerError".to_string())),
+        err: Box::new(Type::Named(error.to_string())),
     }
 }
 
@@ -1051,7 +1064,11 @@ impl<'a> Checker<'a> {
         // ordinary Core effect/fixed-signature tables so it cannot become
         // a runtime or ambient fallback by accident.
         if module == "core.compiler" {
-            if !matches!(name, "lex" | "parse" | "check" | "source_map") {
+            if !matches!(
+                name,
+                "lex" | "parse" | "check" | "source_map" | "manifest" | "package"
+                    | "lock" | "profiles"
+            ) {
                 self.diags.push(unknown_core_item(module, name, span));
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
@@ -1066,6 +1083,16 @@ impl<'a> Checker<'a> {
                         "move this call into `fn build` or a `comptime` binding".to_string(),
                         Some(span),
                     ));
+            }
+            let package_view = matches!(name, "manifest" | "package" | "lock" | "profiles");
+            if package_view {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity(name, 0, args.len(), span));
+                }
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(core_compiler_return(name));
             }
             if !matches!(args.len(), 1 | 2) {
                 self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -1207,20 +1234,26 @@ impl<'a> Checker<'a> {
         // Keep the richer Jet type construction below in sema, but make
         // every consumer reject a row-shaped call from the same fact.
         if let Some(row) = Syntax::core_call(module, name) {
-            if let Err(Syntax::CoreCallProjectionError::Arity { expected, actual }) =
-                Syntax::core_call_projection(
-                    module,
-                    name,
-                    Syntax::CoreCallCoverage::SEMA,
-                    args.len(),
-                )
-            {
-                self.diags
-                    .push(wrong_core_arity(name, expected, actual, span));
-                for arg in args.iter_mut() {
-                    self.infer(&mut arg.expr);
+            // A Core parameter contract may omit trailing defaulted slots at
+            // the source boundary. Its binder below fills those slots before
+            // the fixed ABI reaches any engine, so validate the raw
+            // arity only for rows without a contract.
+            if super::core_param_contract(module, name).is_none() {
+                if let Err(Syntax::CoreCallProjectionError::Arity { expected, actual }) =
+                    Syntax::core_call_projection(
+                        module,
+                        name,
+                        Syntax::CoreCallCoverage::SEMA,
+                        args.len(),
+                    )
+                {
+                    self.diags
+                        .push(wrong_core_arity(name, expected, actual, span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
                 }
-                return None;
             }
             debug_assert_eq!(row.arity(), row.signature.borrow_mask.len());
         }
@@ -1989,7 +2022,10 @@ impl<'a> Checker<'a> {
                 "reader" | "writer",
             )
             | ("core.encoding.xml", "reader" | "writer") => {
-                let max = if (module == "core.encoding.json" && name == "writer")
+                let csv_reader = module == "core.encoding.csv" && name == "reader";
+                let max = if csv_reader {
+                    5
+                } else if (module == "core.encoding.json" && name == "writer")
                     || module == "core.encoding.xml"
                 {
                     3
@@ -2011,6 +2047,43 @@ impl<'a> Checker<'a> {
                 let Some((params, ret)) = &sig else {
                     unreachable!()
                 };
+                if csv_reader {
+                    let Some(contract) = super::core_param_contract(module, name) else {
+                        unreachable!()
+                    };
+                    let bind_params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
+                        .iter()
+                        .enumerate()
+                        .map(|(index, param)| crate::Sema::CallBinder::BindParam {
+                            label: param.label,
+                            name: param.label,
+                            zone: param.zone,
+                            default: None,
+                            convention: params
+                                .get(index)
+                                .map(|(convention, _)| *convention)
+                                .unwrap_or(AccessConvention::Read),
+                            ty: params.get(index).map(|(_, ty)| ty),
+                            variadic: false,
+                            core_default: param.default,
+                        })
+                        .collect();
+                    if crate::Sema::CallBinder::bind_call_args(
+                        name,
+                        &bind_params,
+                        args,
+                        span,
+                        &mut self.diags,
+                    )
+                    .is_none()
+                    {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return ret.clone();
+                    }
+                    self.register_binder_refs(args);
+                }
                 for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
                     if *conv == AccessConvention::Move {
                         if arg.convention != AccessConvention::Move {
@@ -2145,7 +2218,7 @@ impl<'a> Checker<'a> {
             // D-FMT-INTERP3=B: decimal accepts both machine Float and exact
             // Int. The return stays String; the carrier-specific formatter is
             // selected by each engine only after this sema fact is resolved.
-            ("core.text.fmt", "decimal") => {
+            ("core.text.fmt", method @ ("decimal" | "grouped")) => {
                 if args.len() != 2 {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }
@@ -2156,11 +2229,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
-                                "{} can't use `core.text.fmt.decimal`",
+                                "{} can't use `core.text.fmt.{method}`",
                                 got.map_or_else(|| "this value".to_string(), |ty| ty.show())
                             ),
-                            "decimal formatting accepts a Float or exact Int value".to_string(),
-                            "pass a Float or Int as the value".to_string(),
+                            format!("{method} formatting accepts a Float or exact Int value"),
+                            format!("pass a Float or Int as the value"),
                             Some(arg.expr.span()),
                         ));
                     }
@@ -3284,7 +3357,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!("`sign` needs Float or F32, not {}", ty.show()),
-                            "sign classifies a floating-point value as negative, zero, or positive"
+                            "`sign` classifies a floating-point value as negative, zero, or positive"
                                 .to_string(),
                             "pass a Float or F32 value".to_string(),
                             Some(arg.expr.span()),
@@ -3627,7 +3700,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!("`pow` needs Float or F32, not {}", first.show()),
-                        "pow operates on floating-point numbers".to_string(),
+                        "`pow` operates on floating-point numbers".to_string(),
                         "pass a Float or F32 base".to_string(),
                         Some(args[0].expr.span()),
                     ));
@@ -4145,6 +4218,15 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                         match ret {
+                            Some(r)
+                                if matches!(
+                                    r.as_ref(),
+                                    Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+                                ) =>
+                            {
+                                self.diags.push(reactive_derived_unit(args[0].expr.span()));
+                                return None;
+                            }
                             Some(r) => (**r).clone(),
                             None => {
                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));
@@ -4189,6 +4271,15 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                         match ret {
+                            Some(r)
+                                if matches!(
+                                    r.as_ref(),
+                                    Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+                                ) =>
+                            {
+                                self.diags.push(reactive_derived_unit(args[0].expr.span()));
+                                return None;
+                            }
                             Some(r) => (**r).clone(),
                             None => {
                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));

@@ -382,6 +382,23 @@ fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
     }
 }
 
+fn jet_jit_crypto_x25519(secret_handle: i64, public_handle: i64) -> i64 {
+    let secret_key = with_crypto(secret_handle, |value| match value {
+        CryptoValue::X25519SecretKey(key) => Some(runtime::clone_x25519_secret(key)),
+        _ => None,
+    });
+    let public_key = take_crypto(public_handle);
+    match (secret_key, public_key) {
+        (Some(secret_key), Some(CryptoValue::X25519PublicKey(public_key))) => {
+            match runtime::jet_crypto_x25519_typed_impl(&secret_key, public_key) {
+                Ok(shared) => result(true, push(CryptoValue::SharedSecret(shared)) as u64),
+                Err(err) => error(err.to_string()),
+            }
+        }
+        _ => error("invalid X25519 secret or public key handle".to_string()),
+    }
+}
+
 fn jet_jit_crypto_signing_generate() -> i64 {
     match runtime::jet_crypto_signing_generate_impl() {
         Ok(key) => result(true, push(CryptoValue::SigningKey(key)) as u64),
@@ -437,6 +454,16 @@ fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
     push(CryptoValue::Digest256(digest))
 }
 
+fn jet_jit_crypto_blake3(data_handle: i64) -> i64 {
+    let digest = runtime::jet_crypto_blake3_typed_impl(&clone_bytes(data_handle));
+    push(CryptoValue::Digest256(digest))
+}
+
+fn jet_jit_crypto_sha512(data_handle: i64) -> i64 {
+    let digest = runtime::jet_crypto_sha512_typed_impl(&clone_bytes(data_handle));
+    push(CryptoValue::Digest512(digest))
+}
+
 fn jet_jit_crypto_sha1(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha1_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
@@ -470,6 +497,11 @@ fn jet_jit_crypto_sha3_384(data_handle: i64) -> i64 {
 fn jet_jit_crypto_sha3_512(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha3_512_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+fn jet_jit_crypto_hmac_sha256(key_handle: i64, data_handle: i64) -> i64 {
+    let out = runtime::jet_crypto_hmac_sha256(&clone_bytes(key_handle), &clone_bytes(data_handle));
+    alloc_bytes(&out)
 }
 
 fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i64, key_len: i64) -> i64 {
@@ -517,16 +549,6 @@ fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
     }
 }
 
-fn jet_jit_crypto_sha512_bytes(data_handle: i64) -> i64 {
-    let text = runtime::jet_crypto_sha512_impl(&clone_bytes(data_handle));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
-}
-
-fn jet_jit_crypto_blake3_bytes(data_handle: i64) -> i64 {
-    let text = runtime::jet_crypto_blake3_impl(&clone_bytes(data_handle));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
-}
-
 fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_hex_impl(digest)),
@@ -548,6 +570,32 @@ fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
         Some(bytes) => alloc_bytes(&bytes),
         None => {
             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-256 digest handle"));
+            0
+        }
+    }
+}
+
+fn jet_jit_crypto_digest512_hex(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::Digest512(digest) => Some(runtime::jet_crypto_digest512_hex_impl(digest)),
+        _ => None,
+    }) {
+        Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-512 digest handle"));
+            0
+        }
+    }
+}
+
+fn jet_jit_crypto_digest512_bytes(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::Digest512(digest) => Some(runtime::jet_crypto_digest512_bytes_impl(digest)),
+        _ => None,
+    }) {
+        Some(bytes) => alloc_bytes(&bytes),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-512 digest handle"));
             0
         }
     }
@@ -1006,7 +1054,7 @@ fn result_text(value: String) -> i64 {
 }
 
 fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
-    match runtime::auth_register_user(clone_string(user_id), clone_string(password_hash)) {
+    match runtime::jet_auth_register_user(clone_string(user_id), clone_string(password_hash)) {
         Ok(()) => result(true, 0),
         Err(message) => error(message),
     }
@@ -1040,7 +1088,7 @@ fn jet_jit_auth_magic_link_issue(user_id: i64, now_ms: i64, ttl_ms: i64) -> i64 
 }
 
 fn jet_jit_auth_magic_link_consume(token: i64, now_ms: i64, ttl_ms: i64) -> i64 {
-    match runtime::auth_magic_link_consume(clone_string(token), now_ms, ttl_ms) {
+    match runtime::jet_auth_magic_link_consume(clone_string(token), now_ms, ttl_ms) {
         Ok(session) => result(true, session_record(session) as u64),
         Err(message) => error(message),
     }
@@ -1801,11 +1849,14 @@ host_fns! {
     }
     x25519_generate: "jet_jit_crypto_x25519_generate" => jet_jit_crypto_x25519_generate: nullary;
     x25519_public: "jet_jit_crypto_x25519_public" => jet_jit_crypto_x25519_public: unary;
+    x25519: "jet_jit_crypto_x25519" => jet_jit_crypto_x25519: binary;
     signing_generate: "jet_jit_crypto_signing_generate" => jet_jit_crypto_signing_generate: nullary;
     signing_public: "jet_jit_crypto_signing_public" => jet_jit_crypto_signing_public: unary;
     sign: "jet_jit_crypto_sign" => jet_jit_crypto_sign: binary;
     verify: "jet_jit_crypto_verify" => jet_jit_crypto_verify: ternary;
     sha256: "jet_jit_crypto_sha256" => jet_jit_crypto_sha256: unary;
+    blake3: "jet_jit_crypto_blake3" => jet_jit_crypto_blake3: unary;
+    sha512: "jet_jit_crypto_sha512" => jet_jit_crypto_sha512: unary;
     sha1: "jet_jit_crypto_sha1" => jet_jit_crypto_sha1: unary;
     sha224: "jet_jit_crypto_sha224" => jet_jit_crypto_sha224: unary;
     sha384: "jet_jit_crypto_sha384" => jet_jit_crypto_sha384: unary;
@@ -1813,14 +1864,15 @@ host_fns! {
     sha3_256: "jet_jit_crypto_sha3_256" => jet_jit_crypto_sha3_256: unary;
     sha3_384: "jet_jit_crypto_sha3_384" => jet_jit_crypto_sha3_384: unary;
     sha3_512: "jet_jit_crypto_sha3_512" => jet_jit_crypto_sha3_512: unary;
+    hmac_sha256: "jet_jit_crypto_hmac_sha256" => jet_jit_crypto_hmac_sha256: binary;
     pbkdf2_hmac: "jet_jit_crypto_pbkdf2_hmac" => jet_jit_crypto_pbkdf2_hmac: quaternary;
     hasher_new: "jet_jit_crypto_hasher_new" => jet_jit_crypto_hasher_new: nullary;
     hasher_update: "jet_jit_crypto_hasher_update" => jet_jit_crypto_hasher_update: binary;
     hasher_digest: "jet_jit_crypto_hasher_digest" => jet_jit_crypto_hasher_digest: unary;
-    sha512_bytes: "jet_jit_crypto_sha512_bytes" => jet_jit_crypto_sha512_bytes: unary;
-    blake3_bytes: "jet_jit_crypto_blake3_bytes" => jet_jit_crypto_blake3_bytes: unary;
     digest256_hex: "jet_jit_crypto_digest256_hex" => jet_jit_crypto_digest256_hex: unary;
     digest256_bytes: "jet_jit_crypto_digest256_bytes" => jet_jit_crypto_digest256_bytes: unary;
+    digest512_hex: "jet_jit_crypto_digest512_hex" => jet_jit_crypto_digest512_hex: unary;
+    digest512_bytes: "jet_jit_crypto_digest512_bytes" => jet_jit_crypto_digest512_bytes: unary;
     signature_bytes: "jet_jit_crypto_signature_bytes" => jet_jit_crypto_signature_bytes: unary;
     sealed_bytes: "jet_jit_crypto_sealed_bytes" => jet_jit_crypto_sealed_bytes: unary;
     x25519_public_bytes: "jet_jit_crypto_x25519_public_bytes" => jet_jit_crypto_x25519_public_bytes: unary;

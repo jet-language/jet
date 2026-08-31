@@ -1,41 +1,51 @@
-use core.process as process
+#CLI
+struct Args {
+    n: Int
+}
 
 fn sieve(n: Int) [U8] -> {
-    prime := [U8]{1}.cycle(n).to_list()
-    if n > 0 -> prime[0] = 0
-    if n > 1 -> prime[1] = 0
+    odd_count :: if n > 0 -> n /% 2 else -> 0
+    prime := [U8]{1}.cycle(odd_count).to_list()
+    if n > 1 -> prime[0] = 0
     p := 3
-    loop p * p < n {
-        if prime[p] == 1 {
-            multiple := p * p
-            loop multiple < n {
-                prime[multiple] = 0
-                multiple += p * 2
+    p_slot := 1
+    loop p < n && p * p < n {
+        if prime[p_slot] == 1 {
+            multiple_slot := (p * p) /% 2
+            loop multiple_slot < odd_count {
+                prime[multiple_slot] = 0
+                multiple_slot += p
             }
         }
         p += 2
+        p_slot += 1
     }
-    return prime
+    prime
 }
 
-fn run() {
-    args :: process.argv()
-    n :: Int.parse(args.get(1) ?? "0") ?? 0
-    prime :: sieve(n)
+fn report_exact(n: Int, prime: [U8]) {
     count := 0
     largest := 0
     if n > 2 {
         count = 1
         largest = 2
         i := 3
+        slot := 1
         loop i < n {
-            if prime[i] == 1 {
+            if prime[slot] == 1 {
                 count += 1
                 largest = i
             }
             i += 2
+            slot += 1
         }
     }
     print("count {count}")
     print("largest {largest}")
+}
+
+fn run(args: Args) {
+    n :: args.n
+    prime :: sieve(n)
+    report_exact(n, prime)
 }

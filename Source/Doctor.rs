@@ -307,6 +307,7 @@ fn check_registry() -> Check {
         "-c",
         "credential.useHttpPath=true",
         "ls-remote",
+        "--",
         &registry.url,
     ])
     .env("GIT_TERMINAL_PROMPT", "0");

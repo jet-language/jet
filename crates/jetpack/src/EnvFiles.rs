@@ -8,6 +8,7 @@
 
 use jet_env_model::ModuleEval::{FileMode, ManagedFile};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -44,13 +45,30 @@ pub struct FilePlan {
     objects_dir: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct PlannedFile {
     declaration: ManagedFile,
     bytes: Vec<u8>,
     digest: String,
     destination: PathBuf,
     action: FileActionKind,
+}
+
+impl fmt::Debug for PlannedFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("PlannedFile");
+        debug.field("declaration", &self.declaration);
+        if self.declaration.sensitive {
+            debug.field("bytes", &"<redacted>");
+        } else {
+            debug.field("bytes", &self.bytes);
+        }
+        debug
+            .field("digest", &self.digest)
+            .field("destination", &self.destination)
+            .field("action", &self.action)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -112,6 +130,13 @@ pub fn plan(project_dir: &Path, declarations: &[ManagedFile]) -> Result<FilePlan
             project_dir.display()
         )
     })?;
+    #[cfg(not(unix))]
+    if let Some(declaration) = declarations.iter().find(|declaration| declaration.sensitive) {
+        return Err(format!(
+            "sensitive managed file `{}` cannot be applied on this platform: private pre-write permissions are unavailable",
+            declaration.destination
+        ));
+    }
     let files_root = project_root.join(".jet").join(FILES_DIR);
     let objects_dir = files_root.join(OBJECTS_DIR);
     let state_path = files_root.join(STATE_FILE);
@@ -257,7 +282,8 @@ fn classify_action(
         }
         (Some(owner), false, FileMode::Copy) if owner.mode == FileMode::Copy => {
             let current_digest = file_digest(destination)?;
-            let permissions_match = owner.permissions == declaration.permissions;
+            let permissions_match = owner.permissions == declaration.permissions
+                && destination_permissions_match(destination, declaration)?;
             if current_digest == digest
                 && permissions_match
                 && owner.sensitive == declaration.sensitive
@@ -314,10 +340,60 @@ fn object_path(objects_dir: &Path, declaration: &ManagedFile, digest: &str) -> P
     objects_dir.join(crate::SHA256::sha256_hex(identity.as_bytes()))
 }
 
+fn effective_permissions(declaration: &ManagedFile, fallback: u32) -> u32 {
+    let permissions = declaration.permissions.unwrap_or(fallback);
+    if declaration.sensitive {
+        permissions & 0o700
+    } else {
+        permissions
+    }
+}
+
 fn object_permissions(declaration: &ManagedFile) -> u32 {
+    effective_permissions(
+        declaration,
+        if declaration.sensitive { 0o400 } else { 0o444 },
+    )
+}
+
+fn destination_permissions(declaration: &ManagedFile) -> Option<u32> {
     declaration
         .permissions
-        .unwrap_or_else(|| if declaration.sensitive { 0o400 } else { 0o444 })
+        .or_else(|| declaration.sensitive.then_some(0o600))
+        .map(|permissions| {
+            if declaration.sensitive {
+                permissions & 0o700
+            } else {
+                permissions
+            }
+        })
+}
+
+fn destination_permissions_match(
+    path: &Path,
+    declaration: &ManagedFile,
+) -> Result<bool, String> {
+    let Some(expected) = destination_permissions(declaration) else {
+        return Ok(true);
+    };
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "couldn't inspect managed destination `{}`: {error}",
+            declaration.destination
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        Ok(metadata.permissions().mode() & 0o7777 == expected)
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(metadata.permissions().readonly() == (expected & 0o222 == 0))
+    }
 }
 
 fn create_new_file(path: &Path, permissions: Option<u32>) -> io::Result<fs::File> {
@@ -590,10 +666,7 @@ fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
     let result = match file.declaration.mode {
         FileMode::Symlink => make_symlink(object, &temp),
         FileMode::Seed | FileMode::Copy => {
-            let permissions = file
-                .declaration
-                .permissions
-                .or_else(|| file.declaration.sensitive.then_some(0o600));
+            let permissions = destination_permissions(&file.declaration);
             let mut output = create_new_file(&temp, permissions).map_err(|error| {
                     format!(
                         "couldn't create `{}`: {error}",
@@ -608,9 +681,7 @@ fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
                 })?;
             set_permissions(
                 &temp,
-                file.declaration
-                    .permissions
-                    .or_else(|| file.declaration.sensitive.then_some(0o600)),
+                destination_permissions(&file.declaration),
             )?;
             Ok(())
         }
@@ -908,6 +979,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn debug_redacts_sensitive_managed_bytes_but_keeps_public_bytes() {
+        let mut private = declaration("private", true);
+        private.content = Some(b"managed-hostile-secret".to_vec());
+        let private_debug = format!("{private:?}");
+        assert!(!private_debug.contains("managed-hostile-secret"));
+        assert!(private_debug.contains("<redacted>"));
+
+        let public_debug = format!("{:?}", declaration("public", false));
+        assert!(public_debug.contains("[115, 97, 109, 101, 32, 98, 121, 116, 101, 115]"));
+
+        let root = project_dir("jet-env-files-debug");
+        fs::create_dir_all(&root).unwrap();
+        let plan_debug = format!("{:?}", plan(&root, &[private]).unwrap());
+        assert!(!plan_debug.contains("managed-hostile-secret"));
+        assert!(plan_debug.contains("<redacted>"));
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(unix)]
     #[test]
     fn sensitive_temp_is_restricted_before_first_write() {
@@ -916,9 +1006,72 @@ mod tests {
         let root = project_dir("jet-env-files-temp-mode");
         fs::create_dir_all(&root).unwrap();
         let temp = root.join("secret.tmp");
-        let output = create_new_file(&temp, Some(0o600)).unwrap();
+        let mut declaration = declaration("private", true);
+        declaration.permissions = Some(0o644);
+        let output = create_new_file(&temp, destination_permissions(&declaration)).unwrap();
         assert_eq!(output.metadata().unwrap().permissions().mode() & 0o7777, 0o600);
         drop(output);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_explicit_permissions_are_restricted_in_object_and_copy() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = project_dir("jet-env-files-sensitive-permissions");
+        fs::create_dir_all(&root).unwrap();
+        let mut file = declaration("private", true);
+        file.mode = FileMode::Copy;
+        file.permissions = Some(0o644);
+        let digest = crate::SHA256::sha256_hex(b"same bytes");
+        let plan = plan(&root, &[file.clone()]).unwrap();
+        assert_eq!(plan.apply().unwrap().applied, 1);
+
+        assert_eq!(
+            fs::metadata(root.join("private"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o600
+        );
+        let object = object_path(&root.join(".jet/files/objects"), &file, &digest);
+        assert_eq!(
+            fs::metadata(object).unwrap().permissions().mode() & 0o7777,
+            0o600
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_copy_repairs_external_permission_relaxation() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = project_dir("jet-env-files-copy-mode");
+        fs::create_dir_all(&root).unwrap();
+        let mut file = declaration("private", true);
+        file.mode = FileMode::Copy;
+        file.permissions = Some(0o644);
+        assert_eq!(
+            plan(&root, &[file.clone()]).unwrap().apply().unwrap().applied,
+            1
+        );
+
+        let destination = root.join("private");
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o644)).unwrap();
+        let repaired = plan(&root, &[file]).unwrap();
+        assert_eq!(repaired.actions[0].kind, FileActionKind::ReplaceOwned);
+        repaired.apply().unwrap();
+        assert_eq!(
+            fs::metadata(destination)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o600
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -986,5 +1139,21 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_file(outside);
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn sensitive_managed_files_fail_closed_before_resolution() {
+        let root = project_dir("jet-env-files-sensitive-platform");
+        fs::create_dir_all(&root).unwrap();
+
+        let error = plan(&root, &[declaration("private", true)]).unwrap_err();
+        assert!(
+            error.contains("private pre-write permissions are unavailable"),
+            "unexpected error: {error}"
+        );
+        assert!(!root.join(".jet").exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 }

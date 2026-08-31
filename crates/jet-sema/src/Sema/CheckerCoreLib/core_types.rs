@@ -333,7 +333,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLEncoding"
         | "XMLLexicalPolicy" | "XMLCanonical" | "XMLCanonicalMode" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
         | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
-        | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
+        | "CSVReader" | "CSVWriter" | "CSVRow" | "XMLReader" | "XMLWriter"
         | "CBORReader" | "CBORWriter"
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
         | "F32x4" | "F64x2" | "ReduceOp"
@@ -380,9 +380,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
         | "Limits" | "SMTPAuth" | "TLSTrust" | "DkimConfig" | "SMTPConfig" | "Mailer"
-        // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
-        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
         | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
@@ -406,6 +404,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerOutputEntry" | "CompilerStructuralNode" | "CompilerArithmeticOperation"
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
+        | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget"
+        | "CompilerPackageOutput" | "CompilerBuildProfile" | "CompilerManifest"
+        | "CompilerPackage" | "CompilerLockedPackage" | "CompilerLock"
+        | "CompilerKeyValue" | "CompilerProfile" | "CompilerProfileSet"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
         | "FactKind" | "FactValue" | "DimensionInfo" | "DimensionAxis"
         | "MeasureInfo" | "ExactnessInfo" | "ExactnessKind" | "LayoutFact"
@@ -507,6 +509,13 @@ pub fn core_fact_kind_variants(
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == "CSVRow" {
+        return match field {
+            "fields" => Some(Type::List(Box::new(Type::String))),
+            "line" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if type_name == Syntax::TYPE_MEMO_STATS {
         return match field {
             "hits" | "misses" | "size" => Some(Type::Int),
@@ -620,6 +629,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
         return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
+    }
+    if let Some(field_type) = compiler_package_struct_field(type_name, field) {
+        return Some(field_type);
     }
     if type_name == "CompilerToken" {
         return match field {
@@ -894,7 +906,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
                     "CompilerSemanticIndex".to_string(),
                 )))),
                 _ => None,
-            }
+            };
         }
         _ => {}
     }
@@ -1269,6 +1281,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "RangeError" {
+        return match field {
+            "reason" => Some(Type::String),
+            _ => None,
+        };
+    }
     // D-VALIDATE1 / D-VALIDATE-DECODE1: FieldError carries one path/reason.
     if type_name == "FieldError" {
         return match field {
@@ -1344,7 +1362,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
         // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
-        ("Stat", "size" | "modified_ms" | "created_ms") => Some(Type::Int),
+        ("Stat", "size" | "modified_ms" | "created_ms" | "mode") => Some(Type::Int),
         ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
         ("Stat", "kind") => Some(Type::String),
         ("WalkEntry", "path" | "relative") => Some(Type::String),
@@ -1422,6 +1440,94 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             .into_iter()
             .find(|(name, _)| name == field)
             .map(|(_, ty)| ty),
+    }
+}
+
+fn compiler_package_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    let string_list = || Type::List(Box::new(Type::String));
+    let optional_string = || Type::Option(Box::new(Type::String));
+    match type_name {
+        "CompilerPackageError" => match field {
+            "code" | "message" | "file" | "cause" => Some(Type::String),
+            _ => None,
+        },
+        "CompilerDependency" => match field {
+            "name" | "source" => Some(Type::String),
+            _ => None,
+        },
+        "CompilerPackageTarget" => match field {
+            "name" => Some(Type::String),
+            "targets" => Some(string_list()),
+            _ => None,
+        },
+        "CompilerPackageOutput" => match field {
+            "name" | "kind" => Some(Type::String),
+            "entry" => Some(optional_string()),
+            _ => None,
+        },
+        "CompilerBuildProfile" => match field {
+            "name" | "optimize" => Some(Type::String),
+            "debug_info" | "small" => Some(Type::Bool),
+            "panic" => Some(optional_string()),
+            _ => None,
+        },
+        "CompilerManifest" | "CompilerPackage" => match field {
+            "schema_version" => Some(Type::Int),
+            "file" => Some(Type::String),
+            "jet" | "edition" | "description" | "license" | "repository"
+            | "layer" | "target" => Some(optional_string()),
+            "dependencies" => Some(Type::List(Box::new(Type::Named(
+                "CompilerDependency".to_string(),
+            )))),
+            "packages" => Some(Type::List(Box::new(Type::Named(
+                "CompilerPackageTarget".to_string(),
+            )))),
+            "outputs" => Some(Type::List(Box::new(Type::Named(
+                "CompilerPackageOutput".to_string(),
+            )))),
+            "build_profiles" => Some(Type::List(Box::new(Type::Named(
+                "CompilerBuildProfile".to_string(),
+            )))),
+            _ => None,
+        },
+        "CompilerLockedPackage" => match field {
+            "name" | "version" | "source_kind" | "fingerprint" => Some(Type::String),
+            "source" | "revision" | "content_hash" | "layer" | "inferred_layer" => {
+                Some(optional_string())
+            }
+            "dependencies" => Some(string_list()),
+            _ => None,
+        },
+        "CompilerLock" => match field {
+            "schema_version" | "version" => Some(Type::Int),
+            "file" => Some(Type::String),
+            "root_dependencies" => Some(string_list()),
+            "packages" => Some(Type::List(Box::new(Type::Named(
+                "CompilerLockedPackage".to_string(),
+            )))),
+            _ => None,
+        },
+        "CompilerKeyValue" => match field {
+            "key" | "value" => Some(Type::String),
+            _ => None,
+        },
+        "CompilerProfile" => match field {
+            "name" => Some(Type::String),
+            "extends" | "packages" | "sources" => Some(string_list()),
+            "collisions" => Some(Type::List(Box::new(Type::Named(
+                "CompilerKeyValue".to_string(),
+            )))),
+            _ => None,
+        },
+        "CompilerProfileSet" => match field {
+            "schema_version" => Some(Type::Int),
+            "file" => Some(Type::String),
+            "profiles" => Some(Type::List(Box::new(Type::Named(
+                "CompilerProfile".to_string(),
+            )))),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -2284,7 +2390,7 @@ pub fn encoding_handle_method_return(
             Some(Some(result_ty(unit, error)))
         }
         ("CSVReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::List(Box::new(Type::String)))),
+            Type::Option(Box::new(Type::Named("CSVRow".to_string()))),
             error,
         ))),
         // DataStream<T>.next is handled specially in method_calls (needs T).
@@ -2386,6 +2492,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ),
             ("max_expansion_depth".to_string(), Type::Int),
             ("max_expansion_bytes".to_string(), Type::Int),
+        ]),
+        "CSVRow" => Some(vec![
+            ("fields".to_string(), Type::List(Box::new(Type::String))),
+            ("line".to_string(), Type::Int),
         ]),
         "DataLimits" => Some(vec![
             (

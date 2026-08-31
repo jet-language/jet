@@ -1,0 +1,24 @@
+use core.http.client as http_client
+use core.http.server as http_server
+
+#Codable
+struct Reading {
+    city: String
+    degrees: Int
+}
+
+fn run() {
+    mux :: http_server.mux()
+    mux.get("/health", () -> Ok(http_server.response(204, "")))
+    policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
+    http_server.cors(mux, policy)
+    http_server.static_files(mux, "/assets", "/tmp")
+    response :: http_server.json(201, Reading{city: "Reno", degrees: 32})
+    response_text :: http_server.response(200, "hello")
+    decoded :: response.json<Reading>() ?? panic("response")
+    request :: http_client.request("POST", "http://example.test/")
+        .json(Reading{city: "Reno", degrees: 31})
+    request_decoded :: request.json<Reading>() ?? panic("request")
+    request_content_type :: request.header("content-type") ?? "missing"
+    print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
+}

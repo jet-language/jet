@@ -6,7 +6,7 @@
 //! deterministic, bounded, rejects traversal and duplicate names, and stages
 //! substitutions before publication.
 
-use crate::TrustRoot::{Signature as TrustSignature, TrustKey};
+use crate::TrustRoot::{constant_time_eq, Signature as TrustSignature, TrustKey};
 use crate::SHA256;
 use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
 use std::collections::BTreeSet;
@@ -843,7 +843,7 @@ impl NarInfo {
         if !self.signatures.iter().any(|signature| {
             signature.key_id == expected.key_id
                 && signature.algorithm == expected.algorithm
-                && signature.sig_hex == expected.sig_hex
+                && constant_time_eq(signature.sig_hex.as_bytes(), expected.sig_hex.as_bytes())
         }) {
             return Err(invalid("narinfo signature verification failed"));
         }
@@ -1037,10 +1037,7 @@ fn decode_node(
             loop {
                 match reader.string()?.as_str() {
                     ")" => {
-                        validate_sibling_names(
-                            &sibling_names,
-                            reader.allow_nix_store_symlinks,
-                        )?;
+                        validate_sibling_names(&sibling_names, reader.allow_nix_store_symlinks)?;
                         break NarNode::Directory(entries);
                     }
                     "entry" => {
@@ -1248,10 +1245,7 @@ fn path_from_bytes(value: &[u8]) -> io::Result<PathBuf> {
     Ok(PathBuf::from(os_string(value)?))
 }
 
-fn validate_sibling_names(
-    names: &[Vec<u8>],
-    allow_nix_store_symlinks: bool,
-) -> io::Result<()> {
+fn validate_sibling_names(names: &[Vec<u8>], allow_nix_store_symlinks: bool) -> io::Result<()> {
     if allow_nix_store_symlinks {
         return Ok(());
     }
@@ -2120,6 +2114,17 @@ mod tests {
         signed.verify(&key).unwrap();
         let text = signed.to_text().unwrap();
         NarInfo::parse(&text).unwrap().verify(&key).unwrap();
+
+        let mut tampered = signed;
+        let replacement = if tampered.signatures[0].sig_hex.starts_with('0') {
+            '1'
+        } else {
+            '0'
+        };
+        tampered.signatures[0]
+            .sig_hex
+            .replace_range(0..1, &replacement.to_string());
+        assert!(tampered.verify(&key).is_err());
     }
 
     #[test]

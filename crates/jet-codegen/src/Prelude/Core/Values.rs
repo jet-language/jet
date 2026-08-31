@@ -305,31 +305,9 @@ impl<T: JetShow> JetShow for &T {
         (**self).jet_show()
     }
 }
-impl<T: JetDisplay> JetDisplay for &T {
-    fn jet_display(&self) -> String {
-        (**self).jet_display()
-    }
-}
-impl<T: JetDebug> JetDebug for &T {
-    fn jet_debug(&self) -> String {
-        (**self).jet_debug()
-    }
-}
 impl<T: JetShow> JetShow for [T] {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDisplay> JetDisplay for [T] {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDebug> JetDebug for [T] {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
         format!("[{}]", parts.join(", "))
     }
 }
@@ -339,35 +317,11 @@ impl<T: JetShow> JetShow for Vec<T> {
         format!("[{}]", parts.join(", "))
     }
 }
-impl<T: JetDisplay> JetDisplay for Vec<T> {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDebug> JetDebug for Vec<T> {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
 // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`; render it like a list
 // so printing/interpolating a fixed array (or a fan-out result) works.
 impl<T: JetShow, const N: usize> JetShow for [T; N] {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDisplay, const N: usize> JetDisplay for [T; N] {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDebug, const N: usize> JetDebug for [T; N] {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
         format!("[{}]", parts.join(", "))
     }
 }
@@ -380,35 +334,9 @@ impl<T: JetShow> JetShow for std::collections::HashSet<T> {
         format!("[{}]", parts.join(", "))
     }
 }
-impl<T: JetDisplay> JetDisplay for std::collections::HashSet<T> {
-    fn jet_display(&self) -> String {
-        let mut parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        parts.sort();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDebug> JetDebug for std::collections::HashSet<T> {
-    fn jet_debug(&self) -> String {
-        let mut parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-        parts.sort();
-        format!("[{}]", parts.join(", "))
-    }
-}
 impl<T: Ord + JetShow> JetShow for std::collections::BTreeSet<T> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: Ord + JetDisplay> JetDisplay for std::collections::BTreeSet<T> {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: Ord + JetDebug> JetDebug for std::collections::BTreeSet<T> {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
         format!("[{}]", parts.join(", "))
     }
 }
@@ -418,33 +346,9 @@ impl<T: Ord + Clone + JetShow> JetShow for std::collections::BinaryHeap<T> {
         format!("[{}]", parts.join(", "))
     }
 }
-impl<T: Ord + Clone + JetDisplay> JetDisplay for std::collections::BinaryHeap<T> {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: Ord + Clone + JetDebug> JetDebug for std::collections::BinaryHeap<T> {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_debug()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
 impl<T: JetShow> JetShow for std::collections::VecDeque<T> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> {
-    fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
-    }
-}
-impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
-    fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
         format!("[{}]", parts.join(", "))
     }
 }
@@ -453,22 +357,6 @@ impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> 
         jet_debug_map(
             self.iter()
                 .map(|(key, value)| (key.jet_show(), value.jet_show())),
-        )
-    }
-}
-impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for std::collections::BTreeMap<K, V> {
-    fn jet_display(&self) -> String {
-        jet_debug_map(
-            self.iter()
-                .map(|(key, value)| (key.jet_display(), value.jet_display())),
-        )
-    }
-}
-impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, V> {
-    fn jet_debug(&self) -> String {
-        jet_debug_map(
-            self.iter()
-                .map(|(key, value)| (key.jet_debug(), value.jet_debug())),
         )
     }
 }
@@ -498,22 +386,6 @@ impl JetShow for JetAbsent {
         true
     }
 }
-impl JetDisplay for JetAbsent {
-    fn jet_display(&self) -> String {
-        "null".to_string()
-    }
-    fn jet_report_is_clean() -> bool {
-        true
-    }
-}
-impl JetDebug for JetAbsent {
-    fn jet_debug(&self) -> String {
-        "null".to_string()
-    }
-    fn jet_report_is_clean() -> bool {
-        true
-    }
-}
 
 // D-FAILURE-FOUNDATION1: `!Never` lowers its uninhabited error side to
 // `std::convert::Infallible`. The carrier can never render one, but keeping
@@ -521,16 +393,6 @@ impl JetDebug for JetAbsent {
 // display/debug surfaces without inventing a second error representation.
 impl JetShow for std::convert::Infallible {
     fn jet_show(&self) -> String {
-        match *self {}
-    }
-}
-impl JetDisplay for std::convert::Infallible {
-    fn jet_display(&self) -> String {
-        match *self {}
-    }
-}
-impl JetDebug for std::convert::Infallible {
-    fn jet_debug(&self) -> String {
         match *self {}
     }
 }
@@ -543,20 +405,6 @@ impl JetShow for JetTaskFailure {
         }
     }
 }
-impl JetDisplay for JetTaskFailure {
-    fn jet_display(&self) -> String {
-        self.jet_show()
-    }
-}
-impl JetDebug for JetTaskFailure {
-    fn jet_debug(&self) -> String {
-        match self {
-            JetTaskFailure::Cancelled => "Cancelled".to_string(),
-            JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
-            JetTaskFailure::Panicked(reason) => format!("Panicked({reason:?})"),
-        }
-    }
-}
 impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
     fn jet_show(&self) -> String {
         let clean = <E as JetShow>::jet_report_is_clean();
@@ -565,28 +413,6 @@ impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
             Ok(v) => format!("Ok({})", v.jet_show()),
             Err(e) if clean => e.jet_show(),
             Err(e) => format!("Err({})", e.jet_show()),
-        }
-    }
-}
-impl<T: JetDisplay, E: JetDisplay> JetDisplay for JetOutcome<T, E> {
-    fn jet_display(&self) -> String {
-        let clean = <E as JetDisplay>::jet_report_is_clean();
-        match self {
-            Ok(v) if clean => v.jet_display(),
-            Ok(v) => format!("Ok({})", v.jet_display()),
-            Err(e) if clean => e.jet_display(),
-            Err(e) => format!("Err({})", e.jet_display()),
-        }
-    }
-}
-impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
-    fn jet_debug(&self) -> String {
-        let clean = <E as JetDebug>::jet_report_is_clean();
-        match self {
-            Ok(v) if clean => jet_debug_optional(Some(v.jet_debug())),
-            Ok(v) => format!("Ok({})", v.jet_debug()),
-            Err(_) if clean => jet_debug_optional(None),
-            Err(e) => format!("Err({})", e.jet_debug()),
         }
     }
 }

@@ -1,10 +1,10 @@
-Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
   --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:11:26
     |
  11 |         sealed :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [next_byte()], [], [])
     |                          ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
- Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
 Error [E0740]: `protect` uses the effect `IO`, which its signature doesn't allow
@@ -12,6 +12,6 @@ Error [E0740]: `protect` uses the effect `IO`, which its signature doesn't allow
     |
   9 | fn protect() Int -[FS]> {
     |                    ^^
- Why: the signature declares `-[FS]>`, so the body may only use those; `IO` is outside that set
- Fix: add `IO` to the effect list, or stop using it in `protect`
+ Why: The signature declares `-[FS]>`, so the body may only use those; `IO` is outside that set
+ Fix: Add `IO` to the effect list, or stop using it in `protect`
 More: jet-lang.dev/e/E0740

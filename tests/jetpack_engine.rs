@@ -4178,6 +4178,87 @@ fn typed_environment_without_packages_or_secrets_requires_trust() {
         !project.join("escaped").exists(),
         "untrusted typed environment executed a hostile command"
     );
+
+    let run_output = jetpack()
+        .args(["run", "--no-color", "--offline", "--", "true"])
+        .current_dir(&project.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        run_output.status.code(),
+        Some(2),
+        "jet run must not realize an untrusted typed environment: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    let run_stderr = String::from_utf8_lossy(&run_output.stderr);
+    assert!(
+        run_stderr.contains("E1255"),
+        "jet run skipped the typed-environment trust gate: {run_stderr}"
+    );
+    assert!(
+        !project.join("escaped").exists(),
+        "jet run executed a hostile typed environment before trust"
+    );
+}
+
+#[test]
+fn selected_workspace_run_requires_typed_environment_trust() {
+    let project = Scratch::new("selected-typed-trust-gate");
+    let root = Scratch::new("selected-typed-trust-gate-root");
+    let home = Scratch::new("selected-typed-trust-gate-home");
+    let member = project.join("packages/hello");
+    fs::create_dir_all(&member).unwrap();
+    fs::write(
+        project.join("workspace.jet"),
+        "module workspace { members: [\"./packages/hello\"] }\n",
+    )
+    .unwrap();
+    fs::write(
+        member.join("package.jet"),
+        "name: \"hello\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(member.join("hello.jet"), "module hello { }\n").unwrap();
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    services: {
+        hostile: { enable: false, run: ["sh", "-c", "touch escaped"] }
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args([
+            "run",
+            "-p",
+            "hello",
+            "--no-color",
+            "--offline",
+            "--",
+            "true",
+        ])
+        .current_dir(&project.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "selected workspace run must not compose before trust: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1255"), "missing trust diagnostic: {stderr}");
+    assert!(
+        !project.join("escaped").exists(),
+        "selected workspace run executed an untrusted typed environment"
+    );
 }
 
 #[test]

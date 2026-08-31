@@ -7,15 +7,18 @@ impl<'a> Checker<'a> {
         let Stmt::ComptimeBlock { body, .. } = stmt else {
             return;
         };
-        let globals = self.current_ct_globals();
-        match crate::Comptime::run_block_with_imports(
-            body,
-            self.ct_funcs,
-            self.ct_externs,
-            self.ct_base_dir,
-            &globals,
-            self.core_imports,
-        ) {
+        let result = {
+            let globals = self.current_ct_globals();
+            crate::Comptime::run_block_with_imports(
+                body,
+                self.ct_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                globals.as_ref(),
+                self.core_imports,
+            )
+        };
+        match result {
             Ok(scope) => {
                 let current = self.ct_scopes.last_mut().unwrap();
                 for (name, value) in scope {
@@ -38,17 +41,20 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        let globals = self.current_ct_globals();
-        let selected = match crate::Comptime::evaluate_owned_with_imports_opts(
-            cond,
-            self.ct_funcs,
-            self.ct_externs,
-            self.ct_base_dir,
-            &globals,
-            self.core_imports,
-            self.gates,
-            self.ct_impure_depth,
-        ) {
+        let selected = {
+            let globals = self.current_ct_globals();
+            crate::Comptime::evaluate_owned_with_imports_opts(
+                cond,
+                self.ct_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                globals.as_ref(),
+                self.core_imports,
+                self.gates,
+                self.ct_impure_depth,
+            )
+        };
+        let selected = match selected {
             Ok(crate::Comptime::CtValue::Bool(value)) => value,
             Ok(_) => {
                 self.diags.push(Diagnostic::error(

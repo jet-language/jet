@@ -1,89 +1,62 @@
-Error [E0367]: pattern `Fade` needs a leading `.`
+Error [E0367]: Pattern `Fade` needs a leading `.`
   --> tests/ui/enum_pattern_needs_dot_payload.jet:8:9
     |
   8 |         Fade(n) -> { print(n) }
     |         ^^^^
- Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
- Fix: write `.Fade(…)`
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Fix: Write `.Fade(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: pattern `Ok` needs a leading `.`
+Error [E0367]: Pattern `Ok` needs a leading `.`
   --> tests/ui/enum_pattern_needs_dot_payload.jet:11:9
     |
  11 |         Ok(n) -> { print(n) }
     |         ^^
- Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
- Fix: write `.Ok(…)`
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Fix: Write `.Ok(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: pattern `Err` needs a leading `.`
+Error [E0367]: Pattern `Err` needs a leading `.`
   --> tests/ui/enum_pattern_needs_dot_payload.jet:12:9
     |
  12 |         Err(e) -> { print(e) }
     |         ^^^
- Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
- Fix: write `.Err(…)`
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Fix: Write `.Err(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: pattern `Int` needs a leading `.`
+Error [E0367]: Pattern `Int` needs a leading `.`
   --> tests/ui/enum_pattern_needs_dot_payload.jet:15:9
     |
  15 |         Int(n) -> { print(n) }
     |         ^^^
- Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
- Fix: write `.Int(…)`
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Fix: Write `.Int(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: pattern `String` needs a leading `.`
+Error [E0367]: Pattern `String` needs a leading `.`
   --> tests/ui/enum_pattern_needs_dot_payload.jet:16:9
     |
  16 |         String(s) -> { print(s) }
     |         ^^^^^^
- Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
- Fix: write `.String(…)`
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Fix: Write `.String(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E2417]: explicit failure domain `String (text)` is not an Error type
+Error [E2417]: Explicit failure domain `String (text)` is not an Error type
   --> tests/ui/enum_pattern_needs_dot_payload.jet:6:31
     |
   6 | fn show(light: Light, result: Int !String, value: Int | String) {
     |                               ^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/enum_pattern_needs_dot_payload.jet:15:21
-    |
- 15 |         Int(n) -> { print(n) }
-    |                     ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116
-
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/enum_pattern_needs_dot_payload.jet:16:24
-    |
- 16 |         String(s) -> { print(s) }
-    |                        ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116
-
 Error [E0404]: `Ok(...)` only fits where a fallible result is expected
   --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
     |
  21 |     show(Light.Fade(1), Ok(1), 2)
     |                         ^^^^
  Why: `Ok` builds the success side of a `T !E` result
- Fix: use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
-More: jet-lang.dev/e/E0404
-
-Error [E0404]: `Ok(...)` only fits where a fallible result is expected
-  --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
-    |
- 21 |     show(Light.Fade(1), Ok(1), 2)
-    |                         ^^^^
- Why: `Ok` builds the success side of a `T !E` result
- Fix: use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
+ Fix: Use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
 More: jet-lang.dev/e/E0404

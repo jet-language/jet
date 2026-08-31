@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
             // the ordinary per-index arg loop below uses.
             if !ty.is_scalar() {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    self.mark_moved(name.clone(), *span);
+                    self.mark_moved_by(name.clone(), *span, call.name.clone());
                 }
             }
             let arg_name = ty.name();
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
                     let loan = crate::Sema::Diagnostics::contains_expiring_secret_loan(&got);
                     if loan {
                         if let Expr::Ident(name, span) = &arg.expr {
-                            self.mark_moved(name.clone(), *span);
+                            self.mark_moved_by(name.clone(), *span, call.name.clone());
                         }
                     } else {
                         let boxes_as_trait = self.trait_slot_accepts(&elem_ty, &got);

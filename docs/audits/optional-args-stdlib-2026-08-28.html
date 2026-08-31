@@ -323,7 +323,7 @@
         <h2>The question</h2>
       </div>
       <blockquote>
-        The owner proposes: instead of sibling methods sharing one signature shape (<code>String.replace()</code>, <code>String.replace_first()</code>), ship one root method with a great default for the most common operation, taking an optional customization parameter—for example, an enum for <code>First</code>/<code>All</code>. Namespace stays small, there is only one method to find, and the options are discoverable inside the signature. Siblings stay justified when signatures genuinely differ.
+        The owner proposes: instead of sibling methods sharing one signature shape, ship one root method with a great default for the most common operation, taking an optional customization parameter—for example, an enum for <code>First</code>/<code>All</code>. Namespace stays small, there is only one method to find, and the options are discoverable in the signature. Siblings stay justified when signatures genuinely differ.
       </blockquote>
     </section>
 
@@ -343,7 +343,7 @@
         </article>
         <article class="fact">
           <span class="kicker">Option surface</span>
-          <p>Enums with dot-variant patterns (<code>.First</code> / <code>.All</code>) are core surface.</p>
+          <p>Regex replacement uses named sibling methods: <code>replace</code> means all matches and <code>replace_first</code> means at most one.</p>
         </article>
         <article class="fact restriction">
           <span class="kicker">Tier-0 restriction</span>
@@ -352,8 +352,8 @@
       </div>
       <div class="conclusion">
         <strong>Mechanism exists. Zero new syntax needed.</strong>
-        <code>fn replace(pattern: String, with: String, mode: ReplaceMode{.All}) String</code>
-        Call sites: <code>s.replace(p, w)</code> and <code>s.replace(p, w, mode: .First)</code>.
+        <code>fn replace(pattern: String, with: String) String</code> and <code>fn replace_first(pattern: String, with: String) String</code>
+        Call sites: <code>s.replace(p, w)</code> and <code>s.replace_first(p, w)</code>.
       </div>
     </section>
 
@@ -375,9 +375,9 @@
           <tbody>
             <tr>
               <td>Regex/String replace</td>
-              <td><code>replace</code> + <code>replace_first</code><br>Ballot D-REGEXREPL1, card #2304, open</td>
+              <td><code>replace</code> + first-match sibling<br>Ballot D-REGEXREPL1, card #2304, open</td>
               <td>Yes</td>
-              <td><span class="badge olive">Unifiable</span><br><code>replace(p, w, mode: .All{default}/.First)</code>.</td>
+              <td><span class="badge olive">Named siblings</span><br><code>replace(p, w)</code> / <code>replace_first(p, w)</code>.</td>
             </tr>
             <tr>
               <td>Bytes/UTF-8 decode</td>
@@ -439,7 +439,7 @@
             <li>LSP hover and autocomplete teach available modes.</li>
             <li>No combinatorial name explosion: the codec matrix drops from 24 names to 3.</li>
             <li>Beginner call stays ceremony-free: <code>s.replace(p, w)</code>.</li>
-            <li>Expert choice is named at the call site: <code>mode: .First</code> reads better than a bare second method name.</li>
+            <li>Expert choice is named by the method: <code>replace_first</code> makes the scope visible at the call site.</li>
             <li>Matches Python (<code>re.sub count=</code>) and Swift (labeled parameters + enums). Rust uses siblings because Rust lacks default arguments—a constraint Jet does not have.</li>
           </ul>
         </article>
@@ -470,7 +470,7 @@ parts :: s.trim_start()</code></pre>
         </article>
         <article class="code-card after">
           <div class="label">After — root + options world</div>
-          <pre><code>clean :: re.replace(post, mask, mode: .First)
+          <pre><code>clean :: re.replace_first(post, mask)
 bytes.read_int(buf, width: .W16)          // endian .LE, signed true are defaults
 parts :: s.trim(edges: .Start)</code></pre>
         </article>
@@ -483,12 +483,12 @@ parts :: s.trim(edges: .Start)</code></pre>
         <h2>Decision routing</h2>
       </div>
       <div class="status-panel">
-        <span class="kicker">Owner decision pending</span>
+        <span class="kicker">Owner decision ratified</span>
         <ul>
-          <li>New policy ballot <strong>D-STDLIB-OPTPARAM1</strong> is raised on new Tower card <strong>#2322</strong>.</li>
-          <li>Existing open ballots <strong>D-REGEXREPL1</strong> (#2304) and <strong>D-BYTESDECODE1</strong> (#2297) each gained a new root + options option; they resolve consistently with whatever the policy ballot decides.</li>
-          <li>Ratified <strong>D-ZIPLEN1=D</strong> / <strong>D-ZIPPAD1=E</strong> remain law unless the owner explicitly amends them. The policy ballot offers forward-only and retrofit scopes as separate options.</li>
-          <li>Card <strong>#2310</strong> (byte codec matrix) implementation should wait for the policy pick. It is the largest immediate beneficiary.</li>
+          <li>Policy ballot <strong>D-STDLIB-OPTPARAM1</strong> on Tower card <strong>#2322</strong> ratifies one root method with a safe default and named options.</li>
+          <li><strong>D-REGEXREPL1</strong> (#2304) now uses the root + options shape; <strong>D-BYTESDECODE1</strong> (#2297) remains a separate fallibility decision.</li>
+          <li>Ratified <strong>D-ZIPLEN1=D</strong> / <strong>D-ZIPPAD1=E</strong> remain law unless the owner explicitly amends them. Greenfield migrations delete retired sibling spellings; no alias is retained.</li>
+          <li>Card <strong>#2310</strong> (byte codec matrix) can now apply the same policy; it is the largest immediate beneficiary.</li>
         </ul>
       </div>
     </section>

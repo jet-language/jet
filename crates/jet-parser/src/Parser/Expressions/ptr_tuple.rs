@@ -240,6 +240,13 @@ impl<'a> Parser<'a> {
         _allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
         let open = self.bump().span;
+        // D-VOID1=A: `()` is the unit value in expression position. The
+        // lambda lookahead runs before this parser, so `() -> ...` remains an
+        // empty-parameter lambda rather than becoming a unit literal.
+        if matches!(self.peek().kind, TokKind::RParen) {
+            let close = self.bump().span;
+            return Ok(Expr::Unit(Span::new(open.start, close.end)));
+        }
         if self.looks_like_named_tuple(true) {
             return self.parse_tuple_lit(open);
         }

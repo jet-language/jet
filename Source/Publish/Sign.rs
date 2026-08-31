@@ -403,7 +403,8 @@ fn write_private_seed(path: &Path, seed: &[u8], force: bool) -> Result<(), Diagn
     {
         use std::os::unix::fs::OpenOptionsExt as _;
 
-        let temp = force.then(|| path.with_extension(format!("ed25519.jet-key-{}.tmp", std::process::id())));
+        let temp = force
+            .then(|| path.with_extension(format!("ed25519.jet-key-{}.tmp", std::process::id())));
         let destination = temp.as_deref().unwrap_or(path);
         let mut options = OpenOptions::new();
         options.write(true).create_new(true).mode(0o600);

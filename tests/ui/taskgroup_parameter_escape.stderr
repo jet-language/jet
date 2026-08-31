@@ -1,8 +1,17 @@
 Error [E1110]: `group` is a `Group` and cannot escape in a lambda
-  --> tests/ui/taskgroup_parameter_escape.jet:4:12
+  --> tests/ui/taskgroup_parameter_escape.jet:3:46
     |
-  4 |     return () => use_group(group)
-    |            ^^^^^^^^^^^^^^^
- Why: a task group is a scoped spawn authority that may flow only through a direct function or method parameter
- Fix: move this work to a function or method that takes `group: Group` and call it directly
+  3 | fn escape(group: Group) fn() Int -> { return () -> use_group(group) }
+    |                                              ^^^^^^^^^^^^^^^
+ Why: A task group is a scoped spawn authority that may flow only through a direct function or method parameter
+ Fix: Move this work to a function or method that takes `group: Group` and call it directly
 More: jet-lang.dev/e/E1110
+
+Error [E0403]: This fallible call only works inside a function that returns a fallible result
+  --> tests/ui/taskgroup_parameter_escape.jet:3:52
+    |
+  3 | fn escape(group: Group) fn() Int -> { return () -> use_group(group) }
+    |                                                    ^^^^^^^^^
+ Why: Ordinary fallible calls propagate their failure automatically to the caller
+ Fix: Declare `Err` in the return type before `->`, or handle the result with `??`
+More: jet-lang.dev/e/E0403

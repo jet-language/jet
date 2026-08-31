@@ -1,9 +1,47 @@
 // Resident session identity, output launcher, embedded preview, and server rail.
   let canvasSession = null;
+  let canvasRunSelection = { output: "", target: "" };
+  const CANVAS_SESSION_LEASE_INTERVAL_MS = 80;
+  let canvasSessionLeaseTimer = null;
+  let canvasSessionLeaseInFlight = false;
+  let canvasSessionLeaseActive = true;
+
+  function scheduleCanvasSessionLease() {
+    if (!canvasSessionLeaseActive || !canvasSession || canvasSessionLeaseTimer !== null) return;
+    canvasSessionLeaseTimer = window.setTimeout(() => {
+      canvasSessionLeaseTimer = null;
+      if (!canvasSessionLeaseActive) return;
+      if (canvasSessionLeaseInFlight) {
+        scheduleCanvasSessionLease();
+        return;
+      }
+      canvasSessionLeaseInFlight = true;
+      loadCanvasSession().finally(() => {
+        canvasSessionLeaseInFlight = false;
+        scheduleCanvasSessionLease();
+      });
+    }, CANVAS_SESSION_LEASE_INTERVAL_MS);
+  }
+
+  function stopCanvasSessionLease() {
+    canvasSessionLeaseActive = false;
+    if (canvasSessionLeaseTimer !== null) {
+      window.clearTimeout(canvasSessionLeaseTimer);
+      canvasSessionLeaseTimer = null;
+    }
+  }
+
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", stopCanvasSessionLease);
+    window.addEventListener("pageshow", () => {
+      canvasSessionLeaseActive = true;
+      scheduleCanvasSessionLease();
+    });
+  }
 
   function workbenchListener(session) {
     const listeners = session && session.listeners;
-    return listeners && (listeners.workbench || listeners.application || listeners.canvas) || {};
+    return listeners && (listeners.application || listeners.canvas) || {};
   }
 
   function workbenchPort(session) {
@@ -11,9 +49,31 @@
     return Number.isFinite(port) && port > 0 ? port : 0;
   }
 
-  function workbenchPreviewUrl(port) {
+  function applicationListener(session) {
+    const listeners = session && session.listeners;
+    return listeners && listeners.application || {};
+  }
+
+  function listenerPort(listener) {
+    const port = Number(listener && listener.port);
+    return Number.isFinite(port) && port > 0 ? port : 0;
+  }
+
+  function listenerEndpoint(listener) {
+    const port = listenerPort(listener);
+    return port ? `${listener.host || location.hostname}:${port}` : "port pending";
+  }
+
+  function applicationPort(session) {
+    return listenerPort(applicationListener(session));
+  }
+
+  function applicationPreviewUrl(session) {
+    const listener = applicationListener(session);
+    const port = applicationPort(session);
     if (!port) return "";
     const url = new URL("/", window.location.href);
+    if (listener.host) url.hostname = listener.host;
     url.port = String(port);
     return url.href;
   }
@@ -21,7 +81,7 @@
   function syncWorkbenchContext(project = latestProject, session = canvasSession) {
     const packageName = project && (project.packages || []).find((pkg) => pkg && pkg.name)?.name;
     const projectName = packageName || (project && project.entry) || (project && project.mode) || "Project";
-    const selectedOutput = session && session.run && session.run.output;
+    const selectedOutput = canvasRunSelection.output || session && session.run && session.run.output;
     const rows = outputRows(project);
     const firstOutput = rows[0] && (rows[0].name || rows[0].target || rows[0].output || rows[0].kind);
     const outputName = selectedOutput || firstOutput || "default";
@@ -126,15 +186,33 @@
     const list = document.getElementById("server-list");
     const count = document.getElementById("server-count");
     if (!list) return;
-    const listener = workbenchListener(session);
-    const port = workbenchPort(session);
+    const listeners = session && session.listeners || {};
     const state = session && session.state || "starting";
-    const rows = [{
-      name: "Workbench",
-      port: port ? `${listener.host || location.hostname}:${port}` : "port pending",
-      detail: `${state} · Canvas · preview · diagnostics · one session`,
-      state
-    }];
+    const rows = [];
+    if (listenerPort(listeners.canvas)) {
+      rows.push({
+        name: "Canvas",
+        port: listenerEndpoint(listeners.canvas),
+        detail: `${state} · Canvas control · diagnostics · one session`,
+        state
+      });
+    }
+    if (listenerPort(listeners.application)) {
+      rows.push({
+        name: "App Preview",
+        port: listenerEndpoint(listeners.application),
+        detail: `${state} · application preview · application-owned routes · one session`,
+        state
+      });
+    }
+    if (!rows.length) {
+      rows.push({
+        name: "Resident session",
+        port: "port pending",
+        detail: `${state} · resident session`,
+        state
+      });
+    }
     for (const service of (project && project.services) || []) {
       const ports = Array.isArray(service.ports) ? service.ports.join(", ") : "";
       const run = Array.isArray(service.run) ? service.run.join(" ") : service.run || "catalog/default";
@@ -169,7 +247,17 @@
 
   function syncCanvasSession(session) {
     if (!session || !session.id) return;
+    const previousSessionId = canvasSession && canvasSession.id;
     canvasSession = session;
+    if (previousSessionId && previousSessionId !== session.id) {
+      canvasRunSelection = { output: "", target: "" };
+    }
+    if (!canvasRunSelection.output && session.run && session.run.output) {
+      canvasRunSelection.output = String(session.run.output);
+    }
+    if (!canvasRunSelection.target && session.run && session.run.target) {
+      canvasRunSelection.target = String(session.run.target);
+    }
     const projectContext = session.project_context || {};
     if (projectContext.source_id) selectedSourceId = projectContext.source_id;
     const shortId = String(session.id).slice(-18);
@@ -198,9 +286,9 @@
       view.dataset.sessionState = session.state || "starting";
     });
     const preview = document.getElementById("preview-link");
-    const port = workbenchPort(session);
-    const listener = workbenchListener(session);
-    const previewUrl = workbenchPreviewUrl(port);
+    const listener = applicationListener(session);
+    const port = applicationPort(session);
+    const previewUrl = applicationPreviewUrl(session);
     if (preview) {
       preview.href = previewUrl || "/";
       preview.textContent = previewUrl
@@ -272,6 +360,7 @@
         const session = canvasSessionPayload(value) || canvasSessionPayloadFromReport(value);
         if (!session) throw new Error("session response has no resident session");
         syncCanvasSession(session);
+        scheduleCanvasSessionLease();
         return session;
       })
       .catch(() => canvasSession);
@@ -288,60 +377,139 @@
     return project.targets || [];
   }
 
+  function targetRows(project) {
+    if (!project) return [];
+    const rows = [];
+    const selected = canvasRunSelection.target || canvasSession && canvasSession.run && canvasSession.run.target;
+    if (selected) rows.push({ name: String(selected), detail: "selected run target" });
+    for (const pkg of project.packages || []) {
+      if (!pkg || !pkg.target) continue;
+      rows.push({
+        name: String(pkg.target),
+        detail: `${pkg.name || "package"} target`
+      });
+    }
+    if (!rows.length && outputRows(project).length) {
+      rows.push({ name: "native", detail: "default run target" });
+    }
+    const seen = new Set();
+    return rows.filter((row) => {
+      if (!row.name || seen.has(row.name)) return false;
+      seen.add(row.name);
+      return true;
+    });
+  }
+
+  function canvasChoiceCard(row, kind, selected) {
+    const name = String(row.name || row.target || row.output || row.kind || kind);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `project-card ${kind}-card` + (name === selected ? " is-active" : "");
+    card.setAttribute("role", "option");
+    card.setAttribute("aria-selected", name === selected ? "true" : "false");
+    card.dataset[kind === "output" ? "canvasOutput" : "canvasTarget"] = name;
+    card.addEventListener("click", () => {
+      if (kind === "output") selectCanvasOutput(name);
+      else selectCanvasTarget(name);
+    });
+    const title = document.createElement("b");
+    title.textContent = name;
+    const detail = document.createElement("small");
+    detail.textContent = [row.kind, row.entry || row.path, row.detail, row.provenance]
+      .filter(Boolean)
+      .join(" · ") || `valid ${kind}`;
+    card.append(title, detail);
+    return card;
+  }
+
   function syncCanvasOutputs(project) {
     const list = document.getElementById("output-list");
+    const targetList = document.getElementById("target-list");
     const count = document.getElementById("output-count");
-    if (!list) return;
+    const targetCount = document.getElementById("target-count");
+    if (!list || !targetList) return;
     const rows = outputRows(project);
+    const targets = targetRows(project);
     syncWorkbenchContext(project, canvasSession);
     const outputPanel = document.getElementById("output-panel");
     if (outputPanel) {
-      if (!rows.length && outputPanel.contains(document.activeElement) && canvas) canvas.focus();
-      outputPanel.hidden = rows.length === 0;
+      if (!rows.length && !targets.length && outputPanel.contains(document.activeElement) && canvas) canvas.focus();
+      outputPanel.hidden = rows.length === 0 && targets.length === 0;
     }
-    list.innerHTML = "";
+    list.replaceChildren();
+    targetList.replaceChildren();
     if (count) count.textContent = String(rows.length);
+    if (targetCount) targetCount.textContent = String(targets.length);
+    if (!rows.length && !targets.length) {
+      const empty = document.createElement("span");
+      empty.className = "tag";
+      empty.textContent = "No outputs or targets discovered yet";
+      list.appendChild(empty);
+      window.__jetCanvasOutputs = [];
+      window.__jetCanvasTargets = [];
+      syncCanvasLayout(project);
+      return;
+    }
+    const selectedOutput = canvasSelectedOutput();
+    for (const row of rows) {
+      list.appendChild(canvasChoiceCard(row, "output", selectedOutput));
+    }
     if (!rows.length) {
       const empty = document.createElement("span");
       empty.className = "tag";
       empty.textContent = "No outputs discovered yet";
       list.appendChild(empty);
-      window.__jetCanvasOutputs = [];
-      syncCanvasLayout(project);
-      return;
     }
-    const selected = canvasSession && canvasSession.run && canvasSession.run.output;
-    for (const row of rows) {
-      const name = String(row.name || row.target || row.output || row.kind || "output");
-      const card = document.createElement("div");
-      card.className = "project-card output-card" + (name === selected ? " is-active" : "");
-      card.dataset.canvasOutput = name;
-      const title = document.createElement("b");
-      title.textContent = name;
-      const detail = document.createElement("small");
-      detail.textContent = [row.kind, row.entry || row.path, row.provenance].filter(Boolean).join(" · ") || "valid output";
-      card.append(title, detail);
-      list.appendChild(card);
+    const selectedTarget = canvasSelectedTarget();
+    for (const row of targets) {
+      targetList.appendChild(canvasChoiceCard(row, "target", selectedTarget));
+    }
+    if (!targets.length) {
+      const empty = document.createElement("span");
+      empty.className = "tag";
+      empty.textContent = "No targets discovered yet";
+      targetList.appendChild(empty);
     }
     window.__jetCanvasOutputs = rows.map((row) => ({
       name: row.name || row.target || row.output || row.kind || "output",
       kind: row.kind || "",
       entry: row.entry || row.path || ""
     }));
+    window.__jetCanvasTargets = targets.map((row) => ({
+      name: row.name,
+      detail: row.detail || ""
+    }));
     syncCanvasLayout(project);
   }
 
-  function selectCanvasOutput() {
+  function selectCanvasSelection(kind, value) {
+    if (value) canvasRunSelection[kind] = String(value);
+    syncCanvasOutputs(latestProject);
+    syncWorkbenchContext(latestProject, canvasSession);
     return Promise.resolve(canvasSession);
   }
 
+  function selectCanvasOutput(output) {
+    return selectCanvasSelection("output", output);
+  }
+
+  function selectCanvasTarget(target) {
+    return selectCanvasSelection("target", target);
+  }
+
   function canvasSelectedOutput() {
-    return canvasSession && canvasSession.run && canvasSession.run.output || "";
+    return canvasRunSelection.output || canvasSession && canvasSession.run && canvasSession.run.output || "";
+  }
+
+  function canvasSelectedTarget() {
+    return canvasRunSelection.target || canvasSession && canvasSession.run && canvasSession.run.target || "";
   }
 
   window.__jetCanvasSessionApi = {
     clientId: canvasClientId,
     load: loadCanvasSession,
     selectOutput: selectCanvasOutput,
-    selectedOutput: canvasSelectedOutput
+    selectTarget: selectCanvasTarget,
+    selectedOutput: canvasSelectedOutput,
+    selectedTarget: canvasSelectedTarget
   };

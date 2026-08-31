@@ -14,7 +14,8 @@
     "zig",
     "jet-expert",
     "c-expert",
-    "rust-expert"
+    "rust-expert",
+    "node"
   ],
   "spec": {
     "behavior": "Simulate the classic five-body solar system for N symplectic-Euler steps with dt 0.01, after offsetting the Sun's momentum, and print initial and final system energy with nine decimal places.",
@@ -42,6 +43,12 @@
         "main.rs",
         "-o",
         "main-rust"
+      ],
+      "jet-expert": [
+        "jet",
+        "build",
+        "--profile=release",
+        "main.jet"
       ]
     }
   },
@@ -61,7 +68,7 @@
         "rustc E0308: generated Body equal/encode returned Result where plain values were expected",
         "E0164: compound assignment can't target an indexed slot"
       ],
-      "notes": "Default jet run emits the initial line but did not finish N=50000 within 180 seconds; lower-N run matched. Four source-only AOT retries: attempt 1 exact error `Error [E1803]: application authority is undecided for Exec`; attempt 2 exact rustc errors `expected bool, found Result<bool, _>` and `expected DataTree, found Result<DataTree, _>` in generated Body equal/encode; attempt 3 exact error `Error [E0164]: compound assignment can't target an indexed slot`; attempt 4 built but `./build/main 50000` emitted `-0.169289903` and `-0.169248379`. Restored typed-CLI Body source as best clean version. AOT cell remains broken; expected.out is peer-confirmed and Jet's canonical final line was not observed."
+      "notes": "Current source uses named tuple body records plus canonical Vec3 dot/length/splat and collection iteration/writeback surfaces. It reads the declared step argument from process.argv().get(1), with 50000 as the no-argument fallback. The earlier typed-CLI/user-struct and F64x4 experiments remain historical diagnostics; AOT, default-run, interpreter parity, byte output, instruction, and performance proof remain pending the integrated harness pass."
     },
     "rust": {
       "author": "luna-max",
@@ -92,6 +99,13 @@
         "error: root source file struct 'std' has no member named 'io'"
       ],
       "notes": "Updated stdout writer for Zig 0.16 API."
+    },
+    "node": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Added a built-in Node numeric rail with the same five-body constants, update order, and nine-decimal energy output."
     }
   },
   "expert": {

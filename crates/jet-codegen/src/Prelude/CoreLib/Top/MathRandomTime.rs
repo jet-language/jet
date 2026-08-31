@@ -1,6 +1,6 @@
-// D-TIME-INSTANT-SPLIT1=A: these trait impls stay beside the Core-owned
-// carrier. The shared carrier itself lives in Core/TimeInstant.rs so JIT and
-// AOT use the same implementation.
+// D-TIME-INSTANT-SPLIT1=A: JetInstant trait impls stay beside the Core-owned
+// carrier. The Date-family carriers and their traits live in the fixed runtime
+// (`Prelude/Core.rs`) so the optional Core crate does not violate orphan rules.
 impl JetShow for JetInstant {
     fn jet_show(&self) -> String {
         self.to_string_fmt()
@@ -181,6 +181,31 @@ fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_
         ns: jet_duration_kernel_difference(a.ns, b.ns),
     }
 }
+fn jet_duration_abs(d: &jet_std::Duration) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: jet_duration_kernel_abs(d.ns),
+    }
+}
+fn jet_duration_negated(d: &jet_std::Duration) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: jet_duration_kernel_negated(d.ns),
+    }
+}
+fn jet_duration_sign(d: &jet_std::Duration) -> i64 {
+    jet_duration_kernel_sign(d.ns)
+}
+fn jet_duration_total_in(d: &jet_std::Duration, unit: &String) -> f64 {
+    jet_duration_kernel_total_in(d.ns, unit)
+}
+fn jet_duration_round(
+    d: &jet_std::Duration,
+    unit: &String,
+    increment: &i64,
+    mode: &String,
+) -> jet_std::Duration {
+    let ns = jet_duration_kernel_round(d.ns, unit, *increment, mode).unwrap_or(d.ns);
+    jet_std::Duration { ns }
+}
 fn jet_duration_scale(d: &jet_std::Duration, factor: &i64) -> jet_std::Duration {
     jet_std::Duration {
         ns: jet_duration_kernel_scale(d.ns, *factor)
@@ -248,50 +273,6 @@ impl std::ops::Add<JetInstant> for jet_std::Duration {
     }
 }
 
-fn jet_time_ordering(ordering: std::cmp::Ordering) -> __jet_Ordering {
-    match ordering {
-        std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
-        std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
-        std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
-    }
-}
-
-impl __jet_Equatable for JetDate {
-    fn equal(&self, rhs: &Self) -> bool {
-        self == rhs
-    }
-}
-
-impl __jet_Comparable for JetDate {
-    fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        jet_time_ordering(self.cmp(rhs))
-    }
-}
-
-impl __jet_Equatable for JetLocalTime {
-    fn equal(&self, rhs: &Self) -> bool {
-        self == rhs
-    }
-}
-
-impl __jet_Comparable for JetLocalTime {
-    fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        jet_time_ordering(self.cmp(rhs))
-    }
-}
-
-impl __jet_Equatable for JetDateTime {
-    fn equal(&self, rhs: &Self) -> bool {
-        self == rhs
-    }
-}
-
-impl __jet_Comparable for JetDateTime {
-    fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        jet_time_ordering(self.cmp(rhs))
-    }
-}
-
 impl __jet_Equatable for jet_std::Duration {
     fn equal(&self, rhs: &Self) -> bool {
         self.ns == rhs.ns
@@ -313,20 +294,6 @@ impl __jet_Equatable for JetInstant {
 impl __jet_Comparable for JetInstant {
     fn compare(&self, rhs: &Self) -> __jet_Ordering {
         jet_time_ordering(self.cmp(rhs))
-    }
-}
-
-// ZonedDateTime `==` is instant plus zone identity. Temporal keeps that
-// value equality distinct from its separate `equals` distinction.
-impl __jet_Equatable for JetZonedDateTime {
-    fn equal(&self, rhs: &Self) -> bool {
-        self == rhs
-    }
-}
-
-impl __jet_Comparable for JetZonedDateTime {
-    fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        jet_time_ordering(self.instant.cmp(&rhs.instant))
     }
 }
 
@@ -387,8 +354,13 @@ fn jet_time_zone_utc() -> JetZone {
 fn jet_time_zoned(dt: &JetDateTime, zone: &JetZone) -> JetZonedDateTime {
     dt.in_zone(zone)
 }
-fn jet_time_zoned_local(date: &JetDate, time: &JetLocalTime, zone: &JetZone) -> JetZonedDateTime {
-    JetZonedDateTime::from_local(date, time, zone)
+fn jet_time_zoned_local(
+    date: &JetDate,
+    time: &JetLocalTime,
+    zone: &JetZone,
+    disambiguation: &String,
+) -> Result<JetZonedDateTime, String> {
+    JetZonedDateTime::from_local_with_disambiguation(date, time, zone, disambiguation)
 }
 fn jet_datetime_plus_duration(dt: &JetDateTime, d: &crate::jet_std::Duration) -> JetDateTime {
     dt.plus_duration_ns(d.ns)

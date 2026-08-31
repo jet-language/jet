@@ -52,10 +52,13 @@ struct KernelFailure {
 impl<'a> super::Checker<'a> {
     /// D-SIMD3=B: prove the deliberately small source shape that the native
     /// backend may mark as vectorizable. The proof is conservative: one
-    /// half-open, unit-stride fixed-list range; one indexed store; and an
-    /// expression made only from same-lane fixed-list reads and scalar
-    /// arithmetic. Calls, control flow, aliases, and cross-lane reads stay
-    /// scalar until a later proof adds them.
+    /// half-open, unit-stride range; one or more distinct indexed stores; and
+    /// expressions made only from same-lane reads, loop-invariant scalar
+    /// reads, and scalar arithmetic. A dynamic list is admitted only for one
+    /// in-place root bounded by that root's `len()`, which proves the root is
+    /// the only storage participating in the loop. Calls, control flow,
+    /// aliases, and cross-lane reads stay scalar until a later proof adds
+    /// them.
     pub(crate) fn prove_auto_vectorization_loop(
         &self,
         kind: &ForKind,
@@ -80,60 +83,137 @@ impl<'a> super::Checker<'a> {
         if !matches!(start.without_parens(), Expr::Int(0, ..)) {
             return None;
         }
-        let end = match end.without_parens() {
-            Expr::Int(value, ..) if *value >= 0 => u64::try_from(*value).ok()?,
-            _ => return None,
+        let end_root = match end.without_parens() {
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if method == "len" && args.is_empty() => {
+                let Expr::Ident(root, _) = receiver.without_parens() else {
+                    return None;
+                };
+                Some(root.as_str())
+            }
+            _ => None,
         };
-        let [Stmt::Assign {
-            target,
-            op: None,
-            value,
-            ..
-        }] = body
-        else {
-            return None;
+        let extent = match end.without_parens() {
+            Expr::Int(value, ..) if *value >= 0 => Some(u64::try_from(*value).ok()?),
+            _ => {
+                let root = end_root?;
+                let info = self.lookup(root)?;
+                match &info.ty {
+                    Type::FixedList { len, .. } => Some(len.literal_value()?),
+                    Type::List(_) => None,
+                    _ => return None,
+                }
+            }
         };
-        let LValue::Index { base, index, .. } = target else {
-            return None;
-        };
-        let Expr::Ident(output, _) = base.without_parens() else {
-            return None;
-        };
-        if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
-            return None;
-        }
-
-        let output_info = self.lookup(output)?;
-        let Type::FixedList {
-            elem: output_elem,
-            len: output_len,
-        } = &output_info.ty
-        else {
-            return None;
-        };
-        let length = output_len.literal_value()?;
-        if length != end || !is_auto_vectorizable_scalar(output_elem) {
-            return None;
-        }
-        // The write target must be a local value, not a borrowed parameter.
-        // Fixed-list scalar values have no interior references, so distinct
-        // local roots are disjoint storage by construction.
-        if output_info.param_conv.is_some() || !output_info.mutable {
-            return None;
-        }
-
+        let mut outputs = std::collections::BTreeSet::new();
         let mut inputs = std::collections::BTreeSet::new();
-        if !self.prove_auto_element_expr(
-            value,
-            loop_var,
-            output_elem,
-            length,
-            output,
-            &mut inputs,
-        ) {
+        let mut element_type = None;
+        for stmt in body {
+            let Stmt::Assign {
+                target,
+                op: None,
+                value,
+                ..
+            } = stmt
+            else {
+                return None;
+            };
+            let LValue::Index { base, index, .. } = target else {
+                return None;
+            };
+            let Expr::Ident(output, _) = base.without_parens() else {
+                return None;
+            };
+            if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
+                return None;
+            }
+            // Repeated stores to one root have an order-sensitive shape that
+            // the native loop consumer does not model. Distinct roots remain
+            // independent fixed-list destinations.
+            if !outputs.insert(output.clone()) {
+                return None;
+            }
+
+            let output_info = self.lookup(output)?;
+            let (output_elem, same_lane_output) = match &output_info.ty {
+                Type::FixedList { elem, len } => {
+                    if Some(len.literal_value()?) != extent {
+                        return None;
+                    }
+                    // The write target must be a local value, not a borrowed
+                    // parameter. Fixed-list scalar values have no interior
+                    // references, so distinct local roots are disjoint
+                    // storage by construction.
+                    if output_info.param_conv.is_some() || !output_info.mutable {
+                        return None;
+                    }
+                    (elem, false)
+                }
+                Type::List(elem) => {
+                    // A dynamic destination is safe only when the range is
+                    // its own length. This is the single-root in-place case;
+                    // the final root check below rejects a second collection.
+                    if end_root != Some(output.as_str()) {
+                        return None;
+                    }
+                    if output_info.param_conv.is_some_and(|conv| {
+                        conv != AccessConvention::Write
+                    }) || (!output_info.mutable
+                        && output_info.param_conv != Some(AccessConvention::Write))
+                    {
+                        return None;
+                    }
+                    (elem, true)
+                }
+                _ => return None,
+            };
+            if !is_auto_vectorizable_scalar(output_elem) {
+                return None;
+            }
+            if let Some(expected) = &element_type {
+                if expected != output_elem.as_ref() {
+                    return None;
+                }
+            } else {
+                element_type = Some((**output_elem).clone());
+            }
+
+            if !self.prove_auto_element_expr(
+                value,
+                loop_var,
+                output_elem,
+                extent,
+                output,
+                same_lane_output,
+                &mut inputs,
+            ) {
+                return None;
+            }
+        }
+        if outputs.is_empty() {
             return None;
         }
-        if inputs.is_empty() || inputs.contains(output) {
+        let collection_roots = outputs
+            .iter()
+            .chain(inputs.iter())
+            .collect::<std::collections::BTreeSet<_>>();
+        if collection_roots.iter().any(|root| {
+            self.lookup(root.as_str())
+                .is_some_and(|info| matches!(&info.ty, Type::List(_)))
+        }) && (end_root.is_none()
+            || collection_roots.len() != 1
+            || !collection_roots
+                .iter()
+                .any(|root| root.as_str() == end_root.unwrap()))
+        {
+            return None;
+        }
+        let no_cross_iteration_deps = !inputs.iter().any(|input| outputs.contains(input));
+        if !no_cross_iteration_deps {
             return None;
         }
         // Two shared parameter roots could name the same backing storage. A
@@ -155,11 +235,11 @@ impl<'a> super::Checker<'a> {
         }
 
         Some(AutoVectorizationFacts {
-            element_type: (**output_elem).clone(),
+            element_type: element_type?,
             no_aliasing: true,
             no_early_exit: true,
             effect_free_body,
-            no_cross_iteration_deps: true,
+            no_cross_iteration_deps,
         })
     }
 
@@ -168,18 +248,24 @@ impl<'a> super::Checker<'a> {
         expr: &Expr,
         loop_var: &str,
         element_type: &Type,
-        length: u64,
+        extent: Option<u64>,
         output: &str,
+        same_lane_output: bool,
         inputs: &mut std::collections::BTreeSet<String>,
     ) -> bool {
         match expr.without_parens() {
             Expr::Int(..) | Expr::Float(..) => true,
+            Expr::Ident(name, _) if name == loop_var => true,
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .is_some_and(|info| is_auto_vectorizable_scalar(&info.ty)),
             Expr::Unary(UnOp::Neg, inner, ..) => self.prove_auto_element_expr(
                 inner,
                 loop_var,
                 element_type,
-                length,
+                extent,
                 output,
+                same_lane_output,
                 inputs,
             ),
             Expr::Binary(op, left, right, ..)
@@ -189,15 +275,17 @@ impl<'a> super::Checker<'a> {
                     left,
                     loop_var,
                     element_type,
-                    length,
+                    extent,
                     output,
+                    same_lane_output,
                     inputs,
                 ) && self.prove_auto_element_expr(
                     right,
                     loop_var,
                     element_type,
-                    length,
+                    extent,
                     output,
+                    same_lane_output,
                     inputs,
                 )
             }
@@ -205,21 +293,27 @@ impl<'a> super::Checker<'a> {
                 let Expr::Ident(root, _) = base.without_parens() else {
                     return false;
                 };
-                if root == output
-                    || !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var)
-                {
+                if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
                     return false;
                 }
                 let Some(info) = self.lookup(root) else {
                     return false;
                 };
-                let Type::FixedList { elem, len } = &info.ty else {
-                    return false;
-                };
-                if elem.as_ref() != element_type || len.literal_value() != Some(length) {
-                    return false;
+                match &info.ty {
+                    Type::FixedList { elem, len } => {
+                        let Some(length) = len.literal_value() else {
+                            return false;
+                        };
+                        if elem.as_ref() != element_type || Some(length) != extent {
+                            return false;
+                        }
+                    }
+                    Type::List(elem) if elem.as_ref() == element_type => {}
+                    _ => return false,
                 }
-                inputs.insert(root.clone());
+                if !(same_lane_output && root == output) {
+                    inputs.insert(root.clone());
+                }
                 true
             }
             _ => false,

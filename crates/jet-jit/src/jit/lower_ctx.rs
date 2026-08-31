@@ -4,7 +4,6 @@ use cranelift_codegen::ir::{
     TrapCode, Value,
 };
 use cranelift_frontend::{FunctionBuilder, Switch, Variable};
-use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, ambient_err_local, ListSpreadPart, TBuiltinOp, TCallArg, TClosureOp, TContract,
@@ -22,8 +21,7 @@ use super::runtime_host::{
     HostFns, JitZipColumn, JitZipPlan, JitZipValueKind, INTN_MODE_CHECKED, INTN_MODE_SATURATING,
     INTN_MODE_TRAP, INTN_MODE_WRAPPING, INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR,
     INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_MUL, INTN_OP_POW,
-    INTN_OP_REM, INTN_OP_ROTATE_LEFT, INTN_OP_ROTATE_RIGHT, INTN_OP_SHL, INTN_OP_SHR,
-    INTN_OP_SUB,
+    INTN_OP_REM, INTN_OP_ROTATE_LEFT, INTN_OP_ROTATE_RIGHT, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, is_packed_process_signal, jit_closure_elem_type,
@@ -67,6 +65,12 @@ pub(crate) struct LoopTargets {
     compute_preserve_names: HashSet<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JitTextMode {
+    Display,
+    Debug,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ComputeResource {
     Tensor { handle: Value, owner: Option<Value> },
@@ -87,7 +91,7 @@ pub(crate) enum ComputeResource {
 /// `Err` from this file only costs JIT speed, never correctness (D-JIT1).
 pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) b: &'a mut FunctionBuilder<'b>,
-    pub(crate) module: &'a mut JITModule,
+    pub(crate) module: &'a mut dyn Module,
     pub(crate) host: &'a HostFns,
     pub(crate) runtime: &'a mut JitRuntime,
     pub(crate) meta: &'a JitMeta<'a>,
@@ -202,15 +206,6 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) contract_posts: Vec<Vec<usize>>,
 }
 
-/// Recover the canonical conversion pair from the generated conversion name.
-/// `Sema::error_conv_fn_name` and the AOT emitter use this same stable name;
-/// this is metadata lookup, not a second conversion policy.
-pub(crate) fn error_conversion_metadata(name: &str) -> Option<(String, String)> {
-    let stem = name.strip_prefix("__jet_errconv_")?;
-    let (source, target) = stem.split_once("_to_")?;
-    Some((source.to_string(), target.to_string()))
-}
-
 fn mixed_switch_int_literal(cond: &TExpr) -> Option<i64> {
     match &cond.kind {
         TExprKind::Binary { rhs, .. } => match rhs.kind {
@@ -303,15 +298,38 @@ impl LowerCtx<'_, '_> {
     /// #1634: the single-result JIT host-call idiom (declare the func ref in
     /// this function, emit the call, pull the sole `Value` result out of the
     /// returned `Inst`) collapsed to one line. Every host FuncId is declared
-    /// through `HostFns` (#1633), never invented here. Void host calls and
-    /// multi-result host calls still spell the three steps by hand — see the
-    /// remaining `declare_func_in_func` sites in this file.
+    /// through `HostFns` (#1633), never invented here. Multi-result host calls
+    /// still spell the three steps by hand.
     fn call_host(&mut self, id: FuncId, args: &[Value]) -> Value {
         self.assert_host_arity(id, args.len());
+        self.assert_host_results(id, 1);
         let func_ref = self.module.declare_func_in_func(id, self.b.func);
         let call = self.b.ins().call(func_ref, args);
-        self.b.inst_results(call)[0]
+        *self.b.inst_results(call).first().unwrap_or_else(|| {
+            let declaration = self.module.declarations().get_function_decl(id);
+            panic!(
+                "JIT host `{}` ({id:?}) with {} arguments declared no result",
+                declaration.name.as_deref().unwrap_or("<anonymous>"),
+                args.len()
+            )
+        })
     }
+
+
+    /// #2252: the same idiom for a host that declares NO result. Routing a void
+    /// host through [`Self::call_host`] reads result slot 0 of an empty result
+    /// list, so lowering panics (`index out of bounds: the len is 0 but the
+    /// index is 0`) the first time the emitted block is reached. That panic is
+    /// caught as an unnamed resident-JIT gap and the whole program deopts to the
+    /// interpreter, which then refuses whatever the interpreter does not cover —
+    /// the failure is reported nowhere near the void call that caused it.
+    fn call_host_void(&mut self, id: FuncId, args: &[Value]) {
+        self.assert_host_arity(id, args.len());
+        self.assert_host_results(id, 0);
+        let func_ref = self.module.declare_func_in_func(id, self.b.func);
+        self.b.ins().call(func_ref, args);
+    }
+
 
     /// Marshal `keep` through a carrier-shaped host import whose body calls the
     /// shared Prelude `jet_keep`. Returning the lowered value directly would
@@ -356,6 +374,23 @@ impl LowerCtx<'_, '_> {
                 argc,
                 declared,
                 "jit host `{}` emitted with {argc} args for a {declared}-param signature",
+                declaration.name.as_deref().unwrap_or("<anonymous>"),
+            );
+        }
+    }
+
+    /// The result half of [`Self::assert_host_arity`]: a value-returning
+    /// one-liner used on a void host (or the reverse) is a lowering bug, and
+    /// reading result slot 0 of an empty result list only surfaces as an
+    /// `index out of bounds` panic. Name the symbol and both counts instead.
+    fn assert_host_results(&self, id: FuncId, expected: usize) {
+        if cfg!(debug_assertions) {
+            let declaration = self.module.declarations().get_function_decl(id);
+            let declared = declaration.signature.returns.len();
+            assert_eq!(
+                expected,
+                declared,
+                "jit host `{}` called for {expected} results but declares {declared}",
                 declaration.name.as_deref().unwrap_or("<anonymous>"),
             );
         }
@@ -446,6 +481,36 @@ impl LowerCtx<'_, '_> {
                 _ => self.host.coll.list_eq,
             },
             _ => self.host.coll.list_eq,
+        }
+    }
+
+    /// List ordering uses the same typed carrier table as list equality. The
+    /// host only marshals the handle; `collection_semantics::list_order`
+    /// applies the shared Prelude ordering law.
+    fn list_order_host(&self, list_ty: &Type) -> FuncId {
+        match list_ty {
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                match self.erase_distinct_ty(elem) {
+                    Type::String => self.host.coll.list_order_str,
+                    Type::Float | Type::Float32 => self.host.coll.list_order_f64,
+                    _ => self.host.coll.list_order,
+                }
+            }
+            _ => self.host.coll.list_order,
+        }
+    }
+
+    /// `.copy()` host keyed by the carrier the resident ABI holds, mirroring
+    /// [`Self::list_eq_host`]. Every row reaches the same Prelude
+    /// `jet_list_copy` kernel; only the read and republish pair differs.
+    fn list_copy_host(&self, list_ty: &Type) -> FuncId {
+        match list_ty {
+            Type::List(elem) | Type::FixedList { elem, .. } => match self.erase_distinct_ty(elem) {
+                Type::String => self.host.coll.list_copy_str,
+                Type::Float | Type::Float32 => self.host.coll.list_copy_f64,
+                _ => self.host.coll.list_copy,
+            },
+            _ => self.host.coll.list_copy,
         }
     }
 
@@ -671,7 +736,9 @@ impl LowerCtx<'_, '_> {
     /// its slot is a real lowering defect and must keep failing the verifier
     /// loudly instead of being silently coerced.
     fn typed_dead_edge(&mut self, value: Value, tail: &TExpr, want: types::Type) -> Value {
-        if self.b.func.dfg.value_type(value) == want || !Self::is_dead_edge_tail(tail) {
+        let have = self.b.func.dfg.value_type(value);
+        let dead = Self::is_dead_edge_tail(tail);
+        if have == want || !dead {
             return value;
         }
         if want == types::F64 {
@@ -689,6 +756,16 @@ impl LowerCtx<'_, '_> {
             &expr.kind,
             TExprKind::Unreachable { .. } | TExprKind::Todo { .. }
         )
+    }
+    fn current_block_terminated(&self) -> bool {
+        let Some(block) = self.b.current_block() else {
+            return true;
+        };
+        self.b
+            .func
+            .layout
+            .last_inst(block)
+            .is_some_and(|inst| self.b.func.dfg.insts[inst].opcode().is_terminator())
     }
 
     /// Lower a plain Core row through the resident host symbol derived from
@@ -1293,6 +1370,31 @@ impl LowerCtx<'_, '_> {
         Ok(self.call_host(host_id, &[handle]))
     }
 
+    /// Imported functions carry the enclosing Jet failure rail in their ABI.
+    /// AOT appends `?` to module calls whose source type is not already a
+    /// carrier; resident execution must perform the same propagation before a
+    /// String or other handle reaches its consumer.
+    fn lower_implicit_module_result(
+        &mut self,
+        handle: Value,
+        ok_ty: &Type,
+    ) -> Result<Value, String> {
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.emit_lexical_exit(Some(handle), false, self.shield_depth)?;
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let value = self.result_payload(handle, ok_ty)?;
+        self.track_compute_value(value, ok_ty)?;
+        Ok(value)
+    }
+
     fn scalar_bitcast_memflags() -> MemFlags {
         MemFlags::new().with_endianness(Endianness::Little)
     }
@@ -1534,6 +1636,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::DataTreeText | THandleOp::JSONText => Some(Type::String),
             THandleOp::DataTreeBool | THandleOp::JSONBool => Some(Type::Bool),
             THandleOp::DataTreeFloat | THandleOp::JSONFloat => Some(Type::Float),
+            THandleOp::DataTreeToText | THandleOp::JSONToText => Some(Type::String),
             // ParsedArgs handle lives in result bits (i64).
             THandleOp::ArgsSpecParse | THandleOp::ArgsSpecParseOrExit => Some(Type::Int),
             _ => None,
@@ -1612,9 +1715,16 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ClockWait => Some(Type::Int),
                 THandleOp::DurationIn { .. } => Some(Type::Option(Box::new(Type::Int))),
                 THandleOp::DurationSecondsValue => Some(Type::Float),
-                THandleOp::DurationScale | THandleOp::DurationDivide => {
-                    Some(Type::Named(jet_foundation::Syntax::DURATION_TYPE.to_string()))
+                THandleOp::DurationSign => Some(Type::Int),
+                THandleOp::DurationTotalIn => Some(Type::Float),
+                THandleOp::DurationAbs | THandleOp::DurationNegated | THandleOp::DurationRound => {
+                    Some(Type::Named(
+                        jet_foundation::Syntax::DURATION_TYPE.to_string(),
+                    ))
                 }
+                THandleOp::DurationScale | THandleOp::DurationDivide => Some(Type::Named(
+                    jet_foundation::Syntax::DURATION_TYPE.to_string(),
+                )),
                 _ => {
                     let _ = args;
                     None
@@ -1831,7 +1941,13 @@ impl LowerCtx<'_, '_> {
                 self.pack_datatree_enum(disc, Some((val, &Type::String)))
             }
             Type::Char => {
-                return Err("jit SerdeEncode Char unsupported".to_string());
+                let buf = self.call_host(self.host.str_begin, &[]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_char, self.b.func);
+                self.b.ins().call(push, &[buf, val]);
+                let disc = self.datatree_disc("Text")?;
+                self.pack_datatree_enum(disc, Some((buf, &Type::String)))
             }
             Type::Option(inner) => {
                 let present = self.option_present_flag(val, inner, false);
@@ -1871,6 +1987,9 @@ impl LowerCtx<'_, '_> {
             }
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_serde_encode_list(val, elem)
+            }
+            Type::Map { key, value, .. } if matches!(key.as_ref(), Type::String) => {
+                self.lower_serde_encode_map(val, value)
             }
             Type::Union(members)
                 if !members.is_empty()
@@ -1951,6 +2070,14 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// D-SERDE2=A / I9: a generated codec is a top-level item of the module
+    /// that DECLARES the type, so it lowers exactly once, under that module's
+    /// canonical owner (`<dir>::plan.jet::ListReport::decode`). A consumer
+    /// names the same type by a local spelling -- an alias path
+    /// (`plan.ListReport`) outside the declaring module, the bare leaf inside
+    /// it -- so the local key misses for every imported codec, and the resident
+    /// tier deopts on a codec the program plainly declares, until #2252's
+    /// nominal projection maps the spelling onto the declaring identity.
     fn serde_codec_key(&self, ty: &Type, method: &str) -> Option<String> {
         let base = user_type_name(ty)?;
         if matches!(ty, Type::Apply { .. }) {
@@ -1959,7 +2086,18 @@ impl LowerCtx<'_, '_> {
                 return Some(concrete);
             }
         }
-        Some(format!("{base}::{method}"))
+        let local = format!("{base}::{method}");
+        if self.func_ids.contains_key(&local) {
+            return Some(local);
+        }
+        // Resolution stays a fact, not a guess: an ambiguous spelling has no
+        // projection row, so the key misses and the caller reports the missing
+        // codec rather than calling some other module's body.
+        let canonical = format!("{}::{method}", self.meta.canonical_nominal(base));
+        if self.func_ids.contains_key(&canonical) {
+            return Some(canonical);
+        }
+        Some(local)
     }
 
     fn lower_serde_encode_list(&mut self, list: Value, elem_ty: &Type) -> Result<Value, String> {
@@ -1989,7 +2127,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(body);
         let get_ref = self
             .module
-            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+            .declare_func_in_func(self.list_get_host(elem_ty), self.b.func);
         let line = self.b.ins().iconst(types::I32, 0);
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let elem = self.b.inst_results(get_call)[0];
@@ -2015,6 +2153,70 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(exit);
         let out = self.b.use_var(out_var);
         let disc = self.datatree_disc("Array")?;
+        self.pack_datatree_enum(
+            disc,
+            Some((out, &Type::List(Box::new(Type::Named("DataTree".into()))))),
+        )
+    }
+
+    fn lower_serde_encode_map(&mut self, map: Value, value_ty: &Type) -> Result<Value, String> {
+        let map_var = self.fresh_var(types::I64);
+        self.b.def_var(map_var, map);
+        let out_var = self.fresh_var(types::I64);
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
+        self.b.def_var(out_var, out_init);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let map = self.b.use_var(map_var);
+        let len = self.call_host(self.host.coll.map_len, &[map]);
+        let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let key = self.call_host(self.host.coll.map_key_at, &[map, idx]);
+        let raw = self.call_host(self.host.coll.map_value_at, &[map, idx]);
+        let value = self.coerce_text_value(raw, value_ty)?;
+        let encoded = self.lower_serde_encode_value(value, value_ty)?;
+        let record_len = self.b.ins().iconst(types::I64, 2);
+        let record = self.call_host(self.host.struct_new, &[record_len]);
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let key_slot = self.b.ins().iconst(types::I64, 0);
+        let value_slot = self.b.ins().iconst(types::I64, 1);
+        self.b.ins().call(set_i, &[record, key_slot, key]);
+        self.b.ins().call(set_i, &[record, value_slot, encoded]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        let out = self.b.use_var(out_var);
+        self.b.ins().call(push, &[out, record]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let out = self.b.use_var(out_var);
+        let disc = self.datatree_disc("Object")?;
         self.pack_datatree_enum(
             disc,
             Some((out, &Type::List(Box::new(Type::Named("DataTree".into()))))),
@@ -2129,6 +2331,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.encoding.datatree_decode_int, &[tree]))
             }
             Type::String => Ok(self.call_host(self.host.encoding.datatree_text, &[tree])),
+            Type::Char => Ok(self.call_host(self.host.encoding.datatree_decode_char, &[tree])),
             Type::Bool => Ok(self.call_host(self.host.encoding.datatree_bool, &[tree])),
             Type::Float | Type::Float32 => {
                 Ok(self.call_host(self.host.encoding.datatree_float, &[tree]))
@@ -2136,6 +2339,9 @@ impl LowerCtx<'_, '_> {
             Type::Option(inner) => self.lower_datatree_decode_option(tree, inner),
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_datatree_decode_list(tree, elem)
+            }
+            Type::Map { key, value, .. } if matches!(key.as_ref(), Type::String) => {
+                self.lower_datatree_decode_map(tree, value)
             }
             Type::Union(members)
                 if !members.is_empty()
@@ -2323,6 +2529,159 @@ impl LowerCtx<'_, '_> {
         let src_list = self.call_host(self.host.struct_get_i64, &[tree, one]);
         let decoded = self.lower_datatree_decode_list_items(src_list, elem_ty)?;
         self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_datatree_decode_map(&mut self, tree: Value, value_ty: &Type) -> Result<Value, String> {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
+        let object_disc = self.datatree_disc("Object")?;
+        let expected = self.b.ins().iconst(types::I64, object_disc);
+        let is_object = self.b.ins().icmp(IntCC::Equal, disc, expected);
+        let bad = self.b.create_block();
+        let good = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_object, good, &[], bad, &[]);
+
+        self.b.switch_to_block(bad);
+        self.b.seal_block(bad);
+        let error = self.call_host(self.host.encoding.datatree_decode_map_error, &[tree]);
+        self.b.ins().jump(merge, &[error]);
+
+        self.b.switch_to_block(good);
+        self.b.seal_block(good);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let pairs = self.call_host(self.host.struct_get_i64, &[tree, one]);
+        let decoded = self.lower_datatree_decode_map_items(pairs, value_ty)?;
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_datatree_decode_map_items(
+        &mut self,
+        pairs: Value,
+        value_ty: &Type,
+    ) -> Result<Value, String> {
+        let pairs_var = self.fresh_var(types::I64);
+        self.b.def_var(pairs_var, pairs);
+        let out_var = self.fresh_var(types::I64);
+        let out_init = self.call_host(self.host.coll.map_new, &[]);
+        self.b.def_var(out_var, out_init);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let bad = self.b.create_block();
+        let ok_result = self.b.create_block();
+        let error_result = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        let errors_var = self.fresh_var(types::I64);
+        self.b.def_var(errors_var, zero);
+        let failed_result_var = self.fresh_var(types::I64);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let pairs = self.b.use_var(pairs_var);
+        let len = self.call_host(self.host.coll.list_len, &[pairs]);
+        let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let pair_call = self.b.ins().call(get_ref, &[pairs, idx, line]);
+        let pair = self.b.inst_results(pair_call)[0];
+        self.emit_trap_check()?;
+        let key_slot = self.b.ins().iconst(types::I64, 0);
+        let value_slot = self.b.ins().iconst(types::I64, 1);
+        let key = self.call_host(self.host.struct_get_i64, &[pair, key_slot]);
+        let value_tree = self.call_host(self.host.struct_get_i64, &[pair, value_slot]);
+        let decoded = self.lower_datatree_decode(value_tree, value_ty)?;
+        let is_ok = self.call_host(self.host.result_is_ok, &[decoded]);
+        self.b.def_var(failed_result_var, decoded);
+        self.b.ins().brif(is_ok, ok_result, &[], bad, &[]);
+
+        self.b.switch_to_block(ok_result);
+        self.b.seal_block(ok_result);
+        let payload = self.result_payload(decoded, value_ty)?;
+        let stored = match self.b.func.dfg.value_type(payload) {
+            types::F64 => self
+                .b
+                .ins()
+                .bitcast(types::I64, Self::scalar_bitcast_memflags(), payload),
+            types::I8 => self.b.ins().uextend(types::I64, payload),
+            types::I32 => self.b.ins().uextend(types::I64, payload),
+            types::I64 => payload,
+            other => {
+                return Err(format!(
+                    "jit map decode value ABI unsupported: {value_ty:?} ({other:?})"
+                ));
+            }
+        };
+        let map = self.b.use_var(out_var);
+        let insert = self
+            .module
+            .declare_func_in_func(self.map_insert_host_for_key(&Type::String), self.b.func);
+        self.b.ins().call(insert, &[map, key, stored]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(bad);
+        self.b.seal_block(bad);
+        let accumulate = self.module.declare_func_in_func(
+            self.host.encoding.decode_error_accumulate_segment,
+            self.b.func,
+        );
+        let current = self.b.use_var(errors_var);
+        let failed = self.b.use_var(failed_result_var);
+        let accumulated = self.b.ins().call(accumulate, &[current, failed, key]);
+        self.b
+            .def_var(errors_var, self.b.inst_results(accumulated)[0]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let errors = self.b.use_var(errors_var);
+        let no_errors = self.b.ins().icmp(IntCC::Equal, errors, zero);
+        let done = self.b.create_block();
+        self.b.ins().brif(no_errors, done, &[], error_result, &[]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        let map = self.b.use_var(out_var);
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let ok = self.call_host(self.host.result_new_i64, &[tag, map]);
+        self.b.ins().jump(merge, &[ok]);
+
+        self.b.switch_to_block(error_result);
+        self.b.seal_block(error_result);
+        let errors = self.b.use_var(errors_var);
+        self.b.ins().jump(merge, &[errors]);
 
         self.b.switch_to_block(merge);
         self.b.seal_block(merge);
@@ -2752,13 +3111,13 @@ impl LowerCtx<'_, '_> {
             self.b.switch_to_block(bad_block);
             self.b.seal_block(bad_block);
             let zero = self.b.ins().iconst(types::I64, 0);
-            self.call_host(self.host.trap_panic, &[zero]);
+            self.call_host_void(self.host.trap_panic, &[zero]);
             self.emit_trap_check()?;
             self.b.ins().jump(ok_block, &[]);
 
             self.b.switch_to_block(ok_block);
             self.b.seal_block(ok_block);
-            self.call_host(self.host.trace_reset, &[]);
+            self.call_host_void(self.host.trace_reset, &[]);
             let ok_ty = inner
                 .ty
                 .unwrap_result()
@@ -2808,7 +3167,11 @@ impl LowerCtx<'_, '_> {
                 let tag = self.b.ins().iconst(types::I8, 0);
                 self.call_host(self.host.result_new_i64, &[tag, error])
             }
-            TIR::TTryConvert::Typed(conv_fn) => {
+            TIR::TTryConvert::Typed {
+                fn_name,
+                source,
+                target,
+            } => {
                 let err_ty = inner
                     .ty
                     .unwrap_result()
@@ -2816,21 +3179,19 @@ impl LowerCtx<'_, '_> {
                     .ok_or("jit try Typed operand is not Result")?;
                 let err_payload = self.result_payload(handle, &err_ty)?;
                 let func_id =
-                    self.func_ids.get(conv_fn).copied().ok_or_else(|| {
-                        format!("jit typed Result conversion unknown `{conv_fn}`")
+                    self.func_ids.get(fn_name).copied().ok_or_else(|| {
+                        format!("jit typed Result conversion unknown `{fn_name}`")
                     })?;
                 let converted = self.call_host(func_id, &[err_payload]);
                 if jet_codegen::Codegen::TIR::try_target_is_default_error(inner, convert) {
-                    if let Some((source, target)) = error_conversion_metadata(conv_fn) {
-                        let source_handle = self.runtime.heap.alloc_string(source);
-                        let target_handle = self.runtime.heap.alloc_string(target);
-                        let source = self.b.ins().iconst(types::I64, source_handle);
-                        let target = self.b.ins().iconst(types::I64, target_handle);
-                        let apply = self
-                            .module
-                            .declare_func_in_func(self.host.err_apply_conversion, self.b.func);
-                        self.b.ins().call(apply, &[converted, source, target]);
-                    }
+                    let source_handle = self.runtime.heap.alloc_string(source.name());
+                    let target_handle = self.runtime.heap.alloc_string(target.name());
+                    let source = self.b.ins().iconst(types::I64, source_handle);
+                    let target = self.b.ins().iconst(types::I64, target_handle);
+                    let apply = self
+                        .module
+                        .declare_func_in_func(self.host.err_apply_conversion, self.b.func);
+                    self.b.ins().call(apply, &[converted, source, target]);
                 }
                 let tag = self.b.ins().iconst(types::I8, 0);
                 self.call_host(self.host.result_new_i64, &[tag, converted])
@@ -3929,13 +4290,13 @@ impl LowerCtx<'_, '_> {
             .declare_func_in_func(self.host.watcher.event_scope_frame_push, self.b.func);
         self.b.ins().call(push, &[]);
         self.lower_stmts(stmts)?;
-        if self.dead {
+        if self.dead || self.current_block_terminated() {
             self.discard_compute_resources(resource_mark);
             self.restore_scope_vars(outer_names);
             return Ok(None);
         }
         let value = self.lower_expr(value)?;
-        if !self.dead {
+        if !self.dead && !self.current_block_terminated() {
             self.track_compute_scope_locals(outer_names)?;
             let mut preserve = self.current_values(Some(&outer_names));
             preserve.push(value);
@@ -3950,7 +4311,7 @@ impl LowerCtx<'_, '_> {
         }
         self.discard_compute_resources(resource_mark);
         self.restore_scope_vars(outer_names);
-        Ok((!self.dead).then_some(value))
+        Ok((!self.dead && !self.current_block_terminated()).then_some(value))
     }
 
     fn lower_watch_method(
@@ -5194,9 +5555,11 @@ impl LowerCtx<'_, '_> {
                                         other if clif_ty(other) == Some(types::I64) => {
                                             self.host.struct_set_i64
                                         }
-                                        other => return Err(format!(
+                                        other => {
+                                            return Err(format!(
                                             "jit pool field assignment type unsupported: {other:?}"
-                                        )),
+                                        ))
+                                        }
                                     }
                                 };
                                 let index = self.b.ins().iconst(types::I64, index as i64);
@@ -7222,7 +7585,7 @@ impl LowerCtx<'_, '_> {
         let item_type = match reader_type {
             "JSONReader" | "CBORReader" => Type::Named("DataEvent".to_string()),
             "JSONLReader" | "XMLReader" => Type::Named("DataTree".to_string()),
-            "CSVReader" => Type::List(Box::new(Type::String)),
+            "CSVReader" => Type::Named("CSVRow".to_string()),
             _ => {
                 return Err(format!(
                     "jit encoding reader type unsupported: {reader_type}"
@@ -7755,7 +8118,7 @@ impl LowerCtx<'_, '_> {
         }
         let uses_result =
             matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }));
-        self.lower_jet_show_value(value, &ty, uses_result)
+        self.lower_text_value(value, &ty, uses_result, JitTextMode::Debug)
     }
 
     fn lower_testing_call(
@@ -9288,7 +9651,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(list_new, &[]);
                 let hole_values = self.b.inst_results(call)[0];
                 for hole in holes {
-                    let shown = self.lower_jet_show(hole)?;
+                    let shown = self.lower_text(hole, JitTextMode::Display)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
                 Ok(self.call_host(
@@ -9317,7 +9680,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(list_new, &[]);
                 let hole_values = self.b.inst_results(call)[0];
                 for hole in holes {
-                    let shown = self.lower_jet_show(hole)?;
+                    let shown = self.lower_text(hole, JitTextMode::Display)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
                 Ok(self.call_host(
@@ -9346,7 +9709,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(list_new, &[]);
                 let hole_values = self.b.inst_results(call)[0];
                 for hole in holes {
-                    let shown = self.lower_jet_show(hole)?;
+                    let shown = self.lower_text(hole, JitTextMode::Display)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
                 Ok(self.call_host(
@@ -9375,7 +9738,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(list_new, &[]);
                 let hole_values = self.b.inst_results(call)[0];
                 for hole in holes {
-                    let shown = self.lower_jet_show(hole)?;
+                    let shown = self.lower_text(hole, JitTextMode::Display)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
                 match kind {
@@ -9408,27 +9771,26 @@ impl LowerCtx<'_, '_> {
                 subject,
                 parts,
                 probe,
+            } => in_own_frame(|| -> Result<Value, String> {
+                let subject = self.lower_expr(subject)?;
+                let pid = crate::Parse::install_str_pattern(parts.clone());
+                let pid_v = self.b.ins().iconst(types::I64, pid);
+                match probe {
+                    TIR::TMatchProbe::IsSome => {
+                        Ok(self.call_host(self.host.parse.str_match_is_some, &[subject, pid_v]))
+                    }
+                    TIR::TMatchProbe::Unwrap => {
+                        Ok(self.call_host(self.host.parse.str_match_unwrap, &[subject, pid_v]))
+                    }
+                }
+            }),
+            THostCall::BinMatchScan {
+                subject,
+                parts,
+                probe,
             } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let subject = self.lower_expr(subject)?;
-                    let pid = crate::Parse::install_str_pattern(parts.clone());
-                    let pid_v = self.b.ins().iconst(types::I64, pid);
-                    match probe {
-                        TIR::TMatchProbe::IsSome => Ok(
-                            self.call_host(self.host.parse.str_match_is_some, &[subject, pid_v])
-                        ),
-                        TIR::TMatchProbe::Unwrap => {
-                            Ok(self.call_host(self.host.parse.str_match_unwrap, &[subject, pid_v]))
-                        }
-                    }
-                })
-            }
-            THostCall::BinMatchScan { parts, probe } => {
-                in_own_frame(|| -> Result<Value, String> {
-                    let (subject, _) = self
-                        .switch_subject
-                        .clone()
-                        .ok_or("jit BinMatchScan outside switch")?;
                     let pid = crate::Parse::install_bin_pattern(parts.clone());
                     let pid_v = self.b.ins().iconst(types::I64, pid);
                     match probe {
@@ -9473,28 +9835,36 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// `jet_show` marshalling for typed holes. Sema admits a recursive
-    /// JetShow capability, so the JIT must recurse through the same resident
-    /// value shape instead of selecting a closed scalar-kind table.
-    fn lower_jet_show(&mut self, expr: &TExpr) -> Result<Value, String> {
+    /// Shared Display/Debug marshalling for typed values. Sema admits these
+    /// capabilities recursively, so the JIT lowers the resident value shape
+    /// and enters the same Prelude formatter used by AOT.
+    fn lower_text(&mut self, expr: &TExpr, mode: JitTextMode) -> Result<Value, String> {
         let ty = self.erase_distinct_ty(&expr.ty);
         let uses_result = matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }))
             || self.uses_result_option_abi(expr);
         let value = self.lower_expr(expr)?;
-        self.lower_jet_show_value(value, &ty, uses_result)
+        self.lower_text_value(value, &ty, uses_result, mode)
     }
 
-    fn lower_jet_show_value(
+    fn lower_text_value(
         &mut self,
         value: Value,
         ty: &Type,
         uses_result: bool,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let ty = self.erase_distinct_ty(ty);
+        let uses_result = uses_result
+            || matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }));
+        if mode == JitTextMode::Debug {
+            let buf = self.call_host(self.host.str_begin, &[]);
+            self.lower_debug_value(buf, value, &ty, uses_result)?;
+            return Ok(buf);
+        }
         match &ty {
-            Type::Tagged { inner, .. } => self.lower_jet_show_value(value, inner, uses_result),
-            Type::Quantity { base, .. } => self.lower_jet_show_value(value, base, uses_result),
-            Type::InlineRange { base, .. } => self.lower_jet_show_value(value, base, uses_result),
+            Type::Tagged { inner, .. } => self.lower_text_value(value, inner, uses_result, mode),
+            Type::Quantity { base, .. } => self.lower_text_value(value, base, uses_result, mode),
+            Type::InlineRange { base, .. } => self.lower_text_value(value, base, uses_result, mode),
             Type::String => Ok(value),
             Type::Int => Ok(self.call_host(self.host.num.int_to_string, &[value])),
             Type::IntN { signed, .. } => {
@@ -9550,8 +9920,8 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.service_show, &[value]))
             }
             // The resident carrier is the raw nanosecond i64; the rendering
-            // itself belongs to the shared Prelude kernel AOT's
-            // `impl JetShow for Duration` calls.
+            // itself belongs to the shared Prelude kernel used by AOT's
+            // Duration Display/Debug implementations.
             Type::Named(name) if name == jet_foundation::Syntax::DURATION_TYPE => {
                 Ok(self.call_host(self.host.duration_show, &[value]))
             }
@@ -9570,14 +9940,25 @@ impl LowerCtx<'_, '_> {
             {
                 Ok(self.lower_civil_show_value(value))
             }
-            Type::Option(inner) => self.lower_jet_show_option_value(value, inner, uses_result),
-            Type::Result { ok, err } => self.lower_jet_show_result_value(value, ok, err),
+            // DataTree's Display and Debug implementations share the
+            // canonical JSON renderer. Do not fall through to the generic
+            // named-record path: its erased payload is the Rust-side
+            // `JSONObject` representation, not the Jet value.
+            Type::Named(name) if matches!(name.as_str(), "DataTree" | "JSON") => {
+                Ok(self.call_host(self.host.encoding.json_to_string, &[value]))
+            }
+            Type::Named(name) if matches!(name.as_str(), "TextError" | "RangeError") => {
+                let field = self.b.ins().iconst(types::I64, 0);
+                Ok(self.call_host(self.host.struct_get_str, &[value, field]))
+            }
+            Type::Option(inner) => self.lower_text_option_value(value, inner, uses_result, mode),
+            Type::Result { ok, err } => self.lower_text_result_value(value, ok, err, mode),
             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-                self.lower_jet_show_list_value(value, inner)
+                self.lower_text_list_value(value, inner, mode)
             }
             Type::Map {
                 key, value: item, ..
-            } => self.lower_jet_show_map_value(value, key, item),
+            } => self.lower_text_map_value(value, key, item, mode),
             Type::Apply { name, args }
                 if name == "View"
                     && args.len() == 1
@@ -9588,15 +9969,15 @@ impl LowerCtx<'_, '_> {
             Type::Apply { name, .. } if name == "KeyRef" => {
                 Ok(self.call_host(self.host.crypto.vault_key_ref_show, &[value]))
             }
-            Type::Named(name) => self.lower_jet_show_named_value(value, &ty, name),
-            Type::Apply { name, .. } => self.lower_jet_show_named_value(value, &ty, name),
+            Type::Named(name) => self.lower_text_named_value(value, &ty, name, mode),
+            Type::Apply { name, .. } => self.lower_text_named_value(value, &ty, name, mode),
             Type::Tuple(_) => {
                 let name = record_type_key(&ty)
-                    .ok_or_else(|| format!("jit JetShow tuple unsupported: {ty:?}"))?;
-                self.lower_jet_show_named_value(value, &ty, &name)
+                    .ok_or_else(|| format!("jit text tuple unsupported: {ty:?}"))?;
+                self.lower_text_named_value(value, &ty, &name, mode)
             }
-            Type::Union(members) => self.lower_jet_show_union_value(value, members),
-            other => Err(format!("jit JetShow type unsupported: {other:?}")),
+            Type::Union(members) => self.lower_text_union_value(value, members, mode),
+            other => Err(format!("jit text type unsupported: {other:?}")),
         }
     }
 
@@ -9610,12 +9991,18 @@ impl LowerCtx<'_, '_> {
         )
     }
 
-    fn lower_jet_show_option_value(
+    fn lower_text_option_value(
         &mut self,
         value: Value,
         inner: &Type,
         uses_result: bool,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
+        if mode == JitTextMode::Debug {
+            let buf = self.call_host(self.host.str_begin, &[]);
+            self.lower_debug_option(buf, value, inner, uses_result)?;
+            return Ok(buf);
+        }
         let is_none = if uses_result {
             let ok = self.call_host(self.host.result_is_ok, &[value]);
             let ok_wide = self.b.ins().uextend(types::I64, ok);
@@ -9650,7 +10037,7 @@ impl LowerCtx<'_, '_> {
             self.unpack_option_payload(value, inner)?
         };
         let buf = self.call_host(self.host.str_begin, &[]);
-        let text = self.lower_jet_show_value(payload, inner, false)?;
+        let text = self.lower_text_value(payload, inner, false, JitTextMode::Display)?;
         let push = self
             .module
             .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -9661,11 +10048,12 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(done)[0])
     }
 
-    fn lower_jet_show_result_value(
+    fn lower_text_result_value(
         &mut self,
         value: Value,
         ok: &Type,
         err: &Type,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let is_ok = self.call_host(self.host.result_is_ok, &[value]);
         let ok_block = self.b.create_block();
@@ -9677,7 +10065,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let payload = self.result_payload(value, ok)?;
-        let text = self.lower_jet_show_value(payload, ok, false)?;
+        let text = self.lower_text_value(payload, ok, false, mode)?;
         let buf = self.call_host(self.host.str_begin, &[]);
         self.push_str_lit(buf, "Ok(")?;
         self.push_str_value(buf, text);
@@ -9687,7 +10075,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(err_block);
         self.b.seal_block(err_block);
         let payload = self.result_payload(value, err)?;
-        let text = self.lower_jet_show_value(payload, err, false)?;
+        let text = self.lower_text_value(payload, err, false, mode)?;
         let buf = self.call_host(self.host.str_begin, &[]);
         self.push_str_lit(buf, "Err(")?;
         self.push_str_value(buf, text);
@@ -9699,9 +10087,14 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(done)[0])
     }
 
-    fn lower_jet_show_list_value(&mut self, list: Value, inner: &Type) -> Result<Value, String> {
+    fn lower_text_list_value(
+        &mut self,
+        list: Value,
+        inner: &Type,
+        mode: JitTextMode,
+    ) -> Result<Value, String> {
         // D-VALIDATE-DECODE1=B: `[FieldError]` has one rendering, owned by the
-        // Prelude (`impl JetShow for FieldError` + the `Vec<T>` blanket impl).
+        // Prelude collection formatting owns this Core record projection.
         // The resident tier marshals the record list to that host projection
         // instead of walking it as an anonymous record, so direct print,
         // interpolation, and any nested show agree with AOT (I9). Element-wise
@@ -9710,15 +10103,15 @@ impl LowerCtx<'_, '_> {
         if matches!(inner, Type::Named(name) if name == "FieldError") {
             return Ok(self.call_host(self.host.encoding.decode_error_show, &[list]));
         }
-        self.lower_jet_show_sequence_value(list, inner, None)
+        self.lower_text_sequence_value(list, inner, None, mode)
     }
 
-    /// One element renderer for list `jet_show` AND for `TBuiltinOp::JoinSep`.
+    /// One element renderer for list text and `TBuiltinOp::JoinSep`.
     ///
-    /// `sep = None` renders the show shape `[a, b]`. `sep = Some(handle)` renders
+    /// `sep = None` renders the collection shape `[a, b]`. `sep = Some(handle)` renders
     /// the join shape — no brackets, the runtime separator between elements —
     /// which is exactly AOT's
-    /// `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`
+    /// `iter().map(|x| x.jet_display()).collect::<Vec<_>>().join(sep)`
     /// (`TIR/emit/expressions.rs`).
     ///
     /// Join used to marshal to a `jet_jit_list_join_str` host that was handed no
@@ -9730,11 +10123,12 @@ impl LowerCtx<'_, '_> {
     /// instead of `2,3` on the resident tier only. The element type is already
     /// resolved here, so the guess is DELETED rather than repaired (I9: one
     /// renderer, no engine-local policy).
-    fn lower_jet_show_sequence_value(
+    fn lower_text_sequence_value(
         &mut self,
         list: Value,
         inner: &Type,
         sep: Option<Value>,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let list_var = self.fresh_var(types::I64);
         self.b.def_var(list_var, list);
@@ -9800,8 +10194,8 @@ impl LowerCtx<'_, '_> {
             self.call_host(self.host.coll.list_get, &[list, index, line])
         };
         self.emit_trap_check()?;
-        let element_value = self.coerce_jet_show_value(raw, inner)?;
-        let element_text = self.lower_jet_show_value(element_value, inner, false)?;
+        let element_value = self.coerce_text_value(raw, inner)?;
+        let element_text = self.lower_text_value(element_value, inner, false, mode)?;
         let buf = self.b.use_var(buf_var);
         self.push_str_value(buf, element_text);
         self.b.def_var(buf_var, buf);
@@ -9825,11 +10219,12 @@ impl LowerCtx<'_, '_> {
         Ok(buf)
     }
 
-    fn lower_jet_show_map_value(
+    fn lower_text_map_value(
         &mut self,
         map: Value,
         key_ty: &Type,
         value_ty: &Type,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let map_var = self.fresh_var(types::I64);
         self.b.def_var(map_var, map);
@@ -9865,10 +10260,10 @@ impl LowerCtx<'_, '_> {
 
         let key_raw = self.call_host(self.host.coll.map_key_at, &[map, index]);
         let value_raw = self.call_host(self.host.coll.map_value_at, &[map, index]);
-        let key = self.coerce_jet_show_value(key_raw, key_ty)?;
-        let item = self.coerce_jet_show_value(value_raw, value_ty)?;
-        let key_text = self.lower_jet_show_value(key, key_ty, false)?;
-        let item_text = self.lower_jet_show_value(item, value_ty, false)?;
+        let key = self.coerce_text_value(key_raw, key_ty)?;
+        let item = self.coerce_text_value(value_raw, value_ty)?;
+        let key_text = self.lower_text_value(key, key_ty, false, mode)?;
+        let item_text = self.lower_text_value(item, value_ty, false, mode)?;
         self.b.ins().call(push_entry, &[entries, key_text]);
         self.b.ins().call(push_entry, &[entries, item_text]);
         self.b.ins().jump(step, &[]);
@@ -9892,12 +10287,12 @@ impl LowerCtx<'_, '_> {
         Ok(buf)
     }
 
-    fn coerce_jet_show_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
+    fn coerce_text_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
         let want = self
             .meta
             .clif_ty(ty)
             .or_else(|| clif_ty(ty))
-            .ok_or_else(|| format!("jit JetShow value ABI unsupported: {ty:?}"))?;
+            .ok_or_else(|| format!("jit text value ABI unsupported: {ty:?}"))?;
         let got = self.b.func.dfg.value_type(raw);
         Ok(match (want, got) {
             (types::F64, types::I64) => {
@@ -9913,80 +10308,36 @@ impl LowerCtx<'_, '_> {
             (types::I64, types::I64) => raw,
             (want, got) => {
                 return Err(format!(
-                    "jit JetShow value ABI mismatch for {ty:?}: expected {want}, got {got}"
+                    "jit text value ABI mismatch for {ty:?}: expected {want}, got {got}"
                 ))
             }
         })
     }
 
-    fn lower_jet_show_named_value(
+    fn lower_text_named_value(
         &mut self,
         value: Value,
         ty: &Type,
         type_name: &str,
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let type_name = type_name
             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
             .unwrap_or(type_name);
-        if type_name == "Unit" {
-            return Ok(self.call_host(self.host.str_begin, &[]));
-        }
-        if self.meta.is_enum(type_name) {
-            // Packed enum JetShow is the same source-shaped projection used by
-            // direct print. Keep the enum table path for enum payloads; record
-            // fields below are rendered recursively through this function.
-            let buf = self.call_host(self.host.str_begin, &[]);
-            let local = TLocal::generated(format!("show_{}", self.next_var));
-            let place = local.rust_name();
-            let expr = TExpr {
-                ty: ty.clone(),
-                kind: TExprKind::Local(local),
-            };
-            return self
-                .with_bound_local(&place, ty.clone(), value, |this| {
-                    this.lower_named_str_interp(buf, &expr, type_name, StrFormat::Debug)
-                })
-                .map(|_| buf);
-        }
-        let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
-            format!("jit JetShow type has no registered record layout: {type_name}")
-        })?;
-        let generic = self
-            .meta
-            .struct_type_params(type_name)
-            .is_some_and(|params| !params.is_empty());
         let buf = self.call_host(self.host.str_begin, &[]);
-        let open = if generic {
-            format!("{type_name}(")
-        } else {
-            format!("{type_name} {{ ")
+        let local = TLocal::generated(format!("text_{}", self.next_var));
+        let place = local.rust_name();
+        let expr = TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::Local(local),
         };
-        self.push_str_lit(buf, &open)?;
-        for (index, (field_name, declared_ty)) in
-            field_names.iter().zip(field_tys.iter()).enumerate()
-        {
-            if index > 0 {
-                self.push_str_lit(buf, ", ")?;
-            }
-            let label = field_name
-                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                .unwrap_or(field_name.as_str());
-            self.push_str_lit(buf, &format!("{label}: "))?;
-            if super::types_meta::struct_field_redacted(type_name, index) == Some(true) {
-                self.push_str_lit(buf, "[redacted]")?;
-                continue;
-            }
-            let field_ty = self.jet_show_field_type(ty, type_name, declared_ty);
-            let field = self.lower_record_field(value, type_name, field_name, &field_ty)?;
-            let field = self.coerce_jet_show_value(field, &field_ty)?;
-            let text = self.lower_jet_show_value(field, &field_ty, false)?;
-            self.push_str_value(buf, text);
-        }
-        self.push_str_lit(buf, if generic { ")" } else { " }" })?;
+        self.with_bound_local(&place, ty.clone(), value, |this| {
+            this.lower_named_str_interp_mode(buf, &expr, ty, type_name, mode)
+        })?;
         Ok(buf)
     }
 
-    fn jet_show_field_type(&self, owner_ty: &Type, type_name: &str, declared_ty: &Type) -> Type {
+    fn text_field_type(&self, owner_ty: &Type, type_name: &str, declared_ty: &Type) -> Type {
         let Type::Apply { name, args } = owner_ty else {
             return declared_ty.clone();
         };
@@ -10004,10 +10355,11 @@ impl LowerCtx<'_, '_> {
         jet_foundation::Generics::substitute_type(declared_ty, &subst)
     }
 
-    fn lower_jet_show_union_value(
+    fn lower_text_union_value(
         &mut self,
         value: Value,
         members: &[Type],
+        mode: JitTextMode,
     ) -> Result<Value, String> {
         let enum_name = jet_codegen::AST::union_enum_name(members);
         let heap_payload = members
@@ -10045,8 +10397,8 @@ impl LowerCtx<'_, '_> {
             } else {
                 self.b.ins().sshr_imm(value, 8)
             };
-            let payload = self.coerce_jet_show_value(payload, member)?;
-            let text = self.lower_jet_show_value(payload, member, false)?;
+            let payload = self.coerce_text_value(payload, member)?;
+            let text = self.lower_text_value(payload, member, false, mode)?;
             self.b.ins().jump(done, &[text]);
 
             if let Some(next) = next {
@@ -10356,6 +10708,9 @@ impl LowerCtx<'_, '_> {
         line: u32,
     ) -> Result<Value, String> {
         let rhs_ty = self.erase_distinct_ty(rhs_ty);
+        if Self::is_math_value_ty(&rhs_ty) {
+            return self.lower_math_binary(current, rhs, op, &rhs_ty);
+        }
         // A fixed-width whole number carries its own width through the host
         // table, which already knows `^` (INTN_OP_POW). Only the default `Int`
         // and the floats reach `lower_pow`.
@@ -10547,9 +10902,8 @@ impl LowerCtx<'_, '_> {
             return Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
         };
 
-        let carrier = call_value.ok_or_else(|| {
-            format!("jit module call target `{target}` has no Result carrier")
-        })?;
+        let carrier = call_value
+            .ok_or_else(|| format!("jit module call target `{target}` has no Result carrier"))?;
         let payload_clif = if matches!(&expr.ty, Type::Named(name) if name == "Unit")
             || matches!(&expr.ty, Type::Tuple(fields) if fields.is_empty())
         {
@@ -10558,7 +10912,9 @@ impl LowerCtx<'_, '_> {
             self.meta
                 .clif_ty(&expr.ty)
                 .or_else(|| clif_ty(&expr.ty))
-                .ok_or_else(|| format!("jit module call Result payload unsupported: {:?}", expr.ty))?
+                .ok_or_else(|| {
+                    format!("jit module call Result payload unsupported: {:?}", expr.ty)
+                })?
         };
         let is_ok = self.call_host(self.host.result_is_ok, &[carrier]);
         let ok_block = self.b.create_block();
@@ -10591,6 +10947,36 @@ impl LowerCtx<'_, '_> {
         let values: Result<Vec<_>, _> = args.iter().map(|arg| self.lower_call_arg(arg)).collect();
         self.lower_fn_call_values(callee, fn_ty, &values?)
     }
+
+    fn lower_call_result(&mut self, carrier: Value, ty: &Type) -> Result<Value, String> {
+        self.emit_trap_check()?;
+
+        let source_has_carrier = matches!(ty, Type::Result { .. } | Type::Option(_))
+            || matches!(ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_STREAM);
+        if source_has_carrier {
+            return Ok(carrier);
+        }
+
+        let is_ok = self.call_host(self.host.result_is_ok, &[carrier]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        if !self.txn_stack.is_empty() {
+            self.emit_txn_rollbacks_keep()?;
+        }
+        self.emit_lexical_exit(Some(carrier), false, self.shield_depth)?;
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        self.call_host_void(self.host.trace_reset, &[]);
+        let value = self.result_payload(carrier, ty)?;
+        self.track_compute_value(value, ty)?;
+        Ok(value)
+    }
+
 
     fn lower_interrupt_fn_call(
         &mut self,
@@ -10709,153 +11095,43 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(host_ref, &[buf_id, lit_const]);
                 }
                 TStrPart::Interp(e, fmt) => {
-                    // Direct print and interpolation share the display ABI.
                     let push_ty = self.display_abi_ty(e);
                     if matches!(&push_ty, Type::Named(n) if n == "Unit") {
                         continue;
                     }
-                    if let Type::Named(type_name) = &push_ty {
-                        if matches!(
-                            type_name.as_str(),
-                            "Duration"
-                                | "Url"
-                                | "Mime"
-                                | "Path"
-                                | "Date"
-                                | "DateTime"
-                                | "Instant"
-                                | "LocalDate"
-                                | "LocalTime"
-                                | "Period"
-                                | "Zone"
-                                | "ZonedDateTime"
-                        ) {
-                            let text = if matches!(fmt, StrFormat::Debug | StrFormat::Pretty) {
-                                let value = self.lower_expr(e)?;
-                                self.lower_debug_value_text(value, &push_ty)?
-                            } else {
-                                self.lower_jet_show(e)?
-                            };
-                            let push_ref = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_str, self.b.func);
-                            self.b.ins().call(push_ref, &[buf_id, text]);
-                            continue;
-                        }
-                        self.lower_named_str_interp(buf_id, e, type_name, fmt.clone())?;
-                        continue;
-                    }
-                    if let Type::Apply { name, .. } = &push_ty {
-                        if name == "KeyRef" && matches!(fmt, StrFormat::Display) {
-                            let recv = self.lower_expr(e)?;
-                            let host_ref = self.module.declare_func_in_func(
-                                self.host.crypto.vault_key_ref_show,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(host_ref, &[recv]);
-                            let text = self.b.inst_results(call)[0];
-                            let push_ref = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_str, self.b.func);
-                            self.b.ins().call(push_ref, &[buf_id, text]);
-                            continue;
-                        }
-                    }
                     let val = self.lower_expr(e)?;
-                    if let Type::Option(inner) = &push_ty {
-                        // IntN Option uses the result-arena ABI (nonzero handle);
-                        // other Options use 0 = None, bits+1 = Some.
-                        let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
-                            || self.uses_result_option_abi(e);
-                        if matches!(fmt, StrFormat::Debug) {
-                            self.lower_debug_option(buf_id, val, inner, uses_result)?;
+                    let uses_result = matches!(&push_ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }))
+                        || self.uses_result_option_abi(e);
+                    let mode = match fmt {
+                        StrFormat::Display => JitTextMode::Display,
+                        StrFormat::Debug => JitTextMode::Debug,
+                        StrFormat::Pretty => {
+                            let debug = self.lower_text_value(
+                                val,
+                                &push_ty,
+                                uses_result,
+                                JitTextMode::Debug,
+                            )?;
+                            let text = self.call_host(self.host.fmt.pretty, &[debug]);
+                            self.push_str_value(buf_id, text);
                             continue;
                         }
-                        let is_none = if uses_result {
-                            let ok = self.call_host(self.host.result_is_ok, &[val]);
-                            let ok_wide = self.b.ins().uextend(types::I64, ok);
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            self.bool_from_icmp(IntCC::Equal, ok_wide, zero)
-                        } else {
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            self.bool_from_icmp(IntCC::Equal, val, zero)
-                        };
-                        let none_block = self.b.create_block();
-                        let some_block = self.b.create_block();
-                        let done = self.b.create_block();
-                        self.b.ins().brif(is_none, none_block, &[], some_block, &[]);
-                        self.b.switch_to_block(none_block);
-                        self.b.seal_block(none_block);
-                        let none_id = self.runtime.heap.alloc_string("None".to_string());
-                        let none_id = self.b.ins().iconst(types::I64, none_id);
-                        let push_none = self
-                            .module
-                            .declare_func_in_func(self.host.str_push_lit, self.b.func);
-                        self.b.ins().call(push_none, &[buf_id, none_id]);
-                        self.b.ins().jump(done, &[]);
-                        self.b.switch_to_block(some_block);
-                        self.b.seal_block(some_block);
-                        let payload = if uses_result {
-                            self.call_host(self.host.result_get_i64, &[val])
-                        } else {
-                            self.unpack_option_payload(val, inner)?
-                        };
-                        let text = self.lower_jet_show_value(payload, inner, false)?;
-                        self.push_str_value(buf_id, text);
-                        self.b.ins().jump(done, &[]);
-                        self.b.switch_to_block(done);
-                        self.b.seal_block(done);
-                        continue;
-                    }
-                    if matches!(fmt, StrFormat::Debug) {
-                        self.lower_debug_value(buf_id, val, &push_ty)?;
-                        continue;
-                    }
-                    if let Some(elem) = jit_list_iter_elem_type(&push_ty).or_else(|| match &push_ty
-                    {
-                        Type::List(inner) => Some(inner.as_ref().clone()),
-                        Type::FixedList { elem, .. } => Some(elem.as_ref().clone()),
-                        _ => None,
-                    }) {
-                        let text = self.lower_jet_show_list_value(val, &elem)?;
-                        self.push_str_value(buf_id, text);
-                        continue;
-                    }
-                    if let Type::IntN { signed, .. } = &push_ty {
-                        let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
-                        let text = self.call_host(self.host.intn_to_string, &[val, signed]);
-                        let push = self
-                            .module
-                            .declare_func_in_func(self.host.str_push_str, self.b.func);
-                        self.b.ins().call(push, &[buf_id, text]);
-                        continue;
-                    }
-                    if matches!(&push_ty, Type::Int | Type::InlineRange { .. }) {
-                        let text = self.call_host(self.host.num.int_to_string, &[val]);
-                        self.push_str_value(buf_id, text);
-                        continue;
-                    }
-                    let host_id = match &push_ty {
-                        Type::Float => self.host.str_push_f64,
-                        Type::Bool => self.host.str_push_bool,
-                        Type::Char => self.host.str_push_char,
-                        Type::String => self.host.str_push_str,
                         other => {
-                            return Err(format!("jit string interp type unsupported: {other:?}"));
+                            return Err(format!("jit string interp format unsupported: {other:?}"));
                         }
                     };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    self.b.ins().call(host_ref, &[buf_id, val]);
+                    let text = self.lower_text_value(val, &push_ty, uses_result, mode)?;
+                    self.push_str_value(buf_id, text);
                 }
             }
         }
         Ok(buf_id)
     }
 
-    /// `{named}` / `{named:Debug}` — Display prefers `Type::display` when compiled;
-    /// otherwise JetShow-style mangled Debug (`user_Type { user_field: … }`).
-    /// Debug format uses unmangled JetDebug shape (`Type { field: … }`) and
-    /// `#[Redact]` → `[redacted]` when bundle metadata is installed.
+    /// `{named}` / `{named:Debug}` — dispatch to the sema-admitted Display or
+    /// Debug implementation, then marshal structural fallback fields through
+    /// the shared Prelude formatter. `#[Redact]` remains metadata, not a host
+    /// policy.
     fn lower_named_str_interp(
         &mut self,
         buf_id: Value,
@@ -10863,6 +11139,25 @@ impl LowerCtx<'_, '_> {
         type_name: &str,
         fmt: StrFormat,
     ) -> Result<(), String> {
+        let mode = match fmt {
+            StrFormat::Display => JitTextMode::Display,
+            StrFormat::Debug | StrFormat::Pretty => JitTextMode::Debug,
+            other => return Err(format!("jit named text format unsupported: {other:?}")),
+        };
+        self.lower_named_str_interp_mode(buf_id, expr, &expr.ty, type_name, mode)
+    }
+
+    fn lower_named_str_interp_mode(
+        &mut self,
+        buf_id: Value,
+        expr: &TExpr,
+        owner_ty: &Type,
+        type_name: &str,
+        mode: JitTextMode,
+    ) -> Result<(), String> {
+        if type_name == "Unit" {
+            return Ok(());
+        }
         if type_name == jet_foundation::Syntax::TYPE_RANGE {
             let values = self.lower_range_expr(expr)?;
             let text = self.lower_range_show(values)?;
@@ -10881,7 +11176,7 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(push_ref, &[buf_id, text]);
             return Ok(());
         }
-        if matches!(fmt, StrFormat::Display) {
+        if mode == JitTextMode::Display {
             if type_name == "IOError" {
                 let packed = self.lower_expr(expr)?;
                 // This process-local pointer and its host table cannot
@@ -10966,7 +11261,7 @@ impl LowerCtx<'_, '_> {
                 return Ok(());
             }
         }
-        if matches!(fmt, StrFormat::Debug) && matches!(type_name, "GameImage" | "GameSound") {
+        if mode == JitTextMode::Debug && matches!(type_name, "GameImage" | "GameSound") {
             let recv = self.lower_expr(expr)?;
             let kind = self
                 .b
@@ -10979,7 +11274,7 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(push_ref, &[buf_id, text]);
             return Ok(());
         }
-        if matches!(fmt, StrFormat::Debug) {
+        if mode == JitTextMode::Debug {
             let debug_key = format!("{type_name}::debug");
             if let Some(&func_id) = self.func_ids.get(&debug_key) {
                 let recv = self.lower_expr(expr)?;
@@ -10990,46 +11285,76 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_ref, &[buf_id, text]);
                 return Ok(());
             }
-            if self.meta.is_enum(type_name) && self.meta.enum_packed_showable(type_name) {
-                let packed = self.lower_expr(expr)?;
-                return self.lower_packed_enum_debug(buf_id, packed, type_name);
-            }
+        }
+        if self.meta.is_enum(type_name) && self.meta.enum_packed_showable(type_name) {
+            let packed = self.lower_expr(expr)?;
+            return self.lower_packed_enum_text(buf_id, packed, type_name, mode);
         }
         let handle = self.lower_expr(expr)?;
-        self.lower_named_str_interp_handle(buf_id, type_name, handle)
+        self.lower_named_str_interp_handle(owner_ty, buf_id, type_name, handle, mode)
     }
 
     fn lower_named_str_interp_handle(
         &mut self,
+        owner_ty: &Type,
         buf_id: Value,
         type_name: &str,
         handle: Value,
+        field_mode: JitTextMode,
     ) -> Result<(), String> {
-        let (field_names, field_tys) = self
-            .meta
-            .struct_layout(type_name)
-            .map(|(names, tys)| (names.to_vec(), tys.to_vec()))
-            .ok_or_else(|| format!("jit string interp type unsupported: Named({type_name:?})"))?;
+        let (field_names, field_tys, tuple_layout) = match owner_ty {
+            Type::Tuple(fields) => (
+                fields.iter().map(|(name, _)| name.clone()).collect(),
+                fields.iter().map(|(_, ty)| ty.as_ref().clone()).collect(),
+                true,
+            ),
+            _ => {
+                let (names, tys) = self
+                    .meta
+                    .struct_layout(type_name)
+                    .map(|(names, tys)| (names.to_vec(), tys.to_vec()))
+                    .ok_or_else(|| {
+                        format!("jit string interp type unsupported: Named({type_name:?})")
+                    })?;
+                (names, tys, false)
+            }
+        };
         // Lower fields in declaration order. StructuralDebug owns canonical
         // Debug order; this keeps field evaluation source-ordered while each
         // marshalled field retains its declaration/storage index.
         // Both lenses render records with Jet-source names (I2). The metadata
-        // adapter owns user/core redaction lookup; this lowering only marshals
-        // each storage index and flag into StructuralDebug.
-        let field_redacted =
-            |field_index| super::types_meta::struct_field_redacted(type_name, field_index);
+        // adapter owns user/core redaction lookup; tuples have no redactable
+        // declarations, so their structural fields are always visible.
+        let field_redacted = |field_index| {
+            tuple_layout
+                .then_some(false)
+                .or_else(|| super::types_meta::struct_field_redacted(type_name, field_index))
+        };
         if !field_names.is_empty() && field_redacted(0).is_none() {
             return Err(format!(
                 "jit string interp type unsupported: Named({type_name:?})"
             ));
         }
+        if field_names.len() != field_tys.len() {
+            return Err(format!(
+                "jit string interp field layout mismatch: Named({type_name:?}) has {} names and {} types",
+                field_names.len(),
+                field_tys.len()
+            ));
+        }
+        let display_type_name = if tuple_layout {
+            format!("({})", field_names.join(","))
+        } else {
+            type_name.to_string()
+        };
         let fields_id = self.call_host(self.host.coll.list_new, &[]);
         let push_field = self
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
-        for field_index in 0..field_names.len() {
-            let fname = &field_names[field_index];
-            let fty = &field_tys[field_index];
+        for (field_index, (fname, declared_ty)) in
+            field_names.iter().zip(field_tys.iter()).enumerate()
+        {
+            let fty = self.text_field_type(owner_ty, type_name, declared_ty);
             let label = fname
                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                 .unwrap_or(fname.as_str());
@@ -11041,7 +11366,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().iconst(types::I64, empty_id)
             } else {
                 let idx = self.b.ins().iconst(types::I64, field_index as i64);
-                let abi_ty = self.erase_distinct_ty(fty);
+                let abi_ty = self.erase_distinct_ty(&fty);
                 let val = match abi_ty {
                     Type::Float | Type::Float32 => {
                         self.call_host(self.host.struct_get_f64, &[handle, idx])
@@ -11059,14 +11384,23 @@ impl LowerCtx<'_, '_> {
                     | Type::InlineRange { .. }
                     | Type::IntN { .. }
                     | Type::Named(_)
-                    | Type::Option(_) => self.call_host(self.host.struct_get_i64, &[handle, idx]),
+                    | Type::Option(_)
+                    | Type::Result { .. }
+                    | Type::List(_)
+                    | Type::FixedList { .. }
+                    | Type::Map { .. }
+                    | Type::Tuple(_)
+                    | Type::Apply { .. } => {
+                        self.call_host(self.host.struct_get_i64, &[handle, idx])
+                    }
                     other => {
                         return Err(format!(
                             "jit string interp named field unsupported: {type_name}.{fname}: {other:?}"
                         ));
                     }
                 };
-                self.lower_debug_value_text(val, fty)?
+                let uses_result = matches!(&fty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }));
+                self.lower_text_value(val, &fty, uses_result, field_mode)?
             };
             let name_id = self.runtime.heap.alloc_string(label.to_string());
             let name_id = self.b.ins().iconst(types::I64, name_id);
@@ -11076,7 +11410,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_field, &[fields_id, value]);
             }
         }
-        let type_name_id = self.runtime.heap.alloc_string(type_name.to_string());
+        let type_name_id = self.runtime.heap.alloc_string(display_type_name);
         let type_name_id = self.b.ins().iconst(types::I64, type_name_id);
         let push_record = self
             .module
@@ -11089,7 +11423,10 @@ impl LowerCtx<'_, '_> {
 
     fn lower_debug_value_text(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
         let buf_id = self.call_host(self.host.str_begin, &[]);
-        self.lower_debug_value(buf_id, value, ty)?;
+        let ty = self.erase_distinct_ty(ty);
+        let result_abi =
+            matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }));
+        self.lower_debug_value(buf_id, value, &ty, result_abi)?;
         Ok(buf_id)
     }
 
@@ -11102,16 +11439,32 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(push, &[buf_id, text]);
     }
 
-    fn lower_debug_value(&mut self, buf_id: Value, value: Value, ty: &Type) -> Result<(), String> {
-        match ty {
-            Type::Tagged { inner, .. } => self.lower_debug_value(buf_id, value, inner),
+    fn lower_debug_value(
+        &mut self,
+        buf_id: Value,
+        value: Value,
+        ty: &Type,
+        result_abi: bool,
+    ) -> Result<(), String> {
+        let ty = self.erase_distinct_ty(ty);
+        match &ty {
+            Type::Tagged { inner, .. }
+            | Type::Quantity { base: inner, .. }
+            | Type::InlineRange { base: inner, .. } => {
+                self.lower_debug_value(buf_id, value, inner, result_abi)
+            }
             Type::Option(inner) => self.lower_debug_option(
                 buf_id,
                 value,
                 inner,
-                matches!(inner.as_ref(), Type::IntN { .. }),
+                result_abi || matches!(inner.as_ref(), Type::IntN { .. }),
             ),
-            Type::Int | Type::InlineRange { .. } => {
+            Type::Result { ok, err } => {
+                let text = self.lower_text_result_value(value, ok, err, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Int => {
                 let text = self.call_host(self.host.num.int_to_string, &[value]);
                 self.push_str_value(buf_id, text);
                 Ok(())
@@ -11119,10 +11472,7 @@ impl LowerCtx<'_, '_> {
             Type::IntN { signed, .. } => {
                 let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
                 let text = self.call_host(self.host.intn_to_string, &[value, signed]);
-                let push = self
-                    .module
-                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                self.b.ins().call(push, &[buf_id, text]);
+                self.push_str_value(buf_id, text);
                 Ok(())
             }
             Type::Float => {
@@ -11163,22 +11513,19 @@ impl LowerCtx<'_, '_> {
             }
             Type::String => {
                 let text = self.call_host(self.host.coll.string_debug, &[value]);
-                let push = self
-                    .module
-                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                self.b.ins().call(push, &[buf_id, text]);
+                self.push_str_value(buf_id, text);
                 Ok(())
             }
             Type::List(elem) | Type::FixedList { elem, .. } => {
-                let kind = Self::debug_list_kind(elem).ok_or_else(|| {
-                    format!("jit string interp named field unsupported: List({elem:?})")
-                })?;
-                let kind = self.b.ins().iconst(types::I64, kind);
-                let text = self.call_host(self.host.coll.list_debug, &[value, kind]);
-                let push = self
-                    .module
-                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                self.b.ins().call(push, &[buf_id, text]);
+                let text = self.lower_text_list_value(value, elem, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Map {
+                key, value: item, ..
+            } => {
+                let text = self.lower_text_map_value(value, key, item, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
                 Ok(())
             }
             // Core time values use the same Prelude renderer for every
@@ -11205,17 +11552,52 @@ impl LowerCtx<'_, '_> {
                 self.push_str_value(buf_id, text);
                 Ok(())
             }
-            Type::Named(name) if self.meta.enum_packed_showable(name) => {
-                self.lower_packed_enum_debug(buf_id, value, name)
+            // DataTree's Display and Debug implementations share the canonical
+            // JSON renderer. The generic named-record path sees the erased
+            // `JSONObject` payload and would expose its Rust debug shape
+            // (`JSONObject { ... }`) instead of the Jet value.
+            Type::Named(name) if matches!(name.as_str(), "DataTree" | "JSON") => {
+                let text = self.call_host(self.host.encoding.json_to_string, &[value]);
+                self.push_str_value(buf_id, text);
+                Ok(())
             }
-            Type::Named(name) => self.lower_named_str_interp_handle(buf_id, name, value),
-            Type::Apply { name, .. } if self.meta.enum_packed_showable(name) => {
-                self.lower_packed_enum_debug(buf_id, value, name)
+            Type::Named(name) => {
+                let text = self.lower_text_named_value(value, &ty, name, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
             }
-            Type::Apply { name, .. } => self.lower_named_str_interp_handle(buf_id, name, value),
-            other => Err(format!(
-                "jit string interp named field unsupported: {other:?}"
-            )),
+            Type::Apply { name, args }
+                if name == "View"
+                    && args.len() == 1
+                    && matches!(&args[0], Type::Named(inner) if inner == "str") =>
+            {
+                let text = self.call_host(self.host.coll.string_debug, &[value]);
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Apply { name, .. } if name == "KeyRef" => {
+                let text = self.call_host(self.host.crypto.vault_key_ref_show, &[value]);
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Apply { name, .. } => {
+                let text = self.lower_text_named_value(value, &ty, name, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Tuple(_) => {
+                let name = record_type_key(&ty)
+                    .ok_or_else(|| format!("jit text tuple unsupported: {ty:?}"))?;
+                let text = self.lower_text_named_value(value, &ty, &name, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Union(members) => {
+                let text = self.lower_text_union_value(value, members, JitTextMode::Debug)?;
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            other => Err(format!("jit text debug type unsupported: {other:?}")),
         }
     }
 
@@ -11286,11 +11668,12 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
-    fn lower_packed_enum_debug(
+    fn lower_packed_enum_text(
         &mut self,
         buf_id: Value,
         packed: Value,
         enum_name: &str,
+        mode: JitTextMode,
     ) -> Result<(), String> {
         let variants = self
             .meta
@@ -11330,7 +11713,7 @@ impl LowerCtx<'_, '_> {
             let (payload_id, has_payload) = if let Some(payload_ty) = payload_ty {
                 let payload = self.unpack_enum_scalar(packed, &payload_ty)?;
                 (
-                    self.lower_debug_value_text(payload, &payload_ty)?,
+                    self.lower_text_value(payload, &payload_ty, false, mode)?,
                     self.b.ins().iconst(types::I64, 1),
                 )
             } else {
@@ -11717,6 +12100,13 @@ impl LowerCtx<'_, '_> {
     /// `TExprKind::MethodCall`'s `func_ids` lookup key: JIT compiles user
     /// methods into plain functions named `Type::method`. The method's Jet
     /// name is already on `TMethodRef` — no Rust mangle stripping.
+    ///
+    /// #2252: an imported type's methods lower once, under the canonical
+    /// identity of the module that DECLARES the type, while the caller names
+    /// the receiver by its own spelling. The nominal projection maps that
+    /// spelling onto the declaring identity; with no row (a local type, a
+    /// Prelude type, an ambiguous leaf) the local key stands and an honest miss
+    /// stays a miss.
     fn method_key(
         &self,
         recv_ty: &Type,
@@ -11730,7 +12120,15 @@ impl LowerCtx<'_, '_> {
                 return Some(concrete);
             }
         }
-        Some(format!("{}::{}", base, method.name))
+        let local = format!("{}::{}", base, method.name);
+        if self.func_ids.contains_key(&local) {
+            return Some(local);
+        }
+        let canonical = format!("{}::{}", self.meta.canonical_nominal(base), method.name);
+        if self.func_ids.contains_key(&canonical) {
+            return Some(canonical);
+        }
+        Some(local)
     }
 
     /// D-CAPBUNDLE1 / D-QUAL3: `+ - * /` that resolved to a synthetic operator
@@ -12692,10 +13090,9 @@ impl LowerCtx<'_, '_> {
                             )
                         }
                         CtKey::Int(n) => (
-                            self.b.ins().iconst(
-                                types::I64,
-                                self.runtime.heap.int_from_i64(*n),
-                            ),
+                            self.b
+                                .ins()
+                                .iconst(types::I64, self.runtime.heap.int_from_i64(*n)),
                             self.host.coll.map_insert_int,
                         ),
                         CtKey::Bool(b) => {
@@ -13112,8 +13509,7 @@ impl LowerCtx<'_, '_> {
     {
         let handle = self.call_host(self.host.coll.map_new, &[]);
         for (k, v) in entries {
-            if !matches!(&k.ty, Type::String | Type::Int)
-                && !self.is_composite_map_key_type(&k.ty)
+            if !matches!(&k.ty, Type::String | Type::Int) && !self.is_composite_map_key_type(&k.ty)
             {
                 return Err(format!("jit map key type unsupported: {:?}", k.ty));
             }
@@ -13366,8 +13762,8 @@ impl LowerCtx<'_, '_> {
                 | "sha3_256"
                 | "sha3_384"
                 | "sha3_512"
-                | "sha512_bytes"
-                | "blake3_bytes"
+                | "sha512"
+                | "blake3"
                 | "password_hash"
                 | "__password_text"
                 | "__hasher_digest"
@@ -13375,6 +13771,8 @@ impl LowerCtx<'_, '_> {
                 | "x25519_public"
                 | "__digest256_hex"
                 | "__digest256_bytes"
+                | "__digest512_hex"
+                | "__digest512_bytes"
                 | "__signature_bytes"
                 | "__sealed_bytes"
                 | "__x25519_public_bytes"
@@ -13391,13 +13789,15 @@ impl LowerCtx<'_, '_> {
                 "sign"
                 | "password_verify"
                 | "__hasher_update"
+                | "x25519"
                 | "x25519_shared"
                 | "constant_time_equal"
-                | "constant_time_equal_bytes",
+                | "constant_time_equal_bytes"
+                | "hmac_sha256",
             ) => 2,
             ("core.crypto", "verify" | "seal" | "open" | "file_open" | "file_seal") => 3,
             ("core.crypto", "pbkdf2_hmac" | "hkdf_sha256") => 4,
-            ("core.crypto.expert", "secret_bytes") => 1,
+            ("core.crypto.expert", "secret_bytes" | "shared_secret_bytes") => 1,
             ("core.crypto.expert", "open_v1" | "x25519_raw") => 2,
             (
                 "core.crypto.expert",
@@ -13441,6 +13841,8 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "sign") => (self.host.crypto.sign, false),
             ("core.crypto", "verify") => (self.host.crypto.verify, false),
             ("core.crypto", "sha256") => (self.host.crypto.sha256, false),
+            ("core.crypto", "blake3") => (self.host.crypto.blake3, false),
+            ("core.crypto", "sha512") => (self.host.crypto.sha512, false),
             ("core.crypto", "sha1") => (self.host.crypto.sha1, false),
             ("core.crypto", "sha224") => (self.host.crypto.sha224, false),
             ("core.crypto", "sha384") => (self.host.crypto.sha384, false),
@@ -13448,9 +13850,8 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "sha3_256") => (self.host.crypto.sha3_256, false),
             ("core.crypto", "sha3_384") => (self.host.crypto.sha3_384, false),
             ("core.crypto", "sha3_512") => (self.host.crypto.sha3_512, false),
+            ("core.crypto", "hmac_sha256") => (self.host.crypto.hmac_sha256, false),
             ("core.crypto", "pbkdf2_hmac") => (self.host.crypto.pbkdf2_hmac, false),
-            ("core.crypto", "sha512_bytes") => (self.host.crypto.sha512_bytes, false),
-            ("core.crypto", "blake3_bytes") => (self.host.crypto.blake3_bytes, false),
             ("core.crypto", "seal") => (self.host.crypto.seal, false),
             ("core.crypto", "open") => (self.host.crypto.open, false),
             ("core.crypto", "password_hash") => (self.host.crypto.password_hash, false),
@@ -13462,6 +13863,7 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "file_open") => (self.host.crypto.file_open, false),
             ("core.crypto", "__secret_from_bytes") => (self.host.crypto.secret_from_bytes, false),
             ("core.crypto", "hkdf_sha256") => (self.host.crypto.hkdf_sha256, false),
+            ("core.crypto", "x25519") => (self.host.crypto.x25519, false),
             ("core.crypto", "x25519_public") => (self.host.crypto.x25519_public_from_bytes, false),
             ("core.crypto", "x25519_shared") => (self.host.crypto.x25519_shared, false),
             ("core.crypto", "constant_time_equal") => (self.host.crypto.constant_time_equal, false),
@@ -13471,6 +13873,8 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "file_seal") => (self.host.crypto.file_seal, false),
             ("core.crypto", "__digest256_hex") => (self.host.crypto.digest256_hex, false),
             ("core.crypto", "__digest256_bytes") => (self.host.crypto.digest256_bytes, false),
+            ("core.crypto", "__digest512_hex") => (self.host.crypto.digest512_hex, false),
+            ("core.crypto", "__digest512_bytes") => (self.host.crypto.digest512_bytes, false),
             ("core.crypto", "__signature_bytes") => (self.host.crypto.signature_bytes, false),
             ("core.crypto", "__sealed_bytes") => (self.host.crypto.sealed_bytes, false),
             ("core.crypto", "__x25519_public_bytes") => {
@@ -13505,7 +13909,9 @@ impl LowerCtx<'_, '_> {
             ("core.crypto.expert", "hkdf_sha256_raw") => {
                 (self.host.crypto.expert_hkdf_sha256, false)
             }
-            ("core.crypto.expert", "secret_bytes") => (self.host.crypto.expert_secret_bytes, false),
+            ("core.crypto.expert", "secret_bytes" | "shared_secret_bytes") => {
+                (self.host.crypto.expert_secret_bytes, false)
+            }
             _ => {
                 return Err(format!("jit core call unsupported: {module}.{method}"));
             }
@@ -13629,12 +14035,8 @@ impl LowerCtx<'_, '_> {
             ("core.services", "send") => Some(3),
             (
                 "core.services",
-                "delivery_wait"
-                    | "delivery_status"
-                    | "delivery_retry"
-                    | "delivery_cancel"
-                    | "delivery_receipt"
-                    | "delivery_events",
+                "delivery_wait" | "delivery_status" | "delivery_retry" | "delivery_cancel"
+                | "delivery_receipt" | "delivery_events",
             ) => Some(1),
             (
                 "core.services",
@@ -14071,9 +14473,13 @@ impl LowerCtx<'_, '_> {
                             return Err("jit Range call needs the three-value ABI".to_string());
                         });
                     }
-                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                    self.emit_trap_check()?;
-                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+                    let carrier = self
+                        .b
+                        .inst_results(call)
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "jit local call returned no carrier".to_string())?;
+                    self.lower_call_result(carrier, &expr.ty)
                 })
             }
             TExprKind::Print(inner) => in_own_frame(|| -> Result<Value, String> {
@@ -14154,7 +14560,8 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
                     let then_val = self.lower_stmts_scoped_value(then_body, then_value)?;
-                    let then_reaches_merge = then_val.is_some();
+                    let then_reaches_merge =
+                        then_val.is_some() && !Self::is_dead_edge_tail(then_value);
                     if let Some(then_val) = then_val {
                         let then_val = self.typed_dead_edge(then_val, then_value, ret_ty);
                         self.b.ins().jump(merge_block, &[then_val]);
@@ -14163,7 +14570,8 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(else_block);
                     self.b.seal_block(else_block);
                     let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
-                    let else_reaches_merge = else_val.is_some();
+                    let else_reaches_merge =
+                        else_val.is_some() && !Self::is_dead_edge_tail(else_value);
                     if let Some(else_val) = else_val {
                         let else_val = self.typed_dead_edge(else_val, else_value, ret_ty);
                         self.b.ins().jump(merge_block, &[else_val]);
@@ -14173,7 +14581,9 @@ impl LowerCtx<'_, '_> {
                     self.b.seal_block(merge_block);
                     self.dead = !(then_reaches_merge || else_reaches_merge);
                     let phi = self.b.block_params(merge_block)[0];
-                    if !self.dead {
+                    if self.dead {
+                        self.b.ins().trap(TrapCode::UnreachableCodeReached);
+                    } else {
                         self.track_compute_value(phi, &expr.ty)?;
                     }
                     Ok(phi)
@@ -14390,9 +14800,17 @@ impl LowerCtx<'_, '_> {
                             return self.lower_crypto_core_call(expr);
                         });
                     }
-                    if module == "core.process" && method == "argv" && args.is_empty() {
+                    if module == "core.process"
+                        && matches!(method.as_str(), "argv" | "args")
+                        && args.is_empty()
+                    {
                         return in_own_frame(|| -> Result<Value, String> {
-                            return Ok(self.call_host(self.host.coll.io_args, &[]));
+                            let host = if method == "args" {
+                                self.host.coll.io_process_args
+                            } else {
+                                self.host.coll.io_args
+                            };
+                            return Ok(self.call_host(host, &[]));
                         });
                     }
                     if module == "core.term" && method == "print" && args.len() == 1 {
@@ -14408,13 +14826,13 @@ impl LowerCtx<'_, '_> {
                     // registry projection that resolves every recorded row's host
                     // has nothing to project, and this family's one mechanism is
                     // the print emitter instead. AOT emits `eprint(x)` as
-                    // `jet_term_write_stderr_line(&((x).jet_show()), false)`:
-                    // render through the shared JetShow route, then pick the
+                    // `jet_term_write_stderr_line(&((x).jet_display()), false)`:
+                    // render through the shared Display route, then pick the
                     // stream. TIR joins a multi-argument `eprint` into one value
                     // before lowering, so one argument is the whole surface.
                     if module == "core.term" && method == "eprint" && args.len() == 1 {
                         return in_own_frame(|| -> Result<Value, String> {
-                            let text = self.lower_jet_show(&args[0])?;
+                            let text = self.lower_text(&args[0], JitTextMode::Display)?;
                             let eprint_ref = self
                                 .module
                                 .declare_func_in_func(self.host.eprint_str, self.b.func);
@@ -15295,9 +15713,23 @@ impl LowerCtx<'_, '_> {
                                 });
                             }
                             let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                                "parse" if args.len() == 1 => (
+                                "parse" if args.len() == 4 => (
                                     self.host.encoding.csv_parse,
-                                    vec![self.lower_expr(&args[0])?],
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                        self.lower_expr(&args[3])?,
+                                    ],
+                                ),
+                                "rows" if args.len() == 4 => (
+                                    self.host.encoding.csv_rows,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                        self.lower_expr(&args[3])?,
+                                    ],
                                 ),
                                 "to_string" if args.len() == 1 && rows_arg => (
                                     self.host.encoding.csv_to_string,
@@ -15312,14 +15744,16 @@ impl LowerCtx<'_, '_> {
                                     };
                                     (self.host.stream.csv_writer, vec![file, limits])
                                 }
-                                "reader" if args.len() == 1 || args.len() == 2 => {
+                                "reader" if args.len() == 5 => {
                                     let file = self.lower_expr(&args[0])?;
-                                    let limits = if args.len() == 2 {
-                                        self.lower_expr(&args[1])?
-                                    } else {
-                                        self.b.ins().iconst(types::I64, 0)
-                                    };
-                                    (self.host.stream.csv_reader, vec![file, limits])
+                                    let limits = self.lower_expr(&args[1])?;
+                                    let delimiter = self.lower_expr(&args[2])?;
+                                    let header = self.lower_expr(&args[3])?;
+                                    let skip_blank = self.lower_expr(&args[4])?;
+                                    (
+                                        self.host.stream.csv_reader,
+                                        vec![file, limits, delimiter, header, skip_blank],
+                                    )
                                 }
                                 _ => return Err("jit core call unsupported".to_string()),
                             };
@@ -17538,12 +17972,18 @@ impl LowerCtx<'_, '_> {
                                     };
                                     (host, vec![self.lower_expr(&args[0])?])
                                 }
-                                "decimal" | "percent" | "sci" if args.len() == 2 => {
+                                "decimal" | "grouped" | "percent" | "sci"
+                                    if args.len() == 2 =>
+                                {
                                     let host = match method.as_str() {
                                         "decimal" if args[0].ty == Type::Int => {
                                             self.host.fmt.decimal_int
                                         }
                                         "decimal" => self.host.fmt.decimal,
+                                        "grouped" if args[0].ty == Type::Int => {
+                                            self.host.fmt.grouped_int
+                                        }
+                                        "grouped" => self.host.fmt.grouped,
                                         "sci" => self.host.fmt.sci,
                                         _ => self.host.fmt.percent,
                                     };
@@ -17557,10 +17997,7 @@ impl LowerCtx<'_, '_> {
                                 }
                                 "hex" if args.len() == 2 => (
                                     self.host.fmt.hex,
-                                    vec![
-                                        self.lower_expr(&args[0])?,
-                                        self.lower_expr(&args[1])?,
-                                    ],
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "pad" | "pad_left" | "pad_right" | "pad_center"
                                     if args.len() == 3 =>
@@ -17664,6 +18101,34 @@ impl LowerCtx<'_, '_> {
                                         self.host.time.from_unix_ms,
                                         vec![self.lower_expr(&args[0])?],
                                     ),
+                                    ("core.time", "from_unix_seconds") if args.len() == 1 => (
+                                        self.host.time.from_unix_seconds,
+                                        vec![self.lower_expr(&args[0])?],
+                                    ),
+                                    ("core.time", "from_unix_microseconds") if args.len() == 1 => (
+                                        self.host.time.from_unix_microseconds,
+                                        vec![self.lower_expr(&args[0])?],
+                                    ),
+                                    ("core.time", "from_unix_nanoseconds") if args.len() == 1 => (
+                                        self.host.time.from_unix_nanoseconds,
+                                        vec![self.lower_expr(&args[0])?],
+                                    ),
+                                    ("core.time", "parse_iso_week_date") if args.len() == 1 => (
+                                        self.host.time.parse_iso_week_date,
+                                        vec![self.lower_expr(&args[0])?],
+                                    ),
+                                    ("core.time", "from_iso_week") if args.len() == 3 => (
+                                        self.host.time.from_iso_week,
+                                        vec![
+                                            self.lower_expr(&args[0])?,
+                                            self.lower_expr(&args[1])?,
+                                            self.lower_expr(&args[2])?,
+                                        ],
+                                    ),
+                                    ("core.time", "parse_zoned") if args.len() == 1 => (
+                                        self.host.time.parse_zoned,
+                                        vec![self.lower_expr(&args[0])?],
+                                    ),
                                     ("core.time", "utc") if args.is_empty() => {
                                         (self.host.time.utc, Vec::new())
                                     }
@@ -17690,12 +18155,28 @@ impl LowerCtx<'_, '_> {
                                     ("core.time", "zone") if args.len() == 1 => {
                                         (self.host.time.zone, vec![self.lower_expr(&args[0])?])
                                     }
-                                    ("core.time", "zoned_local") if args.len() == 3 => (
+                                    ("core.time", "zoned_local") if args.len() == 3 => {
+                                        let default = self
+                                            .runtime
+                                            .heap
+                                            .alloc_string("compatible".to_string());
+                                        (
+                                            self.host.time.zoned_local,
+                                            vec![
+                                                self.lower_expr(&args[0])?,
+                                                self.lower_expr(&args[1])?,
+                                                self.lower_expr(&args[2])?,
+                                                self.b.ins().iconst(types::I64, default),
+                                            ],
+                                        )
+                                    }
+                                    ("core.time", "zoned_local") if args.len() == 4 => (
                                         self.host.time.zoned_local,
                                         vec![
                                             self.lower_expr(&args[0])?,
                                             self.lower_expr(&args[1])?,
                                             self.lower_expr(&args[2])?,
+                                            self.lower_expr(&args[3])?,
                                         ],
                                     ),
                                     ("core.time", "parse_time") if args.len() == 1 => (
@@ -17815,14 +18296,6 @@ impl LowerCtx<'_, '_> {
                                 ),
                                 "replace_first" if args.len() == 3 => (
                                     self.host.text.regex_replace_first,
-                                    vec![
-                                        self.lower_expr(&args[0])?,
-                                        self.lower_expr(&args[1])?,
-                                        self.lower_expr(&args[2])?,
-                                    ],
-                                ),
-                                "replace_all" if args.len() == 3 => (
-                                    self.host.text.regex_replace_all,
                                     vec![
                                         self.lower_expr(&args[0])?,
                                         self.lower_expr(&args[1])?,
@@ -18307,7 +18780,9 @@ impl LowerCtx<'_, '_> {
                 })
             }
             TExprKind::CoreClosureCall { kind } => match kind {
-                TCoreClosureKind::Spawn { group, site, .. } => {
+                TCoreClosureKind::Spawn {
+                    group, site, label, ..
+                } => {
                     let group = match group {
                         Some(group) => Some(self.lower_expr(group)?),
                         None => None,
@@ -18319,7 +18794,7 @@ impl LowerCtx<'_, '_> {
                         let status = self.b.ins().call(host, &[group]);
                         let _ = self.finish_wait_call(self.b.inst_results(status)[0]);
                     }
-                    let task = self.lower_spawn(*site)?;
+                    let task = self.lower_spawn(*site, label.as_deref())?;
                     if let Some(group) = group {
                         let host = self
                             .module
@@ -18564,7 +19039,7 @@ impl LowerCtx<'_, '_> {
                             self.b.ins().jump(merge, &[val]);
                             self.b.switch_to_block(fail_block);
                             self.b.seal_block(fail_block);
-                            self.call_host(self.host.trace_reset, &[]);
+                            self.call_host_void(self.host.trace_reset, &[]);
                             match fallback {
                                 TOrFallback::Value(e) => {
                                     let fb = self.lower_expr(e)?;
@@ -18681,7 +19156,7 @@ impl LowerCtx<'_, '_> {
 
                         self.b.switch_to_block(fail_block);
                         self.b.seal_block(fail_block);
-                        self.call_host(self.host.trace_reset, &[]);
+                        self.call_host_void(self.host.trace_reset, &[]);
                         match fallback {
                             TOrFallback::Value(e) => {
                                 let fb = self.lower_expr(e)?;
@@ -18741,7 +19216,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().jump(merge, &[val]);
                         self.b.switch_to_block(fail_block);
                         self.b.seal_block(fail_block);
-                        self.call_host(self.host.trace_reset, &[]);
+                        self.call_host_void(self.host.trace_reset, &[]);
                         match fallback {
                             TOrFallback::Panic { msg, loc } => {
                                 let msg_val = self.lower_expr(msg)?;
@@ -18816,7 +19291,7 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().jump(merge, &[ok_val]);
                     self.b.switch_to_block(fail_block);
                     self.b.seal_block(fail_block);
-                    self.call_host(self.host.trace_reset, &[]);
+                    self.call_host_void(self.host.trace_reset, &[]);
                     // D-FAIL-BIND1=A: the failed report is already a Prelude
                     // result handle. Materialize that handle in the shared
                     // compiler-generated slot; fallback lowering only reads it.
@@ -19719,21 +20194,14 @@ impl LowerCtx<'_, '_> {
                         )
                     {
                         let check_method = TMethodRef::bare("check");
-                        let check_key = Self::static_method_key(
-                            owner,
-                            owner_type.as_ref(),
-                            &check_method,
-                            &[],
-                        )
-                        .ok_or_else(|| "jit CheckedText.check owner".to_string())?;
-                        let check_id = self
-                            .func_ids
-                            .get(&check_key)
-                            .copied()
-                            .ok_or_else(|| format!("jit missing CheckedText checker `{check_key}`"))?;
+                        let check_key =
+                            Self::static_method_key(owner, owner_type.as_ref(), &check_method, &[])
+                                .ok_or_else(|| "jit CheckedText.check owner".to_string())?;
+                        let check_id = self.func_ids.get(&check_key).copied().ok_or_else(|| {
+                            format!("jit missing CheckedText checker `{check_key}`")
+                        })?;
                         let text = self.lower_call_arg(&args[0])?;
-                        let check_ref =
-                            self.module.declare_func_in_func(check_id, self.b.func);
+                        let check_ref = self.module.declare_func_in_func(check_id, self.b.func);
                         let check_call = self.b.ins().call(check_ref, &[text]);
                         let check_result = self.b.inst_results(check_call)[0];
                         let is_ok = self.call_host(self.host.result_is_ok, &[check_result]);
@@ -20476,9 +20944,11 @@ impl LowerCtx<'_, '_> {
                             Some(types::I8) => self.b.ins().uextend(types::I64, payload),
                             Some(types::I32) => self.b.ins().sextend(types::I64, payload),
                             Some(types::I64) => payload,
-                            other => return Err(format!(
+                            other => {
+                                return Err(format!(
                                 "jit DBValue payload type unsupported: {payload_ty:?} ({other:?})"
-                            )),
+                            ))
+                            }
                         };
                         let disc_v = self.b.ins().iconst(types::I64, disc);
                         Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, payload_bits]))
@@ -20700,6 +21170,10 @@ impl LowerCtx<'_, '_> {
                             Type::Named(name) if name == "HTTPHandler"
                         )
                     {
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let has_env = self.b.ins().iconst(types::I8, 1);
+                        let callable =
+                            self.call_host(self.host.callable_bind, &[fn_addr, zero, has_env]);
                         // Prefer host-side packing for the common single-capture
                         // middleware shape (`owned :: ~next`); JIT list_push was
                         // arriving empty at bind time on the serve thread.
@@ -20710,7 +21184,7 @@ impl LowerCtx<'_, '_> {
                                 self.host.net_http.http_handler_bind1,
                                 self.b.func,
                             );
-                            let call = self.b.ins().call(host, &[fn_addr, cap0]);
+                            let call = self.b.ins().call(host, &[callable, cap0]);
                             Ok(self.b.inst_results(call)[0])
                         } else {
                             let env = self.call_host(self.host.coll.list_new, &[]);
@@ -20725,7 +21199,7 @@ impl LowerCtx<'_, '_> {
                                 self.host.net_http.http_handler_bind,
                                 self.b.func,
                             );
-                            let call = self.b.ins().call(host, &[fn_addr, env]);
+                            let call = self.b.ins().call(host, &[callable, env]);
                             Ok(self.b.inst_results(call)[0])
                         }
                     } else {
@@ -20914,11 +21388,14 @@ impl LowerCtx<'_, '_> {
                 TFnValueKind::NamedFn {
                     name: Some(name), ..
                 } => {
-                    let id = self
-                        .func_ids
-                        .get(name)
-                        .copied()
-                        .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
+                    let id = super::functions_compile::lower_named_fn_value(
+                        self.module,
+                        self.host,
+                        name,
+                        &expr.ty,
+                        self.meta,
+                        self.func_ids,
+                    )?;
                     let func_ref = self.module.declare_func_in_func(id, self.b.func);
                     let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
                     let zero = self.b.ins().iconst(types::I64, 0);
@@ -21456,6 +21933,14 @@ impl LowerCtx<'_, '_> {
             recv_val
         };
         match op {
+            TBuiltinOp::IntToRadix { .. } => in_own_frame(|| -> Result<Value, String> {
+                let radix = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.num.int_to_radix, &[recv_val, radix]))
+            }),
+            TBuiltinOp::IntFromRadix { .. } => in_own_frame(|| -> Result<Value, String> {
+                let radix = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.num.int_from_radix, &[recv_val, radix]))
+            }),
             TBuiltinOp::LenString => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.str_len, &[recv_val]))
             }),
@@ -21467,6 +21952,12 @@ impl LowerCtx<'_, '_> {
             }),
             TBuiltinOp::ToLower => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.str_to_lower, &[recv_val]))
+            }),
+            TBuiltinOp::ToAsciiUpper => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.str_to_ascii_upper, &[recv_val]))
+            }),
+            TBuiltinOp::ToAsciiLower => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.str_to_ascii_lower, &[recv_val]))
             }),
             TBuiltinOp::Replace => in_own_frame(|| -> Result<Value, String> {
                 let from = self.lower_expr(&args[0])?;
@@ -21602,13 +22093,13 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::JoinSep => {
                 in_own_frame(|| -> Result<Value, String> {
                     // The element type decides the rendering. Without it the old
-                    // host had to guess (see `lower_jet_show_sequence_value`), so
+                    // host had to guess (see `lower_text_sequence_value`), so
                     // an unresolvable element type deopts instead of guessing.
                     let Some(elem) = jit_list_iter_elem_type(&recv_ty) else {
                         return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     };
                     let sep = self.lower_expr(&args[0])?;
-                    self.lower_jet_show_sequence_value(recv_val, &elem, Some(sep))
+                    self.lower_text_sequence_value(recv_val, &elem, Some(sep), JitTextMode::Display)
                 })
             }
             // Remaining TBuiltinOp variants have no JIT lowering: each is named
@@ -21633,6 +22124,11 @@ impl LowerCtx<'_, '_> {
                         let one = self.b.ins().iconst(types::I64, 1);
                         let span = self.b.ins().isub(end, start);
                         let len = self.b.ins().iadd(span, one);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        return Ok(self.bool_from_icmp(IntCC::Equal, len, zero));
+                    }
+                    if matches!(&recv_ty, Type::String) {
+                        let len = self.call_host(self.host.str_len, &[recv_val]);
                         let zero = self.b.ins().iconst(types::I64, 0);
                         return Ok(self.bool_from_icmp(IntCC::Equal, len, zero));
                     }
@@ -21943,9 +22439,7 @@ impl LowerCtx<'_, '_> {
                 let value = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.coll.list_count, &[recv_val, value]))
             }),
-            TBuiltinOp::Counts => {
-                Ok(self.call_host(self.host.coll.list_counts, &[recv_val]))
-            }
+            TBuiltinOp::Counts => Ok(self.call_host(self.host.coll.list_counts, &[recv_val])),
             TBuiltinOp::ExtendList | TBuiltinOp::ConcatList => {
                 Err(Self::BUILTIN_UNSUPPORTED.to_string())
             }
@@ -22293,6 +22787,11 @@ impl LowerCtx<'_, '_> {
                 if matches!(&recv_ty, Type::Apply { name, .. } if name == "Cache") {
                     let key = self.lower_expr(&args[0])?;
                     Ok(self.call_host(self.host.coll.lru_has, &[recv_val, key]))
+                } else if matches!(&recv_ty, Type::Map { .. }) {
+                    let key = self.lower_expr(&args[0])?;
+                    let host = self.map_get_opt_host_for_key(&args[0].ty);
+                    let result = self.call_host(host, &[recv_val, key]);
+                    Ok(self.call_host(self.host.result_is_ok, &[result]))
                 } else {
                     Err(Self::BUILTIN_UNSUPPORTED.to_string())
                 }
@@ -22380,7 +22879,10 @@ impl LowerCtx<'_, '_> {
                 let line = self.b.ins().iconst(types::I32, 0);
                 Ok(self.call_host(self.host.coll.list_slice, &[recv_val, start, end, line]))
             }),
-            TBuiltinOp::ListCopy => Ok(self.call_host(self.host.coll.list_copy, &[recv_val])),
+            TBuiltinOp::ListCopy => {
+                let host = self.list_copy_host(&recv_ty);
+                Ok(self.call_host(host, &[recv_val]))
+            }
             TBuiltinOp::ListEqual => in_own_frame(|| -> Result<Value, String> {
                 let other = self.lower_expr(&args[0])?;
                 let host = self.list_eq_host(&recv_ty);
@@ -22693,10 +23195,11 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ByteBufferWrite { method } => in_own_frame(|| -> Result<Value, String> {
                 let value = self.lower_expr(&args[0])?;
                 let value = match &args[0].ty {
-                    Type::Float => self
-                        .b
-                        .ins()
-                        .bitcast(types::I64, Self::scalar_bitcast_memflags(), value),
+                    Type::Float => {
+                        self.b
+                            .ins()
+                            .bitcast(types::I64, Self::scalar_bitcast_memflags(), value)
+                    }
                     Type::Float32 => {
                         let value = self.b.ins().fpromote(types::F64, value);
                         self.b
@@ -23172,14 +23675,15 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(widened)
             }
-            TNumericOp::CheckedIntToFixed { host_kind, line, .. } => {
+            TNumericOp::CheckedIntToFixed {
+                host_kind, line, ..
+            } => {
                 if !matches!(&recv.ty, Type::Int) {
                     return Err("checked fixed-width construction expects Int".to_string());
                 }
                 let kind = self.b.ins().iconst(types::I64, *host_kind);
                 let line = self.b.ins().iconst(types::I64, i64::from(*line));
-                let converted = self
-                    .call_host(self.host.numeric_checked_int, &[value, kind, line]);
+                let converted = self.call_host(self.host.numeric_checked_int, &[value, kind, line]);
                 self.emit_trap_check()?;
                 Ok(converted)
             }
@@ -24410,7 +24914,7 @@ impl LowerCtx<'_, '_> {
         self.lower_clone_tuple_value(src, fields, None)
     }
 
-    fn lower_spawn(&mut self, site: usize) -> Result<Value, String> {
+    fn lower_spawn(&mut self, site: usize, label: Option<&str>) -> Result<Value, String> {
         let lam = self
             .spawn_lambdas
             .get(site)
@@ -24420,6 +24924,10 @@ impl LowerCtx<'_, '_> {
             .get(site)
             .copied()
             .ok_or_else(|| format!("jit spawn site {site} missing"))?;
+        if self.runtime.task_labels.len() <= site {
+            self.runtime.task_labels.resize_with(site + 1, || None);
+        }
+        self.runtime.task_labels[site] = label.map(str::to_owned);
         let mut cap_vals = Vec::new();
         for cap in &lam.captures {
             let captured = TExpr {
@@ -24440,7 +24948,10 @@ impl LowerCtx<'_, '_> {
         let spawn_site = self.b.ins().iconst(types::I64, site as i64);
         let (host_id, call_args) = match cap_vals.len() {
             0 => (self.host.conc.spawn0, vec![spawn_site, spawn_ptr]),
-            1 => (self.host.conc.spawn1, vec![spawn_site, spawn_ptr, cap_vals[0]]),
+            1 => (
+                self.host.conc.spawn1,
+                vec![spawn_site, spawn_ptr, cap_vals[0]],
+            ),
             2 => (
                 self.host.conc.spawn2,
                 vec![spawn_site, spawn_ptr, cap_vals[0], cap_vals[1]],
@@ -25133,6 +25644,34 @@ impl LowerCtx<'_, '_> {
                 let other = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.duration_difference, &[recv_val, other]))
             }),
+            THandleOp::DurationAbs => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.duration_abs, &[recv_val]))
+            }),
+            THandleOp::DurationNegated => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.duration_negated, &[recv_val]))
+            }),
+            THandleOp::DurationSign => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.duration_sign, &[recv_val]))
+            }),
+            THandleOp::DurationTotalIn => in_own_frame(|| -> Result<Value, String> {
+                let unit = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.duration_total_in, &[recv_val, unit]))
+            }),
+            THandleOp::DurationRound => in_own_frame(|| -> Result<Value, String> {
+                let unit = self.lower_expr(&args[0])?;
+                let increment = if let Some(arg) = args.get(1) {
+                    self.lower_expr(arg)?
+                } else {
+                    self.b.ins().iconst(types::I64, 1)
+                };
+                let mode = if let Some(arg) = args.get(2) {
+                    self.lower_expr(arg)?
+                } else {
+                    let id = self.runtime.heap.alloc_string("half_expand".to_string());
+                    self.b.ins().iconst(types::I64, id)
+                };
+                Ok(self.call_host(self.host.duration_round, &[recv_val, unit, increment, mode]))
+            }),
             THandleOp::DurationSecondsValue => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.duration_seconds_value, &[recv_val]))
             }),
@@ -25665,9 +26204,24 @@ impl LowerCtx<'_, '_> {
                 in_own_frame(|| -> Result<Value, String> {
                     let mut arg_vals = vec![recv_val];
                     if let Some(op) = reduce_op {
+                        if let Some(op) = crate::Math::simd_reduce_op_code(op) {
+                            let op = self.b.ins().iconst(types::I64, op);
+                            let packed = self.call_host(self.host.math.reduce, &[recv_val, op]);
+                            self.emit_trap_check()?;
+                            return self.unpack_math_result(packed, ret_ty);
+                        }
                         let op_h = self.runtime.heap.alloc_string(op.clone());
                         arg_vals.push(self.b.ins().iconst(types::I64, op_h));
                         self.lower_math_host_call(type_name, "reduce", &arg_vals, ret_ty)
+                    } else if method == "dot" && args.len() == 1 {
+                        let other = self.lower_expr(&args[0])?;
+                        let packed = self.call_host(self.host.math.dot, &[recv_val, other]);
+                        self.emit_trap_check()?;
+                        self.unpack_math_result(packed, ret_ty)
+                    } else if method == "length" && args.is_empty() {
+                        let packed = self.call_host(self.host.math.length, &[recv_val]);
+                        self.emit_trap_check()?;
+                        self.unpack_math_result(packed, ret_ty)
                     } else {
                         for a in args {
                             let v = self.lower_expr(a)?;
@@ -25932,13 +26486,20 @@ impl LowerCtx<'_, '_> {
                     }
                 })
             }
-            THandleOp::CivilTimeMethod { method, .. } => {
+            THandleOp::CivilTimeMethod { kind, method } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let recv_v = self.lower_expr(recv)?;
+                    if kind == "Period" && method == "total_in" {
+                        let unit = self.lower_expr(&args[0])?;
+                        let anchor = self.lower_expr(&args[1])?;
+                        return Ok(
+                            self.call_host(self.host.time.period_total_in, &[recv_v, unit, anchor])
+                        );
+                    }
                     let method_id = self.runtime.heap.alloc_string(method.clone());
                     let method_val = self.b.ins().iconst(types::I64, method_id);
-                    let mut arg_vals = Vec::with_capacity(6);
-                    for i in 0..6 {
+                    let mut arg_vals = Vec::with_capacity(7);
+                    for i in 0..7 {
                         let v = if let Some(a) = args.get(i) {
                             self.lower_expr(a)?
                         } else {
@@ -25960,6 +26521,7 @@ impl LowerCtx<'_, '_> {
                             arg_vals[3],
                             arg_vals[4],
                             arg_vals[5],
+                            arg_vals[6],
                         ],
                     );
                     let raw = self.b.inst_results(call)[0];
@@ -26048,9 +26610,10 @@ impl LowerCtx<'_, '_> {
                 in_own_frame(|| -> Result<Value, String> {
                     let recv_v = self.lower_expr(recv)?;
                     let method_name = if method == "replace_all_with" {
-                        // Constant-string lambdas fold to replace_all (canonical
-                        // algorithm); non-constant callbacks stay unsupported.
-                        "replace_all"
+                        // Constant-string callbacks use the all-match
+                        // `replace` kernel; non-constant callbacks stay
+                        // unsupported on the resident JIT path.
+                        "replace"
                     } else {
                         method.as_str()
                     };
@@ -26093,6 +26656,16 @@ impl LowerCtx<'_, '_> {
             THandleOp::HTTPClientMethod { kind, method } => {
                 in_own_frame(|| -> Result<Value, String> {
                     match (kind.as_str(), method.as_str()) {
+                        ("HTTPResponse", "text") if args.is_empty() => {
+                            Ok(self.call_host(self.host.net_http.http_resp_text, &[recv_val]))
+                        }
+                        ("HTTPResponse", "text") if args.len() == 1 => {
+                            let limit = self.lower_expr(&args[0])?;
+                            Ok(self.call_host(
+                                self.host.net_http.http_resp_text_with_limit,
+                                &[recv_val, limit],
+                            ))
+                        }
                         ("HTTPResponse", "status") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_resp_status, &[recv_val]))
                         }
@@ -26155,6 +26728,15 @@ impl LowerCtx<'_, '_> {
                                 other => other,
                             };
                             self.lower_http_body_json(body, limit, ok_ty)
+                        }
+                        ("HTTPRequest", "json") if args.len() == 1 => {
+                            let body = self.lower_typed_json_to_string(&args[0], false)?;
+                            let host = self.module.declare_func_in_func(
+                                self.host.net_http.http_client_request_json,
+                                self.b.func,
+                            );
+                            let call = self.b.ins().call(host, &[recv_val, body]);
+                            Ok(self.b.inst_results(call)[0])
                         }
                         ("HTTPRequest", "body") if args.len() == 1 => {
                             let body = self.lower_expr(&args[0])?;
@@ -26247,9 +26829,17 @@ impl LowerCtx<'_, '_> {
                             let handler = self.lower_expr(&args[1])?;
                             let method_s = self.runtime.heap.alloc_string(m.to_uppercase());
                             let method_v = self.b.ins().iconst(types::I64, method_s);
+                            let host_id = if matches!(
+                                &args[1].ty,
+                                Type::Fn { params, .. } if params.is_empty()
+                            ) {
+                                self.host.net_http.http_mux_add_zero
+                            } else {
+                                self.host.net_http.http_mux_add
+                            };
                             let host = self
                                 .module
-                                .declare_func_in_func(self.host.net_http.http_mux_add, self.b.func);
+                                .declare_func_in_func(host_id, self.b.func);
                             let call = self
                                 .b
                                 .ins()
@@ -26276,6 +26866,16 @@ impl LowerCtx<'_, '_> {
                         }
                         ("HTTPRequest", "body") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_req_body, &[recv_val]))
+                        }
+                        ("HTTPRequest", "text") if args.is_empty() => {
+                            Ok(self.call_host(self.host.net_http.http_req_text, &[recv_val]))
+                        }
+                        ("HTTPRequest", "text") if args.len() == 1 => {
+                            let limit = self.lower_expr(&args[0])?;
+                            Ok(self.call_host(
+                                self.host.net_http.http_req_text_with_limit,
+                                &[recv_val, limit],
+                            ))
                         }
                         ("HTTPRequest", "json") if args.is_empty() => {
                             let body =
@@ -26356,6 +26956,16 @@ impl LowerCtx<'_, '_> {
                         }
                         ("HTTPResponse", "status") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_resp_status, &[recv_val]))
+                        }
+                        ("HTTPResponse", "text") if args.is_empty() => {
+                            Ok(self.call_host(self.host.net_http.http_resp_text, &[recv_val]))
+                        }
+                        ("HTTPResponse", "text") if args.len() == 1 => {
+                            let limit = self.lower_expr(&args[0])?;
+                            Ok(self.call_host(
+                                self.host.net_http.http_resp_text_with_limit,
+                                &[recv_val, limit],
+                            ))
                         }
                         ("HTTPResponse", "body") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_resp_body, &[recv_val]))
@@ -26461,6 +27071,21 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.encoding.datatree_float, &[recv_val]))
                 })
             }
+            THandleOp::DataTreeToText | THandleOp::JSONToText => {
+                in_own_frame(|| -> Result<Value, String> {
+                    Ok(self.call_host(self.host.encoding.datatree_to_text, &[recv_val]))
+                })
+            }
+            THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => {
+                in_own_frame(|| -> Result<Value, String> {
+                    let other = self.lower_expr(&args[0])?;
+                    let result = self.call_host(
+                        self.host.encoding.datatree_equal_unordered,
+                        &[recv_val, other],
+                    );
+                    Ok(self.b.ins().ireduce(types::I8, result))
+                })
+            }
             THandleOp::PathFrom => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.core.path_from, &[recv_val]))
             }),
@@ -26482,6 +27107,14 @@ impl LowerCtx<'_, '_> {
             }),
             THandleOp::PathNormalize => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.core.path_normalize, &[recv_val]))
+            }),
+            THandleOp::PathIsWithin => in_own_frame(|| -> Result<Value, String> {
+                let base = self.lower_expr(&args[0])?;
+                let result = self.call_host(
+                    self.host.core.path_is_within,
+                    &[recv_val, base],
+                );
+                Ok(self.b.ins().ireduce(types::I8, result))
             }),
             THandleOp::PathToString => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.core.path_to_string, &[recv_val]))
@@ -27212,6 +27845,8 @@ impl LowerCtx<'_, '_> {
                     | TBuiltinOp::BeforeView
                     | TBuiltinOp::ToUpper
                     | TBuiltinOp::ToLower
+                    | TBuiltinOp::ToAsciiUpper
+                    | TBuiltinOp::ToAsciiLower
                     | TBuiltinOp::StringToTitle
             ) || matches!(
                 op,
@@ -27319,6 +27954,27 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
         ret_ty: &Type,
     ) -> Result<Value, String> {
+        if recv.is_none() && func == "splat" && args.len() == 1 {
+            if let Some((kind, len)) = crate::Math::simd_lane_type_code(type_name) {
+                let value = self.lower_expr(&args[0])?;
+                let value = match self.meta.clif_ty(&args[0].ty) {
+                    Some(t) if t == types::F64 => {
+                        self.b
+                            .ins()
+                            .bitcast(types::I64, Self::scalar_bitcast_memflags(), value)
+                    }
+                    _ => value,
+                };
+                let kind = self.b.ins().iconst(types::I64, kind);
+                let len = self.b.ins().iconst(
+                    types::I64,
+                    i64::try_from(len).map_err(|_| "jit SIMD lane count overflow")?,
+                );
+                let packed = self.call_host(self.host.math.splat, &[value, kind, len]);
+                self.emit_trap_check()?;
+                return self.unpack_math_result(packed, ret_ty);
+            }
+        }
         let mut arg_vals = Vec::new();
         if let Some(recv) = recv {
             arg_vals.push(recv);
@@ -27336,6 +27992,26 @@ impl LowerCtx<'_, '_> {
             arg_vals.push(bits);
         }
         self.lower_math_host_call(type_name, func, &arg_vals, ret_ty)
+    }
+
+    fn lower_math_binary(
+        &mut self,
+        left: Value,
+        right: Value,
+        op: BinOp,
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        let op = match op {
+            BinOp::Add => 0,
+            BinOp::Sub => 1,
+            BinOp::Mul => 2,
+            BinOp::Div => 3,
+            _ => return Err("jit math binary op unsupported".to_string()),
+        };
+        let op = self.b.ins().iconst(types::I64, op);
+        let packed = self.call_host(self.host.math.binary, &[left, right, op]);
+        self.emit_trap_check()?;
+        self.unpack_math_result(packed, ret_ty)
     }
 
     fn lower_math_host_call(
@@ -27362,7 +28038,10 @@ impl LowerCtx<'_, '_> {
     }
 
     fn unpack_math_result(&mut self, packed: Value, ret_ty: &Type) -> Result<Value, String> {
-        if matches!(ret_ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) {
+        if matches!(
+            ret_ty,
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. }
+        ) {
             return Ok(self.call_host(self.host.math.result_int, &[packed]));
         }
         if matches!(ret_ty, Type::Float | Type::Float32) {
@@ -27652,13 +28331,6 @@ impl LowerCtx<'_, '_> {
             || Self::is_math_value_ty(&rhs.ty)
             || Self::is_math_value_ty(&lhs.ty)
         {
-            let type_name = match &lhs.ty {
-                Type::Named(n) if Self::is_math_value_ty(&lhs.ty) => n.as_str(),
-                _ => match &rhs.ty {
-                    Type::Named(n) => n.as_str(),
-                    _ => return Err("jit math binary needs Named math type".to_string()),
-                },
-            };
             let func = match op {
                 BinOp::Add => "add",
                 BinOp::Sub => "sub",
@@ -27677,7 +28349,7 @@ impl LowerCtx<'_, '_> {
             } else {
                 ret_ty
             };
-            return self.lower_math_host_call(type_name, func, &[l, r], ret_ty);
+            return self.lower_math_binary(l, r, op, ret_ty);
         }
         if let Type::IntN { signed, bits } = lhs_ty {
             let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
@@ -27851,17 +28523,7 @@ impl LowerCtx<'_, '_> {
                 // The element decides which handle shape the host reads, so
                 // erase `#Numeric` / tagged wrappers first: a `[Meter#3]` slot
                 // stores f64 elements even though the element type is Named.
-                let elem = match &lhs_ty {
-                    Type::List(elem) => Some(elem.as_ref()),
-                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
-                    _ => None,
-                }
-                .map(|elem| self.erase_distinct_ty(elem));
-                let host = match &elem {
-                    Some(Type::String) => self.host.coll.list_order_str,
-                    Some(Type::Float | Type::Float32) => self.host.coll.list_order_f64,
-                    _ => self.host.coll.list_order,
-                };
+                let host = self.list_order_host(&lhs_ty);
                 let ordering = self.call_host(host, &[l, r]);
                 let strict_tag: i64 = if matches!(op, BinOp::Lt | BinOp::Le) {
                     0
@@ -28228,13 +28890,11 @@ impl LowerCtx<'_, '_> {
             // Ordering tag from the list host: 0 less, 1 equal, 2 greater,
             // 3 incomparable — the encoding the top-level list ordering row
             // rebuilds its operator from.
-            Type::List(elem) | Type::FixedList { elem, .. } => {
-                let host = match self.erase_distinct_ty(elem) {
-                    Type::String => self.host.coll.list_order_str,
-                    Type::Float | Type::Float32 => self.host.coll.list_order_f64,
-                    _ => self.host.coll.list_order,
-                };
-                let ordering = self.call_host(host, &[l, r]);
+            Type::List(_) | Type::FixedList { .. } => {
+                let ordering = self.call_host(
+                    self.list_order_host(&ty),
+                    &[l, r],
+                );
                 let strict_tag: i64 = match op {
                     BinOp::Lt | BinOp::Le => 0,
                     BinOp::Gt | BinOp::Ge => 2,
@@ -28258,7 +28918,7 @@ impl LowerCtx<'_, '_> {
 
     /// D-UNIONTYPE1=A: a union value is one compiler-generated enum, so equal is
     /// same arm and equal payload. The arm walk mirrors
-    /// `lower_jet_show_union_value` so both read the carrier the same way.
+    /// `lower_text_union_value` so both read the carrier the same way.
     fn lower_union_eq(&mut self, members: &[Type], l: Value, r: Value) -> Result<Value, String> {
         if members.is_empty() {
             return Err("jit union equality on an empty union".to_string());
@@ -28494,7 +29154,7 @@ impl LowerCtx<'_, '_> {
                         | "LocalDate" | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
                 )
         ) {
-            let text = self.lower_jet_show(inner)?;
+            let text = self.lower_text(inner, JitTextMode::Display)?;
             let print = self
                 .module
                 .declare_func_in_func(self.host.print_str, self.b.func);
@@ -28607,7 +29267,8 @@ impl LowerCtx<'_, '_> {
                 ) {
                     let uses_result = matches!(&print_ty, Type::Option(inner_ty) if matches!(inner_ty.as_ref(), Type::IntN { .. }))
                         || self.uses_result_option_abi(inner);
-                    let text = self.lower_jet_show_value(val, &print_ty, uses_result)?;
+                    let text =
+                        self.lower_text_value(val, &print_ty, uses_result, JitTextMode::Display)?;
                     let print = self
                         .module
                         .declare_func_in_func(self.host.print_str, self.b.func);
@@ -28617,7 +29278,7 @@ impl LowerCtx<'_, '_> {
                 // Lists produced by a materialized iterator have the same
                 // resident list ABI; render their element type recursively.
                 if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
-                    let text = self.lower_jet_show_list_value(val, &elem)?;
+                    let text = self.lower_text_list_value(val, &elem, JitTextMode::Display)?;
                     let print = self
                         .module
                         .declare_func_in_func(self.host.print_str, self.b.func);
@@ -28636,10 +29297,10 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(print, &[text]);
                     return Ok(());
                 }
-                // Packed enums — JetShow `user_Variant(…)` matching AOT `{:?}`.
+                // Packed enums — the shared structural variant shape.
                 if let Type::Named(name) = &print_ty {
                     if name == "EventResult" {
-                        // JetShow: Handled / Ignored (not Debug `EventResult::…`).
+                        // Display: Handled / Ignored (not Debug `EventResult::…`).
                         let handled = self.b.ins().iconst(types::I64, 0);
                         let is_handled = self.b.ins().icmp(IntCC::Equal, val, handled);
                         let h_lit = self.lower_string_lit(&[TStrPart::Lit("Handled".into())])?;
@@ -28651,21 +29312,6 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print, &[text]);
                         return Ok(());
                     }
-                    if self.meta.is_enum(name) && self.meta.enum_packed_showable(name) {
-                        // This process-local pointer and its host table cannot
-                        // survive disk tier-cache reuse in another process.
-                        super::tier_cache::abort_capture();
-                        // Leak the type name once: heap string handles die on
-                        // resident reset between compile and run.
-                        let leaked: &'static str = Box::leak(name.clone().into_boxed_str());
-                        let ptr = self.b.ins().iconst(types::I64, leaked.as_ptr() as i64);
-                        let len = self.b.ins().iconst(types::I64, leaked.len() as i64);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.print_enum, self.b.func);
-                        self.b.ins().call(host_ref, &[val, ptr, len]);
-                        return Ok(());
-                    }
                 }
                 let host_id = match &print_ty {
                     Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => self.host.print_i64,
@@ -28674,7 +29320,7 @@ impl LowerCtx<'_, '_> {
                     Type::Bool => self.host.print_bool,
                     Type::Char => self.host.print_char,
                     Type::Named(n) if n == "DataTree" || n == "JSON" => {
-                        // JetShow DataTree/JSON via shared encoding host (same as AOT).
+                        // DataTree/JSON via the shared encoding host (same as AOT).
                         let s = self.call_host(self.host.encoding.json_to_string, &[val]);
                         let print_ref = self
                             .module
@@ -28682,14 +29328,15 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print_ref, &[s]);
                         return Ok(());
                     }
-                    // AOT emits `print(x)` as `(x).jet_show()`, so the JIT's
-                    // own JetShow marshaller — the one that already renders
-                    // collections, options and `{hole}` interpolation — is the
-                    // matching route, not another per-type rung above it. A
+                    // AOT emits `print(x)` through `JetDisplay`, so the JIT's
+                    // own recursive Display marshaller — the one that already
+                    // renders collections, options and `{hole}` interpolation —
+                    // is the matching route, not another per-type rung above it. A
                     // shape it genuinely cannot render still refuses to
                     // compile, from its own message.
                     _ => {
-                        let text = self.lower_jet_show_value(val, &print_ty, false)?;
+                        let text =
+                            self.lower_text_value(val, &print_ty, false, JitTextMode::Display)?;
                         let print_ref = self
                             .module
                             .declare_func_in_func(self.host.print_str, self.b.func);
@@ -28924,13 +29571,14 @@ impl LowerCtx<'_, '_> {
                     None,
                 )
             }
-            // Fallible callbacks carry a Result through the collection
-            // boundary. Keep this path on the shared Prelude evaluator until
-            // the resident ABI can marshal that carrier without reimplementing
-            // its failure semantics.
+            // TrySortBy* is resident only for the compiler-generated Ok(key)
+            // wrapper admitted by safety. Peel that carrier and reuse the
+            // same key-list ABI as the non-fallible sort operation.
             TClosureOp::TryMap | TClosureOp::TryFilter => {
                 Err(Self::CLOSURE_UNSUPPORTED.to_string())
             }
+            TClosureOp::TrySortBy => self.lower_iter_sort_by(recv, args, false, true),
+            TClosureOp::TrySortByDesc => self.lower_iter_sort_by(recv, args, true, true),
             TClosureOp::Any => self.lower_iter_any_all(recv, args, false),
             TClosureOp::All => self.lower_iter_any_all(recv, args, true),
             TClosureOp::EachMap
@@ -28961,8 +29609,8 @@ impl LowerCtx<'_, '_> {
             TClosureOp::EachMut => self.lower_iter_each(recv, args, true),
             TClosureOp::EachRef => self.lower_iter_each(recv, args, false),
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
-            TClosureOp::SortBy => self.lower_iter_sort_by(recv, args, false),
-            TClosureOp::SortByDesc => self.lower_iter_sort_by(recv, args, true),
+            TClosureOp::SortBy => self.lower_iter_sort_by(recv, args, false, false),
+            TClosureOp::SortByDesc => self.lower_iter_sort_by(recv, args, true, false),
             TClosureOp::SortByCompare => self.lower_iter_sort_by_compare(recv, args),
             TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
             TClosureOp::SkipWhile => self.lower_iter_take_skip_while(recv, args, true),
@@ -30156,6 +30804,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
         let payload = self.result_payload(handle, &payload_ty)?;
         let place = TIR::local_place(&binding);
         let clif = self.b.func.dfg.value_type(payload);
@@ -30174,19 +30824,19 @@ impl LowerCtx<'_, '_> {
             self.allocator_view_names.insert(place.clone());
         }
 
-        self.lower_stmts_scoped(then_body)?;
-        let mut then_reaches_merge = !self.dead;
-        if then_reaches_merge {
-            let then_val = self.lower_expr(then_value)?;
-            if !self.dead {
-                if let Some(ret_clif) = ret_ty {
-                    let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
-                    self.b.ins().jump(merge_block, &[then_val]);
-                } else {
-                    self.b.ins().jump(merge_block, &[]);
-                }
+        let then_val = self.lower_stmts_scoped_value_with_names_from(
+            then_body,
+            then_value,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
+        let then_reaches_merge = then_val.is_some() && !Self::is_dead_edge_tail(then_value);
+        if let Some(then_val) = then_val {
+            if let Some(ret_clif) = ret_ty {
+                let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
+                self.b.ins().jump(merge_block, &[then_val]);
             } else {
-                then_reaches_merge = false;
+                self.b.ins().jump(merge_block, &[]);
             }
         }
         self.vars.remove(&place);
@@ -30205,20 +30855,14 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(else_block);
         self.b.seal_block(else_block);
-        self.dead = false;
-        self.lower_stmts_scoped(else_body)?;
-        let mut else_reaches_merge = !self.dead;
-        if else_reaches_merge {
-            let else_val = self.lower_expr(else_value)?;
-            if !self.dead {
-                if let Some(ret_clif) = ret_ty {
-                    let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
-                    self.b.ins().jump(merge_block, &[else_val]);
-                } else {
-                    self.b.ins().jump(merge_block, &[]);
-                }
+        let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
+        let else_reaches_merge = else_val.is_some() && !Self::is_dead_edge_tail(else_value);
+        if let Some(else_val) = else_val {
+            if let Some(ret_clif) = ret_ty {
+                let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
+                self.b.ins().jump(merge_block, &[else_val]);
             } else {
-                else_reaches_merge = false;
+                self.b.ins().jump(merge_block, &[]);
             }
         }
 
@@ -30228,8 +30872,11 @@ impl LowerCtx<'_, '_> {
         let result = if ret_ty.is_some() {
             self.b.block_params(merge_block)[0]
         } else {
-            self.b.ins().iconst(types::I8, 0)
+            self.dead_edge_zero(result_ty)
         };
+        if self.dead {
+            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+        }
         Ok(result)
     }
 
@@ -30276,6 +30923,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
 
         let mut bound_place: Option<String> = None;
         let mut old_var = None;
@@ -30314,19 +30963,19 @@ impl LowerCtx<'_, '_> {
             }
         }
 
-        self.lower_stmts_scoped(then_body)?;
-        let mut then_reaches_merge = !self.dead;
-        if then_reaches_merge {
-            let then_val = self.lower_expr(then_value)?;
-            if !self.dead {
-                if let Some(ret_clif) = ret_ty {
-                    let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
-                    self.b.ins().jump(merge_block, &[then_val]);
-                } else {
-                    self.b.ins().jump(merge_block, &[]);
-                }
+        let then_val = self.lower_stmts_scoped_value_with_names_from(
+            then_body,
+            then_value,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
+        let then_reaches_merge = then_val.is_some() && !Self::is_dead_edge_tail(then_value);
+        if let Some(then_val) = then_val {
+            if let Some(ret_clif) = ret_ty {
+                let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
+                self.b.ins().jump(merge_block, &[then_val]);
             } else {
-                then_reaches_merge = false;
+                self.b.ins().jump(merge_block, &[]);
             }
         }
         if let Some(place) = bound_place {
@@ -30344,20 +30993,14 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(else_block);
         self.b.seal_block(else_block);
-        self.dead = false;
-        self.lower_stmts_scoped(else_body)?;
-        let mut else_reaches_merge = !self.dead;
-        if else_reaches_merge {
-            let else_val = self.lower_expr(else_value)?;
-            if !self.dead {
-                if let Some(ret_clif) = ret_ty {
-                    let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
-                    self.b.ins().jump(merge_block, &[else_val]);
-                } else {
-                    self.b.ins().jump(merge_block, &[]);
-                }
+        let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
+        let else_reaches_merge = else_val.is_some() && !Self::is_dead_edge_tail(else_value);
+        if let Some(else_val) = else_val {
+            if let Some(ret_clif) = ret_ty {
+                let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
+                self.b.ins().jump(merge_block, &[else_val]);
             } else {
-                else_reaches_merge = false;
+                self.b.ins().jump(merge_block, &[]);
             }
         }
 
@@ -30367,8 +31010,11 @@ impl LowerCtx<'_, '_> {
         let result = if ret_ty.is_some() {
             self.b.block_params(merge_block)[0]
         } else {
-            self.b.ins().iconst(types::I8, 0)
+            self.dead_edge_zero(result_ty)
         };
+        if self.dead {
+            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+        }
         Ok(result)
     }
 
@@ -30414,7 +31060,7 @@ impl LowerCtx<'_, '_> {
             &then_outer_names,
             then_resource_mark,
         )?;
-        let then_reaches_merge = then_val.is_some();
+        let then_reaches_merge = then_val.is_some() && !Self::is_dead_edge_tail(then_value);
         if let Some(then_val) = then_val {
             let then_val = self.typed_dead_edge(then_val, then_value, ret_ty);
             self.b.ins().jump(merge_block, &[then_val]);
@@ -30441,7 +31087,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(else_block);
         self.b.seal_block(else_block);
         let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
-        let else_reaches_merge = else_val.is_some();
+        let else_reaches_merge = else_val.is_some() && !Self::is_dead_edge_tail(else_value);
         if let Some(else_val) = else_val {
             let else_val = self.typed_dead_edge(else_val, else_value, ret_ty);
             self.b.ins().jump(merge_block, &[else_val]);
@@ -30451,7 +31097,9 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(merge_block);
         self.dead = !(then_reaches_merge || else_reaches_merge);
         let value = self.b.block_params(merge_block)[0];
-        if !self.dead {
+        if self.dead {
+            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+        } else {
             self.track_compute_value(value, result_ty)?;
         }
         Ok(value)
@@ -31052,6 +31700,7 @@ impl LowerCtx<'_, '_> {
         recv: &TExpr,
         args: &[TExpr],
         descending: bool,
+        fallible: bool,
     ) -> Result<Value, String> {
         let elem_ty =
             jit_closure_elem_type(&recv.ty).ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
@@ -31059,10 +31708,25 @@ impl LowerCtx<'_, '_> {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
-        if !matches!(body_expr.ty, Type::Int | Type::String) {
+        let (key_expr, result_key_ty) = if fallible {
+            match (&body_expr.kind, &body_expr.ty) {
+                (TExprKind::Ok(inner), _) => (inner.as_ref(), None),
+                (
+                    _,
+                    Type::Result { ok, err },
+                ) if matches!(err.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER) => {
+                    (body_expr, Some(ok.as_ref().clone()))
+                }
+                _ => return Err(Self::CLOSURE_UNSUPPORTED.to_string()),
+            }
+        } else {
+            (body_expr, None)
+        };
+        let key_ty = result_key_ty.as_ref().unwrap_or(&key_expr.ty);
+        if !matches!(key_ty, Type::Int | Type::String) {
             return Err("jit sort_by key must be Int or String".to_string());
         }
-        let key_is_string = matches!(body_expr.ty, Type::String);
+        let key_is_string = matches!(key_ty, Type::String);
         let recv_val = self.lower_expr(recv)?;
         let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
@@ -31098,8 +31762,13 @@ impl LowerCtx<'_, '_> {
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
         let key = self.with_bound_local(&param_place, elem_ty, elem, |this| {
-            this.lower_expr(body_expr)
+            this.lower_expr(key_expr)
         })?;
+        let key = if let Some(key_ty) = &result_key_ty {
+            self.result_payload(key, key_ty)?
+        } else {
+            key
+        };
         let keys = self.b.use_var(keys_var);
         let push_ref = self
             .module
@@ -31135,7 +31804,10 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let elem_ty =
             jit_closure_elem_type(&recv.ty).ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
-        if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
+        if !matches!(
+            elem_ty,
+            Type::Int | Type::Float | Type::Float32 | Type::String | Type::Named(_)
+        ) {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (left_place, right_place, body_expr) = self.closure_binary_lambda(args)?;
@@ -31200,7 +31872,7 @@ impl LowerCtx<'_, '_> {
         let line = self.b.ins().iconst(types::I32, 0);
         let get_ref = self
             .module
-            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+            .declare_func_in_func(self.list_get_host(&elem_ty), self.b.func);
         let left_call = self.b.ins().call(get_ref, &[coll, outer, line]);
         let left = self.b.inst_results(left_call)[0];
         self.emit_trap_check()?;
@@ -31212,16 +31884,19 @@ impl LowerCtx<'_, '_> {
                 inner_ctx.lower_expr(body_expr)
             })
         })?;
-        let less_tag = self.b.ins().iconst(types::I64, 0);
-        let less = self.b.ins().icmp(IntCC::Equal, ordering, less_tag);
+        let greater_tag = self.b.ins().iconst(types::I64, 2);
+        let greater = self.b.ins().icmp(IntCC::Equal, ordering, greater_tag);
         let swap = self.b.create_block();
-        self.b.ins().brif(less, swap, &[], inner_step, &[]);
+        self.b.ins().brif(greater, swap, &[], inner_step, &[]);
 
         self.b.switch_to_block(swap);
         self.b.seal_block(swap);
-        let set_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_set, self.b.func);
+        let set_host = if self.list_elem_is_f64(&elem_ty) {
+            self.host.coll.list_set_f64
+        } else {
+            self.host.coll.list_set
+        };
+        let set_ref = self.module.declare_func_in_func(set_host, self.b.func);
         let line = self.b.ins().iconst(types::I32, 0);
         self.b.ins().call(set_ref, &[coll, outer, right, line]);
         self.b.ins().call(set_ref, &[coll, inner, left, line]);

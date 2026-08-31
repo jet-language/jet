@@ -841,6 +841,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
         if want == got {
             if !Type::obligations_satisfy(want, got) {
+                if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. })) {
+                    // Let callable-value callers report the concrete required
+                    // and offered signatures instead of a generic E0108.
+                    return false;
+                }
                 self.diags.push(Diagnostic::error(
                     "E0108",
                     format!(
@@ -882,11 +887,51 @@ impl<'a> Checker<'a> {
             );
             return true;
         }
+        // Callable contracts are directional even when the structural function
+        // shape is identical. An erased function type carries no proof that it
+        // can honor a strict positional/label-only zone; do not let it cross
+        // that boundary. Labels remain declaration metadata here, not inferred
+        // parameter-name identity, so direct named-function mismatches retain
+        // their existing E0112 path below.
+        if let (
+            Type::Fn {
+                param_contract: Some(want_contract),
+                ..
+            },
+            Type::Fn {
+                param_contract: None,
+                ..
+            },
+        ) = (want, got)
+        {
+            let has_strict_zone = want_contract.iter().any(|(_, zone)| {
+                matches!(
+                    zone,
+                    crate::AST::ParamZone::PositionalOnly | crate::AST::ParamZone::LabelOnly
+                )
+            });
+            if fn_types_compatible(want, got) && has_strict_zone {
+                self.diags.push(Diagnostic::error(
+                    "E0771",
+                    format!(
+                        "this needs {}, but the function value is {}",
+                        want.show(),
+                        got.show()
+                    ),
+                    "public labels and parameter zones are part of a function's callable type"
+                        .to_string(),
+                    format!("use `{}` here", want.name()),
+                    Some(span),
+                ));
+                return true;
+            }
+        }
         // Function values are structurally assignable. Keep call metadata for
         // binding a value call, but it cannot make equal callable shapes into
         // different value types.
         if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. }))
             && fn_types_compatible(want, got)
+            && Type::obligations_satisfy(want, got)
         {
             return true;
         }
@@ -905,6 +950,18 @@ impl<'a> Checker<'a> {
             return true;
         }
         if result_used_where_plain_expected(want, got) {
+            // An unannotated callback may widen its expected success row to
+            // Result when a nested call can fail. The expression wrapper will
+            // insert the canonical Try node after this argument check; retain
+            // the carrier here instead of reporting the pre-elaboration shape.
+            if self.failure_carrier_inference {
+                if self.failure_carrier.is_none() {
+                    self.failure_carrier = Some(got.clone());
+                    self.ret = Some(got.clone());
+                }
+                self.task_body_propagates = true;
+                return true;
+            }
             self.diags.push(Diagnostic::error(
                 "E0401",
                 format!(

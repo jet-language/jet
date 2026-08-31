@@ -366,3 +366,11 @@ fn check_fuzz_variant(i: usize, shown: &str, mutated: &str, file_str: &str) {
         }
     }
 }
+
+#[test]
+fn semantic_corpus_policy_runs_with_fuzz_fixtures() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("fixture")
+        .expect("fuzz fixture corpus semantic policy");
+}

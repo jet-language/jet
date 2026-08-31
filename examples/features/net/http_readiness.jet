@@ -5,7 +5,7 @@ use core.tasks as tasks
 fn run() !(NetError | RangeError | TaskFailure) {
     listener :: net.tcp_listen("127.0.0.1:0")
     address :: listener.local_addr()
-    budget :: Duration.milliseconds(1000)
+    budget :: 1000ms
     server :: task {
         stream :: listener.accept(deadline: budget)
         _request :: stream.read_text(8192, deadline: budget)

@@ -97,6 +97,30 @@ fn termios_ffi_layout_is_target_specific_and_shared_by_native_tiers() {
 }
 
 #[test]
+fn process_pty_reuses_the_canonical_termios_abi() {
+    let term = include_str!("../crates/jet-codegen/src/Prelude/Term.rs");
+    let pty = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs");
+    assert_eq!(
+        term.matches("struct Termios").count(),
+        1,
+        "the canonical terminal Prelude must own the only Termios definition"
+    );
+    assert!(
+        !pty.contains("Termios")
+            && !pty.contains("tcgetattr")
+            && !pty.contains("tcsetattr")
+            && !pty.contains("cfmakeraw"),
+        "the PTY backend must not carry a second termios ABI"
+    );
+    assert!(
+        term.contains("pub(super) fn configure_fd(fd: i32, raw: bool)")
+            && term.contains("fn cfmakeraw(termios: *mut Termios)")
+            && pty.contains("super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;"),
+        "PTY configuration must use the canonical Termios seam"
+    );
+}
+
+#[test]
 fn native_os_facts_match_host_and_are_nonempty() {
     let dir = temp_dir("facts");
     let binary = compile(

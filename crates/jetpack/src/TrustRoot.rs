@@ -112,6 +112,19 @@ pub(crate) fn os_random_bytes<const N: usize>() -> io::Result<[u8; N]> {
     }
 }
 
+/// Compare attacker-controlled authentication tags without an early exit.
+/// Length is public framing; every byte position through the longer input is
+/// visited before the result is returned.
+pub(crate) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = u8::from(left.len() != right.len());
+    for index in 0..left.len().max(right.len()) {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
 /// Separate trust-domain identities (D-JPK-TRUSTROOT1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IdentityKind {
@@ -275,13 +288,23 @@ impl BoundIdentity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TrustKey {
     pub key_id: String,
     pub algorithm: String,
     /// Secret material for HMAC-SHA256 role signing. Never serialized into
     /// public metadata; only the key_id appears on the wire.
     pub secret: Vec<u8>,
+}
+
+impl fmt::Debug for TrustKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TrustKey")
+            .field("key_id", &self.key_id)
+            .field("algorithm", &self.algorithm)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
 }
 
 impl TrustKey {
@@ -505,7 +528,13 @@ impl CacheReceipt {
                 )
                 .as_bytes(),
         );
-        if self.signature != expected {
+        if self.signature.key_id != expected.key_id
+            || self.signature.algorithm != expected.algorithm
+            || !constant_time_eq(
+                self.signature.sig_hex.as_bytes(),
+                expected.sig_hex.as_bytes(),
+            )
+        {
             return Err(TrustError::CacheReceiptInvalid {
                 detail: "cache receipt signature does not verify".into(),
             });
@@ -1268,7 +1297,7 @@ impl Keyring {
             });
         }
         let expected = hex(&hmac_sha256(&key.secret, message));
-        if expected != signature.sig_hex {
+        if !constant_time_eq(expected.as_bytes(), signature.sig_hex.as_bytes()) {
             return Err(TrustError::SignatureInvalid {
                 role: MetadataRole::Root,
                 detail: format!("signature for key `{key_id}` does not verify"),
@@ -2499,6 +2528,64 @@ mod tests {
         let second = os_random_bytes::<32>().unwrap();
         assert_eq!(first.len(), 32);
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn trust_key_debug_redacts_secret_and_receipt_rejects_tag_mutation() {
+        let key = TrustKey::from_secret(b"trust-hostile-secret-material".to_vec()).unwrap();
+        let debug = format!("{key:?}");
+        assert!(!debug.contains("trust-hostile-secret-material"));
+        assert!(debug.contains("<redacted>"));
+        assert!(constant_time_eq(b"tag", b"tag"));
+        assert!(!constant_time_eq(b"tag", b"tampered"));
+
+        let signature = key.sign(b"message");
+        let mut keyring = Keyring::default();
+        keyring.insert(key.clone());
+        keyring.verify(&key.key_id, b"message", &signature).unwrap();
+        let mut tampered_signature = signature;
+        let replacement = if tampered_signature.sig_hex.starts_with('0') {
+            '1'
+        } else {
+            '0'
+        };
+        tampered_signature
+            .sig_hex
+            .replace_range(0..1, &replacement.to_string());
+        assert!(keyring
+            .verify(&key.key_id, b"message", &tampered_signature)
+            .is_err());
+
+        let provenance = CacheProvenance {
+            reference: "ref".into(),
+            source: "source".into(),
+            builder: "builder".into(),
+            action: "action".into(),
+            output: "output".into(),
+            platform: "platform".into(),
+            sandbox: "sandbox".into(),
+            policy: "policy".into(),
+        };
+        let mut receipt = CacheReceipt::issue_with_witness(
+            "cache",
+            "test-witness",
+            provenance,
+            1,
+            100,
+            200,
+            &key,
+        )
+        .unwrap();
+        let replacement = if receipt.signature.sig_hex.starts_with('0') {
+            '1'
+        } else {
+            '0'
+        };
+        receipt
+            .signature
+            .sig_hex
+            .replace_range(0..1, &replacement.to_string());
+        assert!(receipt.verify(&key, &FixedClock(100)).is_err());
     }
 
     #[test]

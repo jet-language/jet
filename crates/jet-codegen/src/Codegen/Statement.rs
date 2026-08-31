@@ -360,7 +360,15 @@ pub(crate) fn emit_named_fn_value_sync(cx: &Cx, name: &str, ft: &Type) -> String
 
 fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: bool) -> String {
     let rust_name = mangle(name);
-    let Type::Fn { params, ret, .. } = ft else {
+    // The contextual function type can carry sema's effective Result return
+    // for a nested callable parameter. A named declaration's source type is
+    // the ABI this thunk calls and exposes, so prefer that registry entry when
+    // it is available; generated or foreign names still use the supplied type.
+    let fn_type = match cx.fn_types.get(name) {
+        Some(declared @ Type::Fn { .. }) => declared,
+        _ => ft,
+    };
+    let Type::Fn { params, ret, .. } = fn_type else {
         return rust_name;
     };
     let middleware = params.len() == 1
@@ -372,23 +380,34 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
         "std::rc::Rc::new"
     };
     let rust_type = if send_sync && !middleware {
-        let ordinary = cx.rust_type(ft);
+        let ordinary = cx.rust_type(fn_type);
         ordinary
             .strip_prefix("std::rc::Rc<")
             .and_then(|inner| inner.strip_suffix('>'))
             .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync + 'static>"))
             .unwrap_or(ordinary)
     } else {
-        cx.rust_type(ft)
+        cx.rust_type(fn_type)
     };
     // A Jet declaration with the default failure contract returns
     // `JetOutcome<success, JetErr>` in AOT, while a `fn(...) T` callback
     // carries only `T`. Explicit `?T`/`!E` returns already expose their
     // outcome carrier in the function type and must remain direct.
-    let returns_outcome = matches!(
-        ret.as_deref(),
-        Some(Type::Option(_)) | Some(Type::Result { .. })
-    );
+    //
+    // Sema's callable parameter projection deliberately changes nested
+    // function returns to their effective carrier. The named declaration
+    // registry retains the source return spelling, which is the authority
+    // needed here to distinguish a default `T` from an explicit `?T`/`!E`.
+    let returns_outcome = match cx.fn_types.get(name) {
+        Some(Type::Fn { ret, .. }) => matches!(
+            ret.as_deref(),
+            Some(Type::Option(_)) | Some(Type::Result { .. })
+        ),
+        _ => matches!(
+            ret.as_deref(),
+            Some(Type::Option(_)) | Some(Type::Result { .. })
+        ),
+    };
     if !middleware
         && returns_outcome
         && ret.as_deref().is_some_and(|ret| cx.type_contains_view(ret))

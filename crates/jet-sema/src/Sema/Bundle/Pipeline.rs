@@ -273,18 +273,42 @@ fn derive_member_collision(
 fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::new();
+    let mut seen_aliases: HashMap<(usize, Option<String>), HashSet<String>> = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        for (_, import) in crate::AST::walk_imports(module) {
+        for (scope, import) in crate::AST::walk_imports(module) {
             if !seen.insert((module_idx, import.span)) {
                 continue;
             }
-            if let Err(error) = import.foreign_imports() {
-                diagnostics.push(error.diagnostic());
+            let foreign = match import.foreign_imports() {
+                Ok(foreign) => foreign,
+                Err(error) => {
+                    diagnostics.push(error.diagnostic());
+                    continue;
+                }
+            };
+            if foreign.is_empty() {
+                continue;
+            }
+            let aliases = seen_aliases
+                .entry((module_idx, scope.map(str::to_owned)))
+                .or_default();
+            for (_, alias) in foreign {
+                if aliases.insert(alias.clone()) {
+                    continue;
+                }
+                diagnostics.push(Diagnostic::error(
+                    "E0105",
+                    format!("the import name `{alias}` is used twice"),
+                    "each import needs a unique namespace name in this file".to_string(),
+                    format!("rename one with `{} alias`", Syntax::KW_AS),
+                    Some(import.alias_span),
+                ));
             }
         }
     }
     diagnostics
 }
+
 
 fn foreign_imports_after_validation(
     import: &crate::AST::ImportDecl,
@@ -845,7 +869,7 @@ fn check_bundle_opts_for_output_inner(
         // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
         // it in a synthetic per-lib module (`<c.lib>`) with an empty
         // registry of its own — so a struct/enum/distinct declared in an
-        // ordinary file was NEVER visible to `is_c_abi_type`'s `Type::Named`
+        // ordinary file was NEVER visible to `guest_c_abi_type_is_safe`'s `Type::Named`
         // lookup (`c_named_type_ok`, Sema/FFI.rs), and every named type was
         // silently rejected at the C boundary regardless of its shape. Real
         // modules are always processed before any synthetic one (assemble
@@ -1629,6 +1653,18 @@ fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
+    }
+    // D-ADOPT-GUEST1=A: both directions use the same C-safe type law. Artifact
+    // paths consume the rows exposed by `guest_surface` after these checks;
+    // no backend rechecks the source shape.
+    for (module, state) in bundle.modules.iter().zip(states.iter()) {
+        check_guest_import_surface(&module.items, &state.registry, &mut diags);
+    }
+    if let (Some(module), Some(state)) = (
+        bundle.modules.get(bundle.entry),
+        states.get(bundle.entry),
+    ) {
+        check_guest_export_surface(&module.items, &state.registry, &mut diags);
     }
     // D-BOUND-UNDO1=A: an inverse belongs to the module that owns the foreign
     // binding. CFFI re-homes C declarations into a shared synthetic module, so

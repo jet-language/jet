@@ -829,15 +829,6 @@ pub fn jet_crypto_verify_impl(
         .map_err(|_| "crypto.verify: signature invalid".to_string())
 }
 
-pub fn jet_crypto_sha512_impl(data: &Vec<u8>) -> String {
-    let digest = Sha512::digest(data);
-    hex_encode(&digest)
-}
-
-pub fn jet_crypto_blake3_impl(data: &Vec<u8>) -> String {
-    let digest = blake3::hash(data);
-    digest.to_hex().to_string()
-}
 
 pub fn jet_crypto_constant_time_equal_bytes_impl(a: &Vec<u8>, b: &Vec<u8>) -> bool {
     a.as_slice().ct_eq(b.as_slice()).into()

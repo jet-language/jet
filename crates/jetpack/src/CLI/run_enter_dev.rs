@@ -7,11 +7,12 @@ use super::realize::{
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_jobs,
     project_job_declared, project_job_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
-    run_lifecycle_hooks_silent, validate_declared_secrets, wait_for_services_ready,
+    run_lifecycle_hooks_silent, validate_declared_secrets, validate_declared_secrets_with_reuse,
+    wait_for_services_ready,
 };
 use super::tool::reject_unavailable_provider;
 use super::trust_env_build::{
-    compose_env, compose_env_scoped, compose_env_scoped_with_stats, validate_integration_facts,
+    compose_env, compose_env_scoped, compose_env_scoped_with_warm, validate_integration_facts,
 };
 use super::workspace_sources::{
     cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
@@ -23,6 +24,7 @@ use crate::EnvHook;
 use crate::MemberSelect::{self, SelectRequest};
 use crate::Output::Theme;
 use crate::RefSpec;
+use crate::Secrets;
 use crate::Shell::{self, Env, ShellKind};
 use crate::Store;
 use crate::Syntax;
@@ -69,11 +71,6 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                                 0
                             }
                             Ok(_) => {
-                                // Realize selected members through the build path.
-                                let code = super::trust_env_build::cmd_build(theme, parsed);
-                                if code != 0 {
-                                    return code;
-                                }
                                 match &parsed.command {
                                     Some(cmd) if !cmd.is_empty() => {
                                         let mut plan = match load_project_plan_with_selections(
@@ -92,6 +89,27 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                                         ) {
                                             return code;
                                         }
+                                        // Gate before selected-member realization and
+                                        // environment composition. Both can cross a project
+                                        // trust boundary.
+                                        if let Err(code) = Trust::gate_with_environment(
+                                            theme,
+                                            &Trust::store_path(),
+                                            &project_dir,
+                                            &plan.refs,
+                                            &plan.table,
+                                            &plan.secrets,
+                                            &plan.environment,
+                                            parsed.flags.trust,
+                                        ) {
+                                            return code;
+                                        }
+                                        // Realize selected members through the build path only
+                                        // after the project environment has passed its gate.
+                                        let code = super::trust_env_build::cmd_build(theme, parsed);
+                                        if code != 0 {
+                                            return code;
+                                        }
                                         let env = match compose_env(
                                             theme,
                                             &roots,
@@ -103,7 +121,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                                         };
                                         run_visible_command(theme, &env, &plan.refs, cmd)
                                     }
-                                    _ => 0,
+                                    _ => super::trust_env_build::cmd_build(theme, parsed),
                                 }
                             }
                             Err(d) => {
@@ -174,6 +192,22 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         },
     };
     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
+        return code;
+    }
+
+    // U19: `jet run` realizes the project environment and may execute its
+    // `on_enter` lifecycle before the visible command. Keep it on the same
+    // trust boundary as `jet env`, `jet enter`, and `jet dev`.
+    if let Err(code) = Trust::gate_with_environment(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        parsed.flags.trust,
+    ) {
         return code;
     }
 
@@ -1694,32 +1728,84 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
     mark("trust-gate");
-    if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags) {
-        return code;
-    }
-    mark("catalog-configured");
 
-    if let Err(code) = validate_declared_secrets(
+    let previous_receipt = read_env_entry_receipt(&project_dir);
+    let secret_identity = Secrets::validation_identity(
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    )
+    .ok()
+    .flatten();
+    let reuse_verified_store = previous_receipt.as_ref().is_some_and(|receipt| {
+        secret_identity.as_deref().is_some_and(|identity| {
+            !receipt.secret_identity.is_empty() && receipt.secret_identity == identity
+        })
+    });
+    if let Err(code) = validate_declared_secrets_with_reuse(
         theme,
         &project_dir,
         &plan.secrets,
         plan.environment.active_environment.as_deref(),
+        reuse_verified_store,
     ) {
         return code;
     }
     mark("secrets-validated");
+    let definition_fingerprint = environment_entry_definition_fingerprint(
+        &project_dir,
+        parsed.flags.preset.as_deref(),
+        parsed.flags.environment.as_deref(),
+        &plan,
+        secret_identity.as_deref(),
+    );
+    let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
+    let warm = if flags.prep {
+        None
+    } else {
+        previous_receipt.as_ref().and_then(|receipt| {
+            if !env_entry_matches_plan(receipt, &plan) {
+                return None;
+            }
+            Store::reuse_verified_environment(
+                &roots,
+                &receipt.stamp,
+                &project_dir,
+                &definition_fingerprint,
+                inherited_loader_path.as_deref(),
+                &receipt.packages,
+            )
+            .ok()
+            .flatten()
+        })
+    };
+    let warm_reused = warm.is_some();
+    // A verified warm receipt already binds the package selections, store
+    // journal, sealed manifests, and environment definition. Package catalog
+    // policy is needed only to realize a miss; consulting it before this point
+    // made a cache hit depend on an unrelated catalog and cost the full cold
+    // setup path.
+    if !warm_reused {
+        if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags)
+        {
+            return code;
+        }
+    }
+    mark("catalog-configured");
 
-    let (env, ready_stats) = match compose_env_scoped_with_stats(
+    let (env, ready_stats) = match compose_env_scoped_with_warm(
         theme,
         &roots,
         &flags,
         &plan,
         RealizeScope::Project,
         true,
+        warm,
     ) {
         Ok(result) => result,
         Err(code) => return code,
     };
+
     mark("env-composed");
     if flags.prep {
         auto_clean_after_success(theme, &roots);
@@ -1743,7 +1829,12 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     if let Err(error) = announce_env_ready(
         theme,
         &project_dir,
+        &roots,
+        warm_reused,
         ready_started.elapsed(),
+        &definition_fingerprint,
+        inherited_loader_path.as_deref(),
+        secret_identity.as_deref().unwrap_or_default(),
         &ready_stats,
     ) {
         theme.detail(&format!("couldn't record env entry: {error}"));
@@ -1756,12 +1847,30 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if code == 0 {
         auto_clean_after_success(theme, &roots);
+        if let Err(error) = record_env_entry_receipt(
+            theme,
+            &project_dir,
+            &roots,
+            &definition_fingerprint,
+            inherited_loader_path.as_deref(),
+            secret_identity.as_deref().unwrap_or_default(),
+            &ready_stats,
+        ) {
+            theme.detail(&format!("couldn't refresh env entry: {error}"));
+        }
     }
     code
 }
 
-const ENV_ENTRY_RECEIPT_HEADER: &str = "jetpack-env-entry-v1";
+const ENV_ENTRY_RECEIPT_HEADER: &str = "jetpack-env-entry-v4";
 const ENV_ENTRY_RECEIPT_NAME: &str = "env-entry";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EnvEntryReceipt {
+    stamp: String,
+    secret_identity: String,
+    packages: Vec<Store::EnvironmentSelection>,
+}
 
 fn env_entry_receipt_path(project_dir: &Path) -> PathBuf {
     project_dir
@@ -1770,40 +1879,104 @@ fn env_entry_receipt_path(project_dir: &Path) -> PathBuf {
         .join(ENV_ENTRY_RECEIPT_NAME)
 }
 
-fn canonical_env_entry(packages: &[(String, String)]) -> Vec<(String, String)> {
+fn canonical_env_entry(
+    packages: &[Store::EnvironmentSelection],
+) -> Vec<Store::EnvironmentSelection> {
     let mut packages = packages.to_vec();
     packages.sort();
-    packages.dedup();
     packages
 }
 
-fn read_env_entry_receipt(project_dir: &Path) -> Option<Vec<(String, String)>> {
+fn read_env_entry_receipt(project_dir: &Path) -> Option<EnvEntryReceipt> {
     let contents = std::fs::read_to_string(env_entry_receipt_path(project_dir)).ok()?;
     let mut lines = contents.lines();
     if lines.next() != Some(ENV_ENTRY_RECEIPT_HEADER) {
         return None;
     }
+    let (kind, stamp) = lines.next()?.split_once('\t')?;
+    if kind != "stamp" || stamp.is_empty() {
+        return None;
+    }
+    let secret_identity = match lines.clone().next() {
+        Some(line) => {
+            let (kind, identity) = line.split_once('\t')?;
+            if kind != "secrets" {
+                String::new()
+            } else {
+                lines.next();
+                if identity.is_empty() {
+                    return None;
+                }
+                identity.to_string()
+            }
+        }
+        None => String::new(),
+    };
     let mut packages = Vec::new();
     for line in lines {
-        let (name, version) = line.split_once('\t')?;
-        if name.is_empty() {
+        let mut fields = line.split('\t');
+        let reference = fields.next()?;
+        let name = fields.next()?;
+        let version = fields.next()?;
+        let output = fields.next()?;
+        let metadata = fields.next()?;
+        if fields.next().is_some()
+            || reference.is_empty()
+            || name.is_empty()
+            || output.is_empty()
+            || metadata.is_empty()
+        {
             return None;
         }
-        packages.push((name.to_string(), version.to_string()));
+        packages.push((
+            reference.to_string(),
+            name.to_string(),
+            version.to_string(),
+            output.to_string(),
+            metadata.to_string(),
+        ));
     }
-    Some(canonical_env_entry(&packages))
+    Some(EnvEntryReceipt {
+        stamp: stamp.to_string(),
+        secret_identity,
+        packages: canonical_env_entry(&packages),
+    })
 }
 
 fn write_env_entry_receipt(
     project_dir: &Path,
-    packages: &[(String, String)],
+    stamp: &str,
+    secret_identity: &str,
+    packages: &[Store::EnvironmentSelection],
 ) -> std::io::Result<()> {
-    for (name, version) in packages {
-        if name
+    if stamp.is_empty()
+        || stamp
             .chars()
-            .chain(version.chars())
             .any(|character| matches!(character, '\t' | '\n' | '\r'))
-        {
+        || secret_identity.is_empty()
+        || secret_identity
+            .chars()
+            .any(|character| matches!(character, '\t' | '\n' | '\r'))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "environment entry identity cannot contain line separators",
+        ));
+    }
+    for package in packages {
+        if [
+            package.0.as_str(),
+            package.1.as_str(),
+            package.2.as_str(),
+            package.3.as_str(),
+            package.4.as_str(),
+        ]
+        .iter()
+        .any(|field| {
+            field
+                .chars()
+                .any(|character| matches!(character, '\t' | '\n' | '\r'))
+        }) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "environment entry package fields cannot contain line separators",
@@ -1811,7 +1984,9 @@ fn write_env_entry_receipt(
         }
     }
     let path = env_entry_receipt_path(project_dir);
-    let parent = path.parent().expect("environment entry receipt has a parent");
+    let parent = path
+        .parent()
+        .expect("environment entry receipt has a parent");
     std::fs::create_dir_all(parent)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1827,8 +2002,10 @@ fn write_env_entry_receipt(
             .write(true)
             .open(&temporary)?;
         writeln!(file, "{ENV_ENTRY_RECEIPT_HEADER}")?;
-        for (name, version) in canonical_env_entry(packages) {
-            writeln!(file, "{name}\t{version}")?;
+        writeln!(file, "stamp\t{stamp}")?;
+        writeln!(file, "secrets\t{secret_identity}")?;
+        for (reference, name, version, output, metadata) in canonical_env_entry(packages) {
+            writeln!(file, "{reference}\t{name}\t{version}\t{output}\t{metadata}")?;
         }
         file.sync_all()?;
         std::fs::rename(&temporary, path)
@@ -1837,6 +2014,66 @@ fn write_env_entry_receipt(
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+fn environment_entry_definition_fingerprint(
+    project_dir: &Path,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+    plan: &RunPlan,
+    secret_identity: Option<&str>,
+) -> String {
+    let hook_fingerprint = EnvHook::definition_fingerprint_with_selections(
+        project_dir,
+        requested_preset,
+        requested_environment,
+    )
+    .unwrap_or_default();
+    let semantic_fingerprint = Trust::environment_definition_hash(
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+    );
+    let target = std::env::var("JET_TARGET").unwrap_or_default();
+    let mut canonical = b"jetpack-env-definition-v3\0".to_vec();
+    for field in [
+        hook_fingerprint.as_str(),
+        semantic_fingerprint.as_str(),
+        requested_preset.unwrap_or_default(),
+        requested_environment.unwrap_or_default(),
+        target.as_str(),
+        secret_identity.unwrap_or_default(),
+    ] {
+        canonical.extend_from_slice(&(field.len() as u64).to_le_bytes());
+        canonical.extend_from_slice(field.as_bytes());
+    }
+    crate::SHA256::sha256_hex(&canonical)
+}
+
+fn env_entry_plan_references(plan: &RunPlan) -> Vec<String> {
+    let mut references = plan
+        .refs
+        .iter()
+        .map(|spec| spec.raw.clone())
+        .chain(
+            plan.adapters
+                .iter()
+                .map(|adapter| format!("adapt:{}:{}", adapter.name, adapter.source)),
+        )
+        .collect::<Vec<_>>();
+    references.sort();
+    references
+}
+
+fn env_entry_matches_plan(receipt: &EnvEntryReceipt, plan: &RunPlan) -> bool {
+    let mut references = receipt
+        .packages
+        .iter()
+        .map(|selection| selection.0.clone())
+        .collect::<Vec<_>>();
+    references.sort();
+    references == env_entry_plan_references(plan)
 }
 
 fn format_env_ready(elapsed: Duration, cache_hit_percent: usize) -> String {
@@ -1904,21 +2141,74 @@ fn format_env_changes(
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
-
 fn announce_env_ready(
     theme: &Theme,
     project_dir: &Path,
+    roots: &Store::Roots,
+    warm_reused: bool,
     elapsed: Duration,
+    definition_fingerprint: &str,
+    inherited_loader_path: Option<&str>,
+    secret_identity: &str,
+    stats: &super::trust_env_build::EnvReadyStats,
+) -> std::io::Result<()> {
+    theme.status(&format_env_ready(elapsed, stats.cache_hit_percent()));
+    if warm_reused {
+        return Ok(());
+    }
+    record_env_entry_receipt(
+        theme,
+        project_dir,
+        roots,
+        definition_fingerprint,
+        inherited_loader_path,
+        secret_identity,
+        stats,
+    )
+}
+
+fn record_env_entry_receipt(
+    theme: &Theme,
+    project_dir: &Path,
+    roots: &Store::Roots,
+    definition_fingerprint: &str,
+    inherited_loader_path: Option<&str>,
+    secret_identity: &str,
     stats: &super::trust_env_build::EnvReadyStats,
 ) -> std::io::Result<()> {
     let current = stats.realized_set();
-    theme.status(&format_env_ready(elapsed, stats.cache_hit_percent()));
+    let selections = stats.realized_entries();
+    let stamp = Store::environment_entry_stamp(
+        roots,
+        project_dir,
+        definition_fingerprint,
+        inherited_loader_path,
+        &selections,
+    )?;
     if let Some(previous) = read_env_entry_receipt(project_dir) {
-        if let Some(changes) = format_env_changes(&previous, &current) {
+        let previous_display = previous
+            .packages
+            .iter()
+            .map(|(_, name, version, output, _)| {
+                let version = if version.is_empty() {
+                    super::realize::version_from_out(name, output).unwrap_or_default()
+                } else {
+                    version.clone()
+                };
+                (name.clone(), version)
+            })
+            .collect::<Vec<_>>();
+        if let Some(changes) = format_env_changes(&previous_display, &current) {
             theme.status(&format!("what changed: {changes}"));
         }
+        if previous.stamp == stamp
+            && previous.secret_identity == secret_identity
+            && previous.packages == selections
+        {
+            return Ok(());
+        }
     }
-    write_env_entry_receipt(project_dir, &current)
+    write_env_entry_receipt(project_dir, &stamp, secret_identity, &selections)
 }
 
 /// `jetpack use <package>... [-- cmd]` — realize exactly the named refs in the
@@ -3106,10 +3396,8 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             &plan.secrets,
             &plan.environment,
         );
-        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty())
-            || !plan.environment.lifecycle.on_enter.is_empty()
-            || !plan.environment.lifecycle.checks.is_empty()
-            || plan.environment.lifecycle.git_hooks_path.is_some();
+        let sensitive = Trust::is_typed_environment(&plan.environment)
+            || Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
         let trusted = !sensitive
             || Trust::is_environment_trusted(
                 &store,
@@ -3469,25 +3757,60 @@ mod tests {
             std::process::id()
         ));
         let previous = vec![
-            ("cargo".to_string(), "1.97.0".to_string()),
-            ("rustc".to_string(), "1.97.0".to_string()),
+            (
+                "cargo@jetpack".to_string(),
+                "cargo".to_string(),
+                "1.97.0".to_string(),
+                "sha256:cargo-old".to_string(),
+                "sha256:meta-cargo-old".to_string(),
+            ),
+            (
+                "rustc@jetpack".to_string(),
+                "rustc".to_string(),
+                "1.97.0".to_string(),
+                "sha256:rustc-old".to_string(),
+                "sha256:meta-rustc-old".to_string(),
+            ),
         ];
         let current = vec![
-            ("cargo".to_string(), "1.97.1".to_string()),
-            ("rustc".to_string(), "1.97.1".to_string()),
+            (
+                "cargo@jetpack".to_string(),
+                "cargo".to_string(),
+                "1.97.1".to_string(),
+                "sha256:cargo-new".to_string(),
+                "sha256:meta-cargo-new".to_string(),
+            ),
+            (
+                "rustc@jetpack".to_string(),
+                "rustc".to_string(),
+                "1.97.1".to_string(),
+                "sha256:rustc-new".to_string(),
+                "sha256:meta-rustc-new".to_string(),
+            ),
         ];
+        let previous_display = previous
+            .iter()
+            .map(|(_, name, version, _, _)| (name.clone(), version.clone()))
+            .collect::<Vec<_>>();
+        let current_display = current
+            .iter()
+            .map(|(_, name, version, _, _)| (name.clone(), version.clone()))
+            .collect::<Vec<_>>();
 
-        write_env_entry_receipt(&root, &previous).unwrap();
-        assert_eq!(read_env_entry_receipt(&root), Some(previous.clone()));
+        write_env_entry_receipt(&root, "stamp-a", "secret-a", &previous).unwrap();
+        let receipt = read_env_entry_receipt(&root).unwrap();
+        assert_eq!(receipt.stamp, "stamp-a");
+        assert_eq!(receipt.secret_identity, "secret-a");
+        assert_eq!(receipt.packages, previous);
         assert_eq!(
             format_env_ready(Duration::from_millis(1800), 100),
             "env ready in 1.8s (cache hit 100 percent)"
         );
         assert_eq!(
-            format_env_changes(&previous, &current).as_deref(),
+            format_env_changes(&previous_display, &current_display).as_deref(),
             Some("cargo 1.97.0 to 1.97.1, 2 tools updated")
         );
-        assert_eq!(format_env_changes(&current, &current), None);
+        assert_eq!(format_env_changes(&current_display, &current_display), None);
 
         std::fs::remove_dir_all(root).unwrap();
     }

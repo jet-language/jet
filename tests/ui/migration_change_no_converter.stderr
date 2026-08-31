@@ -1,17 +1,8 @@
-Error [E0910]: the `change note: String -> Label` migration on `Order` has no converter
+Error [E0910]: The `change note: String -> Label` migration on `Order` has no converter
   --> tests/ui/migration_change_no_converter.jet:7:1
     |
   7 | #PublishedSchema struct Order {
     | ^^^^^^^^^^^^^^^^
- Why: a type change needs a way to turn an old value into a new one — old data already on disk is read through it
- Fix: add an inline `via { (old) -> … }` to the `change` op, or declare `impl String -> Label { … }` in scope
+ Why: A type change needs a way to turn an old value into a new one — old data already on disk is read through it
+ Fix: Add an inline `via { (old) -> … }` to the `change` op, or declare `impl String -> Label { … }` in scope
 More: jet-lang.dev/e/E0910
-
-Error [E0102]: `Label` has no method `compare`
-  --> tests/ui/migration_change_no_converter.jet:7:25
-    |
-  7 | #PublishedSchema struct Order {
-    |                         ^^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Label` or `impl Label`
-More: jet-lang.dev/e/E0102

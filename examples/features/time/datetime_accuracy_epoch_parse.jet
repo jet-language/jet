@@ -1,7 +1,11 @@
 use core.time as time
 
 fn parse_status(text: String) String -> {
-    return time.parse_rfc3339(text) ? value -> "accepted|{value.format_rfc3339()}" ! _error -> "rejected"
+    if time.parse_rfc3339(text) == {
+        .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }
+        .Err(_) -> { return "rejected" }
+    }
+    return "rejected"
 }
 
 fn run() {

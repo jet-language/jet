@@ -1,17 +1,26 @@
-Error [E2305]: a returned view cannot borrow from a temporary argument
-  --> tests/ui/task_view_result.jet:3:20
+Error [E2305]: A returned view cannot borrow from a temporary argument
+  --> tests/ui/task_view_result.jet:4:20
     |
-  3 |     t :: task peek([1, 2, 3])
+  4 |     t :: task peek([1, 2, 3])
     |                    ^^^^^^^^^
- Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
- Fix: store the owner in a named binding first, then pass that binding to the view-returning call
+ Why: The temporary owner is dropped at the end of this statement, while the returned view remains live
+ Fix: Store the owner in a named binding first, then pass that binding to the view-returning call
 More: jet-lang.dev/e/E2305
 
-Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_view_result.jet:3:15
+Error [E1102]: This task returns a view that cannot be shared — it does not live long enough to cross into a task
+  --> tests/ui/task_view_result.jet:4:15
     |
-  3 |     t :: task peek([1, 2, 3])
+  4 |     t :: task peek([1, 2, 3])
     |               ^^^^
- Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
+
+Error [E2402]: This implicit fallible call can't convert `TaskFailure` into `Err` — no declared conversion exists
+  --> tests/ui/task_view_result.jet:5:12
+    |
+  5 |     _ :: t.join()
+    |            ^^^^
+ Why: Ordinary fallible calls propagate automatically; `TaskFailure` can reach `Err` only through `impl TaskFailure -> Err`
+ Fix: Handle this call locally with `??`, add `impl TaskFailure -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402

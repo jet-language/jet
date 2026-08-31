@@ -215,7 +215,7 @@ choices; this inventory records the resulting methods and does not add aliases.
 | `Cache<K,V>` | `Cache.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
 | `Bits` | `Bits.new()` | `add`, `remove`, `has`, `count`, `to_list`, `copy`, `len`, `is_empty`, `clear` |
-| `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
+| `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | write: `write_u8`/`write_byte`, `write_i8`, `write_u16_le`/`be`, `write_i16_le`/`be`, `write_u32_le`/`be`, `write_i32_le`/`be`, `write_u64_le`/`be`, `write_i64_le`/`be`, `write_f32_le`/`be`, `write_f64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
 
 For the `[T]` row, `flatten` and `flat_map` return a plain list immediately;
 `.lazy().flatten()` and `.lazy().flat_map(...)` return deferred `Iter` views.
@@ -343,6 +343,11 @@ The `Path` methods are the expert Path-only APIs: their receiver is always a
 typed value through file APIs or keep the simpler string form where no path
 composition is needed.
 
+`candidate.is_within(base)` compares normalized lexical components. It accepts
+either separator spelling and resolves `.` and `..` for the comparison, but it
+does not inspect the filesystem or resolve symlinks. Use `canonicalize` when
+the policy is physical, existing-path containment.
+
 ```jet
 use core.files as fs
 
@@ -378,10 +383,12 @@ Whole-file helpers:
 | `copy(from, to)` | `!IOError` | Copy a file |
 | `copy_dir(from, to)` | `!IOError` | Copy a directory tree |
 | `rename(from, to)` | `!IOError` | Rename or move a file |
-| `stat(path)` | `Stat !IOError` | Metadata: size, times, permissions, kind |
+| `stat(path)` | `Stat !IOError` | Metadata: size, times, permissions, mode, kind |
+| `set_mode(path, mode)` | `!IOError` | Set permissions on a file or directory; Unix accepts `0..u32::MAX`; non-Unix accepts `0` for writable and `1` for readonly |
 | `canonicalize(path)` | `String !IOError` | Existing path, absolute and symlink-resolved |
 | `absolute(path)` | `String !IOError` | Absolute path without requiring it to exist |
 | `walk(path)` | `[WalkEntry] !IOError` | Recursive entries below `path`, sorted per directory |
+| `walk_files(path)` | `[WalkEntry] !IOError` | The same traversal, ordering, errors, and no-follow symlink policy as `walk`, yielding regular files only |
 | `glob(pattern)` | `[String] !IOError` | Recursive `*`/`?` path match |
 | `symlink(from, to)` | `!IOError` | Create a symbolic link |
 | `read_link(path)` | `String !IOError` | Read a symbolic link target |
@@ -439,12 +446,15 @@ the same module can offer both without a name collision.
 Use `entry.path` for a ready-to-use path (don't build `"{dir}/{entry}"` by
 hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 `Stat` fields are `size`, `modified_ms`, `created_ms`, `readonly`, `is_file`,
-`is_dir`, `is_symlink`, and `kind` (`"file"`, `"dir"`, `"symlink"`, or
-`"other"`). `WalkEntry` fields are `path`, `relative`, `is_dir`, and `depth`.
+`is_dir`, `is_symlink`, `kind`, and `mode`. `kind` is `"file"`, `"dir"`,
+`"symlink"`, or `"other"`. On Unix, `mode` contains the full file mode from
+the filesystem, including type and permission bits. On non-Unix systems, it is
+`1` for readonly metadata and `0` otherwise. `WalkEntry` fields are `path`,
+`relative`, `is_dir`, and `depth`.
 `TempDir`, `TempFile`, and `FileLock` expose `.path`; cleanup is RAII on the
 last handle drop. `Path` is the portable path value. Build one with
 `Path.from(value)`, compose it with `.join(part)`, and inspect it with
-`.parent()`, `.extension()`, `.stem()`, and `.normalize()`. The old
+`.parent()`, `.extension()`, `.stem()`, `.normalize()`, and `.is_within(base)`.
 The old free path functions are retired by D-CORE-PATH1. Examples:
 `examples/features/io/dir_entry.jet` and `examples/features/io/files_depth.jet`.
 
@@ -630,6 +640,7 @@ Client surface:
 | `client.get(url)` / `client.post(url, body)` | `HTTPClientResp !String` | One-shot request helpers |
 | `client.request(method, url)` | `HTTPClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
 | `req.header(name, value)` / `.body(text|Body)` | `HTTPClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
+| `req.json(value)` | `HTTPClientReq` | Encode a `#Codable` value with the typed JSON encoder, set `Content-Type: application/json`, and use the same body lifecycle as every other upload |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HTTPClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
 | `req.cookie(name, value)` / `.redirects(n)` | `HTTPClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` / `.dns_timeout(ms)` / `.tls_timeout(ms)` / `.write_timeout(ms)` / `.first_byte_timeout(ms)` | `HTTPClientReq` | Set nonnegative global/per-phase deadlines; request overrides beat `Client.timeouts`; negative milliseconds fail before transport; an ambient `#Context(deadline: …)` remaining budget is converted to an absolute Instant at send entry and upper-bounds the request total |
@@ -641,19 +652,20 @@ Client surface:
 | `Client.new().allow_http_downgrade(true)` | `HTTPClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
 | `Client.new().retries(.Safe/.Idempotent/.None)` | `HTTPClient` | Stale pooled-connection retry before request bytes only (D-HTTP-CLIENT2): default unset is Safe (GET/HEAD/OPTIONS/TRACE); `.Idempotent` opts in PUT/DELETE; `.None` disables; max one attempt; IO-only (never Timeout/status); POST/PATCH never auto-retry |
 | `req.send()` / `client.send(req)` | `HTTPClientResp !String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
-| `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
+| `resp.status()` / `.text()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, the one-MiB-default text projection, body, headers, and Set-Cookie values; use `.body().text(limit)` for an explicit cap |
 
-The compatibility text response path accepts at most 8 MiB of transfer-decoded
-bytes and rejects non-UTF-8 data. Client uploads and response downloads share the
-byte-native streaming `Body` API; unknown-length uploads use HTTP/1.1 chunked
-transfer encoding.
+The message-level `resp.text()` projection reads the shared single-use body with
+the canonical one-MiB default and rejects non-UTF-8 data. Client uploads and
+response downloads share the byte-native streaming `Body` API; unknown-length
+uploads use HTTP/1.1 chunked transfer encoding. `body().text(limit)`, binary
+reads, and streaming remain the explicit expert paths.
 
 Server surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
 | `server.mux()` | `HTTPMux` | Create a function-first router |
-| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) HTTPSrvResp` handlers |
+| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) HTTPSrvResp` handlers; a fixed literal path may use a zero-argument handler when it does not need the request |
 | `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HTTPServer !String` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
 | `server.serve(addr, mux)` | `!String` | Serve HTTP/1.1 forever |
 | `server.serve(addr, mux, tls: server.tls(cert, key))` | `!String` | Serve HTTPS with explicit TLS material |
@@ -663,6 +675,7 @@ Server surface:
 | `server.sse(data)` | `HTTPSrvResp` | Server-sent event response |
 | `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HTTPSrvResp !String` | Static file response, with Range support |
 | `server.json(status, value)` | `HTTPSrvResp` | One JSON response from a `#Codable` value; sets `Content-Type: application/json; charset=utf-8` |
+| `req.text()` | `String !HTTPError` | Read the incoming request body as UTF-8 with the canonical one-MiB default; the read consumes the shared Body |
 | `req.json<T>()` | `T !HTTPError` | Read the request body as JSON and decode it; the ratified body cap frames the read |
 | `resp.json<T>(limit)` | `T !HTTPError` | Read a client response body as JSON and decode it; without `limit` the shared body cap applies |
 | `server.static_files(mux, prefix, root)` | nothing | Mount a directory under a prefix; add `index`, `dotfiles`, `follow_links` for expert policy |
@@ -784,12 +797,13 @@ fn run() {
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `sha256(text)` / `sha256_bytes(bytes)` | `String` | SHA-256 hex digest |
+| `sha256(bytes)` | `Digest256` | SHA-256 digest; use `.hex()` for lowercase hexadecimal text or `.bytes()` for raw bytes |
 | `sha1(bytes)` / `sha224(bytes)` / `sha384(bytes)` | `String` | SHA-1 or SHA-2 hex digest |
 | `sha3_224(bytes)` / `sha3_256(bytes)` / `sha3_384(bytes)` / `sha3_512(bytes)` | `String` | SHA-3 hex digest |
-| `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
-| `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
+| `sha512(bytes)` | `Digest512` | SHA-512 digest; use `.hex()` for lowercase hexadecimal text or `.bytes()` for raw bytes |
+| `blake3(bytes)` | `Digest256` | BLAKE3 digest; use `.hex()` for lowercase hexadecimal text or `.bytes()` for raw bytes |
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8]` | PBKDF2-HMAC-SHA256 key derivation |
+| `hmac_sha256(key, data)` | `[U8]` | RFC 4231 HMAC-SHA256 |
 | `Hasher.new()` / `update(bytes)` / `digest()` | `Hasher` / nothing / `String` | Incremental SHA-256 hashing |
 | `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
 | `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed !CryptoError` / `[U8] !CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
@@ -813,7 +827,7 @@ Card 302 audit state:
 | Signatures | Shipped: Ed25519 sign/verify with RFC-vector golden |
 | Password hashing | Shipped: Argon2id PHC hash/verify, random salt default, deterministic salted vector helper |
 | KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
-| Hashes / comparison | Shipped: SHA-1, SHA-2, SHA-3, SHA-256, SHA-512, BLAKE3, PBKDF2-HMAC-SHA256, incremental SHA-256, constant-time equality |
+| Hashes / comparison | Shipped: SHA-1, SHA-2, SHA-3, SHA-256, SHA-512, BLAKE3, HMAC-SHA256, PBKDF2-HMAC-SHA256, incremental SHA-256, constant-time equality |
 | File envelope | JETC v2 recipient streaming plus exact expert JETC v1 open/migrate are shipped on Linux. Linux stages plaintext and output in unlinked `O_TMPFILE` inodes under a component-wise no-follow held parent, revalidates parent identity, links the still-open output fd to the final name once with `linkat(AT_EMPTY_PATH)`, and fsyncs the held directory. Exact-maximum sparse input enters bounded streaming; larger input is rejected before staging; hostile framing, short I/O, cancellation, tamper, and publication races leave no output. Other targets currently fail closed and make no JETC filesystem-runtime claim |
 | Entropy | Shipped: one D-CRYPTO-RNG1 provider shared by `random.bytes`, envelope nonces, Ed25519 key generation, Argon2id salts, and file envelopes. Linux glibc `getrandom` has live runtime proof. Source adapters use macOS `SecRandomCopyBytes`, Windows MSVC `BCryptGenRandom`, and WASI preview 1 `random_get`; their runtime execution remains on #526. Unsupported targets fail closed with no fallback. D-CRYPTO-WASI-ALLOC2: every interrupted WASI call's exact-count zeroed `Vec` is volatile-zeroized and dropped before a new ownership generation; allocator address reuse is allowed; no failed bytes escape; at most seventeen calls occur. Package key generation maps provider failure through a closed helper status to E1292, never raw provider/helper text |
 | Reference and tier proof | Expert XChaCha20-Poly1305 matches the CFRG vector and AES-256-GCM matches NIST CAVS. Argon2id matches RFC 9106 section 5.3 through Jet's canonical worker, with a public expert known answer and Argon2i mutation control; Ed25519, X25519, and HKDF retain their RFC vectors. Generated bridge dependencies use exact versions, disabled defaults, and explicit features. The typed crypto golden is byte-identical in AOT and default dev. Resident JIT names its unsupported result-status boundary, and default dev takes the transparent AOT fallback rather than changing behavior |
@@ -1142,7 +1156,9 @@ without end, so a piped run, a test harness, and a CI job all finish.
 arrives.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
-program arguments (`process.argv()` sees them, argv[1..]); plain positional words
+program arguments. `process.argv()` preserves the complete process vector,
+including `argv[0]`; `process.args()` returns a fresh `List<String>` containing
+only the values after `argv[0]`. Plain positional words
 with no separator also work (`jet run greet.jet Ada`). An unknown `--`-flag
 written before the `--` is **E2102**, which teaches the `--` form (D-CLI1).
 `jet test` also accepts `--`; `jet build` does not (no running process).
@@ -2068,6 +2084,8 @@ comptime, and default `jet run`.
 | `.count(needle)` | `Int` | Non-overlapping substring count; empty needles count as zero |
 | `.is_alphabetic()` / `.is_numeric()` / `.is_whitespace()` | `Bool` | True only when non-empty and every scalar has the pinned property |
 | `.is_ascii()` | `Bool` | True when every byte is ASCII |
+| `.to_ascii_lower()` | `String` | Change only `A`–`Z` to `a`–`z`; preserve every other byte/code point |
+| `.to_ascii_upper()` | `String` | Change only `a`–`z` to `A`–`Z`; preserve every other byte/code point |
 | `.to_title()` | `String` | Word-start Unicode titlecase mapping; remaining letters are lowercase |
 | `.split_once(separator)` | `?(before: String, after: String)` | Split at the first separator |
 | `.last_index_of(needle)` | `?Int` | Unicode-scalar index of the last substring |
@@ -2188,7 +2206,10 @@ fn run() {
 | `now()` | `Int` | Current Unix time in milliseconds |
 | `now_utc()` | `DateTime` | Current UTC wall-clock date-time |
 | `from_unix_ms(ms)` | `DateTime` | Convert Unix milliseconds to UTC `DateTime` |
+| `from_unix_seconds(s)` / `from_unix_microseconds(us)` / `from_unix_nanoseconds(ns)` | `DateTime` | Convert an exact Unix count to UTC `DateTime` |
 | `parse_rfc3339(text)` | `DateTime !String` | Parse RFC 3339 / ISO 8601 offset text |
+| `parse_iso_week_date(text)` / `from_iso_week(year, week, weekday)` | `LocalDate !String` | Parse or construct an ISO week date (`weekday`: 1–7) |
+| `parse_zoned(text)` | `ZonedDateTime !String` | Parse RFC 9557 text with a bracketed IANA zone and verify its offset |
 | `today()` | `LocalDate` | Current UTC date |
 | `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime !String` | Local wall-clock time |
 | `datetime(y, m, d, h, mi, s)` | `DateTime` | UTC date-time from civil components |
@@ -2196,7 +2217,7 @@ fn run() {
 | `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
 | `zone(name)` / `utc()` | `Zone !String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
-| `zoned_local(date, time, zone)` | `ZonedDateTime` | Resolve local civil time in a zone |
+| `zoned_local(date, time, zone, disambiguation: "compatible")` | `ZonedDateTime !String` | Resolve local civil time in a zone; choose `compatible`, `earlier`, `later`, or `reject` for DST gaps and overlaps |
 | `sleep(duration: Duration)` | nothing | Block for the duration (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
@@ -2221,18 +2242,27 @@ Useful methods:
 
 | Type | Methods |
 |------|---------|
-| `LocalDate` | `year()`, `month()`, `day()`, `add_days(n)`, `add_months(n)`, `add_period(p)`, `diff_days(other)`, `weekday()`, `iso_weekday()`, `day_of_year()`, `iso_week()`, `quarter_of_year()`, `days_in_month()`, `is_leap_year()`, `truncate(unit)`, `replace(y, m, d)`, `format(pattern)`, `to_string()` |
-| `LocalTime` | `hour()`, `minute()`, `second()`, `to_string()` |
-| `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `millisecond()`, `microsecond()`, `nanosecond()`, `to_timestamp()`, `to_unix_ms()`, `plus_duration(d)`, `difference(other)`, `truncate(unit)`, `round(unit)`, `floor(unit)`, `ceil(unit)`, `replace(y, m, d, h, min, s)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `to_string()` |
-| `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `is_dst()`, `to_datetime()`, `zone()`, `add_duration(d)`, `add_period(p)`, `format(pattern)`, `to_string()` |
+| `LocalDate` | `year()`, `month()`, `day()`, `add_days(n)`, `add_months(n)`, `add_period(p)`, `diff_days(other)`, `weekday()`, `iso_weekday()`, `day_of_year()`, `iso_week()`, `iso_week_year()`, `quarter_of_year()`, `days_in_month()`, `is_leap_year()`, `truncate(unit)`, `replace(y, m, d)`, `with(year, month, day[, overflow: "constrain"])`, `until(other[, largest_unit, smallest_unit, rounding_mode, increment])`, `since(...)`, `format(pattern)`, `format_checked(pattern)`, `to_string()` |
+| `LocalTime` | `hour()`, `minute()`, `second()`, `millisecond()`, `microsecond()`, `nanosecond()`, `add_duration(d)`, `subtract_duration(d)`, `round(unit[, increment, rounding_mode])`, `truncate(unit[, increment])`, `floor(unit[, increment])`, `ceil(unit[, increment])`, `until(other[, largest_unit, smallest_unit, rounding_mode, increment])`, `since(...)`, `format(pattern)`, `format_checked(pattern)`, `to_string()` |
+| `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `millisecond()`, `microsecond()`, `nanosecond()`, `to_timestamp()`, `to_unix_ms()`, `to_unix_s()`, `to_unix_us()`, `to_unix_ns()`, `plus_duration(d)`, `subtract_duration(d)`, `add_period(p)`, `subtract_period(p)`, `difference(other)`, `truncate(unit[, increment])`, `round(unit[, increment, rounding_mode])`, `floor(unit[, increment])`, `ceil(unit[, increment])`, `replace(y, m, d, h, min, s)`, `with(year, month, day, hour, minute, second[, overflow: "constrain"])`, `until(other[, largest_unit, smallest_unit, rounding_mode, increment])`, `since(...)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `format_checked(pattern)`, `to_string()` |
+| `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `is_dst()`, `to_datetime()`, `zone()`, `add_duration(d)`, `subtract_duration(d)`, `add_period(p)`, `subtract_period(p)`, `with_time(time[, disambiguation: "compatible"])`, `with_zone(zone)`, `until(other[, largest_unit, smallest_unit, rounding_mode, increment])`, `since(...)`, `next_transition()`, `previous_transition()`, `start_of_day()`, `hours_in_day()`, `format_rfc9557()`, `format(pattern)`, `format_checked(pattern)`, `to_string()` |
 | `Instant` | `elapsed_millis()`, `elapsed()` |
-| `Duration` | `in(unit)`, `is_zero()`, `total_seconds()`, `difference(other)` |
-| `Zone` | `name()` |
+| `Duration` | `in(unit)`, `total_in(unit)`, `is_zero()`, `total_seconds()`, `difference(other)`, `round(unit[, increment, rounding_mode])`, `abs()`, `negated()`, `sign()` |
+| `Period` | `years()`, `months()`, `days()`, `sign()`, `is_zero()`, `abs()`, `negated()`, `add(other)`, `sub(other)`, `total_in(unit, anchor)`, `to_string()` |
+| `Zone` | `name()`, `next_transition(instant_seconds)`, `previous_transition(instant_seconds)`, `start_of_day(date)`, `hours_in_day(date)` |
 
-Format patterns are literal text plus `yyyy`, `MM`, `dd`, `HH`, `mm`, `ss`,
-`EEE`, `DDD`, `VV`, and `XXX`. Leap seconds are not represented as a distinct
-instant: RFC 3339 parsing rejects `:60`; use upstream clock smear policy before
-data reaches Jet.
+`to_unix_us()` and `to_unix_ns()` return `Int !RangeError`. They report `E2704`
+instead of changing a value that is too large for the requested precision.
+
+Format patterns are literal text plus the date/time tokens `yyyy`, `MM`, `dd`,
+`HH`, `mm`, `ss`, `EEE`, `EEEE`, `MMM`, `MMMM`, `DDD`, `SSS`, `SSSSSS`,
+`SSSSSSSSS`, `VV`, and `XXX`. The checked formatter also accepts the strftime
+codes `%%`, `%A`, `%a`, `%B`, `%b`, `%Y`, `%y`, `%m`, `%d`, `%e`, `%j`, `%H`,
+`%I`, `%M`, `%S`, `%p`, `%z`, `%Z`, `%F`, `%T`, `%R`, `%D`, and `%f`, plus
+single-quoted literals with doubled quotes. `VV`/`XXX` and `%z`/`%Z` require
+a zoned value. Unsupported tokens and malformed quoted text fail through
+`format_checked` with `TextError` code `E2703`. Leap seconds are not represented
+as a distinct instant: RFC 3339 parsing rejects `:60`.
 
 **Test hook:** when the environment variable `LEX_TEST_EPOCH` is set to an
 integer, `time.now()` returns that value instead of the real clock. Tests use
@@ -2273,19 +2303,23 @@ same observed instant. Backward mutation never rewinds a system clock.
 A runtime `Duration` is an i64 nanosecond count (D-TIMERES1=A), built with
 checked type-owned unit methods such as `Duration.seconds(n)` or
 `Duration.nanoseconds(n)`. Read a whole unit with `d.in(.Nanoseconds)` /
-`d.in(.Milliseconds)`; the result truncates toward zero and reports
-`RangeError` on overflow. Time literals `ns`, `us`, `ms`, `s`, `min`, `h`, and
-`d` are members of the canonical `core.units::Time` family and produce a
-`Duration` with an i64 nanosecond carrier. `Instant` is the matching point:
-`time.instant() + 5min` is an `Instant`, and subtracting two `Instant` values
-produces a `Duration`.
+`d.in(.Milliseconds)`; the result truncates toward zero. `d.total_in("seconds")`
+keeps the fractional value, and `d.round(unit, increment, rounding_mode)`
+uses the exact rounding law shared by every execution tier. Time literals `ns`,
+`us`, `ms`, `s`, `min`, `h`, and `d` are members of the canonical
+`core.units::Time` family and produce a `Duration` with an i64 nanosecond
+carrier. `Instant` is the matching point: `time.instant() + 5min` is an
+`Instant`, and subtracting two `Instant` values produces a `Duration`.
 
 | `Duration` method | Returns | What it does |
 |-------------------|---------|--------------|
 | `in(unit)` | `Int !RangeError` | Whole nanoseconds, microseconds, milliseconds, seconds, minutes, or hours; truncates toward zero |
+| `total_in(unit)` | `Float` | Fractional value in a fixed unit; invalid units return `0.0` |
 | `is_zero()` | `Bool` | Whether the span is exactly zero |
 | `total_seconds()` | `Int` | Whole seconds in the span (truncates toward zero) |
 | `difference(other)` | `Duration` | This span minus `other` (saturating) |
+| `round(unit[, increment, rounding_mode])` | `Duration` | Round the nanosecond carrier with an exact fixed-unit quantum |
+| `abs()` / `negated()` / `sign()` | `Duration` / `Duration` / `Int` | Saturating magnitude, negation, and sign |
 
 **Expert escape — `assume_deterministic { … }`.** Inside a `fn … -[]>`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
@@ -2331,7 +2365,11 @@ fn run() {
 the retired `Data` spelling is a teaching error, not an alias. Every adapter shares
 one structure with one walker and one accessor set (`.field(name)`, `.at(i)`,
 `.int()`, `.float()`, `.text()`, `.bool()`). Integral numbers decode to `.Int`,
-fractional to `.Float`; objects keep field order.
+fractional to `.Float`; objects keep field order. `.text()` remains strict and
+accepts only text leaves. `.to_text()` projects text, integers, floats, and
+booleans, returning `None` for `Null` and containers. `.equal_unordered(other)`
+ignores object insertion order, keeps array order and numeric variants distinct,
+and never equates `NaN`.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
@@ -2390,10 +2428,14 @@ as typed decode errors. This is the measured safety and diagnosis win. The
 executable proof is in `tests/encoding_corpus.rs::exact_typed_json_numbers` and
 `tests/encoding_parity.rs::exact_typed_json_numbers_match_aot_default_run_and_interpreter`.
 
-**`core.encoding.csv`** — `parse(text) [[String]] !String` (rows of fields),
-`to_string(rows) String`, plus bounded `reader` / `writer` handles over
-RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
-newlines; malformed quote closure is an error rather than a partial row.
+**`core.encoding.csv`** — `parse(text, delimiter: ",", header: false,
+skip_blank: false) [[String]] !String` (rows of fields), and
+`rows(text, delimiter: ",", header: false, skip_blank: false) [CSVRow] !String`
+over the same engine. `CSVRow` has `fields` and its one-based physical opening
+`line`. `to_string(rows) String` and bounded `reader` / `writer` handles use
+the same RFC-4180 quoting rules. Quoted fields preserve delimiters, escaped
+quotes, and embedded newlines; malformed quote closure is an error rather than
+a partial row.
 **`core.encoding.toml`** / **`core.encoding.yaml`**
 — `parse(text) TOML !JSONError` / `YAML !JSONError` (full adapters over
 `DataTree`, not a flat map), `to_string(value)`.
@@ -2410,7 +2452,7 @@ test vectors, and edition migrations are normative in
 |--------|---------|--------------|
 | `core.encoding.json` | `canonical` (2026 prototype / 2027 JCS+limits), `reader`, `writer` | Edition-split whole-value canonical; pull `DataEvent` streaming; shipped `events(DataTree) String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
-| `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
+| `core.encoding.csv` | `parse(text)`, `rows(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `decode<T>`, `decode_bytes<T>`, `root`, `expanded_name`, `attribute`, `content`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, W3C C14N, and D-ENCXML-PROJECTION1=A typed helpers |
 | `core.encoding.cbor` | `parse`, `decode<T>`, `to_bytes`, `to_bytes_canonical`, `reader`, `writer` | RFC 8949 typed/native bytes and Core deterministic profile |
 
@@ -2601,13 +2643,16 @@ D-HUMANFMT1 keeps ordinary formatting as library calls; D-FMT-PRETTY1 also
 exposes the same expanded Debug shape through the `:Pretty` interpolation selector.
 The beginner path is the thing report and CLI authors need every day: readable
 numbers, bytes, durations, ordinals, plural phrases, padding, and nested values.
-Two checked selectors cover language-owned values: `{value#Fixed(n)}` formats
-a `Float`, and `{value#Unit(name)}` or `{value#Unit(bare)}` selects a unit style.
+Two checked selectors cover language-owned values: `{value:Fixed(n)}` formats a
+`Float` or exact `Int` with a machine-plain whole part, and
+`{value:Grouped(n)}` is the explicit human-grouping form. `{value:Unit(name)}`
+or `{value:Unit(bare)}` selects a unit style.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `number(n)` | `String` | Thousands-grouped integer |
-| `decimal(x, places)` | `String` | Fixed decimal with grouped whole part |
+| `decimal(x, places)` | `String` | Fixed decimal with plain whole part |
+| `grouped(x, places)` | `String` | Fixed decimal with grouped whole part |
 | `percent(x, places)` | `String` | `x * 100` with `%` |
 | `bytes(n)` | `String` | SI byte units (`KB`, `MB`, `GB`, ...) |
 | `duration(ms)` | `String` | Compact `d h m s` / `ms` duration |
@@ -3066,15 +3111,15 @@ use core.regex as re
 
 fn run() {
     text :: "order 42 shipped"
-    print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
+    print(re.is_match(Regex{"\d+"}, text))   // true
 
-    m :: re.match("(\\d+) shipped", text) ?? panic("bad pattern")
+    m :: re.match(Regex{"(\d+) shipped"}, text) ?? panic("no match")
     if m == Val(mat) {
         print(mat.group(0) ?? "")   // 42 shipped
         print(mat.group(1) ?? "")   // 42
     }
 
-    print(re.replace_all("\\d+", "#", text) ?? panic("bad pattern"))
+    print(re.replace(Regex{"\d+"}, "#", text))
 
     flags :: re.flags(true, true, false)              // case-insensitive, multiline, dotall
     rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
@@ -3092,22 +3137,23 @@ fn run() {
 | `re.escape(text)` | `String` | escape metacharacters for a literal match |
 | `re.compile(pat)` | `Regex !String` | parse once with default flags |
 | `re.compile_with(pat, flags)` | `Regex !String` | parse once with typed flags |
-| `re.is_match(pat, text)` | `Bool !String` | whether `pat` occurs anywhere |
-| `re.full_match(pat, text)` | `Bool !String` | whether `pat` matches the whole text |
-| `re.match(pat, text)` | `?Match !String` | first match with capture groups, `None` if none |
-| `re.find(pat, text)` | `?String !String` | first matched substring, `None` if none |
-| `re.find_all(pat, text)` | `[String] !String` | every non-overlapping match, left to right |
-| `re.matches(pat, text)` | `[Match] !String` | every non-overlapping match with captures/spans |
-| `re.replace(pat, repl, text)` | `String !String` | replace every match (`$1`, `${name}` allowed in `repl`) |
-| `re.replace_first(pat, repl, text)` | `String !String` | replace only the first match |
-| `re.replace_all(pat, repl, text)` | `String !String` | replace every match |
-| `re.split(pat, text)` | `[String] !String` | split `text` on every match |
-| `re.split_limit(pat, text, n)` | `[String] !String` | split at most `n - 1` times |
+| `re.is_match(regex, text)` | `Bool` | whether `regex` occurs anywhere |
+| `re.full_match(regex, text)` | `Bool` | whether `regex` matches the whole text |
+| `re.match(regex, text)` | `?Match` | first match with capture groups, `None` if none |
+| `re.find(regex, text)` | `?String` | first matched substring, `None` if none |
+| `re.find_all(regex, text)` | `[String]` | every non-overlapping match, left to right |
+| `re.matches(regex, text)` | `[Match]` | every non-overlapping match with captures/spans |
+| `re.replace(regex, repl, text)` | `String` | replace every match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace_first(regex, repl, text)` | `String` | replace only the first match |
+| `re.split(regex, text)` | `[String]` | split `text` on every match |
+| `re.split_limit(regex, text, n)` | `[String]` | split at most `n - 1` times |
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
 | `rx.full_match(text)` | `Bool` | whether a compiled regex matches the whole text |
 | `rx.match(text)` | `?Match` | first match with captures/spans |
 | `rx.matches(text)` | `[Match]` | all matches with captures/spans |
 | `rx.pattern()` / `rx.source()` | `String` | raw pattern text |
+| `rx.replace(text, repl)` | `String` | replace every non-overlapping match |
+| `rx.replace_first(text, repl)` | `String` | replace only the first non-overlapping match |
 | `rx.flags()` / `rx.options()` | `String` | active flag letters (`i`/`m`/`s`) |
 | `rx.names()` | `[String]` | named capture group names |
 | `rx.count(text)` | `Int` | number of non-overlapping matches |
@@ -3399,7 +3445,9 @@ fn run() {
 ```
 
 Raw pointer and MMIO helpers also live in `core.mem`. `mem.address_of(x)` returns
-an inert address as `Int`; `mem.Ptr<T>.from_addr(addr)`, `mem.volatile_read(p)`,
+an inert address as `Int`; a stack-place registration is live only until its
+owning Jet frame exits, while heap, static, and foreign storage keep their own
+lifetime rules. `mem.Ptr<T>.from_addr(addr)`, `mem.volatile_read(p)`,
 and `mem.volatile_write(p, value)` require an audited `#Unsafe("reason")` region.
 
 `arena.alloc(value)` hands back a **view** into the arena's storage, not an owned
@@ -3579,10 +3627,17 @@ fn run() {
 | `Reader.over(bs)` | `Reader` | Wrap a `[U8]` in a consuming scanner |
 | `r.read_u8()` | `U8 !String` | One byte |
 | `r.read_u16_le()` / `_be()` | `U16 !String` | Two bytes, little/big-endian |
+| `r.read_i8()` | `I8 !String` | One signed byte |
+| `r.read_i16_le()` / `_be()` | `I16 !String` | Two signed bytes, little/big-endian |
 | `r.read_u32_le()` / `_be()` | `U32 !String` | Four bytes |
+| `r.read_i32_le()` / `_be()` | `I32 !String` | Four signed bytes, little/big-endian |
 | `r.read_u64_le()` / `_be()` | `U64 !String` | Eight bytes |
-| `r.read_f32_le()` | `F32 !String` | Four bytes as a little-endian 32-bit float |
-| `r.read_f64_le()` | `Float !String` | Eight bytes as a little-endian 64-bit float |
+| `r.read_i64_le()` / `_be()` | `I64 !String` | Eight signed bytes, little/big-endian |
+| `r.read_f32_le()` / `_be()` | `F32 !String` | Four bytes as a little/big-endian 32-bit float |
+| `r.read_f64_le()` / `_be()` | `Float !String` | Eight bytes as a little/big-endian 64-bit float |
+| `r.peek()` | `U8 !String` | Read the next byte without advancing |
+| `r.seek(position)` | `Unit !String` | Move to an in-range byte position |
+| `r.skip(n)` | `Unit !String` | Advance by exactly n bytes |
 | `r.take(n)` | `[U8] !String` | Next `n` bytes (`n`: `Int`, `U8`, `U16`, or `U32`; sized lengths widen internally, while `U64` stays explicit) |
 | `r.take_pattern([U8]{"…{h:U<w>}…"})` | `(holes…) !String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |

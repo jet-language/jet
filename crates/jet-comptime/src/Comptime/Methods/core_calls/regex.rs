@@ -33,9 +33,7 @@ pub(in super::super::super) fn apply_regex_method(
         "matches" => regex_matches(call_args, span),
         "split" => regex_split(call_args, span),
         "split_limit" => regex_split_limit(call_args, span),
-        "replace" => regex_replace(call_args, span, false),
-        "replace_first" => regex_replace(call_args, span, true),
-        "replace_all" => regex_replace(call_args, span, false),
+        "replace" | "replace_first" => regex_replace_method(recv, method, args, span),
         "match" => regex_match(call_args, span),
         _ => return None,
     })
@@ -347,12 +345,7 @@ pub(super) fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValu
             .collect(),
     ))
 }
-
-pub(super) fn regex_replace(
-    args: Vec<CtValue>,
-    span: Span,
-    first: bool,
-) -> Result<CtValue, Diagnostic> {
+fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
     let rep = as_string(
         args.get(1)
@@ -364,11 +357,52 @@ pub(super) fn regex_replace(
             .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
         span,
     )?;
-    Ok(CtValue::Str(if first {
-        re.replace_first(text, rep)
-    } else {
+    let replaced = re.replace(text, rep);
+    Ok(CtValue::Str(replaced))
+}
+
+pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    regex_replace_impl(args, span)
+}
+
+pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let rep = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.replace_first: missing replacement argument", span))?,
+        span,
+    )?;
+    let text = as_string(
+        args.get(2)
+            .ok_or_else(|| unsupported("regex.replace_first: missing text argument", span))?,
+        span,
+    )?;
+    Ok(CtValue::Str(re.replace_first(text, rep)))
+}
+
+fn regex_replace_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(std::slice::from_ref(recv), span)?;
+    let text = as_string(
+        args.first()
+            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
+        span,
+    )?;
+    let rep = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
+        span,
+    )?;
+    let replaced = if method == "replace" {
         re.replace(text, rep)
-    }))
+    } else {
+        re.replace_first(text, rep)
+    };
+    Ok(CtValue::Str(replaced))
 }
 
 pub(super) fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {

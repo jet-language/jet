@@ -3,8 +3,10 @@
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -98,6 +100,22 @@ fn run() {
     print(result)
 }
 `],
+  ["core.text.fmt.grouped", `// core-conformance: core.text.fmt.grouped
+use core.text.fmt as fmt
+
+fn run() {
+    result :: fmt.grouped(Float{1234.5678}, 2)
+    print(result)
+}
+`],
+  ["core.args.spec", `// core-conformance: core.args.spec
+use core.args as args
+
+fn run() {
+    result :: args.spec()
+    print(result.completion("bash").contains("--help"))
+}
+`],
   ["core.crypto.uuid.v4", `// core-conformance: core.crypto.uuid.v4
 use core.crypto.uuid as uuid
 
@@ -110,7 +128,7 @@ fn run() {
 use core.time as time
 
 fn run() {
-    result :: time.parse_rfc3339("2024-03-01T12:00:00Z") ?? return Err("parse")
+    result :: time.parse_rfc3339("2024-03-01T12:00:00Z") ?? panic("parse")
     print(result.to_timestamp())
 }
 `],
@@ -440,9 +458,10 @@ function walk(dir) {
   if (!existsSync(dir)) return [];
   const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walk(path));
-    else if (entry.isFile() && entry.name.endsWith(".jet")) files.push(path);
+    else if (entry.isFile() && entry.name.endsWith(".jet") && entry.name !== "package.jet") files.push(path);
   }
   return files.sort();
 }
@@ -454,19 +473,20 @@ function keyForPath(path) {
   return `${parts.join(".")}.${name}`;
 }
 
-function parseExclusions() {
-  if (!existsSync(EXCLUSIONS)) return new Map();
+function parseExclusions(source = existsSync(EXCLUSIONS) ? readFileSync(EXCLUSIONS, "utf8") : "") {
   const rows = new Map();
-  for (const [index, raw] of readFileSync(EXCLUSIONS, "utf8").split(/\r?\n/).entries()) {
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
-    const fields = raw.split("\t");
-    if (fields.length !== 2 || !fields[0].trim()) {
-      throw new Error(`malformed conformance carve-out at line ${index + 1}: expected key<TAB>reason`);
+    const fields = raw.split("\t").map((field) => field.trim());
+    if (fields.length !== 4 || fields.some((field) => !field)) {
+      throw new Error(
+        `malformed conformance carve-out at line ${index + 1}: expected key<TAB>reason<TAB>owner<TAB>decision`,
+      );
     }
-    const key = fields[0].trim();
+    const [key, reason] = fields;
     if (rows.has(key)) throw new Error(`duplicate conformance carve-out: ${key}`);
-    rows.set(key, fields[1].trim());
+    rows.set(key, reason);
   }
   return rows;
 }
@@ -541,6 +561,56 @@ function observerCalls(code) {
   return observers;
 }
 
+// A registered result also counts as consumed when it reaches an observer
+// through later bindings: `first :: reader.next()` followed by `print(first)`
+// reads `reader`. Walking that chain to a fixpoint keeps genuinely unread
+// bindings failing while accepting a program that really consumes the value.
+function valueReachesObserver(code, source, observers, value, after) {
+  const bindings = [];
+  const pattern = /(?:^|[{};\n])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*([^\n;]*)/g;
+  for (const match of code.matchAll(pattern)) {
+    bindings.push({ name: match[1], init: match[2] });
+  }
+  const reached = new Set([value]);
+  for (let pass = 0; pass <= bindings.length; pass += 1) {
+    let grew = false;
+    for (const held of Array.from(reached)) {
+      const seen = observers.some(
+        ({ open, close }) => open > after && expressionConsumesValue(source.slice(open + 1, close), held),
+      );
+      if (seen) return true;
+      if (matchArmObserves(code, observers, held)) return true;
+      for (const candidate of bindings) {
+        if (reached.has(candidate.name)) continue;
+        if (!expressionConsumesValue(candidate.init, held)) continue;
+        reached.add(candidate.name);
+        grew = true;
+      }
+    }
+    if (!grew) break;
+  }
+  return false;
+}
+
+// Branching on a value and printing from the arms observes it. The arm binders
+// are introduced by the pattern, not by a `::` binding, so the chain above
+// cannot see them; this reads the match as one consumption site.
+function matchArmObserves(code, observers, held) {
+  const pattern = /(?<![A-Za-z0-9_.])if\s+([^\n{]*?)==\s*\{/g;
+  for (const match of code.matchAll(pattern)) {
+    if (!expressionConsumesValue(match[1], held)) continue;
+    const open = match.index + match[0].length - 1;
+    let close;
+    try {
+      close = matching(code, open, "{", "}");
+    } catch {
+      continue;
+    }
+    if (observers.some(({ open: obs }) => obs > open && obs < close)) return true;
+  }
+  return false;
+}
+
 function sourceErrors(key, source) {
   const errors = [];
   const expectedMarker = `// core-conformance: ${key}`;
@@ -560,6 +630,14 @@ function sourceErrors(key, source) {
   const module = key.slice(0, dot);
   const name = key.slice(dot + 1);
   const code = codeOnly(source);
+  const unitRun = code.match(/\bfn\s+run\s*\(\s*\)\s*\{/);
+  if (unitRun) {
+    const opening = unitRun.index + unitRun[0].lastIndexOf("{");
+    const closing = matching(code, opening, "{", "}");
+    if (/\?\?\s*return\s+Err\s*\(/.test(code.slice(opening + 1, closing))) {
+      errors.push("Unit run cannot use ?? return Err(...) propagation");
+    }
+  }
   const usePattern = new RegExp(
     `^\\s*use\\s+${escapedRegExp(module)}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(?:;[ \\t]*)?\\r?$`,
     "gm",
@@ -597,13 +675,18 @@ function sourceErrors(key, source) {
   if (binding) {
     const value = binding[1];
     if (value.startsWith("_")) errors.push(`result is bound to discard name ${value}`);
-    const consumed = observers.some(
-      ({ open, close }) => open > callClose && expressionConsumesValue(source.slice(open + 1, close), value),
-    );
-    if (!consumed) errors.push(`bound result ${value} is never consumed by print/eprint/assert`);
+    if (!valueReachesObserver(code, source, observers, value, callClose)) {
+      errors.push(`bound result ${value} is never consumed by print/eprint/assert`);
+    }
   } else {
-    const consumed = observers.some(({ open, close }) => open < callStart && callStart < close);
-    if (!consumed) errors.push("direct result is not consumed by print/eprint/assert");
+    const directObserver = observers.some(({ open, close }) => open < callStart && callStart < close);
+    const lineEnd = code.indexOf("\n", callClose);
+    const tail = code.slice(callClose + 1, lineEnd < 0 ? code.length : lineEnd);
+    const propagated = /\?\?\s*panic\s*\(/.test(tail);
+    const observesSuccess = observers.some(({ open }) => open > callClose);
+    if (!directObserver && !(propagated && observesSuccess)) {
+      errors.push("direct result is not consumed by print/eprint/assert or explicit error propagation");
+    }
   }
   return errors;
 }
@@ -677,6 +760,28 @@ function generate() {
 }
 
 function hostileFixtures() {
+  const walkFixture = mkdtempSync(join(ROOT, "core-conformance-hostile-"));
+  try {
+    const visible = join(walkFixture, "visible", "ordinary.jet");
+    const manifest = join(walkFixture, "visible", "package.jet");
+    const hidden = join(walkFixture, "visible", ".jet", "receipts", ".package.jet");
+    mkdirSync(dirname(visible), { recursive: true });
+    mkdirSync(dirname(hidden), { recursive: true });
+    writeFileSync(visible, "");
+    writeFileSync(manifest, "manifest");
+    writeFileSync(hidden, "");
+    const discovered = walk(walkFixture);
+    if (discovered.length !== 1 || discovered[0] !== visible) {
+      throw new Error("walk included hidden receipt or visible package manifest as a witness");
+    }
+    const ordinaryErrors = sourceErrors("core.fake.ordinary", "");
+    if (!ordinaryErrors.includes("file must start with // core-conformance: core.fake.ordinary")) {
+      throw new Error("ordinary witness without a marker was accepted");
+    }
+  } finally {
+    rmSync(walkFixture, { recursive: true, force: true });
+  }
+
   const key = "core.crypto.uuid.v4";
   const valid = `// core-conformance: ${key}
 use core.crypto.uuid as uuid
@@ -802,12 +907,45 @@ fn run() {
 `,
       "expected one core.crypto.uuid.v4 call, found 2",
     ],
+    [
+      "direct Unit return propagation",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    uuid.v4() ?? return Err("uuid")
+    print("ok")
+}
+`,
+      "Unit run cannot use ?? return Err(...) propagation",
+    ],
+    [
+      "bound Unit return propagation",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    result :: uuid.v4() ?? return Err("uuid")
+    print(result)
+}
+`,
+      "Unit run cannot use ?? return Err(...) propagation",
+    ],
   ];
   for (const [label, source, expected] of cases) {
     const errors = sourceErrors(key, source);
     if (!errors.some((error) => error.includes(expected))) {
       throw new Error(`${label} fixture was accepted: ${errors.join("; ")}`);
     }
+  }
+
+  const directPanic = `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    uuid.v4() ?? panic("uuid")
+    print("ok")
+}
+`;
+  if (sourceErrors(key, directPanic).length !== 0) {
+    throw new Error("direct panic propagation fixture was rejected");
   }
 
   const interpolated = valid.replace("print(result)", 'print("value={result}")');
@@ -830,6 +968,24 @@ fn run() {
   if (sourceErrors("core.data.csv", generic).length !== 0) {
     throw new Error("generic call fixture was rejected");
   }
+
+  const parsed = parseExclusions("core.fake.one\tplain reason\towner\tD-TEST\n");
+  if (parsed.get("core.fake.one") !== "plain reason") {
+    throw new Error("owner-ratified exclusion did not return its reason");
+  }
+  const malformedExclusion = (label, source) => {
+    try {
+      parseExclusions(source);
+    } catch (error) {
+      if (error.message.includes("expected key<TAB>reason<TAB>owner<TAB>decision")) return;
+      throw error;
+    }
+    throw new Error(`${label} exclusion was accepted`);
+  };
+  malformedExclusion("reasonless", "core.fake.one\t\towner\tD-TEST\n");
+  malformedExclusion("ownerless", "core.fake.one\tplain reason\t\tD-TEST\n");
+  malformedExclusion("decisionless", "core.fake.one\tplain reason\towner\t\n");
+  malformedExclusion("extra-field", "core.fake.one\tplain reason\towner\tD-TEST\textra\n");
 
   const expectedRows = ["core.fake.one", "core.fake.two"];
   const witness = (row, path) => ({ key: row, path, source: `// core-conformance: ${row}
@@ -866,7 +1022,7 @@ fn run() {
   );
   assertLedgerError("witness-plus-exclusion", both, "both a program and a carve-out");
 
-  console.log("core conformance hostile fixtures: rejected bind-and-discard result, observerless/direct calls, comment/string ghosts, malformed marker/calls, and denominator rows");
+  console.log("core conformance hostile fixtures: rejected hidden/package witnesses, unmarked ordinary files, missing exclusion metadata, bind-and-discard result, observerless/direct calls, comment/string ghosts, malformed marker/calls, and denominator rows");
   return 0;
 }
 

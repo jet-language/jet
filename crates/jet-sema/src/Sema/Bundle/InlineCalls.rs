@@ -180,6 +180,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
+        | Expr::Unit(_)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }

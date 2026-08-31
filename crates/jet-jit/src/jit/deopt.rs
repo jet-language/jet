@@ -10,7 +10,6 @@ use std::time::Instant;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc};
 use jet_codegen::Comptime::{self, CtReport, CtValue, DevSink};
@@ -398,6 +397,7 @@ mod rewrite_tests {
 /// The deopt owns its allocator marshalling boundary because it can run after
 /// the resident runtime has been rejected or torn down.
 pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
+    let _loaded_mod_scope = crate::Mod::LoadScope;
     crate::with_program_allocator(bundle, || run_whole_interp_configured(bundle, plan))
 }
 
@@ -491,7 +491,7 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
 
 /// Emit a Cranelift trampoline that packs args and calls `jet_deopt_call`.
 pub(crate) fn lower_deopt_stub(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     tir: &TFunc,

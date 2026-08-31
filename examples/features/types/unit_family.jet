@@ -6,7 +6,11 @@
 // `Usd.from_float(value)`, same-unit arithmetic works, and `.raw()` strips the unit.
 #UnitFamily(Currency) { usd, eur }
 
-fn subtotal(price: Usd, qty: Int) Usd -> Usd.from_float(price.raw() * Float.from_int(qty))
+#UnitFamily(Length, dimension, base: meter) { meter }
+
+fn subtotal(price: Usd, qty: Int) Usd -> { Usd.from_float(price.raw() * Float.from_int(qty)) }
+
+fn scaled(value: Meter, factor: Int) Meter -> value * factor
 
 fn run() {
     unit :: Usd.from_float(9.99)
@@ -22,9 +26,12 @@ fn run() {
     // `.raw()` drops back to the base Float.
     bare :: grand.raw()
     print("bare {(bare)}")
+    distance :: 3meter
+    print("scaled {(scaled(distance, 2).raw())}")
 }
 // --- expected output --------------------------------------------------
 // total 29.97
 // grand 32.47
 // budget 20.0
 // bare 32.47
+// scaled 6.0

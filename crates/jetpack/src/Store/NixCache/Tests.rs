@@ -688,9 +688,7 @@ fn native_nix_cache_admits_backslash_component_names() {
         ("dotdot", &b".."[..]),
     ] {
         let nar = nar_with_directory_entries(&[name]);
-        let invalid_path = format!(
-            "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-{tag}"
-        );
+        let invalid_path = format!("/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-{tag}");
         assert_single_nix_cache_failure(
             &format!("backslash-{tag}"),
             &invalid_path,
@@ -763,7 +761,8 @@ fn native_nix_cache_admits_sibling_store_relative_symlink_and_host_escape() {
         name: "out".into(),
         store_path: deep_store_path.into(),
     };
-    let admitted = admit_nix_closure(&deep_roots, std::slice::from_ref(&deep_request), false).unwrap();
+    let admitted =
+        admit_nix_closure(&deep_roots, std::slice::from_ref(&deep_request), false).unwrap();
     let deep_object = &admitted.objects[deep_store_path];
     assert_eq!(
         fs::read_link(deep_object.hangar_path.join("lib/link")).unwrap(),
@@ -800,7 +799,12 @@ fn native_nix_cache_admits_sibling_store_relative_symlink_and_host_escape() {
     let abs_admitted =
         admit_nix_closure(&abs_roots, std::slice::from_ref(&abs_request), false).unwrap();
     assert_eq!(
-        fs::read_link(abs_admitted.objects[abs_store_path].hangar_path.join("lib/link")).unwrap(),
+        fs::read_link(
+            abs_admitted.objects[abs_store_path]
+                .hangar_path
+                .join("lib/link")
+        )
+        .unwrap(),
         PathBuf::from("/etc/passwd")
     );
     drop(abs_server);
@@ -842,13 +846,11 @@ fn native_nix_cache_admits_reregisters_and_reuses_file_root() {
     let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
     let object = &first.objects[store_path];
     assert!(fs::symlink_metadata(&object.hangar_path).unwrap().is_file());
-    assert!(
-        crate::Store::list_checked(&roots)
-            .unwrap()
-            .into_iter()
-            .find(|entry| entry.name == "file-root")
-            .is_some_and(|entry| entry.bin.is_empty())
-    );
+    assert!(crate::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name == "file-root")
+        .is_some_and(|entry| entry.bin.is_empty()));
     server.replace_routes(BTreeMap::from([(
         "/nix-cache-info".to_string(),
         b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),

@@ -46,6 +46,7 @@
           doCheck = true;
 
           postInstall = ''
+            mv $out/bin/jet-cxx $out/bin/jet-c++
             wrapProgram $out/bin/jet \
               --prefix PATH : "${jetRuntimePath}" \
               --set-default TZDIR "${jetTzdb}"

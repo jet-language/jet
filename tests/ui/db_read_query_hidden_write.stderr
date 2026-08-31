@@ -3,8 +3,8 @@ Error [E0405]: `??` only works on a fallible value, not `DBScope`
     |
  15 |     scoped :: conn.with_policy(policy, "owner") ?? panic("scope")
     |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: the left side must be a `Result` or optional value
- Fix: call something that can fail, then write `... ?? fallback`
+ Why: The left side must be a `Result` or optional value
+ Fix: Call something that can fail, then write `... ?? fallback`
 More: jet-lang.dev/e/E0405
 
 Error [E0740]: `touch` uses the effect `DB.Write`, which its signature doesn't allow
@@ -12,6 +12,6 @@ Error [E0740]: `touch` uses the effect `DB.Write`, which its signature doesn't a
     |
   8 | fn touch(conn: DBScope) -[DB.Read]> {
     |                           ^^^^^^^
- Why: the signature declares `-[DB.Read]>`, so the body may only use those; `DB.Write` is outside that set
- Fix: add `DB.Write` to the effect list, or stop using it in `touch`
+ Why: The signature declares `-[DB.Read]>`, so the body may only use those; `DB.Write` is outside that set
+ Fix: Add `DB.Write` to the effect list, or stop using it in `touch`
 More: jet-lang.dev/e/E0740

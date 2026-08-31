@@ -3,8 +3,8 @@ Error [E0080]: A braced callable with a non-unit success result needs `->` befor
     |
  15 | fn bad() bank.Account {
     |                       ^
- Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
- Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+ Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` bare for a unit result.
 More: jet-lang.dev/e/E0080
 
 Error [E0113]: `bad` promises to return bank.Account, but this returns `vis2.bank.Account`
@@ -12,6 +12,6 @@ Error [E0113]: `bad` promises to return bank.Account, but this returns `vis2.ban
     |
  16 |     return vis2.bank.Account{balance: 1}
     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: the value handed back must match the declared return type
- Fix: use bank.Account here
+ Why: The value handed back must match the declared return type
+ Fix: Use bank.Account here
 More: jet-lang.dev/e/E0113

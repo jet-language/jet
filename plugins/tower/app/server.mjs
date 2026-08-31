@@ -1,19 +1,20 @@
 // Std-only HTTP server: static UI + JSON API + SSE live stream.
 //
 // Auth: non-localhost requests need the token from config.auth (cookie,
-// Bearer header, or ?key=…). Localhost is always exempt so local CLIs and
-// agents just work. Static PWA plumbing (manifest, sw.js) is public.
+// Bearer header, or ?key=…). Static PWA plumbing (manifest, sw.js) is public.
+// State-changing requests also need browser same-origin evidence or the
+// explicit authenticated `X-Tower-Client: cli` channel.
 //
 // Live: every mutation broadcasts the projected state over /api/stream
 // (SSE). Web push / VAPID removed (owner D-VERDICT-460-1, 2026-07-14).
 import { createServer } from 'node:http';
+import { isIP } from 'node:net';
 import { readFile } from 'node:fs/promises';
-import { readdirSync, existsSync } from 'node:fs';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { UI, projectRoot, readJSON } from './paths.mjs';
+import { UI, projectRoot, readLatestJSON } from './paths.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
@@ -93,16 +94,24 @@ const START_VERSION = computeVersion(TOWER_ROOT);
 // conflict when another writer (CLI, other agent) advanced the store past
 // what this server last saw — surfaced, never overwritten.
 const noteSeen = (store, rev) => { if (rev != null && rev > (store.serveSeenRev ?? 0)) store.serveSeenRev = rev; };
-const projected = (store) => {
-  const p = { ...db.projectBoard(store.load(), store.config, store.loadHistory()), boot: BOOT, cli: `node ${TOWER_BIN}` };
+const projectedStates = new WeakMap();
+const projectState = (store, state) => {
+  const cached = projectedStates.get(state);
+  if (cached) return cached;
+  const p = { ...db.projectBoard(state, store.config), boot: BOOT, cli: `node ${TOWER_BIN}` };
   noteSeen(store, p.meta?.rev);
+  projectedStates.set(state, p);
   return p;
 };
-const closedProjected = (store) => db.projectClosed(store.load(), store.config, store.loadHistory());
+const projected = (store) => projectState(store, store.loadLive());
+const closedProjected = (store) => {
+  const pair = store.loadPair();
+  return db.projectClosed(pair.state, store.config, pair.history);
+};
 const sseClients = new Set();
-function broadcast(store) {
+function broadcast(store, state = null) {
   if (!sseClients.size) return;
-  const data = `data: ${JSON.stringify(projected(store))}\n\n`;
+  const data = `data: ${JSON.stringify(state ? projectState(store, state) : projected(store))}\n\n`;
   for (const res of [...sseClients]) { try { res.write(`event: state\n${data}`); } catch { sseClients.delete(res); } }
 }
 
@@ -158,27 +167,26 @@ const PUBLIC = new Set(['/manifest.webmanifest', '/sw.js', '/icon.svg']);
 const COOKIE = (token) => `tower=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`;
 const OWNER_COOKIE = (token) => `${OWNER_SESSION_COOKIE}=${token}; Path=/; Max-Age=${OWNER_SESSION_TTL_MS / 1000}; SameSite=Strict; HttpOnly`;
 const cookieValue = (req, name) => new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.cookie || '')?.[1];
-function isLocal(req) {
-  const a = req.socket.remoteAddress || '';
-  return a === '127.0.0.1' || a === '::1' || a.startsWith('::ffff:127.');
+function requestHostname(req) {
+  const host = String(req.headers.host || '').trim();
+  if (!host) return '';
+  try { return new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, '').toLowerCase(); }
+  catch { return ''; }
 }
-function ownerLoopback(req) {
-  if (!isLocal(req)) return false;
+function loopbackHost(req) {
+  const host = requestHostname(req);
+  return host === 'localhost'
+    || (isIP(host) === 4 && host.startsWith('127.'))
+    || (isIP(host) === 6 && host === '::1');
+}
+function loopbackForwarded(req) {
   const forwarded = String(req.headers['x-forwarded-for'] || '').trim();
   return !forwarded || forwarded === '127.0.0.1' || forwarded === '::1';
 }
-// #515 P0 fix: the dev box (loopback) is always trusted, but a remote/phone
-// device was ALWAYS rejected here even though the rest of this server
-// already treats a device presenting the configured auth.token as the
-// owner (see authed() below) — the exact case the README's "Live + remote"
-// PWA/push setup exists for. Reuse that same trust boundary: loopback OR
-// the shared token, never a bare LAN/tailnet IP with no proof of identity.
-function ownerTrusted() {
-  // Owner order 2026-07-12: no loopback/token restriction on owner
-  // verification — any device that can reach the board acts as the owner.
-  // The board is a single-owner LAN/tailnet tool; if that changes, revisit
-  // via card #460 (auth.token hardening).
-  return true;
+function isLocal(req) {
+  const a = req.socket.remoteAddress || '';
+  const socketLoopback = a === '127.0.0.1' || a === '::1' || a.startsWith('::ffff:127.');
+  return socketLoopback && loopbackHost(req) && loopbackForwarded(req);
 }
 function ownerSession(req) {
   const token = cookieValue(req, OWNER_SESSION_COOKIE);
@@ -189,8 +197,49 @@ function ownerSession(req) {
   }
   return { token, ...session };
 }
-function auditAcceptanceReject(store, decisionId, route, reason, by) {
-  store.mutate((s) => db.auditAcceptanceRejection(s, decisionId, route, reason, by));
+function tokenMatches(req, token) {
+  if (!token) return false;
+  const cookie = cookieValue(req, 'tower');
+  const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization || ''))?.[1];
+  return cookie === token || bearer === token;
+}
+function requestTrusted(req, token) {
+  return token ? tokenMatches(req, token) : isLocal(req);
+}
+function ownerTrusted(req, token) {
+  return requestTrusted(req, token);
+}
+function ownerSessionTrusted(req, token) {
+  return ownerTrusted(req, token) && !!ownerSession(req);
+}
+function sameOrigin(req) {
+  const site = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (site && site !== 'same-origin') return false;
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return site === 'same-origin';
+  if (origin === 'null') return false;
+  return origin === `http://${req.headers.host}` && (!site || site === 'same-origin');
+}
+function cliChannel(req, token) {
+  const client = String(req.headers['x-tower-client'] || '').trim().toLowerCase();
+  if (client !== 'cli' || !requestTrusted(req, token)) return false;
+  // A browser cannot attach this non-simple header cross-origin without a
+  // preflight. Reject contradictory browser metadata if a raw client sends it.
+  return !String(req.headers.origin || '').trim() && !String(req.headers['sec-fetch-site'] || '').trim();
+}
+function csrfAllowed(req, res, url, token) {
+  const mutates = req.method === 'POST'
+    || (req.method === 'GET' && (url.pathname === '/api/docs'
+      || (url.pathname === '/api/brief' && url.searchParams.get('claim') === '1')));
+  if (!mutates || sameOrigin(req) || cliChannel(req, token)) return true;
+  send(res, 403, { error: 'E_CSRF', message: 'cross-origin mutation rejected' });
+  return false;
+}
+function auditAcceptanceReject(store, decisionId, route, reason, by, ownerAuthenticated = false) {
+  // Rejected owner-verification requests are still audit mutations. Do not let
+  // an unauthenticated payload forge the actor on that event.
+  const auditBy = by === 'owner' && !ownerAuthenticated ? undefined : by;
+  store.mutate((s) => db.auditAcceptanceRejection(s, decisionId, route, reason, auditBy));
   broadcast(store);
 }
 // A locked-out navigation gets a real unlock page, never raw JSON.
@@ -203,17 +252,15 @@ const UNLOCK_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" 
 <button style="padding:11px;border-radius:8px;border:0;background:#b3122d;color:#fff;font-weight:600;cursor:pointer">Unlock</button>
 </form></body>`;
 function authed(req, res, token, url) {
-  if (!token || isLocal(req) || PUBLIC.has(url.pathname)) return true;
+  if (PUBLIC.has(url.pathname)) return true;
   const key = url.searchParams.get('key');
-  if (key === token) {
+  if (token && key === token) {
     // first visit with ?key= → set cookie, redirect to clean URL
     res.writeHead(302, { 'set-cookie': COOKIE(token), location: url.pathname + url.hash });
     res.end();
     return 'redirected';
   }
-  const cookie = /(?:^|;\s*)tower=([^;]+)/.exec(req.headers.cookie || '')?.[1];
-  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
-  if (cookie === token || bearer === token) return true;
+  if (requestTrusted(req, token)) return true;
   if (req.method === 'GET' && !url.pathname.startsWith('/api/') && (req.headers.accept || '').includes('text/html')) {
     sendBytes(req, res, 401, Buffer.from(UNLOCK_HTML), { contentType: 'text/html', cacheControl: 'private, no-store' });
     return false;
@@ -247,8 +294,8 @@ async function serveStatic(req, res) {
 }
 
 export function serve(store, port = 7878, open = false) {
-  // Auth is OPT-IN: set "auth": { "token": "…" } in untracked secrets.json
-  // to require a key from non-localhost devices. No VAPID provisioning.
+  // A missing token keeps Tower local-only. Set "auth": { "token": "…" }
+  // in untracked secrets.json to permit authenticated remote devices.
   const token = store.config.auth?.token || null;
 
   // #1738 criterion 1: re-read the store before every board write; if the
@@ -256,7 +303,7 @@ export function serve(store, port = 7878, open = false) {
   // note the fresh rev, and broadcast so every client catches up — the
   // caller retries against current state instead of silently overwriting.
   const guardWrite = (res) => {
-    const diskRev = store.load().meta.rev;
+    const diskRev = store.loadLive().meta.rev;
     if (diskRev > (store.serveSeenRev ?? 0)) {
       noteSeen(store, diskRev);
       broadcast(store);
@@ -265,7 +312,7 @@ export function serve(store, port = 7878, open = false) {
     }
     return true;
   };
-  noteSeen(store, store.load().meta.rev);
+  noteSeen(store, store.loadLive().meta.rev);
 
   const server = createServer(async (req, res) => {
     res.__towerReq = req;
@@ -273,6 +320,7 @@ export function serve(store, port = 7878, open = false) {
       const url = new URL(req.url, 'http://x');
       const ok = authed(req, res, token, url);
       if (ok !== true) return;
+      if (!csrfAllowed(req, res, url, token)) return;
 
       // A loopback (or token-authenticated remote) browser navigation
       // establishes an HttpOnly, process-local owner UI session. It is not
@@ -286,8 +334,9 @@ export function serve(store, port = 7878, open = false) {
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
       if (req.method === 'GET' && url.pathname === '/api/card') {
-        const s = store.load();
-        const card = db.projectCard(s, url.searchParams.get('id') || url.searchParams.get('card'), store.loadHistory());
+        const pair = store.loadPair();
+        const s = pair.state;
+        const card = db.projectCard(s, url.searchParams.get('id') || url.searchParams.get('card'), pair.history);
         if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${url.searchParams.get('id') || url.searchParams.get('card')}` });
         return send(res, 200, { rev: s.meta.rev, card }, { revision: s.meta.rev });
       }
@@ -302,11 +351,11 @@ export function serve(store, port = 7878, open = false) {
         return send(res, 200, { start: START_VERSION, current, stale: current !== START_VERSION });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
-        const s = store.load();
+        const s = store.loadLive();
         return send(res, 200, s.events.slice(0, Number(url.searchParams.get('limit') || 50)), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/messages') {
-        const s = store.load();
+        const s = store.loadLive();
         return send(res, 200, db.listMessages(s, {
           cardId: url.searchParams.get('card') || undefined,
           status: url.searchParams.has('status') ? url.searchParams.get('status') : 'open',
@@ -324,9 +373,10 @@ export function serve(store, port = 7878, open = false) {
         // #461: archived (retired) cards, optionally filtered by epoch —
         // the Board UI's done-subgroup uses this for a lazy archived count.
         const epoch = url.searchParams.get('epoch');
-        const h = store.loadHistory();
+        const pair = store.loadPair();
+        const h = pair.history;
         const cards = epoch ? h.cards.filter(c => c.epoch === epoch) : h.cards;
-        const revision = store.load().meta.rev;
+        const revision = pair.state.meta.rev;
         if (url.searchParams.get('count') === '1') return send(res, 200, { count: cards.length }, { revision });
         return send(res, 200, { cards, count: cards.length }, { revision });
       }
@@ -336,7 +386,7 @@ export function serve(store, port = 7878, open = false) {
           : q.get('burndown') === '1' || q.get('scope') === 'burndown' ? 'burndown'
           : undefined;
         const limit = Number(q.get('limit') || (scope === 'ready-across' ? 50 : 5));
-        const s = store.load();
+        const s = store.loadLive();
         return send(res, 200, db.nextCards(s, { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }), { revision: s.meta.rev });
       }
       // Docs — durable markdown under docs/ + pinned scratchpad.
@@ -347,6 +397,9 @@ export function serve(store, port = 7878, open = false) {
         if (q.get('scratch') === '1') return send(res, 200, docs.showScratchPad(store.dataDir));
         if (q.get('path')) return send(res, 200, docs.showDoc(store.dataDir, q.get('path')));
         return send(res, 200, docs.listDocs(store.dataDir));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/guidance') {
+        return send(res, 200, docs.showOwnerGuidance(store.dataDir));
       }
       if (req.method === 'POST' && url.pathname === '/api/docs/add') {
         const p = await jsonBody(req);
@@ -368,8 +421,9 @@ export function serve(store, port = 7878, open = false) {
       // #457 — durability sweeper, same rules as `tower lint`.
       if (req.method === 'GET' && url.pathname === '/api/lint') {
         const q = url.searchParams;
-        const s = store.load();
-        const history = store.loadHistory();
+        const pair = store.loadPair();
+        const s = pair.state;
+        const history = pair.history;
         const docsRoot = join(projectRoot(store.dataDir), 'docs');
         return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }), { revision: s.meta.rev });
       }
@@ -379,7 +433,7 @@ export function serve(store, port = 7878, open = false) {
         const q = url.searchParams;
         const agent = q.get('agent') || undefined;
         const cardRef = q.get('card') || undefined;
-        let s = store.load();
+        let s = store.loadLive();
         let card = cardRef ? db.findCard(s, cardRef) : null;
         if (cardRef && !card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${cardRef}` });
         if (!card) {
@@ -392,25 +446,31 @@ export function serve(store, port = 7878, open = false) {
           const { state } = store.mutate((s2) => db.claimCard(s2, card.id, agent));
           s = state;
           card = db.findCard(s, card.id);
-          broadcast(store);
+          broadcast(store, state);
         }
         return send(res, 200, db.buildBrief(s, card.id), { revision: s.meta.rev });
       }
       // ---- writes ----
+      if (req.method === 'POST' && url.pathname === '/api/guidance/update') {
+        if (!ownerSessionTrusted(req, token)) {
+          return send(res, 403, { error: 'E_OWNER_ONLY', message: 'guidance editing requires an authenticated owner UI session' });
+        }
+        const p = await jsonBody(req);
+        return send(res, 200, { ok: true, result: docs.updateOwnerGuidance(store.dataDir, p) });
+      }
       if (req.method === 'POST' && url.pathname === '/api/undo') {
+        if (!ownerSessionTrusted(req, token)) return send(res, 403, { error: 'E_OWNER_ONLY', message: 'undo requires an authenticated owner UI session' });
         const p = await jsonBody(req);
         // #1738: a whole-board replace must prove which rev it thinks it is
         // undoing — an expectRev-less undo from a stale tab is an overwrite.
         if (p.expectRev == null) return send(res, 400, { error: 'E_USAGE', message: 'undo requires expectRev — read /api/state and pass its meta.rev' });
         if (!guardWrite(res)) return;
         const bdir = join(store.dataDir, 'backups');
-        const files = existsSync(bdir) ? readdirSync(bdir).filter(f => f.startsWith('tower-')).sort() : [];
-        if (!files.length) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
-        const prev = readJSON(join(bdir, files.at(-1)), null);
-        if (!prev) return send(res, 500, { error: 'E_INTERNAL', message: 'backup unreadable' });
-        store.restore(prev, { expectRev: p.expectRev });
-        broadcast(store);
-        return send(res, 200, { ok: true, state: projected(store) });
+        const prev = readLatestJSON(bdir, 'tower-', null);
+        if (prev === null) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
+        const { state } = store.restore(prev, { expectRev: p.expectRev });
+        broadcast(store, state);
+        return send(res, 200, { ok: true, state: projectState(store, state) });
       }
       if (req.method === 'POST' && (url.pathname === '/api/acceptance/challenge' || url.pathname === '/api/acceptance/resolve')) {
         const p = await jsonBody(req);
@@ -427,7 +487,7 @@ export function serve(store, port = 7878, open = false) {
         if (!session) return reject('missing or expired owner UI session');
 
         if (url.pathname.endsWith('/challenge')) {
-          const s = store.load();
+          const s = store.loadLive();
           const d = s.decisions.find(x => x.id === p.decisionId);
           if (!d || d.status === 'ratified' || d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
             return reject('decision is not a live owner-verification ballot');
@@ -450,9 +510,9 @@ export function serve(store, port = 7878, open = false) {
         const provenance = { kind: 'owner-ui', session: session.auditId, challenge: challenge.challengeAudit,
           issuedFor: challenge.decisionId, outcome: challenge.outcome, resolvedAt: new Date().toISOString() };
         if (!guardWrite(res)) return;
-        const { result } = store.mutate((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
-        broadcast(store);
-        return send(res, 200, { ok: true, result, state: projected(store) });
+        const { result, state } = store.mutate((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
+        broadcast(store, state);
+        return send(res, 200, { ok: true, result, state: projectState(store, state) });
       }
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const name = url.pathname.slice(5);
@@ -461,30 +521,35 @@ export function serve(store, port = 7878, open = false) {
         const p = await jsonBody(req);
         if (name === 'clearance' || name === 'clearance/batch') {
           const ids = name === 'clearance' ? [p.decisionId] : (p.decisions || []).map(d => d.decisionId);
+          const s = store.loadLive();
           const acceptance = ids.filter(id => {
-            const d = store.load().decisions.find(x => x.id === id);
+            const d = s.decisions.find(x => x.id === id);
             return d && (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'));
           });
           if (acceptance.length) {
-            for (const id of acceptance) auditAcceptanceReject(store, id, name, 'generic clearance cannot resolve owner verification', p.by);
+            for (const id of acceptance) auditAcceptanceReject(store, id, name, 'generic clearance cannot resolve owner verification', p.by, ownerSessionTrusted(req, token));
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner-verification ballots require the dedicated owner UI action' });
           }
         }
         if (name === 'card/update') {
-          const s = store.load();
+          const s = store.loadLive();
           const c = db.findCard(s, p.id);
           const ballot = c && s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
           const clearsFlag = 'needsAcceptance' in p && !(p.needsAcceptance === true || p.needsAcceptance === 'true');
           if ((c?.needsAcceptance && p.phase === 'done' && p.by === 'owner') || (ballot && clearsFlag)) {
             const id = ballot?.id || `D-ACCEPT-${c.num}`;
-            auditAcceptanceReject(store, id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by);
+            auditAcceptanceReject(store, id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by, ownerSessionTrusted(req, token));
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
           }
         }
+        const claimsOwner = p.by === 'owner' || !!String(p.quote || '').trim()
+          || (name === 'clearance/batch' && (p.decisions || []).some(d => !!String(d.quote || '').trim()));
+        if (claimsOwner && !ownerSessionTrusted(req, token))
+          return send(res, 403, { error: 'E_OWNER_ONLY', message: 'owner attribution requires an authenticated owner UI session' });
         if (!guardWrite(res)) return;
-        const { result } = store.mutate((s, cfg, history) => fn(s, p, cfg, history), { expectRev: p.expectRev });
-        broadcast(store);
-        return send(res, 200, { ok: true, result, state: projected(store) });
+        const { result, state } = store.mutate((s, cfg, history) => fn(s, p, cfg, history), { expectRev: p.expectRev });
+        broadcast(store, state);
+        return send(res, 200, { ok: true, result, state: projectState(store, state) });
       }
       if (req.method === 'GET') return serveStatic(req, res);
       res.writeHead(405); res.end();
@@ -501,13 +566,15 @@ export function serve(store, port = 7878, open = false) {
     }
     throw e;
   });
-  server.listen(port, () => {
+  const onListen = () => {
     const url = `http://localhost:${port}`;
     console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}${token ? `\n    remote access enabled; unlock key is in .tower/secrets.json` : ''}\n`);
     if (open) import('node:child_process').then(({ spawn }) => {
       const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
       spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();
     });
-  });
+  };
+  if (token) server.listen(port, onListen);
+  else server.listen(port, '127.0.0.1', onListen);
   return server;
 }

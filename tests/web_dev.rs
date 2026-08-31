@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -54,6 +54,12 @@ fn remember_canvas_session(port: u16, session: String) {
         .lock()
         .unwrap()
         .insert(port, session);
+}
+
+fn forget_canvas_session(port: u16) {
+    if let Some(sessions) = CANVAS_SESSIONS.get() {
+        sessions.lock().unwrap().remove(&port);
+    }
 }
 
 /// Minimal blocking HTTP/1.1 GET over a raw `TcpStream` — the same shape of
@@ -280,7 +286,6 @@ fn session_from_canvas_url_line(line: &str) -> Option<String> {
 struct DevPorts {
     canvas: u16,
     application: u16,
-    app_before_canvas: bool,
 }
 
 fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
@@ -291,21 +296,15 @@ fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
         let mut canvas_port = None;
         let mut application_port = None;
         let mut session = None;
-        let mut saw_canvas = false;
-        let mut app_before_canvas = false;
         for line in reader.lines().map_while(Result::ok) {
             if canvas_port.is_none() {
                 if let Some(port) = port_from_url_line(&line, "Canvas: ") {
                     canvas_port = Some(port);
                 }
-                saw_canvas |= line.starts_with("Canvas: ");
             }
             if application_port.is_none() {
                 if let Some(port) = port_from_url_line(&line, "App preview: ") {
                     application_port = Some(port);
-                }
-                if line.starts_with("App preview: ") && !saw_canvas {
-                    app_before_canvas = true;
                 }
             }
             if session.is_none() {
@@ -316,17 +315,19 @@ fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
             if let (Some(canvas), Some(application), Some(session)) =
                 (canvas_port, application_port, session.as_ref())
             {
+                if application != canvas {
+                    forget_canvas_session(application);
+                }
                 remember_canvas_session(canvas, session.clone());
                 let _ = tx.send(DevPorts {
                     canvas,
                     application,
-                    app_before_canvas,
                 });
                 return;
             }
         }
     });
-    rx.recv_timeout(Duration::from_secs(20))
+    rx.recv_timeout(Duration::from_secs(60))
         .expect("jet dev never printed its serving URL and Canvas session")
 }
 
@@ -339,13 +340,14 @@ fn wait_for_app_preview(child_stdout: std::process::ChildStdout) -> u16 {
         for line in reader.lines().map_while(Result::ok) {
             if !sent {
                 if let Some(port) = port_from_url_line(&line, "App preview: ") {
+                    forget_canvas_session(port);
                     let _ = tx.send(port);
                     sent = true;
                 }
             }
         }
     });
-    rx.recv_timeout(Duration::from_secs(20))
+    rx.recv_timeout(Duration::from_secs(60))
         .expect("jet dev never printed its static app preview URL")
 }
 
@@ -459,21 +461,12 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
 
-    let ports = wait_for_ports(stdout);
+    let port = wait_for_app_preview(stdout);
     assert!(
-        (8080..=8089).contains(&ports.application),
+        (8080..=8089).contains(&port),
         "default app preview port escaped the stable range: {}",
-        ports.application
+        port
     );
-    assert!(
-        ports.app_before_canvas,
-        "startup must print App preview before Canvas"
-    );
-    assert_eq!(
-        ports.application, ports.canvas,
-        "the workbench serves app preview and Canvas on one listener (card #2170)"
-    );
-    let port = ports.application;
 
     for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
         let (status, _) = http_get(port, path).expect("static-path hostile request failed");
@@ -527,12 +520,11 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         "served index.html should have the live-reload script injected"
     );
     let (status, _) =
-        http_get_without_session(port, "/canvas").expect("GET /canvas without session");
+        http_get_without_session(port, "/canvas").expect("GET app listener Canvas path");
     assert_eq!(
-        status, 401,
-        "the Canvas workbench route must keep its session gate on the shared listener"
+        status, 404,
+        "the app listener must not expose the Canvas route"
     );
-
     // Edit the SAME file the dev server is watching (never a real example
     // file — this is the throwaway temp copy) and wait for the rebuild.
     fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
@@ -595,7 +587,7 @@ fn jet_dev_web_rejects_windows_absolute_static_paths() {
     }
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
-    let ports = wait_for_ports(stdout);
+    let port = wait_for_app_preview(stdout);
 
     for path in [
         "/C:/Windows/win.ini",
@@ -603,7 +595,7 @@ fn jet_dev_web_rejects_windows_absolute_static_paths() {
         "/\\Windows\\win.ini",
         "/\\\\server\\share\\secret",
     ] {
-        let (status, _) = http_get(ports.application, path)
+        let (status, _) = http_get(port, path)
             .expect("Windows absolute static-path request failed");
         assert_eq!(
             status, 400,
@@ -690,7 +682,7 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
     fs::write(&src_path, FIXTURE_SRC).unwrap();
 
     let mut child = Command::new(jet_bin())
-        .args(["dev", "app.jet", "--target=web", "--verbose"])
+        .args(["dev", "app.jet", "--target=web", "--canvas", "--verbose"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
@@ -723,7 +715,9 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
     let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
     assert!(ready.contains("\"clients\":1"), "{ready}");
     assert!(
-        ready.contains(&format!("ready · localhost:{port} · 1 client")),
+        ready.contains(&format!(
+            "ready · localhost:{application_port} · 1 client"
+        )),
         "{ready}"
     );
     let second_tab = wait_for_status(port, "tab-b", "ready", Duration::from_secs(2));
@@ -838,7 +832,7 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
     // not inspect a post-exit string facade. NO_COLOR matches the owner's
     // host environment and proves color is not required for pinning/input.
     let command = format!(
-        "env NO_COLOR=1 {} dev app.jet --target=web --port={port}",
+        "env NO_COLOR=1 {} dev app.jet --target=web --canvas --port={port}",
         jet_bin().display()
     );
     let mut pty = Command::new("script")
@@ -867,7 +861,7 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
     assert!(ready.contains("\"clients\":1"), "{ready}");
     let pinned = wait_for_file_text(
         &transcript_path,
-        &format!("jet dev  [ready] localhost:{canvas_port} · 1 client"),
+        &format!("jet dev  [ready] localhost:{port} · 1 client"),
         Duration::from_secs(5),
     );
     assert!(
@@ -998,7 +992,7 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
     let port = unused_local_port();
 
     let command = format!(
-        "env NO_COLOR=1 {} dev app.jet --target=web --verbose --port={port}",
+        "env NO_COLOR=1 {} dev app.jet --target=web --canvas --verbose --port={port}",
         jet_bin().display()
     );
     let mut child = Command::new("script")
@@ -1086,7 +1080,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     fs::write(&src_path, FIXTURE_SRC).unwrap();
 
     let mut child = Command::new(jet_bin())
-        .args(["dev", "app.jet", "--target=web"])
+        .args(["dev", "app.jet", "--target=web", "--canvas"])
         .current_dir(&dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1115,6 +1109,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"project-mode\""));
     assert!(html.contains("id=\"output-panel\""));
     assert!(html.contains("id=\"output-list\""));
+    assert!(html.contains("id=\"target-list\""));
+    assert!(html.contains("id=\"target-count\""));
+    assert!(html.contains("role=\"listbox\""));
     assert!(html.contains("id=\"session-identity\""));
     assert!(html.contains("data-session-view=\"custom servers\""));
     assert!(html.contains("id=\"preview-panel\""));
@@ -1250,13 +1247,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(session.contains("\"last_good_program\":\"web-build-"));
     assert!(session.contains("\"transport\":\"canvas\""));
     assert!(session.contains("\"transport\":\"application\""));
+    assert!(!session.contains("\"workbench\""));
     let application_port = json_number_after(
         &session,
         "\"application\":{\"host\":\"127.0.0.1\",\"port\":",
     );
-    assert_eq!(
+    assert_ne!(
         application_port, port,
-        "the workbench serves Canvas and app preview on one listener (card #2170)"
+        "Canvas and app preview must use separate listeners (card #2170)"
     );
     let (app_status, _) = http_get(application_port, "/").expect("GET app preview listener");
     assert_eq!(app_status, 200);
@@ -1277,9 +1275,19 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("latestProject"));
     assert!(js.contains("function loadProject"));
     assert!(js.contains("function loadCanvasSession"));
+    assert!(js.contains("CANVAS_SESSION_LEASE_INTERVAL_MS"));
+    assert!(js.contains("scheduleCanvasSessionLease"));
+    assert!(js.contains("pagehide"));
     assert!(js.contains("function syncCanvasOutputs"));
     assert!(js.contains("function selectCanvasOutput"));
     assert!(js.contains("canvasSelectedOutput"));
+    assert!(js.contains("function selectCanvasTarget"));
+    assert!(js.contains("canvasSelectedTarget"));
+    assert!(js.contains("canvasChoiceCard"));
+    assert!(js.contains("aria-selected"));
+    assert!(js.contains("canvasRunSelection"));
+    assert!(js.contains("body.output = selectedOutput"));
+    assert!(js.contains("body.target = selectedTarget"));
     assert!(js.contains("acceptedRevision"));
     assert!(js.contains("lastGoodProgram"));
     assert!(js.contains("last-good graph retained"));
@@ -1981,7 +1989,7 @@ fn jet_dev_web_status_does_not_expose_canvas_session_data() {
     fs::write(dir.join("app.jet"), FIXTURE_SRC).unwrap();
 
     let mut child = Command::new(jet_bin())
-        .args(["dev", "app.jet", "--target=web"])
+        .args(["dev", "app.jet", "--target=web", "--canvas"])
         .current_dir(&dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2040,7 +2048,7 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     fs::write(&entry, source).unwrap();
 
     let mut child = Command::new(jet_bin())
-        .args(["dev", "app.jet", "--target=web"])
+        .args(["dev", "app.jet", "--target=web", "--canvas"])
         .current_dir(&dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2212,7 +2220,7 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
     .unwrap();
 
     let mut child = Command::new(jet_bin())
-        .args(["dev", "app.jet", "--target=web"])
+        .args(["dev", "app.jet", "--target=web", "--canvas"])
         .current_dir(&dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2314,6 +2322,31 @@ fn wait_for_server_up(port: u16, timeout: Duration) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+struct EmbeddedDevserverChild(std::process::Child);
+
+impl Drop for EmbeddedDevserverChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn start_embedded_devserver(dir: &Path, port: u16) -> EmbeddedDevserverChild {
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet"])
+        .current_dir(dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start embedded devserver fixture");
+    let stdout = child.stdout.take().unwrap();
+    let guard = EmbeddedDevserverChild(child);
+    let served_port = wait_for_app_preview(stdout);
+    assert_eq!(served_port, port);
+    wait_for_server_up(port, Duration::from_secs(30));
+    guard
 }
 
 #[test]
@@ -2587,6 +2620,577 @@ fn jet_dev_static_generator_serves_reloads_and_watches_inputs() {
         String::from_utf8_lossy(&html_body).contains("<h1>source edit: second headline</h1>"),
         "generator source edit was not served"
     );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn embedded_devserver_static_read_survives_concurrent_symlink_swap() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_static_read_survives_concurrent_symlink_swap (need rustc)"
+        );
+        return;
+    }
+
+    use std::os::unix::fs::symlink;
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_symlink_race_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(
+        dir.join("app.jet"),
+        format!(
+            r#"use core.web.devserver as devserver
+
+fn dev() {{
+    server :: devserver.app()
+    server.port({port})
+    server.serve()
+}}
+
+fn run() {{
+    print("host")
+}}
+"#
+        ),
+    )
+    .unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start embedded devserver symlink-race fixture");
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_app_preview(stdout);
+    wait_for_server_up(port, Duration::from_secs(30));
+
+    let build = dir.join("build");
+    let target = build.join("race.js");
+    let parked = build.join("race.js.parked");
+    let outside = dir.join("outside-secret.js");
+    let outside_marker: &'static [u8] = b"outside-secret";
+    fs::write(&outside, outside_marker).unwrap();
+    fs::write(&target, b"inside").unwrap();
+
+    let (status, content_type, body) =
+        http_get_with_content_type(port, "/race.js").expect("initial static GET failed");
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "application/javascript; charset=utf-8");
+    assert_eq!(body, b"inside");
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let swap_stop = std::sync::Arc::clone(&stop);
+    let swap_target = target.clone();
+    let swap_parked = parked.clone();
+    let swap_outside = outside.clone();
+    let swap_count = std::sync::Arc::clone(&swaps);
+    let swapper = std::thread::spawn(move || {
+        while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = fs::remove_file(&swap_parked);
+            if fs::rename(&swap_target, &swap_parked).is_ok() {
+                if symlink(&swap_outside, &swap_target).is_ok() {
+                    swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let _ = fs::remove_file(&swap_target);
+                let _ = fs::rename(&swap_parked, &swap_target);
+                std::thread::sleep(Duration::from_micros(50));
+            }
+        }
+    });
+
+    let mut requests = Vec::new();
+    for _ in 0..4 {
+        let request_leaked = std::sync::Arc::clone(&leaked);
+        let request_served = std::sync::Arc::clone(&served);
+        requests.push(std::thread::spawn(move || {
+            for _ in 0..512 {
+                let Some((status, body)) = http_get_without_session(port, "/race.js") else {
+                    continue;
+                };
+                if status == 200 {
+                    request_served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                if body
+                    .windows(outside_marker.len())
+                    .any(|window| window == outside_marker)
+                    || (status == 200 && body != b"inside")
+                {
+                    request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+            }
+        }));
+    }
+    for request in requests {
+        request.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    swapper.join().unwrap();
+
+    let _ = fs::remove_file(&target);
+    let _ = fs::rename(&parked, &target);
+    assert!(
+        !leaked.load(std::sync::atomic::Ordering::Relaxed),
+        "concurrent static serving returned bytes from outside the build root"
+    );
+    assert!(
+        swaps.load(std::sync::atomic::Ordering::Relaxed) > 0
+            && served.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        "hostile race did not observe both symlink swaps and successful in-root reads"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_rejects_oversized_static_response_before_read() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_rejects_oversized_static_response_before_read (need rustc)"
+        );
+        return;
+    }
+
+    const MAX_GENERATED_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_oversized_response_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(
+        dir.join("app.jet"),
+        format!(
+            r#"use core.web.devserver as devserver
+
+fn dev() {{
+    server :: devserver.app()
+    server.port({port})
+    server.serve()
+}}
+
+fn run() {{
+    print("host")
+}}
+"#
+        ),
+    )
+    .unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start embedded devserver oversized-response fixture");
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_app_preview(stdout);
+    wait_for_server_up(port, Duration::from_secs(30));
+
+    let oversized = dir.join("build").join("oversized.bin");
+    let file = fs::File::create(&oversized).unwrap();
+    file.set_len(MAX_GENERATED_RESPONSE_BYTES + 1).unwrap();
+    drop(file);
+
+    let (status, content_type, body) = http_get_with_content_type(port, "/oversized.bin")
+        .expect("oversized static GET failed");
+    assert_eq!(status, 404);
+    assert_eq!(content_type, "text/plain; charset=utf-8");
+    assert!(
+        body.len() < 128,
+        "oversized response error must not echo or buffer the file"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_slow_header_does_not_block_other_clients() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_slow_header_does_not_block_other_clients (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_slow_header_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    slow.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+    slow.write_all(b"G").unwrap();
+    slow.flush().unwrap();
+    let (status, _, _) = http_get_with_content_type(port, "/__jet_dev_version")
+        .expect("slow header must not block a normal client");
+    assert_eq!(status, 200);
+
+    drop(slow);
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn embedded_devserver_rejects_hardlinked_source() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_rejects_hardlinked_source (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_hardlinked_source_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    let source = fn_fixture_src(port, "hardlinked source");
+    let outside = dir.join("outside-app.jet");
+    fs::write(&outside, &source).unwrap();
+    fs::hard_link(&outside, dir.join("app.jet")).unwrap();
+
+    let output = Command::new(jet_bin())
+        .args(["dev", "app.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to launch hardlinked-source fixture");
+    assert!(
+        !output.status.success(),
+        "jet dev must fail closed for a hardlinked source"
+    );
+    assert_eq!(fs::read(&outside).unwrap(), source.as_bytes());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn embedded_devserver_rejects_unix_hardlinks_and_special_files() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_rejects_unix_hardlinks_and_special_files (need rustc)"
+        );
+        return;
+    }
+
+    use std::os::unix::net::UnixListener;
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_unix_file_identity_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+    let build = dir.join("build");
+
+    let outside_static = dir.join("outside-static.js");
+    fs::write(&outside_static, b"outside-static").unwrap();
+    let hardlinked_static = build.join("hardlinked.js");
+    fs::hard_link(&outside_static, &hardlinked_static).unwrap();
+    let (status, _, body) =
+        http_get_with_content_type(port, "/hardlinked.js").expect("hardlinked static GET failed");
+    assert_eq!(status, 400);
+    assert!(body.is_empty() || body == b"bad path");
+    assert_eq!(fs::read(&outside_static).unwrap(), b"outside-static");
+
+    let special = build.join("special.sock");
+    let socket = UnixListener::bind(&special).unwrap();
+    let (status, _, _) =
+        http_get_with_content_type(port, "/special.sock").expect("special-file GET failed");
+    assert_eq!(status, 400);
+    drop(socket);
+
+    let outside_output = dir.join("outside-output.js");
+    fs::write(&outside_output, b"outside-output").unwrap();
+    let output_path = build.join("app.js");
+    fs::remove_file(&output_path).unwrap();
+    fs::hard_link(&outside_output, &output_path).unwrap();
+    let (_, baseline_body) = http_get_without_session(port, "/__jet_dev_version").unwrap();
+    let baseline = String::from_utf8_lossy(&baseline_body).trim().to_string();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "changed")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let (_, version_body) = http_get_without_session(port, "/__jet_dev_version").unwrap();
+        if String::from_utf8_lossy(&version_body).trim() != baseline {
+            panic!("hardlinked output was published instead of rejected");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(fs::read(&outside_output).unwrap(), b"outside-output");
+    assert_eq!(fs::read(&output_path).unwrap(), b"outside-output");
+
+    fs::remove_file(&output_path).unwrap();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "recovered")).unwrap();
+    let recovered = wait_for_version_change(port, &baseline, Duration::from_secs(15));
+    assert_ne!(recovered, baseline, "watcher did not recover after rejected publish");
+    assert_eq!(fs::read(&outside_output).unwrap(), b"outside-output");
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn embedded_devserver_parent_rename_stays_inside_held_root() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_parent_rename_stays_inside_held_root (need rustc)"
+        );
+        return;
+    }
+
+    use std::os::unix::fs::symlink;
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_parent_rename_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    let build = dir.join("build");
+    let nested = build.join("nested");
+    let parked = build.join("nested.parked");
+    let outside = dir.join("outside-parent");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(nested.join("race.js"), b"inside-parent").unwrap();
+    fs::write(outside.join("race.js"), b"outside-parent").unwrap();
+    let (status, body) = http_get_without_session(port, "/nested/race.js").unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body, b"inside-parent");
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let swap_stop = std::sync::Arc::clone(&stop);
+    let swap_nested = nested.clone();
+    let swap_parked = parked.clone();
+    let swap_outside = outside.clone();
+    let swap_count = std::sync::Arc::clone(&swaps);
+    let swapper = std::thread::spawn(move || {
+        while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = fs::remove_dir(&swap_parked);
+            if fs::rename(&swap_nested, &swap_parked).is_ok() {
+                if symlink(&swap_outside, &swap_nested).is_ok() {
+                    swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let _ = fs::remove_file(&swap_nested);
+                let _ = fs::rename(&swap_parked, &swap_nested);
+            }
+        }
+    });
+
+    let mut requests = Vec::new();
+    for _ in 0..4 {
+        let request_leaked = std::sync::Arc::clone(&leaked);
+        requests.push(std::thread::spawn(move || {
+            for _ in 0..256 {
+                let Some((status, body)) = http_get_without_session(port, "/nested/race.js")
+                else {
+                    continue;
+                };
+                if status == 200 && body != b"inside-parent" {
+                    request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+            }
+        }));
+    }
+    for request in requests {
+        request.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    swapper.join().unwrap();
+    let _ = fs::remove_file(&nested);
+    let _ = fs::rename(&parked, &nested);
+
+    assert!(!leaked.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(swaps.load(std::sync::atomic::Ordering::Relaxed) > 0);
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_rejects_invalid_utf8_index_within_response_budget() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_rejects_invalid_utf8_index_within_response_budget (need rustc)"
+        );
+        return;
+    }
+
+    const MAX_GENERATED_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
+    const SCRIPT_HEADROOM_BYTES: u64 = 4096;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_invalid_utf8_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    let index = dir.join("build").join("index.html");
+    let mut file = fs::File::create(&index).unwrap();
+    file.set_len(MAX_GENERATED_RESPONSE_BYTES - SCRIPT_HEADROOM_BYTES)
+        .unwrap();
+    file.write_all(&[0xff]).unwrap();
+    drop(file);
+
+    let (status, content_type, body) =
+        http_get_with_content_type(port, "/").expect("invalid-UTF8 index GET failed");
+    assert_eq!(status, 404);
+    assert_eq!(content_type, "text/plain; charset=utf-8");
+    assert!(body.len() < 128, "invalid UTF-8 must fail closed without echoing HTML");
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn embedded_devserver_windows_rejects_reparse_hardlink_and_renamed_entries() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_windows_rejects_reparse_hardlink_and_renamed_entries (need rustc)"
+        );
+        return;
+    }
+
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_windows_identity_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+    let build = dir.join("build");
+
+    let outside_static = dir.join("outside-static.js");
+    fs::write(&outside_static, b"outside-static").unwrap();
+    let hardlinked_static = build.join("hardlinked.js");
+    fs::hard_link(&outside_static, &hardlinked_static).unwrap();
+    let (status, _, _) =
+        http_get_with_content_type(port, "/hardlinked.js").expect("Windows hardlink GET failed");
+    assert_eq!(status, 400);
+
+    let reparse = build.join("reparse.js");
+    match symlink_file(&outside_static, &reparse) {
+        Ok(()) => {
+            let (status, _, _) =
+                http_get_with_content_type(port, "/reparse.js").expect("Windows reparse GET failed");
+            assert_eq!(status, 400);
+            let _ = fs::remove_file(&reparse);
+        }
+        Err(error) => eprintln!("note: Windows file-reparse test unavailable: {error}"),
+    }
+
+    let nested = build.join("nested");
+    let parked = build.join("nested.parked");
+    let outside = dir.join("outside-parent");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(nested.join("race.js"), b"inside-parent").unwrap();
+    fs::write(outside.join("race.js"), b"outside-parent").unwrap();
+    fs::rename(&nested, &parked).unwrap();
+    match symlink_dir(&outside, &nested) {
+        Ok(()) => {
+            let (status, _) = http_get_without_session(port, "/nested/race.js").unwrap();
+            assert_eq!(status, 400);
+            fs::remove_dir(&nested)
+                .or_else(|_| fs::remove_file(&nested))
+                .unwrap();
+        }
+        Err(error) => {
+            eprintln!("note: Windows directory-reparse test unavailable: {error}");
+            fs::create_dir(&nested).unwrap();
+            fs::write(nested.join("race.js"), b"replacement").unwrap();
+            let (status, body) = http_get_without_session(port, "/nested/race.js").unwrap();
+            assert_eq!(status, 200);
+            assert_eq!(body, b"replacement");
+            fs::remove_dir_all(&nested).unwrap();
+        }
+    }
+    fs::rename(&parked, &nested).unwrap();
+
+    let outside_output = dir.join("outside-output.js");
+    fs::write(&outside_output, b"outside-output").unwrap();
+    let output_path = build.join("app.js");
+    fs::remove_file(&output_path).unwrap();
+    fs::hard_link(&outside_output, &output_path).unwrap();
+    let (_, baseline_body) = http_get_without_session(port, "/__jet_dev_version").unwrap();
+    let baseline = String::from_utf8_lossy(&baseline_body).trim().to_string();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "changed")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let (_, version_body) = http_get_without_session(port, "/__jet_dev_version").unwrap();
+        if String::from_utf8_lossy(&version_body).trim() != baseline {
+            panic!("Windows hardlinked output was published instead of rejected");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(fs::read(&outside_output).unwrap(), b"outside-output");
+    assert_eq!(fs::read(&output_path).unwrap(), b"outside-output");
+
+    fs::remove_file(&output_path).unwrap();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "recovered")).unwrap();
+    let recovered = wait_for_version_change(port, &baseline, Duration::from_secs(15));
+    assert_ne!(recovered, baseline, "Windows watcher did not recover after rejected publish");
+    assert_eq!(fs::read(&outside_output).unwrap(), b"outside-output");
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);

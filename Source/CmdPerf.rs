@@ -497,7 +497,10 @@ fn attach(args: &[String]) -> i32 {
                 }
             }
             (Some(_), Err(message)) => {
-                perf_error_with_fix(message, "start the program with `jet run --observe`, then attach");
+                perf_error_with_fix(
+                    message,
+                    "start the program with `jet run --observe`, then attach",
+                );
                 return ExitCodes::USAGE;
             }
             (None, Ok(_)) => {
@@ -2349,7 +2352,9 @@ fn export(args: &[String]) -> i32 {
         i += 1;
     }
     let Some(path) = path else {
-        perf_error(format!("`jet perf export` needs a {ARTIFACT_EXT_TRACE} path"));
+        perf_error(format!(
+            "`jet perf export` needs a {ARTIFACT_EXT_TRACE} path"
+        ));
         return ExitCodes::USAGE;
     };
     let trace = match read_verified(&path) {

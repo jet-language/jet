@@ -23,7 +23,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v3-cabi";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v5-cabi-failure-hook-lifecycle";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -1706,7 +1706,7 @@ pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "=0.5.3");
 /// The `sha2` crate version backing SHA-512 + HKDF-SHA256 (D-CRYPTO-SUITE1).
 pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "=0.10.9");
 
-/// The `blake3` crate version backing `core.crypto.blake3_bytes` (D-CRYPTO-SUITE1).
+/// The `blake3` crate version backing `core.crypto.blake3` (D-CRYPTO-SUITE1).
 pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "=1.8.2");
 
 /// The `hkdf` crate version backing `core.crypto.hkdf_sha256` (D-CRYPTO-SUITE1).
@@ -1798,6 +1798,7 @@ pub const COMPRESS_ZSTD_CRATE_SPEC: (&str, &str) = ("zstd", "0.13");
 /// `core.archive.gzip` or `core.archive.zstd` is used (D-CODECS1). This is
 /// the only place the standalone codec paths touch `flate2` / `zstd`.
 const COMPRESS_RUNTIME: &str = include_str!("Prelude/Compress.rs");
+const GZIP_KERNEL: &str = include_str!("../../jet-foundation/src/GzipKernel.rs");
 
 pub fn build_bridge(
     entries: &[ExternEntry],
@@ -2813,6 +2814,7 @@ fn cache_key_full(
     identity.field("needs_compress", &[needs_compress as u8]);
     if needs_compress {
         identity.field("compress_runtime", COMPRESS_RUNTIME.as_bytes());
+        identity.field("gzip_kernel", GZIP_KERNEL.as_bytes());
     }
     identity.field("needs_plugin", &[needs_plugin as u8]);
     if needs_plugin {
@@ -2866,6 +2868,16 @@ fn cache_key_full(
 /// but their descriptor stamps must remain distinct in the cache identity.
 fn foreign_language_for_entry(entry: &ExternEntry) -> Option<ForeignLanguage> {
     if entry.c_abi {
+        // COM type-library binders use the reserved bridge prefix on every
+        // generated symbol. Preserve that descriptor through the shared C ABI
+        // bridge so cache identity and provenance cannot silently downgrade a
+        // COM artifact to ordinary C.
+        if entry
+            .rust_path
+            .starts_with(ForeignLanguage::Com.bridge_prefix())
+        {
+            return Some(ForeignLanguage::Com);
+        }
         return Some(ForeignLanguage::C);
     }
     match entry.inline.as_ref().map(|inline| inline.lang.as_str()) {
@@ -3458,7 +3470,7 @@ fn emit_wrapper_lib(
     needs_secrets: bool,
 ) -> String {
     let mut out = String::from(
-        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\nfn ffi_panic() -> ! {\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::panic_any(format!(\"__jet_ffi_runtime__: {MESSAGE}\"));\n}\n\n",
+        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\ntype JetFfiPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;\ntype JetFfiSharedPanicHook = std::sync::Arc<JetFfiPanicHook>;\nstatic JET_FFI_PREVIOUS_PANIC_HOOK: std::sync::Mutex<Option<JetFfiSharedPanicHook>> =\n    std::sync::Mutex::new(None);\n\nthread_local! {\n    static JET_FFI_FAILURE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };\n    // The hook is process-global, but suppression is per calling thread.\n    static JET_FFI_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> =\n        const { std::cell::Cell::new(0) };\n}\n\n// `catch_unwind` runs the panic hook before it returns the payload. Keep the\n// bridge's private conversion quiet without mutating the hook around each\n// call; FFI calls may run concurrently on unrelated threads.\nstatic JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {\n    let previous = std::sync::Arc::new(std::panic::take_hook());\n    *JET_FFI_PREVIOUS_PANIC_HOOK\n        .lock()\n        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous.clone());\n    std::panic::set_hook(Box::new(move |info| {\n        let private_marker = info\n            .payload()\n            .downcast_ref::<String>()\n            .is_some_and(|message| message.starts_with(\"__jet_ffi_runtime__: \"));\n        let quiet = private_marker\n            || JET_FFI_PANIC_BOUNDARY_DEPTH\n                .try_with(|depth| depth.get() != 0)\n                .unwrap_or(false);\n        if !quiet {\n            previous(info);\n        }\n    }));\n});\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_clear_panic_hook() {\n    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n        let previous = JET_FFI_PREVIOUS_PANIC_HOOK\n            .lock()\n            .unwrap_or_else(|poisoned| poisoned.into_inner())\n            .take();\n        let Some(previous) = previous else { return; };\n        let current = std::panic::take_hook();\n        drop(current);\n        if let Ok(previous) = std::sync::Arc::try_unwrap(previous) {\n            std::panic::set_hook(previous);\n        }\n    }));\n}\n\nfn ffi_catch_unwind<F, T>(f: F) -> Result<T, Box<dyn std::any::Any + Send>>\nwhere\n    F: FnOnce() -> T,\n{\n    let result = JET_FFI_PANIC_BOUNDARY_DEPTH.with(|depth| {\n        let previous = depth.replace(depth.get().saturating_add(1));\n        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n            std::sync::LazyLock::force(&JET_FFI_PANIC_HOOK);\n            std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))\n        }));\n        depth.set(previous);\n        result\n    });\n    match result {\n        Ok(result) => result,\n        Err(payload) => Err(payload),\n    }\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_take_failure() -> i8 {\n    JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)\n}\n\nfn ffi_host_fault() {\n    JET_FFI_FAILURE.with(|failure| {\n        if failure.get() == 0 { failure.set(2); }\n    });\n}\n\nfn ffi_panic() -> ! {\n    JET_FFI_FAILURE.with(|failure| failure.set(1));\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::resume_unwind(Box::new(format!(\"__jet_ffi_runtime__: {MESSAGE}\")));\n}\n\n",
     );
     for descriptor in foreign_descriptor_stamps(entries) {
         out.push_str("// jet-ffi-descriptor=");
@@ -3578,6 +3590,8 @@ fn emit_wrapper_lib(
         // D-CODECS1: the compress runtime is the only place the standalone
         // `core.archive.gzip` / `core.archive.zstd` codec paths are touched.
         push_runtime_mod(&mut out, "__jet_compress", |out| {
+            out.push_str(GZIP_KERNEL);
+            out.push('\n');
             out.push_str(COMPRESS_RUNTIME);
             out.push('\n');
         });
@@ -4095,11 +4109,11 @@ fn emit_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String 
     };
     let body = if ret == "()" {
         format!(
-            "match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n        {rust_call}\n    }})) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}"
+            "match ffi_catch_unwind(|| {{\n        {rust_call}\n    }}) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}"
         )
     } else {
         format!(
-            "match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {rust_call})) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}"
+            "match ffi_catch_unwind(|| {rust_call}) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}"
         )
     };
     format!(
@@ -4192,11 +4206,12 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
         }
     }
     let call = format!("{}({})", entry.wrapper_name, call_args.join(", "));
-    let (ret_params, ret_ty, body) = match &entry.return_type {
+    let (ret_params, ret_ty, body, panic_return) = match &entry.return_type {
         None => (
             String::new(),
             String::new(),
             format!("    let _ = {call};\n"),
+            "()",
         ),
         Some(Type::String) => (
             if params.is_empty() {
@@ -4208,21 +4223,25 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
             format!(
                 "    if out_ptr.is_null() || out_len.is_null() {{ ffi_panic(); }}\n    let s = {call};\n    let v = s.into_bytes().into_boxed_slice();\n    let len = v.len();\n    let ptr = Box::into_raw(v) as *mut u8;\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
             ),
+            "1",
         ),
         Some(Type::Int) | Some(Type::InlineRange { .. }) => (
             String::new(),
             " -> i64".to_string(),
             format!("    {call}\n"),
+            "0",
         ),
         Some(Type::Float) | Some(Type::Float32) => (
             String::new(),
             " -> f64".to_string(),
             format!("    ({call}) as f64\n"),
+            "0.0",
         ),
         Some(Type::Bool) => (
             String::new(),
             " -> i8".to_string(),
             format!("    i8::from({call})\n"),
+            "0",
         ),
         Some(_) => return None,
     };
@@ -4234,7 +4253,7 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
         p.join(", ")
     };
     Some(format!(
-        "#[no_mangle]\npub unsafe extern \"C\" fn {cabi}({all_params}){ret_ty} {{\n{body}}}\n"
+        "#[no_mangle]\npub unsafe extern \"C\" fn {cabi}({all_params}){ret_ty} {{\n    match ffi_catch_unwind(|| {{\n{body}    }}) {{\n        Ok(value) => value,\n        Err(_) => {{ ffi_host_fault(); {panic_return} }},\n    }}\n}}\n"
     ))
 }
 
@@ -4342,8 +4361,13 @@ fn stable_cargo_detail(stderr: &str) -> String {
 }
 
 fn normalize_ffi_generated_source_line(line: &str) -> String {
-    let marker = "match std::panic::catch_unwind(";
-    let Some(start) = line.find(marker) else {
+    let marker = [
+        "match std::panic::catch_unwind(",
+        "match ffi_catch_unwind(",
+    ]
+    .into_iter()
+    .find_map(|marker| line.find(marker).map(|start| (marker, start)));
+    let Some((marker, start)) = marker else {
         return line.to_string();
     };
     format!("{}{}<generated wrapper>)", &line[..start], marker)
@@ -4451,6 +4475,37 @@ mod tests {
     }
 
     #[test]
+    fn generated_com_bridge_carries_the_com_descriptor_stamp() {
+        let entry = ExternEntry {
+            jet_name: "open".into(),
+            rust_path: "jet_com_office_open".into(),
+            wrapper_name: "jet_ffi_open".into(),
+            params: Vec::new(),
+            return_type: Some(Type::Int),
+            crate_spec: "std".into(),
+            line_hint: "`open` in COM module `jet_com_office`".into(),
+            inline: None,
+            c_abi: true,
+            close: None,
+        };
+        let source = emit_wrapper_lib(
+            &[entry],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        let stamp = foreign_descriptor_stamp(ForeignLanguage::Com);
+        assert!(source.contains(&format!("// jet-ffi-descriptor={stamp}")));
+    }
+
+    #[test]
     fn generated_bridge_reports_through_host_callback() {
         let source = emit_wrapper_lib(
             &[],
@@ -4466,9 +4521,17 @@ mod tests {
             false,
         );
         assert!(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"));
+        assert!(source.contains("pub extern \"C\" fn jet_ffi_clear_panic_hook"));
+        assert!(source.contains("pub extern \"C\" fn jet_ffi_take_failure"));
+        assert!(source.contains("fn ffi_host_fault()"));
         assert!(source.contains("reporter(MESSAGE.as_ptr(), MESSAGE.len())"));
         assert!(source.contains("__jet_ffi_runtime__: {MESSAGE}"));
-        assert!(source.contains("std::panic::panic_any"));
+        assert!(source.contains("std::panic::resume_unwind"));
+        assert!(source.contains("fn ffi_catch_unwind"));
+        assert!(!source.contains("fn jet_ffi_catch_unwind"));
+        assert!(source.contains("let private_marker = info"));
+        assert!(source.contains("message.starts_with(\"__jet_ffi_runtime__: \")"));
+        assert!(source.contains("JET_FFI_PANIC_BOUNDARY_DEPTH"));
         assert!(!source.contains("std::process::exit"));
         assert!(!source.contains("eprintln!(\"panic: a foreign function panicked\")"));
     }
@@ -4490,6 +4553,8 @@ mod tests {
         let source = emit_cabi_trampoline(&value_entry, &HashSet::new()).unwrap();
         assert!(source.contains("String::from_utf8(bytes)"), "{source}");
         assert!(source.contains("p0_ptr.is_null()"), "{source}");
+        assert!(source.contains("ffi_catch_unwind"), "{source}");
+        assert!(source.contains("ffi_host_fault(); 1"), "{source}");
         assert!(
             source.contains("out_ptr.is_null() || out_len.is_null()"),
             "{source}"

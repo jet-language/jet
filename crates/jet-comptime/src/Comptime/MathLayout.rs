@@ -322,6 +322,11 @@ fn as_lane(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
     match v {
         CtValue::Float(f) => Ok(f.as_f64()),
         CtValue::Int(n) => Ok(*n as f64),
+        CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_DECIMAL => {
+            crate::Numeric::CtDecimal::from_value(v)
+                .map(|decimal| decimal.to_f64())
+                .map_err(|error| unsupported(&error, span))
+        }
         _ => Err(unsupported("math component must be a Float", span)),
     }
 }

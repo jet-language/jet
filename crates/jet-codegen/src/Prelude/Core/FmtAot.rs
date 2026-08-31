@@ -6,6 +6,10 @@ pub(crate) fn jet_fmt_decimal_int_aot(value: i64, precision: i64) -> String {
     jet_fmt_decimal_int(&jet_std::jet_int_to_string(value), precision)
 }
 
+pub(crate) fn jet_fmt_grouped_int_aot(value: i64, precision: i64) -> String {
+    jet_fmt_grouped_int(&jet_std::jet_int_to_string(value), precision)
+}
+
 pub(crate) fn jet_fmt_hex(value: i64, width: i64) -> String {
     jet_fmt_hex_decimal(&jet_std::jet_int_to_string(value), width)
 }

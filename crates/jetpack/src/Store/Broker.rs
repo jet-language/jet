@@ -2629,9 +2629,7 @@ mod tests {
         let mut child = match child {
             Ok(child) => child,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                println!(
-                    "skipping namespace UID proof: unshare is unavailable ({error})"
-                );
+                println!("skipping namespace UID proof: unshare is unavailable ({error})");
                 let _ = fs::remove_file(&socket);
                 return;
             }
@@ -2666,9 +2664,7 @@ mod tests {
         assert!(status.success(), "peer probe failed: {status}");
         let current = current_uid().unwrap();
         if uid == current {
-            println!(
-                "skipping namespace UID proof: peer UID {uid} equals current UID {current}"
-            );
+            println!("skipping namespace UID proof: peer UID {uid} equals current UID {current}");
             drop(stream);
             let _ = UnixStream::connect(&socket);
             let _ = fs::remove_file(socket);

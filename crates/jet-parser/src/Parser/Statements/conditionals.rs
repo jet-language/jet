@@ -1204,6 +1204,42 @@ impl<'a> Parser<'a> {
         Ok((combined, n, Span::new(group_start, group_end)))
     }
 
+    /// `arm_atom` uses the arithmetic/bit-xor layer as its base so a bare `|`
+    /// remains the dispatch-alternates separator. Ordinary expressions still
+    /// use `expr_cmp`, where `|` is bitwise OR; dispatch heads have a distinct
+    /// grammar and must not consume that separator before
+    /// `parse_arm_alternates_cond` can diagnose an unparenthesized group.
+    fn parse_dispatch_atom_expr(&mut self) -> Result<Expr, Diagnostic> {
+        let lhs = self.expr_bitxor(false)?;
+        let op = match &self.peek().kind {
+            TokKind::EqEq => Some(BinOp::Eq),
+            TokKind::NotEq => Some(BinOp::Ne),
+            TokKind::Lt => Some(BinOp::Lt),
+            TokKind::Gt if self.module_arg_expr_depth != Some(self.depth) => Some(BinOp::Gt),
+            TokKind::Le => Some(BinOp::Le),
+            TokKind::Ge => Some(BinOp::Ge),
+            TokKind::Compare => Some(BinOp::Compare),
+            _ => None,
+        };
+        let Some(op) = op else {
+            return Ok(lhs);
+        };
+        let op_span = self.bump().span;
+        if op == BinOp::Eq {
+            if let Some(pattern) = self.try_pattern_rhs()? {
+                let span = Span::new(lhs.span().start, pat_span(&pattern).end.max(op_span.end));
+                return Ok(Expr::PatternTest {
+                    subject: Box::new(lhs),
+                    pattern,
+                    span,
+                });
+            }
+        }
+        let rhs = self.expr_bitxor(false)?;
+        let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+        Ok(Expr::Binary(op, Box::new(lhs), Box::new(rhs), span))
+    }
+
     /// `arm_atom = "(" arm_bool_expr ")" | single_value`
     pub(super) fn parse_arm_atom_cond(
         &mut self,
@@ -1217,7 +1253,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the arm head group")?;
             return Ok(inner);
         }
-        let raw = self.expr_cmp(false)?;
+        let raw = self.parse_dispatch_atom_expr()?;
         Ok(Self::arm_atom_to_cond(
             subject.clone(),
             raw,
@@ -1408,10 +1444,10 @@ impl<'a> Parser<'a> {
         op: BinOp,
         start: Span,
     ) -> Result<Expr, Diagnostic> {
-        let pat_subject = match &subject {
-            Expr::Ident(..) => subject.clone(),
-            _ => Expr::Ident(Syntax::KW_IT.to_string(), subject.span()),
-        };
+        // Expression dispatch has no separate subject field, so retain the
+        // receiver in each pattern test. The result-handler lowering pass
+        // evaluates the shared receiver once before matching its arms.
+        let pat_subject = subject.clone();
         let mut arms: Vec<(Expr, Vec<Stmt>, Expr)> = Vec::new();
         let (else_body, else_value, end) = loop {
             while matches!(self.peek().kind, TokKind::Semi) {

@@ -1277,7 +1277,7 @@ impl<'a> Interp<'a> {
         ty: &Type,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
-        let rows = match super::EncodingLite::csv_parse(text) {
+        let rows = match super::EncodingLite::csv_parse(text, ",", false, false) {
             Ok(r) => r,
             Err(e) => return Ok(CtValue::failed(Box::new(decode_error(e)))),
         };
@@ -1290,10 +1290,11 @@ impl<'a> Interp<'a> {
         let mut errors = Vec::new();
         for (i, row) in it.enumerate() {
             let entries: Vec<(CtKey, CtValue)> = header
+                .fields
                 .iter()
                 .enumerate()
                 .map(|(c, name)| {
-                    let cell = row.get(c).cloned().unwrap_or_default();
+                    let cell = row.fields.get(c).cloned().unwrap_or_default();
                     (CtKey::Str(name.clone()), text_cell(cell))
                 })
                 .collect();

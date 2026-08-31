@@ -1,17 +1,17 @@
-Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
   --> tests/ui/crypto_expert_nonce_length.jet:6:21
     |
   6 |         x :: expert.xchacha20poly1305_open([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [1, 2, 3], [])
     |                     ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
- Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
   --> tests/ui/crypto_expert_nonce_length.jet:7:21
     |
   7 |         y :: expert.aes256gcm_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 3], [])
     |                     ^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
- Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

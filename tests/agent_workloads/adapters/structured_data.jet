@@ -1,26 +1,21 @@
 use core.encoding.json as json
 use core.files as fs
-use core.process as process
 
-#Codable
 struct Event {
     service: String
     duration_ms: Int
 }
 
-#Codable
 struct Batch {
     events: [Event]
 }
 
-#Codable
 struct Summary {
     service: String
     count: Int
     total_ms: Int
 }
 
-#Codable
 struct Report {
     total_events: Int
     summaries: [Summary]
@@ -47,15 +42,17 @@ fn summarize(batch: Batch) Report -> {
     return Report{total_events: batch.events.len(), summaries: summaries}
 }
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: structured_data INPUT_FILE")
-    input :: args.get(1) ?? panic("missing input file")
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
     raw :: fs.read(input) ?? panic("cannot read input")
-    decoded :: json.decode<Batch>(raw)
-    if decoded == {
-        .Ok(batch) -> print(json.to_string(summarize(batch)))
-        .Err(_) -> print("invalid-json")
-        else -> print("invalid-json")
+    decoded :: json.decode<Batch>(raw) ?? {
+        print("invalid-json")
+        return
     }
+    print(json.to_string(summarize(decoded)))
 }

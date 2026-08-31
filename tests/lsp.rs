@@ -2562,6 +2562,129 @@ fn lsp_document_symbol_returns_checked_outline() {
 }
 
 #[test]
+fn lsp_document_symbol_returns_symbols_for_imported_package_module() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let _guard = lock_lsp_process();
+
+    let root = common::Scratch::new("lsp-document-symbol-imported");
+    fs::create_dir_all(root.join("app")).expect("create imported symbol module directory");
+    fs::create_dir_all(root.join("src")).expect("create imported symbol root directory");
+    fs::write(
+        root.join("package.jet"),
+        "name: \"lsp-symbols\"\nversion: \"0.1.0\"\n",
+    )
+    .expect("write imported symbol package manifest");
+
+    let main_path = root.join("src/main.jet");
+    let imported_path = root.join("app/plan.jet");
+    let main_source = "use app.plan\nfn run() {}\n";
+    let imported_source =
+        "struct ImportedPlan { value: Int }\nfn imported_helper(value: Int) Int {\n    return value;\n}\n";
+    fs::write(&main_path, main_source).expect("write imported symbol root module");
+    fs::write(&imported_path, imported_source).expect("write imported symbol module");
+
+    let main_uri = format!("file://{}", main_path.display());
+    let imported_uri = format!("file://{}", imported_path.display());
+    let root_uri = format!("file://{}", root.path.display());
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .current_dir(&root.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp for imported symbols");
+    let mut stdin = child.stdin.take().expect("imported symbols stdin");
+    let mut stdout = child.stdout.take().expect("imported symbols stdout");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{}","capabilities":{{}}}}}}"#,
+            root_uri
+        ),
+    );
+    let initialize = read_msg(&mut stdout);
+    assert!(
+        initialize.contains("documentSymbolProvider"),
+        "initialize must advertise document symbols: {initialize}"
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            main_uri,
+            json_string(main_source)
+        ),
+    );
+    let main_diagnostics = read_msg(&mut stdout);
+    assert!(
+        main_diagnostics.contains("publishDiagnostics"),
+        "main module open must publish diagnostics: {main_diagnostics}"
+    );
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            imported_uri,
+            json_string(imported_source)
+        ),
+    );
+    let imported_diagnostics = read_msg(&mut stdout);
+    assert!(
+        imported_diagnostics.contains("publishDiagnostics"),
+        "imported module open must publish diagnostics: {imported_diagnostics}"
+    );
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            imported_uri
+        ),
+    );
+    let symbols = read_msg(&mut stdout);
+    assert!(
+        symbols.contains("\"result\":["),
+        "documentSymbol must return an array: {symbols}"
+    );
+    assert!(
+        symbols.contains("\"name\":\"ImportedPlan\""),
+        "imported module symbols must include ImportedPlan: {symbols}"
+    );
+    assert!(
+        symbols.contains("\"kind\":23"),
+        "imported module symbols must classify structs: {symbols}"
+    );
+    assert!(
+        symbols.contains("\"name\":\"imported_helper\""),
+        "imported module symbols must include imported_helper: {symbols}"
+    );
+    assert!(
+        symbols.contains("\"kind\":12"),
+        "imported module symbols must classify functions: {symbols}"
+    );
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let shutdown = read_msg(&mut stdout);
+    assert!(shutdown.contains("\"result\""), "shutdown must return a result: {shutdown}");
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn lsp_wave2_navigation_features() {
     let jet = jet_bin();
     if !jet.exists() {

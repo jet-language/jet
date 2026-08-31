@@ -123,19 +123,31 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
                 match method.as_str() {
                     "route" | "page" | "layout" => {
+                        let callable = Concurrency::http_callable_snapshot(a1);
                         let handler = move || {
-                            Concurrency::with_http_jet_runtime(|| {
-                                let call: extern "C" fn() -> i64 =
-                                    unsafe { std::mem::transmute(a1 as usize) };
-                                let page = call();
-                                with_rt(|rt| {
-                                    rt.web
-                                        .pages
-                                        .get(page.saturating_sub(1) as usize)
-                                        .cloned()
-                                        .unwrap_or_default()
+                            let page = callable.and_then(|(epoch, callable)| {
+                                Concurrency::try_with_http_jet_runtime_at(epoch, || {
+                                    let page = unsafe {
+                                        if callable.has_env {
+                                            let call: unsafe extern "C" fn(i64) -> i64 =
+                                                std::mem::transmute(callable.fn_ptr as usize);
+                                            call(callable.env)
+                                        } else {
+                                            let call: unsafe extern "C" fn() -> i64 =
+                                                std::mem::transmute(callable.fn_ptr as usize);
+                                            call()
+                                        }
+                                    };
+                                    with_rt(|rt| {
+                                        rt.web
+                                            .pages
+                                            .get(page.saturating_sub(1) as usize)
+                                            .cloned()
+                                            .unwrap_or_default()
+                                    })
                                 })
-                            })
+                            });
+                            page.unwrap_or_default()
                         };
                         match method.as_str() {
                             "route" => app_handle.route(key, std::sync::Arc::new(handler)),
@@ -144,12 +156,21 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
                         }
                     }
                     "action" | "form" | "data" => {
+                        let callable = Concurrency::http_callable_snapshot(a1);
                         let handler = move || {
-                            Concurrency::with_http_jet_runtime(|| {
-                                let call: extern "C" fn() =
-                                    unsafe { std::mem::transmute(a1 as usize) };
-                                call();
-                            });
+                            if let Some((epoch, callable)) = callable {
+                                let _ = Concurrency::try_with_http_jet_runtime_at(epoch, || unsafe {
+                                    if callable.has_env {
+                                        let call: unsafe extern "C" fn(i64) =
+                                            std::mem::transmute(callable.fn_ptr as usize);
+                                        call(callable.env);
+                                    } else {
+                                        let call: unsafe extern "C" fn() =
+                                            std::mem::transmute(callable.fn_ptr as usize);
+                                        call();
+                                    }
+                                });
+                            }
                         };
                         match method.as_str() {
                             "action" => app_handle.action(key, std::sync::Arc::new(handler)),
@@ -162,15 +183,26 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
             }
             "mount" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
+                let callable = Concurrency::http_callable_snapshot(a1);
                 app_handle.mount(
                     key,
                     std::sync::Arc::new(move |path: &String| {
-                        Concurrency::with_http_jet_runtime(|| {
-                            let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
-                            let call: extern "C" fn(i64) =
-                                unsafe { std::mem::transmute(a1 as usize) };
-                            call(path);
-                        });
+                        if let Some((epoch, callable)) = callable {
+                            let _ = Concurrency::try_with_http_jet_runtime_at(epoch, || {
+                                let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
+                                unsafe {
+                                    if callable.has_env {
+                                        let call: unsafe extern "C" fn(i64, i64) =
+                                            std::mem::transmute(callable.fn_ptr as usize);
+                                        call(callable.env, path);
+                                    } else {
+                                        let call: unsafe extern "C" fn(i64) =
+                                            std::mem::transmute(callable.fn_ptr as usize);
+                                        call(path);
+                                    }
+                                }
+                            });
+                        }
                     }),
                 )
             }

@@ -1,37 +1,41 @@
-use core.files as fs
-use core.process as process
+use core.files as files
+use core.regex as re
 
-fn run() {
-    args :: process.argv()
-    dir :: args.get(1) ?? "photos"
-    root :: dir
-    entries :: fs.list_dir(root) ?? panic("cannot list directory")
-    photos := [String]{}
-    files := 0
+#CLI
+struct Args {
+    directory: String
+}
+
+struct Photo {
+    number: Int
+    name: String
+    path: String
+}
+
+fn run(args: Args) {
+    dir :: args.directory
+    entries :: files.list_dir(dir) ?? panic("cannot list directory")
+    target_dir :: Path.from(dir)
+    pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
+    photos := [Photo]{}
     loop entry in entries {
         if !entry.is_dir {
-            files += 1
-            if entry.name.starts_with("IMG_") && entry.name.ends_with(".jpeg") {
-                raw :: entry.name.after("IMG_").before(".jpeg")
-                if raw.is_numeric() {
-                    number :: Int.parse(raw) ?? panic("bad image number")
-                    key :: "{number}".pad_start(5, "0")
-                    photos.push("{key}|{entry.name}|{entry.path}")
-                }
+            matched :: re.match(pattern, entry.name)
+            if matched == .Val(mat) {
+                photos.push(Photo{
+                    number: Int.parse(mat.group(1) ?? "0") ?? 0,
+                    name: entry.name,
+                    path: entry.path
+                })
             }
         }
     }
-    photos.sort()
-    index := 1
-    loop photo in photos {
-        fields :: photo.split("|").to_list()
-        name :: fields[1]
-        path :: fields[2]
-        index_text :: "{index}".pad_start(4, "0")
-        destination :: Path.from(root).join("photo-{index_text}.jpg")
-        fs.rename(path, destination.to_string()) ?? panic("cannot rename photo")
-        print("renamed {name} -> photo-{index_text}.jpg")
-        index += 1
+    photos.sort_by((photo: Photo) -> (number: photo.number, name: photo.name))
+    loop (index, photo) in photos {
+        display_index :: index + 1
+        index_text :: display_index.to_string().pad_start(4, "0")
+        files.rename(photo.path, target_dir.join("photo-{index_text}.jpg").to_string()) ?? panic("cannot rename photo")
+        print("renamed {photo.name} -> photo-{index_text}.jpg")
     }
-    print("renamed {photos.len()} skipped {files - photos.len()}")
+    print("renamed {photos.len()} skipped {entries.filter(entry -> !entry.is_dir).len() - photos.len()}")
 }

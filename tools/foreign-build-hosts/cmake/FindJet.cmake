@@ -1,0 +1,23 @@
+# CMake discovery module for the first-party Jet host adapters.
+
+if(NOT Jet_EXECUTABLE AND DEFINED ENV{JET_EXECUTABLE})
+    get_filename_component(_jet_env_executable "$ENV{JET_EXECUTABLE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(EXISTS "${_jet_env_executable}" AND NOT IS_DIRECTORY "${_jet_env_executable}")
+        set(Jet_EXECUTABLE "${_jet_env_executable}")
+    endif()
+endif()
+if(NOT Jet_EXECUTABLE)
+    find_program(Jet_EXECUTABLE NAMES jet)
+endif()
+if(NOT Jet_EXECUTABLE OR NOT EXISTS "${Jet_EXECUTABLE}" OR IS_DIRECTORY "${Jet_EXECUTABLE}")
+    set(Jet_FOUND FALSE)
+    if(Jet_FIND_REQUIRED)
+        message(FATAL_ERROR "JET-HOST-TOOL: Jet executable was not found; set JET_EXECUTABLE or add jet to PATH")
+    endif()
+    return()
+endif()
+
+set(Jet_FOUND TRUE)
+set(JET_EXECUTABLE "${Jet_EXECUTABLE}")
+set(Jet_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+include("${Jet_MODULE_DIR}/Jet.cmake")

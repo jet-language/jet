@@ -1,0 +1,28 @@
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+
+#UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+
+fn calibrate(value: Float) Float -> value * 2
+
+fn run() {
+    value :: Meter.from_float(Float{4.0})
+    decimal_scaled :: value * 1.5
+    print(decimal_scaled.raw())
+    print(Meter.from_float(value.raw() * 2).raw())
+    #allow(unit_scalar_rewrap) print(Meter.from_float(value.raw() * 3).raw())
+    print(Meter.from_float(value.raw() * calibrate(2.0)).raw())
+    rounded :: Meter.from_half_rounded(1half, .NearestEven, digits: 0) ?? Meter.from_float(Float{0.0})
+    print(rounded.raw())
+    point :: CelsiusPoint.from_float(Float{20.0})
+    print(CelsiusPoint.from_float(point.raw() * 2).raw())
+    #Arithmetic(.Wrapping) {
+        policy :: Meter.from_float(value.raw() * 2)
+        print(policy.raw())
+    }
+}

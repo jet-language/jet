@@ -1,0 +1,43 @@
+// E2404: provenance teaches both the inferred default and an explicit domain.
+// The converted call below is the successful counterpart: its declared rail
+// is accepted and therefore adds no mismatch report.
+#Error
+enum SourceErr { One }
+
+#Error
+enum TargetErr { One }
+
+#Error
+enum OtherErr { One }
+
+fn inferred() Int -> {
+    return Err("missing")
+}
+
+fn explicit() Int !SourceErr -> {
+    return Err(SourceErr.One)
+}
+
+impl SourceErr -> TargetErr {
+    return TargetErr.One
+}
+
+fn converted() Int !TargetErr -> {
+    explicit()
+    return Ok(0)
+}
+
+fn other() Int !OtherErr -> {
+    return Err(OtherErr.One)
+}
+
+fn run() Int !TargetErr -> {
+    inferred()
+    inferred()
+    inferred()
+    inferred()
+    inferred()
+    other()
+    converted()
+    return Ok(0)
+}

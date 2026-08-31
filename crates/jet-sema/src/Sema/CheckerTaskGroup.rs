@@ -463,7 +463,7 @@ impl<'a> Checker<'a> {
             .collect();
         for (name, span) in pending {
             if !self.flow.moved.contains(&name) {
-                self.mark_moved(name.clone(), span);
+                self.mark_moved_by(name.clone(), span, "task group");
             }
         }
     }
@@ -700,8 +700,9 @@ impl<'a> Checker<'a> {
         }
         // Branch spawns belong to the combinator, not to the binding that
         // receives its result. Keep that outer binding out of the spawn
-        // registration while inferring the branch list.
+        // registration while inferring the branch list or named tuple.
         let arg_ty = self.infer_taskgroup_branches(&mut args[0].expr);
+        let named_result = matches!(&arg_ty, Some(Type::Tuple(_)));
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -718,6 +719,33 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             },
+            Some(Type::Tuple(fields)) => {
+                let mut result_fields = Vec::with_capacity(fields.len());
+                for (field, task_ty) in fields {
+                    let elem = match *task_ty {
+                        Type::Apply { name, args, .. }
+                            if name == "Task" && args.len() == 1 =>
+                        {
+                            args[0].clone()
+                        }
+                        other => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`task.all` field `{field}` needs a task branch, not {}",
+                                    other.show()
+                                ),
+                                "each named branch must produce one task result".to_string(),
+                                "write `task.all { first: work(), second: work() }`".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                    };
+                    result_fields.push((field, Box::new(elem)));
+                }
+                Type::Tuple(result_fields)
+            }
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
@@ -731,9 +759,12 @@ impl<'a> Checker<'a> {
             None => return None,
         };
         self.mark_taskgroup_all_consumed(&args[0].expr);
-        Some(Self::task_failure_result(Type::List(Box::new(elem))))
+        Some(Self::task_failure_result(if named_result {
+            elem
+        } else {
+            Type::List(Box::new(elem))
+        }))
     }
-
     fn infer_taskgroup_race(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
         self.infer_taskgroup_first_task(
             args,
@@ -789,7 +820,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
-                            "{method_label} needs task branches, not `[{}]`",
+                            "`{method_label}` needs task branches, not `[{}]`",
                             other.show()
                         ),
                         "each branch must produce one task result".to_string(),
@@ -802,7 +833,7 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("{method_label} needs task branches, not {}", other.show()),
+                    format!("`{method_label}` needs task branches, not {}", other.show()),
                     "give the combinator one or more task branches".to_string(),
                     "write `task.race { first(), second() }`".to_string(),
                     Some(args[0].expr.span()),
@@ -826,7 +857,7 @@ impl<'a> Checker<'a> {
         let mut names = HashSet::new();
         collect_task_idents(expr, &mut names);
         for name in names {
-            self.mark_moved(name.clone(), expr.span());
+            self.mark_moved_by(name.clone(), expr.span(), "task group");
         }
     }
 }
@@ -838,6 +869,11 @@ fn collect_task_idents(expr: &Expr, out: &mut HashSet<String>) {
         }
         Expr::ListLit(items, _) => {
             for e in items {
+                collect_task_idents(e, out);
+            }
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields {
                 collect_task_idents(e, out);
             }
         }

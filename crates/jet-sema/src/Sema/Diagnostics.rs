@@ -120,7 +120,7 @@ pub fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
             "a `DateTime` literal cannot contain interpolation".to_string(),
             "DateTime values are checked as complete RFC3339 literals before the program runs"
                 .to_string(),
-            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+            "write a complete `DateTime{\"…\"}` literal, or parse a runtime String explicitly"
                 .to_string(),
             Some(*literal_span),
         ));
@@ -1584,6 +1584,7 @@ pub(crate) fn is_printable(
         }
         Type::Named(n) => {
             registry.is_unit_type(n)
+                || registry.distinct_is_printable(n)
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
                 || is_core_shown_type(n)
         }
@@ -1609,7 +1610,8 @@ pub(crate) fn is_printable(
     }
 }
 
-/// D-DISPLAYDBG1: bare `{value}` requires `Display` (explicit impl or builtin scalar).
+/// D-DISPLAYDBG1: bare `{value}` requires a Display-capable value. Auto-
+/// Printable values remain admitted during the Display migration.
 pub(crate) fn is_displayable(
     ty: &Type,
     type_reg: &TypeRegistry,
@@ -1626,10 +1628,14 @@ pub(crate) fn is_displayable(
             is_displayable(ok, type_reg, trait_reg) && is_displayable(err, type_reg, trait_reg)
         }
         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
-        Type::Map { value, .. } => is_displayable(value, type_reg, trait_reg),
+        Type::Map { key, value, .. } => {
+            is_displayable(key, type_reg, trait_reg)
+                && is_displayable(value, type_reg, trait_reg)
+        }
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DISPLAY)
+                || trait_reg.implements_trait(n, Generics::PRINTABLE)
                 || is_core_shown_type(n)
                 || matches!(
                     n.as_str(),
@@ -1643,9 +1649,21 @@ pub(crate) fn is_displayable(
         Type::Quantity { .. } => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
-            (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+            let native_composite = matches!(
+                name.as_str(),
+                Syntax::TYPE_SET
+                    | Syntax::TYPE_RANK
+                    | Syntax::TYPE_PRIORITY_QUEUE
+                    | Syntax::TYPE_QUEUE
+                    | Syntax::TYPE_LRU
+                    | Syntax::EXPIRING_VALUE_TYPE
+                    | "Loadable"
+                    | "View"
+            );
+            (native_composite
                 || trait_reg.implements_trait(name, Generics::DISPLAY)
-                || args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
+                || trait_reg.implements_trait(name, Generics::PRINTABLE))
+                && args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -1733,7 +1751,10 @@ pub(crate) fn is_debuggable(
             is_debuggable(ok, type_reg, trait_reg) && is_debuggable(err, type_reg, trait_reg)
         }
         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
-        Type::Map { value, .. } => is_debuggable(value, type_reg, trait_reg),
+        Type::Map { key, value, .. } => {
+            is_debuggable(key, type_reg, trait_reg)
+                && is_debuggable(value, type_reg, trait_reg)
+        }
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DEBUG)

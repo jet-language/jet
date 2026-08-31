@@ -351,7 +351,7 @@ impl HandlerKey {
 const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "publish",
-        usage: "publish [--force] [--no-sign]",
+        usage: "publish --to <registry> [--no-sign]",
         summary: "Publish the current package",
         handler: HandlerKey::Publish,
         also_canonical_top_level: false,
@@ -437,7 +437,7 @@ const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
 }];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
-    NestedCommandSpec { name: "update", usage: "update [--endpoint <url>] [--channel <name>] [--platform <target>] [--trust-key <file>] [--dry-run] [--apply]", summary: "Verify or install a signed Jet toolchain release", handler: HandlerKey::SelfUpdate, also_canonical_top_level: false },
+    NestedCommandSpec { name: "update", usage: "update [--endpoint <url>] [--channel <name>] [--platform <target>] [--trust-key <file>] [--dry-run] [--apply] [--allow-unofficial]", summary: "Verify or install a signed Jet toolchain release", handler: HandlerKey::SelfUpdate, also_canonical_top_level: false },
     NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
     NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
     NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
@@ -848,6 +848,22 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: Some("build [<file.jet|dir>]"),
     },
     CommandSpec {
+        name: "cc",
+        summary: "Compile and link C with the pinned Jetpack toolchain",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("cc [options] <sources>"),
+    },
+    CommandSpec {
+        name: "c++",
+        summary: "Compile and link C++ with the pinned Jetpack toolchain",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("c++ [options] <sources>"),
+    },
+    CommandSpec {
         name: "dev",
         summary: "Watch and run a program; optionally open the Canvas IDE",
         headline: false,
@@ -941,7 +957,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("lint --a11y|--complexity <file.jet>"),
+        usage: Some("lint --a11y|--complexity|--cost <file.jet>"),
     },
     CommandSpec {
         name: "doc",
@@ -953,11 +969,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "explain",
-        summary: "Explain a diagnostic code, build fact, or generic-module value",
+        summary: "Explain a diagnostic code, build fact, generic-module value, or typed cost",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some("explain <CODE|FACT> [file] | explain --cost <file.jet>"),
     },
     CommandSpec {
         name: "env",
@@ -1367,14 +1383,14 @@ fn generated_effect_flags() -> Vec<FlagSpec> {
                 FlagSpec {
                     long: leaked_cli_text(format!("--allow-{}", effect.flag())),
                     help: leaked_cli_text(format!(
-                        "With build: allow {} access for this run",
+                        "With build: Allow {} access for this run",
                         effect.name()
                     )),
                 },
                 FlagSpec {
                     long: leaked_cli_text(format!("--deny-{}", effect.flag())),
                     help: leaked_cli_text(format!(
-                        "With repl: deny {} access; overrides allow and prompts",
+                        "With repl: Deny {} access; overrides allow and prompts",
                         effect.name()
                     )),
                 },
@@ -1386,152 +1402,175 @@ fn generated_effect_flags() -> Vec<FlagSpec> {
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
 const BASE_FLAGS: &[FlagSpec] = &[
-    FlagSpec { long: "--attach", help: "With inspect live: process id to observe" },
-    FlagSpec { long: "--once", help: "With inspect live: print one snapshot and exit" },
-    FlagSpec { long: "--observe", help: "With run: expose bounded live runtime facts for attachment" },
-    FlagSpec { long: "--raw-frames", help: "With debug: show generated Rust frames and scopes (expert)" },
-    FlagSpec { long: "--dap", help: "With debug: speak the Debug Adapter Protocol over stdio" },
-    FlagSpec { long: "--gc-trace", help: "With run/dev: record bounded automatic GC-promotion evidence" },
-    FlagSpec { long: "--structural", help: "With diff/merge: compare checked definitions by semantic identity" },
-    FlagSpec { long: "--base-receipt", help: "With review: proof receipt for the base change-set side" },
-    FlagSpec { long: "--receipt", help: "With review: proof receipt for the reviewed change-set side" },
-    FlagSpec { long: "--out", help: "With structural merge: write the checked result to this path" },
+    FlagSpec { long: "--attach", help: "With inspect live: Process id to observe" },
+    FlagSpec { long: "--once", help: "With inspect live: Print one snapshot and exit" },
+    FlagSpec { long: "--observe", help: "With run: Expose bounded live runtime facts for attachment" },
+    FlagSpec { long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)" },
+    FlagSpec { long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio" },
+    FlagSpec { long: "--gc-trace", help: "With run/dev: Record bounded automatic GC-promotion evidence" },
+    FlagSpec { long: "--structural", help: "With diff/merge: Compare checked definitions by semantic identity" },
+    FlagSpec { long: "--base-receipt", help: "With review: Proof receipt for the base change-set side" },
+    FlagSpec { long: "--receipt", help: "With review: Proof receipt for the reviewed change-set side" },
+    FlagSpec { long: "--out", help: "With structural merge: Write the checked result to this path" },
     FlagSpec { long: "--repo", help: "With merge install-driver: Git worktree to configure" },
     FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
-    FlagSpec { long: "--topic", help: "With inspect digest: emit one digest topic" },
-    FlagSpec { long: "--list-topics", help: "With inspect digest: list digest topics" },
-    FlagSpec { long: "--kind", help: "With inspect gates/authority: filter one gate kind" },
+    FlagSpec { long: "--topic", help: "With inspect digest: Emit one digest topic" },
+    FlagSpec { long: "--to", help: "With publish: Foreign registry (pypi | npm | maven | nuget)" },
+    FlagSpec { long: "--list-topics", help: "With inspect digest: List digest topics" },
+    FlagSpec { long: "--kind", help: "With inspect gates/authority: Filter one gate kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
     // confirmations); never suppresses errors or requested data.
     FlagSpec { long: "--quiet", help: "Suppress non-error status output" },
     FlagSpec { long: "--color", help: "Color: auto | always | never" },
     FlagSpec { long: "--version", help: "Print compiler version" },
-    FlagSpec { long: "--endpoint", help: "With self-update: signed toolchain channel endpoint" },
-    FlagSpec { long: "--channel", help: "With self-update: toolchain channel name" },
-    FlagSpec { long: "--platform", help: "With self-update: toolchain target triple" },
-    FlagSpec { long: "--trust-key", help: "With self-update: public trust-key file" },
-    FlagSpec { long: "--apply", help: "With self-update: install the verified artifact" },
-    FlagSpec { long: "--check", help: "With fmt/learn: check without changing files (CI gate)" },
-    FlagSpec { long: "--lang", help: "With fmt: delegate non-Jet files to the environment formatter for this language" },
-    FlagSpec { long: "--restore-role-files", help: "With init: restore the exact pre-package.jet role files" },
-    FlagSpec { long: "--diff", help: "With fmt --check: also print unified diffs for each changed file" },
-    FlagSpec { long: "--simplify", help: "With fmt: rewrite to the simplest ratified spelling" },
-    FlagSpec { long: "--changed", help: "With fmt: format only VCS-changed .jet files (requires git)" },
-    FlagSpec { long: "--explicit-copies", help: "With fmt: materialize implicit read-view copies as `~`" },
-    FlagSpec { long: "--skipped", help: "With project parts: show modules omitted from automatic discovery" },
-    FlagSpec { long: "--stdin-path", help: "With fmt -: path label used in diagnostics when reading from stdin" },
-    FlagSpec { long: "--small", help: "With build/run: favor a smaller binary" },
-    FlagSpec { long: "--lib", help: "With build: emit the native Library and C header" },
-    FlagSpec { long: "--output", help: "With run/dev: select a named build output (Canvas uses it as the initial selection)" },
-    FlagSpec { long: "--locked", help: "With fetch: verify only, refuse network" },
-    FlagSpec { long: "--effect", help: "With find: require an effect such as FS.Read" },
-    FlagSpec { long: "--example", help: "With find: search by input/output example" },
+    FlagSpec { long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint" },
+    FlagSpec { long: "--channel", help: "With self-update: Toolchain channel name" },
+    FlagSpec { long: "--platform", help: "With self-update: Toolchain target triple" },
+    FlagSpec { long: "--trust-key", help: "With self-update: Public trust-key file" },
+    FlagSpec { long: "--apply", help: "With self-update: Install the verified artifact" },
+    FlagSpec { long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel" },
+    FlagSpec { long: "--check", help: "With fmt/learn: Check without changing files (CI gate)" },
+    FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
+    FlagSpec { long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files" },
+    FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
+    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
+    FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
+    FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
+    FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
+    FlagSpec { long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin" },
+    FlagSpec { long: "--small", help: "With build/run: Favor a smaller binary" },
+    FlagSpec { long: "--lib", help: "With build: Emit the native Library and C header" },
+    FlagSpec { long: "--output", help: "With build/run/dev: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)" },
+    FlagSpec { long: "--locked", help: "With build/fetch: Require locked dependency and provenance facts" },
+    FlagSpec { long: "--effect", help: "With find: Require an effect such as FS.Read" },
+    FlagSpec { long: "--example", help: "With find: Search by input/output example" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
-    FlagSpec { long: "--lock", help: "With fetch: lock a manifest-less script's inline deps instead of fetching a project" },
-    FlagSpec { long: "--read-only", help: "With shared-store enroll: grant read-only broker access" },
-    FlagSpec { long: "--fd", help: "With shared-store broker: inherited broker socket descriptor" },
+    FlagSpec { long: "--lock", help: "With fetch: Lock a manifest-less script's inline deps instead of fetching a project" },
+    FlagSpec { long: "--read-only", help: "With shared-store enroll: Grant read-only broker access" },
+    FlagSpec { long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
-    FlagSpec { long: "-p", help: "With run/dev/debug/check/build/jobs: pick a workspace member by name" },
-    FlagSpec { long: "--annotated", help: "With new: include commented example deps" },
-    FlagSpec { long: "--force", help: "With publish: bypass pre-publish gate (with warning)" },
+    FlagSpec { long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name" },
+    FlagSpec { long: "--annotated", help: "With new: Include commented example deps" },
+    FlagSpec { long: "--force", help: "With publish: Bypass pre-publish gate (with warning)" },
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
     // usage-string prose (`NestedCommandSpec::usage`), invisible to
     // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
     // and shell completions. Real rows here fix all three renderers at once.
-    FlagSpec { long: "--no-sign", help: "With publish: skip the optional author signature (registry metadata is still signed)" },
-    FlagSpec { long: "--registry", help: "With keygen/key: registry name to generate or manage a signing key for" },
-    FlagSpec { long: "--pkg", help: "With bind: library name for the generated binding module" },
-    FlagSpec { long: "--clang", help: "With bind cpp: path to the clang binary used to parse the header" },
-    FlagSpec { long: "--ar", help: "With bind cpp: path to the ar archiver used to build the static library" },
-    FlagSpec { long: "--message", help: "With yank: human-readable reason for yanking the version" },
-    FlagSpec { long: "--before", help: "With schema squash: re-baseline migrations before this version" },
-    FlagSpec { long: "--spdx", help: "With sbom: emit SPDX tag-value format (default)" },
-    FlagSpec { long: "--cyclonedx", help: "With sbom: emit CycloneDX JSON format" },
-    FlagSpec { long: "--advisory-db", help: "With audit: path to advisory database file" },
-    FlagSpec { long: "--vendor-dir", help: "With vendor: directory to copy dependencies into (default vendor/)" },
-    FlagSpec { long: "--sbom", help: "With build: also write an SPDX SBOM next to the binary" },
-    FlagSpec { long: "--verbose", help: "With build: print the bridge steps" },
-    FlagSpec { long: "--online", help: "With doctor: allow network checks" },
-    FlagSpec { long: "--fix", help: "With doctor: apply auto-fixable problems" },
-    FlagSpec { long: DRY_RUN_FLAG, help: "With rewrite commands: preview changes without writing" },
-    FlagSpec { long: "--keep", help: "With try: keep a clean speculative edit" },
-    FlagSpec { long: "--edition", help: "With fix: apply edition migration rewrites --edition=<year>" },
-    FlagSpec { long: "--all", help: "With fix: apply safety classes beyond formatting and behavior-preserving" },
-    FlagSpec { long: "--try-anyway", help: "With dev: interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--interpret", help: "With dev: force the tier-0 TIR interpreter" },
-    FlagSpec { long: "--trace-tiers", help: "With run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
-    FlagSpec { long: "--restart", help: "With dev: always rerun from scratch after a save" },
-    FlagSpec { long: "--swap", help: "With dev: hot-swap compatible edits and restart after type changes" },
-    FlagSpec { long: "--watch", help: "With run/dev/learn: re-run on dependency changes; --watch=off runs once" },
-    FlagSpec { long: CANVAS_FLAG, help: "With dev: open the full Canvas IDE over this dev session" },
-    FlagSpec { long: "--canvas-host", help: "With dev: with --canvas, bind host (loopback by default)" },
-    FlagSpec { long: "--canvas-port", help: "With dev: with --canvas, bind an explicit port" },
-    FlagSpec { long: "--canvas-transport", help: "With dev: with --canvas, select the named transport" },
-    FlagSpec { long: "--canvas-authority", help: "With dev: with --canvas, select loopback or remote authority" },
-    FlagSpec { long: "--canvas-audit", help: "With dev: with --canvas, enable request/rebuild audit output" },
+    FlagSpec { long: "--no-sign", help: "With publish: Skip the optional author signature (registry metadata is still signed)" },
+    FlagSpec { long: "--registry", help: "With keygen/key: Registry name to generate or manage a signing key for" },
+    FlagSpec { long: "--pkg", help: "With bind: Library name for the generated binding module" },
+    FlagSpec { long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header" },
+    FlagSpec { long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library" },
+    FlagSpec { long: "--message", help: "With yank: Human-readable reason for yanking the version" },
+    FlagSpec { long: "--before", help: "With schema squash: Re-baseline migrations before this version" },
+    FlagSpec { long: "--spdx", help: "With sbom: Emit SPDX tag-value format (default)" },
+    FlagSpec { long: "--cyclonedx", help: "With sbom: Emit CycloneDX JSON format" },
+    FlagSpec { long: "--advisory-db", help: "With audit: Path to advisory database file" },
+    FlagSpec { long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)" },
+    FlagSpec { long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary" },
+    FlagSpec { long: "--verbose", help: "With build: Print the bridge steps" },
+    FlagSpec { long: "--online", help: "With doctor: Allow network checks" },
+    FlagSpec { long: "--fix", help: "With doctor: Apply auto-fixable problems" },
+    FlagSpec { long: DRY_RUN_FLAG, help: "With rewrite commands: Preview changes without writing" },
+    FlagSpec { long: "--keep", help: "With try: Keep a clean speculative edit" },
+    FlagSpec { long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>" },
+    FlagSpec { long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving" },
+    FlagSpec { long: "--try-anyway", help: "With dev: Interpret past unsupported features (no guarantees)" },
+    FlagSpec { long: "--interpret", help: "With dev: Force the tier-0 TIR interpreter" },
+    FlagSpec { long: "--trace-tiers", help: "With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
+    FlagSpec { long: "--restart", help: "With dev: Always rerun from scratch after a save" },
+    FlagSpec { long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes" },
+    FlagSpec { long: "--watch", help: "With run/dev/learn: Re-run on dependency changes; --watch=off runs once" },
+    FlagSpec { long: CANVAS_FLAG, help: "With dev: Open the full Canvas IDE over this dev session" },
+    FlagSpec { long: "--canvas-host", help: "With dev: With --canvas, bind host (loopback by default)" },
+    FlagSpec { long: "--canvas-port", help: "With dev: With --canvas, bind an explicit port" },
+    FlagSpec { long: "--canvas-transport", help: "With dev: With --canvas, select the named transport" },
+    FlagSpec { long: "--canvas-authority", help: "With dev: With --canvas, select loopback or remote authority" },
+    FlagSpec { long: "--canvas-audit", help: "With dev: With --canvas, enable request/rebuild audit output" },
     // E2-M18 REPL flags.
-    FlagSpec { long: "--project", help: "With repl: load package settings and imports from this directory" },
+    FlagSpec { long: "--project", help: "With repl: Load package settings and imports from this directory" },
     // E3 interactive scripting flags.
-    FlagSpec { long: "--protocol", help: "With notebook: use the bounded headless JSONL/script session" },
-    FlagSpec { long: "--headless", help: "With notebook: use the bounded headless session" },
-    FlagSpec { long: "--bind", help: "With notebook: bind the local HTTP client to this address" },
-    FlagSpec { long: "--token", help: "With notebook: require this bearer token for clients" },
+    FlagSpec { long: "--protocol", help: "With notebook: Use the bounded headless JSONL/script session" },
+    FlagSpec { long: "--headless", help: "With notebook: Use the bounded headless session" },
+    FlagSpec { long: "--bind", help: "With notebook: Bind the local HTTP client to this address" },
+    FlagSpec { long: "--token", help: "With notebook: Require this bearer token for clients" },
     // E2-M16 flags.
-    FlagSpec { long: "--pure", help: "With eval: reject code with side effects" },
-    FlagSpec { long: "--freestanding", help: "With build/run: target a system without an operating system" },
+    FlagSpec { long: "--pure", help: "With eval: Reject code with side effects" },
+    FlagSpec { long: "--freestanding", help: "With build/run: Target a system without an operating system" },
+    FlagSpec { long: "--offline", help: "With cc/c++: Reuse only cached signed toolchain data" },
+    FlagSpec { long: "--fixtures", help: "With cc/c++ tests: Use an explicit fixture bundle" },
+    FlagSpec { long: "--project-root", help: "With cc/c++: Scope source paths to a project directory" },
+    FlagSpec { long: "--build-root", help: "With cc/c++: Scope output paths to a build directory" },
+    FlagSpec { long: "-c", help: "With cc/c++: Compile sources without linking" },
+    FlagSpec { long: "-o", help: "With cc/c++: Choose the output path" },
+    FlagSpec { long: "-MMD", help: "With cc/c++: Emit user-header dependency data" },
+    FlagSpec { long: "-MD", help: "With cc/c++: Emit dependency data" },
+    FlagSpec { long: "-MF", help: "With cc/c++: Choose the dependency-file path" },
+    FlagSpec { long: "-MT", help: "With cc/c++: Choose the dependency target" },
+    FlagSpec { long: "--sysroot", help: "With cc/c++: Reserved; target selects the pinned sysroot" },
+    FlagSpec { long: "-I", help: "With cc/c++: Add a project-relative include path" },
+    FlagSpec { long: "-D", help: "With cc/c++: Define a preprocessor symbol" },
+    FlagSpec { long: "-L", help: "With cc/c++: Add a project-relative library path" },
+    FlagSpec { long: "-l", help: "With cc/c++: Link a declared library" },
+    FlagSpec { long: "-std", help: "With cc/c++: Select the language standard" },
+    FlagSpec { long: "-dumpmachine", help: "With cc/c++: Print the pinned target triple" },
+    FlagSpec { long: "-print-sysroot", help: "With cc/c++: Print the pinned virtual sysroot" },
+    FlagSpec { long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version" },
+    FlagSpec { long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely" },
     // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
-    FlagSpec { long: "--gate", help: "With build/run/dev: allow one audited gate as --gate name=allow" },
-    FlagSpec { long: "--target", help: "With build/run/dev: select a target: a rustc triple or board.<name>" },
+    FlagSpec { long: "--gate", help: "With build/run/dev: Allow one audited gate as --gate name=allow" },
+    FlagSpec { long: "--target", help: "With build/run/dev/cc/c++: Select a target: a rustc triple or board.<name>" },
     // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.
-    FlagSpec { long: "--env", help: "With env/run/dev/test: select one declared env.<name> module" },
+    FlagSpec { long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module" },
     // D-CONF-WORD1=A: `--preset` selects a named environment composition.
-    FlagSpec { long: "--preset", help: "With env/run/dev/test: select one declared environment preset" },
+    FlagSpec { long: "--preset", help: "With env/run/dev/test: Select one declared environment preset" },
     FlagSpec {
         long: "--explain-partition",
-        help: "With build --target=web: show which code becomes JavaScript or WebAssembly",
+        help: "With build --target=web: Show which code becomes JavaScript or WebAssembly",
     },
-    FlagSpec { long: "--update-snapshots", help: "With test: replace expected snapshot output" },
-    FlagSpec { long: "--coverage", help: "With test: show function and branch coverage" },
-    FlagSpec { long: "--rust", help: "With emit: print generated Rust source" },
-    FlagSpec { long: "--emit-generated", help: "With build: copy generated Jet sources into build/generated/" },
+    FlagSpec { long: "--update-snapshots", help: "With test: Replace expected snapshot output" },
+    FlagSpec { long: "--coverage", help: "With test: Show function and branch coverage" },
+    FlagSpec { long: "--rust", help: "With emit: Print generated Rust source" },
+    FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
-    FlagSpec { long: "--release", help: "With build/run/test: optimize for release" },
-    FlagSpec { long: "--profile", help: "With build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
+    FlagSpec { long: "--release", help: "With build/run/test: Optimize for release" },
+    FlagSpec { long: "--profile", help: "With build/run/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
-    FlagSpec { long: "--set", help: "With build/run: set one declared package setting as key=value" },
-    FlagSpec { long: "--builder", help: "With build: select a previously bound remote builder" },
+    FlagSpec { long: "--set", help: "With build/run: Set one declared package setting as key=value" },
+    FlagSpec { long: "--builder", help: "With build: Select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
-    FlagSpec { long: "--a11y", help: "With lint: check roles, labels, and other accessibility basics" },
-    FlagSpec { long: "--complexity", help: "With lint: report per-function cognitive complexity" },
-    FlagSpec { long: "--max", help: "With lint --complexity: fail when a function exceeds this score" },
-    FlagSpec { long: "--scope", help: "With inspect gates/authority or trust grant: choose a ledger or trust scope" },
+    FlagSpec { long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics" },
+    FlagSpec { long: "--complexity", help: "With lint: Report per-function cognitive complexity" },
+    FlagSpec { long: "--cost", help: "With lint/explain: Show typed hidden-copy and fallback costs" },
+    FlagSpec { long: "--max", help: "With lint --complexity: Fail when a function exceeds this score" },
+    FlagSpec { long: "--scope", help: "With inspect gates/authority or trust grant: Choose a ledger or trust scope" },
     // D-TESTKIT1=A: the shared test name-selection flag.
-    FlagSpec { long: "--filter", help: "With test: only run claims whose name contains --filter=<substr>" },
-    FlagSpec { long: "--shuffle", help: "With test: run tests in random (or --shuffle=<seed>) order" },
-    FlagSpec { long: "--serial", help: "With test: run tests one at a time instead of the parallel default" },
-    FlagSpec { long: "--show-default", help: "With run/build/dev/test: use and report the stock default" },
-    FlagSpec { long: "--measure", help: "With test: measure `.measure` claims" },
-    FlagSpec { long: "--record", help: "With run/dev/test: record a named replay as --record=<name>" },
-    FlagSpec { long: "--replay", help: "With debug: consume a named replay as --replay=<name>" },
+    FlagSpec { long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>" },
+    FlagSpec { long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order" },
+    FlagSpec { long: "--serial", help: "With test: Run tests one at a time instead of the parallel default" },
+    FlagSpec { long: "--show-default", help: "With run/build/dev/test: Use and report the stock default" },
+    FlagSpec { long: "--measure", help: "With test: Measure `.measure` claims" },
+    FlagSpec { long: "--record", help: "With run/dev/test: Record a named replay as --record=<name>" },
+    FlagSpec { long: "--replay", help: "With debug: Consume a named replay as --replay=<name>" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
-    FlagSpec { long: "--iterations", help: "With fuzz: case budget --iterations=<n> (default 1000)" },
-    FlagSpec { long: "--time", help: "With fuzz: wall-clock budget in seconds --time=<n>" },
-    FlagSpec { long: "--seed", help: "With fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
-    FlagSpec { long: "--corpus", help: "With fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
-    FlagSpec { long: "--lens", help: "With prove: project the human report by an exact evidence facet" },
+    FlagSpec { long: "--iterations", help: "With fuzz: Case budget --iterations=<n> (default 1000)" },
+    FlagSpec { long: "--time", help: "With fuzz: Wall-clock budget in seconds --time=<n>" },
+    FlagSpec { long: "--seed", help: "With fuzz: Base PRNG seed --seed=<n> (default: fixed, reproducible)" },
+    FlagSpec { long: "--corpus", help: "With fuzz: Corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
+    FlagSpec { long: "--lens", help: "With prove: Project the human report by an exact evidence facet" },
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.
-    FlagSpec { long: "--facts", help: "With expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
+    FlagSpec { long: "--facts", help: "With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
     FlagSpec { long: "--annotations", help: "With budget: CI annotations auto, none, or github" },
-    FlagSpec { long: "--baseline", help: "With budget update: selected baseline name" },
-    FlagSpec { long: "--bootstrap", help: "With budget update: create absent or stale baseline history" },
-    FlagSpec { long: "--accept-regression", help: "With budget update: explicitly accept a regression" },
-    FlagSpec { long: "--reason", help: "With exceptional budget update: checked-in reason" },
-    FlagSpec { long: "--yes", help: "With budget update: apply a valid non-interactive plan" },
+    FlagSpec { long: "--baseline", help: "With budget update: Selected baseline name" },
+    FlagSpec { long: "--bootstrap", help: "With budget update: Create absent or stale baseline history" },
+    FlagSpec { long: "--accept-regression", help: "With budget update: Explicitly accept a regression" },
+    FlagSpec { long: "--reason", help: "With exceptional budget update: Checked-in reason" },
+    FlagSpec { long: "--yes", help: "With budget update: Apply a valid non-interactive plan" },
     FlagSpec { long: "-y", help: "Short form of --yes" },
 ];
 
@@ -1578,6 +1617,7 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
         .filter(|flag| {
             flag.help
                 .strip_prefix("with ")
+                .or_else(|| flag.help.strip_prefix("With "))
                 .and_then(|rest| rest.split_once(':'))
                 .map(|(names, _)| {
                     names
@@ -1591,6 +1631,7 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
             let help = flag
                 .help
                 .strip_prefix("with ")
+                .or_else(|| flag.help.strip_prefix("With "))
                 .and_then(|rest| rest.split_once(':'))
                 .map(|(_, help)| help.trim())
                 .unwrap_or(flag.help);
@@ -1653,6 +1694,8 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
     matches!(
         name,
         "env"
+            | "cc"
+            | "c++"
             | "remote"
             | "shared-store"
             | "dev"
@@ -2682,6 +2725,49 @@ mod tests {
                     "completion missing {deny}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn cost_surface_is_registered_for_help_man_and_completions() {
+        assert_eq!(
+            FLAGS.iter().filter(|flag| flag.long == "--cost").count(),
+            1
+        );
+        assert!(is_known_flag("--cost"));
+        assert!(command_usage("lint").contains("--cost"));
+        assert!(command_usage("explain").contains("<CODE|FACT>"));
+        assert!(command_usage("explain").contains("--cost"));
+        assert!(man_page("0.0.0").contains("--cost"));
+        for completion in [
+            completions_bash(),
+            completions_zsh(),
+            completions_fish(),
+            completions_powershell(),
+        ] {
+            assert!(completion.contains("--cost") || completion.contains("cost"));
+        }
+    }
+
+    #[test]
+    fn self_update_keyless_override_is_registered_for_help_and_completions() {
+        assert_eq!(
+            FLAGS
+                .iter()
+                .filter(|flag| flag.long == "--allow-unofficial")
+                .count(),
+            1
+        );
+        assert!(is_known_flag("--allow-unofficial"));
+        assert!(command_group_usage("self").contains("--allow-unofficial"));
+        assert!(man_page("0.0.0").contains("--allow-unofficial"));
+        for completion in [
+            completions_bash(),
+            completions_zsh(),
+            completions_fish(),
+            completions_powershell(),
+        ] {
+            assert!(completion.contains("--allow-unofficial"));
         }
     }
 

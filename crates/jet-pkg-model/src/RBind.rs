@@ -474,19 +474,72 @@ repeat {{
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_r_{lib}");
-    let mut out=format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Extern module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}\"\n"));
-        out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}_table\"\n"));
-        out.push_str(&format!("    fn {name}_plot(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}_plot\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n"));
+        out.push_str(&format!("    fn {name}_plot(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\nuse core.data as data\n\npub struct Session {{ value: Int }}\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() => Session !RError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\nuse core.data as data\n\npub struct Session {{ value: Int }}\n#Error\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "RError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
+    out.push_str(
+        r#"impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(^session: Session) { abi.close(session.value) }
+
+pub fn open() Session !RError -> {
+    handle :: abi.open()
+    if abi.take_error() != 0 -> return Err(RError.NotRunning)
+    return Ok(Session{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+"#,
+    );
     for name in functions {
-        out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) => DataTree !RError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(RError.NotRunning) }}\n    if code == 2 {{ return Err(RError.Timeout) }}\n    if code == 3 {{ return Err(RError.Cancelled) }}\n    if code == 5 {{ return Err(RError.Limit) }}\n    if code != 0 {{ return Err(RError.Protocol) }}\n    response := json.parse(raw) ?? return Err(RError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(RError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
-        out.push_str(&format!("pub fn {name}_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> !RError {{\n    raw :: abi.{name}_table(session.value, json.to_string(data.rows(~table)), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(RError.NotRunning) }}\n    if code == 2 {{ return Err(RError.Timeout) }}\n    if code == 3 {{ return Err(RError.Cancelled) }}\n    if code == 5 {{ return Err(RError.Limit) }}\n    if code != 0 {{ return Err(RError.Protocol) }}\n    response := json.parse(raw) ?? return Err(RError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(RError.CommandFailed) }}\n    value := response.field(\"value\") ?? return Err(RError.Protocol)\n    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)\n    return Ok(data.table(~rows))\n}}\n\n"));
-        out.push_str(&format!("pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) => String !RError {{\n    raw :: abi.{name}_plot(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(RError.NotRunning) }}\n    if code == 2 {{ return Err(RError.Timeout) }}\n    if code == 3 {{ return Err(RError.Cancelled) }}\n    if code == 5 {{ return Err(RError.Limit) }}\n    if code != 0 {{ return Err(RError.Protocol) }}\n    response := json.parse(raw) ?? return Err(RError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(RError.CommandFailed) }}\n    value := (response.field(\"value\") ?? DataTree.Null).text() ?? return Err(RError.Protocol)\n    return Ok(value)\n}}\n\n"));
+        out.push_str(&format!(
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !RError -> {{
+    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
+}}
+
+"#
+        ));
+        out.push_str(&format!(
+            r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> !RError -> {{
+    raw :: abi.{name}_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    value :: decode_response(raw, code)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}}
+
+"#
+        ));
+        out.push_str(&format!(
+            r#"pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) String !RError -> {{
+    raw :: abi.{name}_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    value :: decode_response(raw, code)
+    return Ok(value.text() ?? return Err(RError.Protocol))
+}}
+
+"#
+        ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet("registry", &["transform".into()])
 }
 
 fn tool_path(tool: &str) -> Option<PathBuf> {
@@ -576,7 +629,10 @@ fn ident(v: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 fn reserved(v: &str) -> bool {
-    matches!(v, "open" | "cancel" | "close" | "Session" | "RError")
+    matches!(
+        v,
+        "open" | "cancel" | "close" | "decode_response" | "Session" | "RError"
+    )
         || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
         || crate::Syntax::JET_TYPE_LIST.contains(&v)
 }
@@ -601,6 +657,16 @@ mod tests {
         assert!(super::parse_function_names(b"N\topen\n").is_err());
         assert!(super::parse_function_names(b"N\tx\nN\tx_table\n").is_err());
         assert!(super::parse_function_names(b"N\tx\nN\tx_plot\n").is_err());
+    }
+    #[test]
+    fn renders_one_response_decoder_for_all_r_operation_shapes() {
+        let jet = super::render_jet("ops", &["transform".into()]);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform_table(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform_plot(").count(), 1);
+        assert_eq!(jet.matches("decode_response(raw, code)").count(), 3);
     }
     #[test]
     fn rejects_bad_parameters() {

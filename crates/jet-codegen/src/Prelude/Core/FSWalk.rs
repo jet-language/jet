@@ -2,6 +2,34 @@
 ///
 /// Consumers provide only entry and error carriers. Traversal policy stays
 /// here so AOT, JIT, and interpreter adapters cannot drift.
+fn jet_fs_validate_walk_root(path: &std::path::Path) -> std::io::Result<()> {
+    let source = if path.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        path
+    };
+    for ancestor in source
+        .ancestors()
+        .filter(|ancestor| !ancestor.as_os_str().is_empty())
+    {
+        let metadata = std::fs::symlink_metadata(ancestor)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("filesystem walk path contains symlink: {}", ancestor.display()),
+            ));
+        }
+    }
+    let metadata = std::fs::symlink_metadata(source)?;
+    if !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            format!("filesystem walk root is not a directory: {}", source.display()),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn jet_fs_walk_parallel<T, E, MakeEntry, MakeError>(
     path: &str,
     shown: &str,
@@ -14,6 +42,27 @@ where
     MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
     MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
 {
+    jet_fs_walk_parallel_filtered(path, shown, make_entry, make_error, |_, _| true)
+}
+
+/// The same walk policy with an entry filter. The traversal still visits every
+/// real directory; the filter changes only which entries are yielded. The
+/// file-only surface selects regular files, preserving ordering, errors, and
+/// no-follow symlink policy.
+pub(crate) fn jet_fs_walk_parallel_filtered<T, E, MakeEntry, MakeError, Keep>(
+    path: &str,
+    shown: &str,
+    make_entry: MakeEntry,
+    make_error: MakeError,
+    keep: Keep,
+) -> Result<Vec<T>, E>
+where
+    T: Send + 'static,
+    E: Send + 'static,
+    MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
+    MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
+    Keep: Fn(bool, bool) -> bool + Send + Sync + 'static,
+{
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::{Arc, Condvar, Mutex};
@@ -25,6 +74,9 @@ where
     }
 
     let root = PathBuf::from(path);
+    if let Err(error) = jet_fs_validate_walk_root(&root) {
+        return Err(make_error(shown, error));
+    }
     let state = Arc::new((
         Mutex::new(QueueState {
             directories: VecDeque::from([(root.clone(), 0)]),
@@ -37,6 +89,7 @@ where
     let shown = Arc::new(shown.to_string());
     let make_entry = Arc::new(make_entry);
     let make_error = Arc::new(make_error);
+    let keep = Arc::new(keep);
     let workers = std::thread::available_parallelism()
         .map(std::num::NonZeroUsize::get)
         .unwrap_or(1);
@@ -48,6 +101,7 @@ where
         let shown = Arc::clone(&shown);
         let make_entry = Arc::clone(&make_entry);
         let make_error = Arc::clone(&make_error);
+        let keep = Arc::clone(&keep);
         let root = root.clone();
         handles.push(std::thread::spawn(move || loop {
             let (dir, depth) = {
@@ -74,6 +128,8 @@ where
             };
 
             let result = (|| {
+                jet_fs_validate_walk_root(&dir)
+                    .map_err(|error| make_error(&shown, error))?;
                 let mut entries = Vec::new();
                 for entry in std::fs::read_dir(&dir).map_err(|error| make_error(&shown, error))? {
                     entries.push(entry.map_err(|error| make_error(&shown, error))?);
@@ -82,18 +138,22 @@ where
                 let mut children = Vec::new();
                 for entry in entries {
                     let child = entry.path();
-                    let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+                    let file_type = entry.file_type();
+                    let is_dir = file_type.as_ref().is_ok_and(std::fs::FileType::is_dir);
+                    let is_file = file_type.as_ref().is_ok_and(std::fs::FileType::is_file);
                     let relative = child
                         .strip_prefix(&root)
                         .unwrap_or(&child)
                         .to_string_lossy()
                         .to_string();
-                    batch.push(make_entry(
-                        child.to_string_lossy().to_string(),
-                        relative,
-                        is_dir,
-                        depth,
-                    ));
+                    if keep(is_dir, is_file) {
+                        batch.push(make_entry(
+                            child.to_string_lossy().to_string(),
+                            relative,
+                            is_dir,
+                            depth,
+                        ));
+                    }
                     if is_dir {
                         children.push((child, depth + 1));
                     }
@@ -152,4 +212,21 @@ where
     Ok(sink
         .into_inner()
         .unwrap_or_else(|_| panic!("filesystem walk sink poisoned")))
+}
+
+pub(crate) fn jet_fs_walk_files_parallel<T, E, MakeEntry, MakeError>(
+    path: &str,
+    shown: &str,
+    make_entry: MakeEntry,
+    make_error: MakeError,
+) -> Result<Vec<T>, E>
+where
+    T: Send + 'static,
+    E: Send + 'static,
+    MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
+    MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
+{
+    jet_fs_walk_parallel_filtered(path, shown, make_entry, make_error, |is_dir, is_file| {
+        !is_dir && is_file
+    })
 }

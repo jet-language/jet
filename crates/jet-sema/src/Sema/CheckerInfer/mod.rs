@@ -154,3 +154,4 @@ mod binary;
 mod calls;
 mod expr;
 mod fallible;
+mod stdlib_lints;

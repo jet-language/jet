@@ -22,21 +22,36 @@ fn describe_unrecognized_character(character: char) -> String {
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
-    lex_raw_with_policy(src, false, false)
+    lex_raw_with_policy_at_depth(src, false, false, 0)
+}
+
+pub(super) fn lex_raw_at_depth(
+    src: &str,
+    interpolation_depth: usize,
+) -> (Vec<Token>, Vec<Diagnostic>) {
+    lex_raw_with_policy_at_depth(src, false, false, interpolation_depth)
 }
 
 pub(super) fn lex_raw_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
-    lex_raw_with_policy(src, true, false)
+    lex_raw_with_policy_at_depth(src, true, false, 0)
+}
+
+pub(super) fn lex_raw_generated_at_depth(
+    src: &str,
+    interpolation_depth: usize,
+) -> (Vec<Token>, Vec<Diagnostic>) {
+    lex_raw_with_policy_at_depth(src, true, false, interpolation_depth)
 }
 
 pub(super) fn lex_raw_config(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
-    lex_raw_with_policy(src, false, true)
+    lex_raw_with_policy_at_depth(src, false, true, 0)
 }
 
-fn lex_raw_with_policy(
+fn lex_raw_with_policy_at_depth(
     src: &str,
     allow_reserved_identifiers: bool,
     config_surface: bool,
+    interpolation_depth: usize,
 ) -> (Vec<Token>, Vec<Diagnostic>) {
     let mut lx = Lexer {
         chars: src.char_indices().collect(),
@@ -46,6 +61,7 @@ fn lex_raw_with_policy(
         diags: Vec::new(),
         allow_reserved_identifiers,
         config_surface,
+        interpolation_depth,
     };
     // D-SCRIPT-ENTRY1=A: the operating system owns a byte-zero `#!/...` line.
     // Advance the real source cursor so every later token keeps its original

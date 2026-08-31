@@ -15,7 +15,55 @@ const MAX_ENTRIES: usize = 4096;
 const ZIP_READER_STATE: &[u8] = b"JZR1";
 const ZIP_WRITER_STATE: &[u8] = b"JZW1";
 
+#[derive(Default)]
+struct ArchiveAllocationBudget {
+    used: usize,
+}
+
+impl ArchiveAllocationBudget {
+    fn reserve(&mut self, bytes: usize) -> bool {
+        let Some(used) = self.used.checked_add(bytes) else {
+            return false;
+        };
+        if used > MAX_OUTPUT {
+            return false;
+        }
+        self.used = used;
+        true
+    }
+
+    fn release(&mut self, bytes: usize) {
+        self.used = self.used.saturating_sub(bytes);
+    }
+}
+
+fn replace_archive_entry(
+    entries: &mut [(String, Vec<u8>)],
+    index: usize,
+    name: &str,
+    data: &[u8],
+) {
+    let old_name = std::mem::take(&mut entries[index].0);
+    drop(old_name);
+    let old_data = std::mem::take(&mut entries[index].1);
+    drop(old_data);
+    entries[index] = (name.to_owned(), data.to_vec());
+}
+
 pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
+    let Some((local_size, central_size, _)) = zip_archive_size(std::iter::once((name, data)))
+    else {
+        return Vec::new();
+    };
+    let Some(size) = local_size
+        .checked_add(central_size)
+        .and_then(|size| size.checked_add(22))
+    else {
+        return Vec::new();
+    };
+    if size > MAX_OUTPUT {
+        return Vec::new();
+    }
     zip_write_all(&[(name.to_string(), data.to_vec())])
 }
 
@@ -42,6 +90,9 @@ pub fn jet_archive_adler32(data: &[u8]) -> i64 {
 }
 
 pub fn jet_archive_deflate(data: &[u8]) -> Vec<u8> {
+    if data.len() > MAX_OUTPUT || deflate_fixed_len(data).is_none_or(|size| size > MAX_OUTPUT) {
+        return Vec::new();
+    }
     deflate_fixed(data)
 }
 
@@ -50,13 +101,8 @@ pub fn jet_archive_inflate(data: &[u8]) -> Vec<u8> {
 }
 
 pub fn jet_archive_zip_names_json(data: &[u8]) -> String {
-    names_json(
-        zip_read_all(data)
-            .unwrap_or_default()
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect(),
-    )
+    let entries = zip_read_all(data).unwrap_or_default();
+    names_json(entries.iter().map(|(name, _)| name.as_str()).collect()).unwrap_or_default()
 }
 
 pub fn jet_archive_zip_open(data: &[u8]) -> Vec<u8> {
@@ -79,7 +125,7 @@ pub fn jet_archive_zip_next(reader: &[u8], index: i64) -> String {
         return String::new();
     };
     zip_reader_entries(reader)
-        .and_then(|entries| entries.get(index).map(|(name, _)| name.clone()))
+        .and_then(|entries| entries.into_iter().nth(index).map(|(name, _)| name))
         .unwrap_or_default()
 }
 
@@ -90,12 +136,47 @@ pub fn jet_archive_zip_read(reader: &[u8], name: &str) -> Vec<u8> {
 }
 
 pub fn jet_archive_zip_write(writer: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
-    if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
+    if !zip_name_valid(name) || data.len() > MAX_OUTPUT || u16::try_from(name.len()).is_err() {
         return Vec::new();
     }
     let mut entries = zip_writer_entries(writer).unwrap_or_default();
-    if let Some(index) = entries.iter().position(|(entry, _)| entry == name) {
-        entries[index] = (name.to_string(), data.to_vec());
+    let replacement = entries.iter().position(|(entry, _)| entry == name);
+    if replacement.is_none() && entries.len() >= MAX_ENTRIES {
+        return Vec::new();
+    }
+    let (local_size, central_size, _) = if let Some(index) = replacement {
+        let Some(sizes) = zip_archive_size(entries.iter().enumerate().map(|(entry_index, (entry, payload))| {
+            if entry_index == index {
+                (name, data)
+            } else {
+                (entry.as_str(), payload.as_slice())
+            }
+        })) else {
+            return Vec::new();
+        };
+        sizes
+    } else {
+        let Some(sizes) = zip_archive_size(
+            entries
+                .iter()
+                .map(|(entry, payload)| (entry.as_str(), payload.as_slice()))
+                .chain(std::iter::once((name, data))),
+        ) else {
+            return Vec::new();
+        };
+        sizes
+    };
+    let Some(size) = local_size
+        .checked_add(central_size)
+        .and_then(|size| size.checked_add(22))
+    else {
+        return Vec::new();
+    };
+    if size > MAX_OUTPUT {
+        return Vec::new();
+    }
+    if let Some(index) = replacement {
+        replace_archive_entry(&mut entries, index, name, data);
     } else {
         entries.push((name.to_string(), data.to_vec()));
     }
@@ -118,11 +199,11 @@ pub fn jet_archive_unzip(data: &[u8], name: &str) -> Vec<u8> {
 
 fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     let eocd = find_eocd(data)?;
-    let count = usize::from(read_u16(data, eocd + 10)?);
-    let central_size = usize::try_from(read_u32(data, eocd + 12)?).ok()?;
-    let central = usize::try_from(read_u32(data, eocd + 16)?).ok()?;
+    let count = usize::from(read_u16_at(data, eocd, 10)?);
+    let central_size = usize::try_from(read_u32_at(data, eocd, 12)?).ok()?;
+    let central = usize::try_from(read_u32_at(data, eocd, 16)?).ok()?;
     let central_end = central.checked_add(central_size)?;
-    if central_end > eocd || read_u16(data, eocd + 4)? != 0 || read_u16(data, eocd + 6)? != 0 {
+    if central_end > eocd || read_u16_at(data, eocd, 4)? != 0 || read_u16_at(data, eocd, 6)? != 0 {
         return None;
     }
     if count > MAX_ENTRIES {
@@ -130,27 +211,28 @@ fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     }
     let mut entries = Vec::with_capacity(count);
     let mut offset = central;
-    let mut total = 0usize;
+    let mut budget = ArchiveAllocationBudget::default();
     for _ in 0..count {
-        if read_u32(data, offset)? != 0x0201_4b50 {
+        let fixed = data.get(offset..offset.checked_add(46)?)?;
+        if read_u32(fixed, 0)? != 0x0201_4b50 {
             return None;
         }
-        if read_u16(data, offset + 6)? != 20 || read_u16(data, offset + 8)? != 0 {
+        if read_u16(fixed, 6)? != 20 || read_u16(fixed, 8)? != 0 {
             return None;
         }
-        let method = read_u16(data, offset + 10)?;
+        let method = read_u16(fixed, 10)?;
         if method != 0 && method != 8 {
             return None;
         }
-        let crc = read_u32(data, offset + 16)?;
-        let compressed_len = usize::try_from(read_u32(data, offset + 20)?).ok()?;
-        let expected_len = usize::try_from(read_u32(data, offset + 24)?).ok()?;
-        if expected_len > MAX_OUTPUT || total.saturating_add(expected_len) > MAX_OUTPUT {
+        let crc = read_u32(fixed, 16)?;
+        let compressed_len = usize::try_from(read_u32(fixed, 20)?).ok()?;
+        let expected_len = usize::try_from(read_u32(fixed, 24)?).ok()?;
+        if expected_len > MAX_OUTPUT {
             return None;
         }
-        let name_len = usize::from(read_u16(data, offset + 28)?);
-        let extra_len = usize::from(read_u16(data, offset + 30)?);
-        let comment_len = usize::from(read_u16(data, offset + 32)?);
+        let name_len = usize::from(read_u16(fixed, 28)?);
+        let extra_len = usize::from(read_u16(fixed, 30)?);
+        let comment_len = usize::from(read_u16(fixed, 32)?);
         let name_start = offset.checked_add(46)?;
         let name_end = name_start.checked_add(name_len)?;
         let extra_end = name_end.checked_add(extra_len)?;
@@ -158,25 +240,32 @@ fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
         if record_end > central_end {
             return None;
         }
-        let name = String::from_utf8(data.get(name_start..name_end)?.to_vec()).ok()?;
-        if !zip_name_valid(&name) {
+        let name_bytes = data.get(name_start..name_end)?;
+        let name_text = std::str::from_utf8(name_bytes).ok()?;
+        if !zip_name_valid(name_text) {
             return None;
         }
-        let local = usize::try_from(read_u32(data, offset + 42)?).ok()?;
-        if read_u32(data, local)? != 0x0403_4b50
-            || read_u16(data, local + 6)? != 0
-            || read_u16(data, local + 8)? != method
+        let local = usize::try_from(read_u32(fixed, 42)?).ok()?;
+        let local_fixed = data.get(local..local.checked_add(30)?)?;
+        if read_u32(local_fixed, 0)? != 0x0403_4b50
+            || read_u16(local_fixed, 6)? != 0
+            || read_u16(local_fixed, 8)? != method
         {
             return None;
         }
-        let local_name_len = usize::from(read_u16(data, local + 26)?);
-        let local_extra_len = usize::from(read_u16(data, local + 28)?);
+        let local_name_len = usize::from(read_u16(local_fixed, 26)?);
+        let local_extra_len = usize::from(read_u16(local_fixed, 28)?);
         let payload_start = local
             .checked_add(30)?
             .checked_add(local_name_len)?
             .checked_add(local_extra_len)?;
         let payload_end = payload_start.checked_add(compressed_len)?;
         let payload = data.get(payload_start..payload_end)?;
+        let name_and_data = name_len.checked_add(expected_len)?;
+        if !budget.reserve(name_and_data) {
+            return None;
+        }
+        let name = name_text.to_owned();
         let bytes = match method {
             0 => (compressed_len == expected_len).then(|| payload.to_vec())?,
             8 => inflate(payload, expected_len)?,
@@ -185,7 +274,6 @@ fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
         if bytes.len() != expected_len || crc32(&bytes) != crc {
             return None;
         }
-        total = total.checked_add(bytes.len())?;
         entries.push((name, bytes));
         offset = record_end;
     }
@@ -196,28 +284,37 @@ fn zip_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     if entries.len() > MAX_ENTRIES {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    let mut total = 0usize;
+    let Some((local_size, central_size, _)) = zip_archive_size(
+        entries
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_slice())),
+    ) else {
+        return Vec::new();
+    };
+    let Some(final_size) = local_size
+        .checked_add(central_size)
+        .and_then(|size| size.checked_add(22))
+    else {
+        return Vec::new();
+    };
+    if final_size > MAX_OUTPUT {
+        return Vec::new();
+    }
+    let Ok(count) = u16::try_from(entries.len()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(final_size);
     for (name, data) in entries {
-        if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
-            return Vec::new();
-        }
-        total = match total.checked_add(data.len()) {
-            Some(total) if total <= MAX_OUTPUT => total,
-            _ => return Vec::new(),
-        };
         let Ok(name_len) = u16::try_from(name.len()) else {
             return Vec::new();
         };
-        let compressed = deflate_fixed(data);
-        let Ok(compressed_len) = u32::try_from(compressed.len()) else {
+        let Some(compressed_len) = deflate_fixed_len(data) else {
+            return Vec::new();
+        };
+        let Ok(compressed_len_u32) = u32::try_from(compressed_len) else {
             return Vec::new();
         };
         let Ok(size) = u32::try_from(data.len()) else {
-            return Vec::new();
-        };
-        let Ok(local_offset) = u32::try_from(out.len()) else {
             return Vec::new();
         };
         put_u32(&mut out, 0x0403_4b50);
@@ -227,50 +324,64 @@ fn zip_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
         put_u16(&mut out, 0);
         put_u16(&mut out, 0);
         put_u32(&mut out, crc32(data));
-        put_u32(&mut out, compressed_len);
+        put_u32(&mut out, compressed_len_u32);
         put_u32(&mut out, size);
         put_u16(&mut out, name_len);
         put_u16(&mut out, 0);
         out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(&compressed);
-
-        put_u32(&mut central, 0x0201_4b50);
-        put_u16(&mut central, 20);
-        put_u16(&mut central, 20);
-        put_u16(&mut central, 0);
-        put_u16(&mut central, 8);
-        put_u16(&mut central, 0);
-        put_u16(&mut central, 0);
-        put_u32(&mut central, crc32(data));
-        put_u32(&mut central, compressed_len);
-        put_u32(&mut central, size);
-        put_u16(&mut central, name_len);
-        put_u16(&mut central, 0);
-        put_u16(&mut central, 0);
-        put_u16(&mut central, 0);
-        put_u16(&mut central, 0);
-        put_u32(&mut central, 0);
-        put_u32(&mut central, local_offset);
-        central.extend_from_slice(name.as_bytes());
+        let compressed_start = out.len();
+        deflate_fixed_into(data, &mut out);
+        debug_assert_eq!(out.len() - compressed_start, compressed_len);
     }
     let Ok(central_offset) = u32::try_from(out.len()) else {
         return Vec::new();
     };
-    let Ok(central_size) = u32::try_from(central.len()) else {
+    let Ok(central_size) = u32::try_from(central_size) else {
         return Vec::new();
     };
-    if out
-        .len()
-        .checked_add(central.len())
-        .and_then(|size| size.checked_add(22))
-        .is_none_or(|size| size > MAX_OUTPUT)
-    {
-        return Vec::new();
+    let mut local_offset = 0usize;
+    for (name, data) in entries {
+        let Ok(name_len) = u16::try_from(name.len()) else {
+            return Vec::new();
+        };
+        let Some(compressed_len) = deflate_fixed_len(data) else {
+            return Vec::new();
+        };
+        let Ok(compressed_len_u32) = u32::try_from(compressed_len) else {
+            return Vec::new();
+        };
+        let Ok(size) = u32::try_from(data.len()) else {
+            return Vec::new();
+        };
+        let Ok(local_offset_u32) = u32::try_from(local_offset) else {
+            return Vec::new();
+        };
+        put_u32(&mut out, 0x0201_4b50);
+        put_u16(&mut out, 20);
+        put_u16(&mut out, 20);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 8);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 0);
+        put_u32(&mut out, crc32(data));
+        put_u32(&mut out, compressed_len_u32);
+        put_u32(&mut out, size);
+        put_u16(&mut out, name_len);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 0);
+        put_u32(&mut out, 0);
+        put_u32(&mut out, local_offset_u32);
+        out.extend_from_slice(name.as_bytes());
+        let Some((local_len, _)) = zip_entry_wire_lengths(name, data) else {
+            return Vec::new();
+        };
+        local_offset = match local_offset.checked_add(local_len) {
+            Some(offset) => offset,
+            None => return Vec::new(),
+        };
     }
-    let Ok(count) = u16::try_from(entries.len()) else {
-        return Vec::new();
-    };
-    out.extend_from_slice(&central);
     put_u32(&mut out, 0x0605_4b50);
     put_u16(&mut out, 0);
     put_u16(&mut out, 0);
@@ -306,8 +417,59 @@ fn zip_name_valid(name: &str) -> bool {
         })
 }
 
-fn names_json(names: Vec<&str>) -> String {
-    let mut out = String::from("[");
+fn zip_entry_wire_lengths(name: &str, data: &[u8]) -> Option<(usize, usize)> {
+    let name_len = usize::from(u16::try_from(name.len()).ok()?);
+    let compressed_len = deflate_fixed_len(data)?;
+    let local_len = 30usize
+        .checked_add(name_len)?
+        .checked_add(compressed_len)?;
+    let central_len = 46usize
+        .checked_add(name_len)?;
+    Some((local_len, central_len))
+}
+
+fn zip_archive_size<'a, I>(entries: I) -> Option<(usize, usize, usize)>
+where
+    I: IntoIterator<Item = (&'a str, &'a [u8])>,
+{
+    let mut local_size = 0usize;
+    let mut central_size = 0usize;
+    let mut budget = ArchiveAllocationBudget::default();
+    for (name, data) in entries {
+        if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
+            return None;
+        }
+        let materialized = name.len().checked_add(data.len())?;
+        if !budget.reserve(materialized) {
+            return None;
+        }
+        let (local_len, central_len) = zip_entry_wire_lengths(name, data)?;
+        local_size = local_size.checked_add(local_len)?;
+        central_size = central_size.checked_add(central_len)?;
+    }
+    Some((local_size, central_size, budget.used))
+}
+
+fn names_json(names: Vec<&str>) -> Option<String> {
+    let mut size = 2usize;
+    for (index, name) in names.iter().enumerate() {
+        let name_size = name.chars().try_fold(2usize, |size, ch| {
+            let escaped = match ch {
+                '"' | '\\' | '\u{0008}' | '\u{000c}' | '\n' | '\r' | '\t' => 2,
+                ch if (ch as u32) < 0x20 => 6,
+                ch => ch.len_utf8(),
+            };
+            size.checked_add(escaped)
+        })?;
+        size = size
+            .checked_add(if index > 0 { 1 } else { 0 })?
+            .checked_add(name_size)?;
+        if size > MAX_OUTPUT {
+            return None;
+        }
+    }
+    let mut out = String::with_capacity(size);
+    out.push('[');
     for (index, name) in names.into_iter().enumerate() {
         if index > 0 {
             out.push(',');
@@ -317,24 +479,27 @@ fn names_json(names: Vec<&str>) -> String {
             match ch {
                 '"' => out.push_str("\\\""),
                 '\\' => out.push_str("\\\\"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000c}' => out.push_str("\\f"),
                 '\n' => out.push_str("\\n"),
                 '\r' => out.push_str("\\r"),
                 '\t' => out.push_str("\\t"),
+                ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
                 ch => out.push(ch),
             }
         }
         out.push('"');
     }
     out.push(']');
-    out
+    Some(out)
 }
 
-struct DeflateBits {
-    out: Vec<u8>,
+struct DeflateBits<'a> {
+    out: &'a mut Vec<u8>,
     bit: u8,
 }
 
-impl DeflateBits {
+impl DeflateBits<'_> {
     fn write(&mut self, mut value: u32, count: u8) {
         for _ in 0..count {
             if self.bit == 0 {
@@ -349,13 +514,19 @@ impl DeflateBits {
         }
     }
 
-    fn finish(self) -> Vec<u8> {
-        self.out
-    }
 }
 
 fn deflate_fixed(data: &[u8]) -> Vec<u8> {
-    let mut bits = DeflateBits { out: Vec::new(), bit: 0 };
+    let Some(size) = deflate_fixed_len(data) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(size);
+    deflate_fixed_into(data, &mut out);
+    out
+}
+
+fn deflate_fixed_into(data: &[u8], out: &mut Vec<u8>) {
+    let mut bits = DeflateBits { out, bit: 0 };
     bits.write(1, 1);
     bits.write(1, 2);
     for byte in data {
@@ -364,7 +535,15 @@ fn deflate_fixed(data: &[u8]) -> Vec<u8> {
     }
     let (code, count) = fixed_code(256);
     bits.write(code, count);
-    bits.finish()
+}
+
+fn deflate_fixed_len(data: &[u8]) -> Option<usize> {
+    let mut bits = 3usize;
+    for byte in data {
+        bits = bits.checked_add(usize::from(fixed_code(usize::from(*byte)).1))?;
+    }
+    bits = bits.checked_add(usize::from(fixed_code(256).1))?;
+    bits.checked_add(7).map(|bits| bits / 8)
 }
 
 fn fixed_code(symbol: usize) -> (u32, u8) {
@@ -382,8 +561,37 @@ pub fn jet_archive_tar_add(archive: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
     let mut entries = tar_read_all(archive);
-    if let Some(index) = entries.iter().position(|(entry, _)| entry == name) {
-        entries[index] = (name.to_string(), data.to_vec());
+    if !tar_name_valid(name) {
+        return tar_write_all(&entries);
+    }
+    let replacement = entries.iter().position(|(entry, _)| entry == name);
+    if replacement.is_none() && entries.len() >= MAX_ENTRIES {
+        return Vec::new();
+    }
+    let mut budget = ArchiveAllocationBudget::default();
+    for (entry_index, (entry, payload)) in entries.iter().enumerate() {
+        let (entry_name, entry_data) = if Some(entry_index) == replacement {
+            (name, data)
+        } else {
+            (entry.as_str(), payload.as_slice())
+        };
+        let Some(materialized) = entry_name.len().checked_add(entry_data.len()) else {
+            return Vec::new();
+        };
+        if !budget.reserve(materialized) {
+            return Vec::new();
+        }
+    }
+    if replacement.is_none() {
+        let Some(materialized) = name.len().checked_add(data.len()) else {
+            return Vec::new();
+        };
+        if !budget.reserve(materialized) {
+            return Vec::new();
+        }
+    }
+    if let Some(index) = replacement {
+        replace_archive_entry(&mut entries, index, name, data);
     } else {
         entries.push((name.to_string(), data.to_vec()));
     }
@@ -398,34 +606,16 @@ pub fn jet_archive_tar_get(archive: &[u8], name: &str) -> Vec<u8> {
 }
 
 pub fn jet_archive_tar_names_json(archive: &[u8]) -> String {
-    let mut out = String::from("[");
-    for (index, (name, _)) in tar_read_all(archive).iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push('"');
-        for ch in name.chars() {
-            match ch {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                ch => out.push(ch),
-            }
-        }
-        out.push('"');
-    }
-    out.push(']');
-    out
+    let entries = tar_read_all(archive);
+    names_json(entries.iter().map(|(name, _)| name.as_str()).collect()).unwrap_or_default()
 }
 
 fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     let mut offset = 0usize;
     let mut long_name = None;
+    let mut budget = ArchiveAllocationBudget::default();
     let mut entries = 0usize;
-    let mut total = 0usize;
     let mut terminated = false;
     while offset < data.len() {
         let Some(header_end) = offset.checked_add(TAR_BLOCK) else {
@@ -465,19 +655,27 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
         };
         let kind = header[156];
         if kind == b'L' {
-            long_name = Some(trim_nul(payload));
+            let name = std::str::from_utf8(trim_nul(payload)).unwrap_or("");
+            if !set_tar_long_name(&mut long_name, &mut budget, name) {
+                return Vec::new();
+            }
         } else if kind == b'x' {
-            long_name = Some(pax_path(payload).unwrap_or_default());
+            let name = pax_path(payload).unwrap_or("");
+            if !set_tar_long_name(&mut long_name, &mut budget, name) {
+                return Vec::new();
+            }
         } else if kind != b'g' {
-            let name = long_name.take().unwrap_or_else(|| tar_header_name(header));
+            let name = match long_name.take() {
+                Some(name) => name,
+                None => match tar_header_name(header, &mut budget) {
+                    Some(name) => name,
+                    None => return Vec::new(),
+                },
+            };
             if !tar_name_valid(&name) {
                 return Vec::new();
             }
-            total = match total.checked_add(payload.len()) {
-                Some(total) if total <= MAX_OUTPUT => total,
-                _ => return Vec::new(),
-            };
-            if total > MAX_OUTPUT {
+            if !budget.reserve(payload.len()) {
                 return Vec::new();
             }
             out.push((name, payload.to_vec()));
@@ -504,34 +702,62 @@ fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     if entries.len() > MAX_ENTRIES {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    let mut total = 0usize;
+    let mut wire_size = TAR_BLOCK * 2;
+    let mut budget = ArchiveAllocationBudget::default();
     for (name, data) in entries {
         if !tar_name_valid(name) || data.len() > MAX_OUTPUT {
             continue;
         }
-        total = match total.checked_add(data.len()) {
-            Some(total) if total <= MAX_OUTPUT => total,
+        let Some(materialized) = name.len().checked_add(data.len()) else {
+            return Vec::new();
+        };
+        if !budget.reserve(materialized) {
+            return Vec::new();
+        }
+        let Some(data_size) = tar_entry_wire_len(data.len()) else {
+            return Vec::new();
+        };
+        wire_size = match wire_size.checked_add(data_size) {
+            Some(size) if size <= MAX_OUTPUT => size,
             _ => return Vec::new(),
         };
         if split_ustar_name(name).is_none() {
-            let mut long = name.as_bytes().to_vec();
-            long.push(0);
-            append_tar_entry(&mut out, "././#LongLink", &long, b'L');
-            if out.len() > MAX_OUTPUT {
+            let Some(long_size) = name.len().checked_add(1).and_then(tar_entry_wire_len) else {
+                return Vec::new();
+            };
+            wire_size = match wire_size.checked_add(long_size) {
+                Some(size) if size <= MAX_OUTPUT => size,
+                _ => return Vec::new(),
+            };
+        }
+    }
+    let mut out = Vec::with_capacity(wire_size);
+    for (name, data) in entries {
+        if !tar_name_valid(name) || data.len() > MAX_OUTPUT {
+            continue;
+        }
+        if split_ustar_name(name).is_none() {
+            if !append_tar_long_name(&mut out, name) {
                 return Vec::new();
             }
         }
-        append_tar_entry(&mut out, name, data, b'0');
+        if !append_tar_entry(&mut out, name, data, b'0') {
+            return Vec::new();
+        }
         if out.len() > MAX_OUTPUT {
             return Vec::new();
         }
     }
-    if out.len().saturating_add(TAR_BLOCK * 2) > MAX_OUTPUT {
-        return Vec::new();
-    }
-    out.resize(out.len() + TAR_BLOCK * 2, 0);
+    out.resize(wire_size, 0);
     out
+}
+
+fn tar_entry_wire_len(data_len: usize) -> Option<usize> {
+    let padded = data_len
+        .checked_add(TAR_BLOCK - 1)?
+        .checked_div(TAR_BLOCK)?
+        .checked_mul(TAR_BLOCK)?;
+    TAR_BLOCK.checked_add(padded)
 }
 
 fn tar_name_valid(name: &str) -> bool {
@@ -545,18 +771,62 @@ fn tar_name_valid(name: &str) -> bool {
         })
 }
 
-fn append_tar_entry(out: &mut Vec<u8>, name: &str, data: &[u8], kind: u8) {
+fn append_tar_entry(out: &mut Vec<u8>, name: &str, data: &[u8], kind: u8) -> bool {
+    let Some(size) = u64::try_from(data.len()).ok() else {
+        return false;
+    };
+    if !append_tar_header(out, name, size, kind) {
+        return false;
+    }
+    out.extend_from_slice(data);
+    let Some(padded) = out
+        .len()
+        .checked_add(TAR_BLOCK - 1)
+        .and_then(|size| size.checked_div(TAR_BLOCK))
+        .and_then(|blocks| blocks.checked_mul(TAR_BLOCK))
+    else {
+        return false;
+    };
+    out.resize(padded, 0);
+    true
+}
+
+fn append_tar_long_name(out: &mut Vec<u8>, name: &str) -> bool {
+    let Some(size) = name.len().checked_add(1).and_then(|size| u64::try_from(size).ok()) else {
+        return false;
+    };
+    if !append_tar_header(out, "././#LongLink", size, b'L') {
+        return false;
+    }
+    out.extend_from_slice(name.as_bytes());
+    out.push(0);
+    let Some(padded) = out
+        .len()
+        .checked_add(TAR_BLOCK - 1)
+        .and_then(|size| size.checked_div(TAR_BLOCK))
+        .and_then(|blocks| blocks.checked_mul(TAR_BLOCK))
+    else {
+        return false;
+    };
+    out.resize(padded, 0);
+    true
+}
+
+fn append_tar_header(out: &mut Vec<u8>, name: &str, size: u64, kind: u8) -> bool {
     let mut header = [0u8; TAR_BLOCK];
     let (path, prefix) = split_ustar_name(name).unwrap_or_else(|| {
         let bytes = name.as_bytes();
         (&bytes[..bytes.len().min(100)], &[][..])
     });
     header[..path.len()].copy_from_slice(path);
-    header[345..345 + prefix.len()].copy_from_slice(prefix);
+    let Some(prefix_end) = 345usize.checked_add(prefix.len()) else {
+        return false;
+    };
+    header[345..prefix_end].copy_from_slice(prefix);
     put_tar_octal(&mut header[100..108], 0o644);
     put_tar_octal(&mut header[108..116], 0);
     put_tar_octal(&mut header[116..124], 0);
-    put_tar_octal(&mut header[124..136], data.len() as u64);
+    put_tar_octal(&mut header[124..136], size);
     put_tar_octal(&mut header[136..148], 0);
     header[148..156].fill(b' ');
     header[156] = kind;
@@ -565,8 +835,24 @@ fn append_tar_entry(out: &mut Vec<u8>, name: &str, data: &[u8], kind: u8) {
     let checksum = header.iter().map(|byte| *byte as u64).sum();
     put_tar_checksum(&mut header[148..156], checksum);
     out.extend_from_slice(&header);
-    out.extend_from_slice(data);
-    out.resize(out.len().div_ceil(TAR_BLOCK) * TAR_BLOCK, 0);
+    true
+}
+
+fn set_tar_long_name(
+    long_name: &mut Option<String>,
+    budget: &mut ArchiveAllocationBudget,
+    value: &str,
+) -> bool {
+    if let Some(old) = long_name.take() {
+        let old_len = old.len();
+        drop(old);
+        budget.release(old_len);
+    }
+    if !budget.reserve(value.len()) {
+        return false;
+    }
+    *long_name = Some(value.to_owned());
+    true
 }
 
 fn split_ustar_name(name: &str) -> Option<(&[u8], &[u8])> {
@@ -578,36 +864,53 @@ fn split_ustar_name(name: &str) -> Option<(&[u8], &[u8])> {
         .iter()
         .enumerate()
         .rev()
-        .find(|(index, byte)| **byte == b'/' && *index <= 155 && bytes.len() - index - 1 <= 100)
-        .map(|(index, _)| (&bytes[index + 1..], &bytes[..index]))
+        .find(|(index, byte)| {
+            **byte == b'/'
+                && *index <= 155
+                && (*index)
+                    .checked_add(1)
+                    .and_then(|start| bytes.len().checked_sub(start))
+                    .is_some_and(|len| len <= 100)
+        })
+        .and_then(|(index, _)| index.checked_add(1).map(|start| (&bytes[start..], &bytes[..index])))
 }
 
-fn tar_header_name(header: &[u8]) -> String {
-    let name = trim_nul(&header[..100]);
-    let prefix = trim_nul(&header[345..500]);
-    if prefix.is_empty() {
-        name
+fn tar_header_name(header: &[u8], budget: &mut ArchiveAllocationBudget) -> Option<String> {
+    let name = std::str::from_utf8(trim_nul(&header[..100])).unwrap_or("");
+    let prefix = std::str::from_utf8(trim_nul(&header[345..500])).unwrap_or("");
+    let size = if prefix.is_empty() {
+        name.len()
     } else {
-        format!("{prefix}/{name}")
+        prefix.len().checked_add(1)?.checked_add(name.len())?
+    };
+    if !budget.reserve(size) {
+        return None;
     }
+    let mut full = String::with_capacity(size);
+    if !prefix.is_empty() {
+        full.push_str(prefix);
+        full.push('/');
+    }
+    full.push_str(name);
+    Some(full)
 }
 
-fn trim_nul(bytes: &[u8]) -> String {
-    String::from_utf8(
-        bytes[..bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len())].to_vec(),
-    )
-    .unwrap_or_default()
+fn trim_nul(bytes: &[u8]) -> &[u8] {
+    &bytes[..bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len())]
 }
 
-fn pax_path(payload: &[u8]) -> Option<String> {
+fn pax_path(payload: &[u8]) -> Option<&str> {
     let mut offset = 0;
     while offset < payload.len() {
-        let space = payload[offset..].iter().position(|byte| *byte == b' ')? + offset;
+        let space = offset.checked_add(
+            payload[offset..].iter().position(|byte| *byte == b' ')?,
+        )?;
         let len = std::str::from_utf8(&payload[offset..space]).ok()?.parse::<usize>().ok()?;
         let end = offset.checked_add(len)?;
-        let record = payload.get(space + 1..end.checked_sub(1)?)?;
+        let record_start = space.checked_add(1)?;
+        let record = payload.get(record_start..end.checked_sub(1)?)?;
         if let Some(path) = record.strip_prefix(b"path=") {
-            return String::from_utf8(path.to_vec()).ok();
+            return std::str::from_utf8(path).ok();
         }
         offset = end;
     }
@@ -664,9 +967,21 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
     let start = data.len().saturating_sub(65_557);
     (start..=data.len().checked_sub(22)?).rev().find(|offset| {
         read_u32(data, *offset) == Some(0x0605_4b50)
-            && read_u16(data, *offset + 20)
-                .is_some_and(|comment| *offset + 22 + usize::from(comment) == data.len())
+            && read_u16_at(data, *offset, 20).is_some_and(|comment| {
+                offset
+                    .checked_add(22)
+                    .and_then(|start| start.checked_add(usize::from(comment)))
+                    == Some(data.len())
+            })
     })
+}
+
+fn read_u16_at(data: &[u8], base: usize, offset: usize) -> Option<u16> {
+    read_u16(data, base.checked_add(offset)?)
+}
+
+fn read_u32_at(data: &[u8], base: usize, offset: usize) -> Option<u32> {
+    read_u32(data, base.checked_add(offset)?)
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
@@ -711,13 +1026,18 @@ impl Bits<'_> {
         for shift in 0..count {
             let byte = *self.data.get(self.bit / 8)?;
             value |= u32::from((byte >> (self.bit % 8)) & 1) << shift;
-            self.bit += 1;
+            self.bit = self.bit.checked_add(1)?;
         }
         Some(value)
     }
 
-    fn align_byte(&mut self) {
-        self.bit = self.bit.div_ceil(8) * 8;
+    fn align_byte(&mut self) -> Option<()> {
+        self.bit = self
+            .bit
+            .checked_add(7)?
+            .checked_div(8)?
+            .checked_mul(8)?;
+        Some(())
     }
 }
 
@@ -729,15 +1049,19 @@ impl Huffman {
         if max == 0 || max > 15 {
             return None;
         }
-        let mut counts = vec![0u32; max + 1];
+        let mut counts = vec![0u32; max.checked_add(1)?];
         for length in lengths.iter().copied().filter(|length| *length != 0) {
-            counts[usize::from(length)] += 1;
+            let count = &mut counts[usize::from(length)];
+            *count = count.checked_add(1)?;
         }
-        let mut next = vec![0u32; max + 1];
+        let mut next = vec![0u32; max.checked_add(1)?];
         let mut code = 0u32;
         for bits in 1..=max {
-            code = (code + counts[bits - 1]) << 1;
-            if code + counts[bits] > 1 << bits {
+            code = code
+                .checked_add(counts[bits - 1])?
+                .checked_shl(1)?;
+            let limit = 1u32.checked_shl(bits.try_into().ok()?)?;
+            if code.checked_add(counts[bits])? > limit {
                 return None;
             }
             next[bits] = code;
@@ -749,7 +1073,7 @@ impl Huffman {
             }
             let length = usize::from(length);
             let canonical = next[length];
-            next[length] += 1;
+            next[length] = next[length].checked_add(1)?;
             entries.push((reverse_bits(canonical, length), length, symbol as u16));
         }
         Some(Self(entries))
@@ -790,12 +1114,12 @@ fn inflate_any(data: &[u8]) -> Option<Vec<u8>> {
 
 fn inflate_with_limit(data: &[u8], expected_len: Option<usize>) -> Option<Vec<u8>> {
     let mut bits = Bits { data, bit: 0 };
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(expected_len.unwrap_or(0).min(MAX_OUTPUT));
     loop {
         let final_block = bits.read(1)? != 0;
         match bits.read(2)? {
             0 => {
-                bits.align_byte();
+                bits.align_byte()?;
                 let len = bits.read(16)? as usize;
                 if bits.read(16)? as u16 != !(len as u16) {
                     return None;
@@ -838,26 +1162,33 @@ fn fixed_trees() -> Option<(Huffman, Huffman)> {
 }
 
 fn dynamic_trees(bits: &mut Bits<'_>) -> Option<(Huffman, Huffman)> {
-    let literal_count = bits.read(5)? as usize + 257;
-    let distance_count = bits.read(5)? as usize + 1;
-    let code_count = bits.read(4)? as usize + 4;
+    let literal_count = (bits.read(5)? as usize).checked_add(257)?;
+    let distance_count = (bits.read(5)? as usize).checked_add(1)?;
+    let code_count = (bits.read(4)? as usize).checked_add(4)?;
     let order = [16usize, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
     let mut code_lengths = [0u8; 19];
     for index in 0..code_count {
         code_lengths[order[index]] = bits.read(3)? as u8;
     }
     let code_tree = Huffman::new(&code_lengths)?;
-    let total = literal_count + distance_count;
+    let total = literal_count.checked_add(distance_count)?;
     let mut lengths = Vec::with_capacity(total);
     while lengths.len() < total {
         match code_tree.symbol(bits)? {
             value @ 0..=15 => lengths.push(value as u8),
             16 => {
                 let previous = *lengths.last()?;
-                lengths.resize(lengths.len().checked_add(bits.read(2)? as usize + 3)?, previous);
+                let repeat = (bits.read(2)? as usize).checked_add(3)?;
+                lengths.resize(lengths.len().checked_add(repeat)?, previous);
             }
-            17 => lengths.resize(lengths.len().checked_add(bits.read(3)? as usize + 3)?, 0),
-            18 => lengths.resize(lengths.len().checked_add(bits.read(7)? as usize + 11)?, 0),
+            17 => {
+                let repeat = (bits.read(3)? as usize).checked_add(3)?;
+                lengths.resize(lengths.len().checked_add(repeat)?, 0)
+            }
+            18 => {
+                let repeat = (bits.read(7)? as usize).checked_add(11)?;
+                lengths.resize(lengths.len().checked_add(repeat)?, 0)
+            }
             _ => return None,
         }
         if lengths.len() > total {
@@ -905,16 +1236,13 @@ fn inflate_codes(
             256 => return Some(()),
             symbol @ 257..=285 => {
                 let index = usize::from(symbol - 257);
-                let length = LENGTH_BASE[index] + bits.read(LENGTH_EXTRA[index])? as usize;
+                let length = LENGTH_BASE[index].checked_add(bits.read(LENGTH_EXTRA[index])? as usize)?;
                 let distance_symbol = usize::from(distance.symbol(bits)?);
                 let base = *DIST_BASE.get(distance_symbol)?;
                 let extra = *DIST_EXTRA.get(distance_symbol)?;
-                let distance = base + bits.read(extra)? as usize;
-                if distance == 0
-                    || distance > out.len()
-                    || out.len().checked_add(length)? > MAX_OUTPUT
-                    || expected_len.is_some_and(|limit| out.len().checked_add(length).is_none_or(|end| end > limit))
-                {
+                let distance = base.checked_add(bits.read(extra)? as usize)?;
+                let end = out.len().checked_add(length)?;
+                if distance == 0 || distance > out.len() || end > MAX_OUTPUT || expected_len.is_some_and(|limit| end > limit) {
                     return None;
                 }
                 for _ in 0..length {
@@ -923,5 +1251,21 @@ fn inflate_codes(
             }
             _ => return None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_json_escapes_controls_and_bounds_expansion() {
+        assert_eq!(
+            names_json(vec!["quote\"slash\\line\ncontrol\u{0001}"]),
+            Some("[\"quote\\\"slash\\\\line\\ncontrol\\u0001\"]".to_string())
+        );
+
+        let name = "\u{0001}".repeat(MAX_OUTPUT / 6);
+        assert!(names_json(vec![name.as_str()]).is_none());
     }
 }

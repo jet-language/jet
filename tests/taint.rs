@@ -564,6 +564,10 @@ mod auth_session_boundary {
             "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)"
         );
         assert!(!shown.contains("sess-live-bearer"));
+        let debug = format!("{session:?}");
+        assert!(!debug.contains("sess-live-bearer"));
+        assert!(!debug.contains("jet_session=sess-live-bearer"));
+        assert!(debug.contains("<redacted>"));
         assert!(jet_auth_oauth_begin("google".to_string()).is_err());
         assert!(jet_auth_oauth_finish(
             "state".to_string(),

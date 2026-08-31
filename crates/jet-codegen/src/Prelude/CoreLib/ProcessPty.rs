@@ -71,26 +71,6 @@ mod unix {
         ypixel: u16,
     }
 
-    // Linux and the BSD/Darwin family use the same termios fields used by the
-    // existing `core.term` prelude. Keep this local so the PTY backend remains
-    // independent of the terminal-input backend.
-    #[repr(C)]
-    struct Termios {
-        c_iflag: u32,
-        c_oflag: u32,
-        c_cflag: u32,
-        c_lflag: u32,
-        #[cfg(target_os = "linux")]
-        c_line: u8,
-        c_cc: [u8; 32],
-        #[cfg(target_os = "linux")]
-        c_ispeed: u32,
-        #[cfg(target_os = "linux")]
-        c_ospeed: u32,
-        #[cfg(not(target_os = "linux"))]
-        _pad: [u8; 12],
-    }
-
     #[cfg(target_os = "linux")]
     const PTY_OPEN_FLAGS: i32 = 0x0002 | 0x0100 | 0x80000; // O_RDWR|O_NOCTTY|O_CLOEXEC
     #[cfg(not(target_os = "linux"))]
@@ -106,9 +86,6 @@ mod unix {
     #[cfg(not(target_os = "linux"))]
     const TIOCSWINSZ: u64 = 0x80087467;
 
-    const TCSANOW: i32 = 0;
-    const VTIME: usize = 5;
-    const VMIN: usize = 6;
     const EIO: i32 = 5;
     const ESRCH: i32 = 3;
 
@@ -119,9 +96,6 @@ mod unix {
         fn unlockpt(fd: i32) -> i32;
         fn ptsname(fd: i32) -> *mut c_char;
         fn ioctl(fd: i32, request: u64, arg: *const c_void) -> i32;
-        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-        fn tcsetattr(fd: i32, actions: i32, termios: *const Termios) -> i32;
-        fn cfmakeraw(termios: *mut Termios);
         fn fcntl(fd: i32, command: i32, ...) -> i32;
         fn setsid() -> i32;
         fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
@@ -284,23 +258,7 @@ mod unix {
         {
             return Err(ioctl_error("TIOCSWINSZ"));
         }
-        // SAFETY: `termios` is zeroed storage for the platform ABI and the
-        // kernel fills it through the valid PTY slave descriptor.
-        let mut termios = unsafe { std::mem::zeroed::<Termios>() };
-        if unsafe { tcgetattr(slave.as_raw_fd(), &mut termios) } != 0 {
-            return Err(last_os_error("tcgetattr"));
-        }
-        if raw {
-            // SAFETY: `termios` was initialized by tcgetattr and remains a
-            // valid mutable termios object.
-            unsafe { cfmakeraw(&mut termios) };
-            termios.c_cc[VMIN] = 1;
-            termios.c_cc[VTIME] = 0;
-        }
-        // SAFETY: the pointer references the initialized local termios value.
-        if unsafe { tcsetattr(slave.as_raw_fd(), TCSANOW, &termios) } != 0 {
-            return Err(last_os_error("tcsetattr"));
-        }
+        super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;
         Ok(())
     }
 

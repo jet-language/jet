@@ -3067,9 +3067,14 @@ fn send_once_upload(
     for (name, value) in headers {
         if name.is_empty()
             || !name.bytes().all(http_token_byte)
-            || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
+            || !value.bytes().all(http_field_value_byte)
         {
             return Err(JetHTTPBridgeError::InvalidHeader);
+        }
+        if name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+        {
+            return Err(JetHTTPBridgeError::InvalidFraming);
         }
     }
     let proxy_key = proxy.map(|proxy| format!("{}://{}:{}", proxy.scheme, proxy.host, proxy.port));
@@ -3328,6 +3333,10 @@ fn http_token_byte(byte: u8) -> bool {
                 | b'|'
                 | b'~'
         )
+}
+
+fn http_field_value_byte(byte: u8) -> bool {
+    byte == b'\t' || (0x20..=0x7e).contains(&byte) || byte >= 0x80
 }
 
 fn connection_retry_allowed(policy: RetryPolicy, method: &str) -> bool {
@@ -3652,7 +3661,7 @@ fn parse_status_and_headers(
             .ok_or(JetHTTPBridgeError::InvalidHeader)?;
         if name.is_empty()
             || !name.bytes().all(http_token_byte)
-            || value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
+            || !value.bytes().all(http_field_value_byte)
         {
             return Err(JetHTTPBridgeError::InvalidHeader);
         }

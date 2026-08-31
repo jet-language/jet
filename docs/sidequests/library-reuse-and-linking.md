@@ -3,7 +3,8 @@
 **Card:** #1421 (plan) → #1422 (build). **Ratified:** D-LIB-REUSE1=B,
 D-LIB-EXPORT1=C, D-LIB-DYNTRUST1=A, D-LIB-NAME1=A, D-LIB-CALLGRANT1=A
 (2026-08-08).
-**Status:** ratified, unbuilt.
+**Status:** ratified; native Library artifacts and the direct `.jetlib` loader
+are implemented in #1343/#1345. Sealed package-object reuse remains unbuilt.
 
 Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
@@ -176,9 +177,14 @@ frees a returned buffer and what a foreign caller may hold across calls, and
 sema checks it (I3).
 
 **A Jet program loads Jet at run time** (D-LIB-DYNTRUST1=A). A `Library` marked
-loadable builds a `.jetlib` file pinned to one compiler identity. The loaded
-library declares its effects like any package. The host states its grant at the
-load site, and a library asking for more is refused before it is mapped.
+loadable builds a `.jetlib` file pinned to one compiler identity. Its header
+also records the host-native target, ABI version, Library name, exact checked
+top-level `pub fn` export table, and payload length. The loaded library
+declares its effects like any package. The host states its grant at the load
+site, and a library asking for more is refused before it is mapped. The shared
+Prelude loader verifies every declared symbol, maps through the platform
+`dlopen`/`LoadLibraryW` bridge, and drops the handle before deleting its staged
+payload; JIT and interpreter teardown release their load tables.
 
 ```jet
 # the mod declares what it needs
@@ -250,10 +256,12 @@ be trusted, it is rebuilt silently rather than offered with a warning.
    IR, full artifact identity, restore from local and bound mirrors, static
    link, typed generic bodies in the artifact. Still gated on D-INCR-UNIT1 for
    the incremental-unit boundary.
-2. **Loadable library and loader.** The `Library` fields, the `.jetlib`
-   artifact, the compiler-identity pin, and the effect grant check. Two fresh
-   diagnostic codes are needed, each with what/why/fix text and a UI snapshot.
-   `E0912` from the reuse-ballot example is retired and must not be reused.
+2. **Loadable library and loader — implemented in #1343/#1345.** The
+   `Library` fields, the `.jetlib` artifact, exact compiler/ABI/export metadata
+   verification, the effect grant check, native load/call/unload lifecycle, and
+   failure cleanup are covered. `E0912` from the reuse-ballot example is
+   retired and must not be reused; the current loader diagnostics are registered
+   and snapshot-backed.
 3. **Native export and bindings.** Native artifacts, the generated C header, and
    the per-language binding generator, all driven by the frozen `pub` surface.
 

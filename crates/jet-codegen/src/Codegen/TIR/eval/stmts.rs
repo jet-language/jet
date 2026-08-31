@@ -314,13 +314,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             ));
         }
         match base {
-            CtValue::Struct { ref type_name, .. }
-                if type_name == super::UNINIT_FIXED_CARRIER => super::uninit_fixed_read(
-                &base,
-                usize::try_from(index)
-                    .map_err(|_| unsupported("negative uninit index", self.span()))?,
-            )
-            .ok_or_else(|| unsupported("uninit fixed-list index", self.span())),
+            CtValue::Struct { ref type_name, .. } if type_name == super::UNINIT_FIXED_CARRIER => {
+                super::uninit_fixed_read(
+                    &base,
+                    usize::try_from(index)
+                        .map_err(|_| unsupported("negative uninit index", self.span()))?,
+                )
+                .ok_or_else(|| unsupported("uninit fixed-list index", self.span()))
+            }
             CtValue::List(items) => {
                 if index as usize >= items.len() {
                     Err(self.runtime_index_stop(
@@ -2078,15 +2079,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Ok(Flow::Normal);
                     }
                 }
-                let mut replacement = self.replace_indexed_value(
-                    base_value,
-                    idx_v,
-                    *is_map,
-                    rhs,
-                    *uninit,
-                )?;
-                for (step_index, (step_is_map, step_index_value)) in
-                    steps.iter().enumerate().rev()
+                let mut replacement =
+                    self.replace_indexed_value(base_value, idx_v, *is_map, rhs, *uninit)?;
+                for (step_index, (step_is_map, step_index_value)) in steps.iter().enumerate().rev()
                 {
                     replacement = self.replace_indexed_value(
                         parents[step_index].clone(),

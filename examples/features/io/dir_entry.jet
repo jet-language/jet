@@ -4,11 +4,11 @@ use core.files as fs
 
 fn run() {
     dir :: "/tmp/jet_lsdir_demo"
-    fs.create_dir(dir) ?? return Err("could not create demo dir")
-    fs.write(Path.from(dir).join("hello.txt"), "hi") ?? return Err("write failed")
+    fs.create_dir(dir)
+    fs.write(Path.from(dir).join("hello.txt"), "hi")
     sub :: Path.from(dir).join("sub")
-    fs.create_dir(sub) ?? return Err("could not create subdir")
-    entries :: fs.list_dir(dir) ?? return Err("list_dir failed")
+    fs.create_dir(sub)
+    entries :: fs.list_dir(dir)
     loop entry in entries {
         if {
             entry.is_dir -> { print("dir:  {entry.name}") }

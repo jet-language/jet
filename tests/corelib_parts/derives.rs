@@ -1197,6 +1197,34 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn yaml_hostile_alias_and_depth_match_all_execution_tiers() {
+    let src = r#"
+use core.encoding.yaml as yaml
+
+fn run() {
+    alias_raw :: "base: &a\n  value: x\nitems:\n" + "  - *a\n".repeat(32768)
+    alias :: yaml.parse(alias_raw)
+    if alias == {
+        .Ok(_) -> { print("alias:accepted") }
+        .Err(_) -> { print("alias:rejected") }
+    }
+
+    depth_raw :: "[".repeat(65) + "0" + "]".repeat(65)
+    depth :: yaml.parse(depth_raw)
+    if depth == {
+        .Ok(_) -> { print("depth:accepted") }
+        .Err(_) -> { print("depth:rejected") }
+    }
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "yaml_hostile_alias_and_depth",
+        src,
+        "alias:rejected\ndepth:rejected\n",
+    );
+}
+
 // D-VALIDATE-DECODE1=B / D-MIGRATE4=A: one canonical typed decode contract.
 // Published-schema migration is silent inside Result<T, [FieldError]>; the
 // migration report is internal to the shared codec implementation.

@@ -569,6 +569,24 @@ impl<'a> Parser<'a> {
         &mut self,
         allow_failure_contract_tail: bool,
     ) -> Result<(Type, Span), Diagnostic> {
+        self.type_inner_with_options(allow_failure_contract_tail, true)
+    }
+
+    /// Parse a type atom while leaving a following `|` for the enclosing union.
+    /// Prefix `?` owns only the next atom, so `?Int | ?String` is a union of
+    /// options rather than one option around a union.
+    fn type_inner_without_union(
+        &mut self,
+        allow_failure_contract_tail: bool,
+    ) -> Result<(Type, Span), Diagnostic> {
+        self.type_inner_with_options(allow_failure_contract_tail, false)
+    }
+
+    fn type_inner_with_options(
+        &mut self,
+        allow_failure_contract_tail: bool,
+        allow_union_tail: bool,
+    ) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
             // D-FAILURE-FOUNDATION1=A: `!Error` is the expert unit-success
@@ -587,7 +605,7 @@ impl<'a> Parser<'a> {
             // structured result carrier; without it this is ordinary Option.
             TokKind::Question => {
                 self.bump();
-                let success = self.type_inner_with_failure_contract(false)?.0;
+                let success = self.type_inner_without_union(false)?.0;
                 if matches!(self.peek().kind, TokKind::Bang) {
                     let bang = self.bump().span;
                     let err = self.parse_explicit_failure_type(bang)?;
@@ -1037,7 +1055,7 @@ impl<'a> Parser<'a> {
         }
         if !allow_failure_contract_tail {
             let member = base;
-            if matches!(self.peek().kind, TokKind::Pipe) {
+            if allow_union_tail && matches!(self.peek().kind, TokKind::Pipe) {
                 self.bump();
                 let (right, _) = self.type_inner_with_failure_contract(false)?;
                 return Ok((crate::AST::canonicalize_union(vec![member, right]), start));
@@ -1101,9 +1119,7 @@ impl<'a> Parser<'a> {
         } else {
             base
         };
-        // D-UNIONTYPE1=A: a contract-owned error union is parenthesized, so
-        // the outer union parser never steals its members.
-        if matches!(self.peek().kind, TokKind::Pipe) {
+        if allow_union_tail && matches!(self.peek().kind, TokKind::Pipe) {
             self.bump();
             let (right, _) = self.type_()?;
             return Ok((crate::AST::canonicalize_union(vec![member, right]), start));
@@ -1226,14 +1242,22 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
-        // Identity only exists when the type actually declares one; an
-        // unannotated `fn(Int) Int` keeps its bare structural meaning.
+        // S61: names on ordinary `name: Type` entries document the callable
+        // and are not part of its identity. Only an explicit zone contributes
+        // a contract; a label-only zone keeps the label it must be called by.
         let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> =
-            (saw_slash || saw_star || param_names.iter().any(Option::is_some)).then(|| {
+            (saw_slash || saw_star).then(|| {
                 param_names
                     .iter()
                     .zip(param_zones.iter())
-                    .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
+                    .map(|(name, zone)| {
+                        let label = if *zone == crate::AST::ParamZone::LabelOnly {
+                            name.clone().unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        (label, *zone)
+                    })
                     .collect()
             });
         let canonical_effect = matches!(self.peek().kind, TokKind::Minus)

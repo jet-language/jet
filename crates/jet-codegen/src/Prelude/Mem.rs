@@ -35,13 +35,17 @@
     use self::jet_sentry as sentry_kernel;
 
     pub use self::jet_sentry::{
-        jet_memory_ledger_record, jet_sentry_fenced_scope, jet_sentry_policy_scope,
-        jet_sentry_reset, jet_sentry_scope, jet_sentry_set_hardened, JetSentryGuard,
-        MemoryLedgerWitness,
+        jet_memory_ledger_record, jet_sentry_current_frame, jet_sentry_fenced_scope,
+        jet_sentry_frame, jet_sentry_policy_scope, jet_sentry_reset, jet_sentry_scope,
+        jet_sentry_set_hardened, JetSentryFrame, JetSentryGuard, MemoryLedgerWitness,
     };
 
     pub fn jet_sentry_register_allocation(ptr: *mut u8, bytes: usize) {
         sentry_kernel::jet_sentry_register_allocation(ptr as usize, bytes);
+    }
+
+    pub fn jet_sentry_register_stack_allocation(ptr: *mut u8, bytes: usize) {
+        sentry_kernel::jet_sentry_register_stack_allocation(ptr as usize, bytes);
     }
 
     pub fn jet_sentry_register_owned_allocation(owner: usize, ptr: *mut u8, bytes: usize) {
@@ -77,8 +81,59 @@
         );
     }
 
+    fn jet_sentry_check_foreign<T>(ptr: *const T, operation: &str, obligation: &str) {
+        let Some(fault) = sentry_kernel::jet_sentry_check_foreign(
+            ptr as usize,
+            std::mem::size_of::<T>(),
+            std::mem::align_of::<T>(),
+            operation,
+            obligation,
+        ) else {
+            return;
+        };
+        super::jet_sentry_runtime_stop(
+            fault.code,
+            &fault.file,
+            fault.line,
+            &fault.gate,
+            &fault.operation,
+            &fault.obligation,
+            &fault.detail,
+        );
+    }
+
+    /// Validate an exclusive Jet value before a foreign call. Foreign-owned
+    /// storage is valid input even when Jet did not register its allocation;
+    /// tracked storage still gets the shared liveness, range, and alignment
+    /// witness.
+    pub fn jet_sentry_foreign_ref<T>(ptr: &mut T) -> &mut T {
+        jet_sentry_check_foreign(ptr as *const T, "ffi_write", "ffi_contract");
+        ptr
+    }
+
+    /// Validate a raw pointer before a foreign call. Raw pointers retain the
+    /// strict provenance rule used by Jet memory operations.
+    pub fn jet_sentry_foreign_ptr<T>(ptr: *mut T) -> *mut T {
+        jet_sentry_check(ptr.cast_const(), "ffi_ptr", "ffi_contract");
+        ptr
+    }
+
+    /// Validate both the pointer slot and the pointee of an exclusive raw
+    /// pointer argument. The slot may be ordinary foreign-visible storage,
+    /// while the pointee must retain Jet's strict raw-pointer provenance.
+    pub fn jet_sentry_foreign_ptr_ref<T>(ptr: &mut *mut T) -> &mut *mut T {
+        jet_sentry_check_foreign(ptr as *const *mut T, "ffi_write", "ffi_contract");
+        jet_sentry_check((*ptr).cast_const(), "ffi_ptr", "ffi_contract");
+        ptr
+    }
+
     pub fn jet_sentry_address_of<T>(ptr: *const T) -> i64 {
         jet_sentry_register_allocation(ptr.cast_mut().cast::<u8>(), std::mem::size_of::<T>());
+        ptr as usize as i64
+    }
+
+    pub fn jet_sentry_stack_address_of<T>(ptr: *const T) -> i64 {
+        jet_sentry_register_stack_allocation(ptr.cast_mut().cast::<u8>(), std::mem::size_of::<T>());
         ptr as usize as i64
     }
 

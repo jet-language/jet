@@ -147,6 +147,67 @@ impl JetDebug for JetZonedDateTime {
         self.to_string_fmt()
     }
 }
+
+// D-TIME-INSTANT-SPLIT1=A: Date/LocalTime/DateTime/ZonedDateTime are fixed
+// runtime carriers. Keep their Jet comparison implementations here with the
+// carriers, so the optional Core crate does not violate Rust's orphan rule.
+fn jet_time_ordering(ordering: std::cmp::Ordering) -> __jet_Ordering {
+    match ordering {
+        std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
+        std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
+        std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
+    }
+}
+
+impl __jet_Equatable for JetDate {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetDate {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+impl __jet_Equatable for JetLocalTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetLocalTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+impl __jet_Equatable for JetDateTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetDateTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+// ZonedDateTime `==` is instant plus zone identity. Temporal keeps that
+// value equality distinct from its separate `equals` distinction.
+impl __jet_Equatable for JetZonedDateTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetZonedDateTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.instant.cmp(&rhs.instant))
+    }
+}
 // D-PARCAPTURE1=D: one failure-aware wrapper around the shared indexed
 // collection scheduler. Chunk boundaries and result order live in the shared
 // Prelude collection seam; this wrapper only carries the AOT failure rail.
@@ -632,9 +693,12 @@ fn jet_runtime_report_parked_tasks() -> Option<i32> {
 fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
     jet_std_os_run_atexit();
     jet_runtime_report_parked_tasks();
+    jet_observe_drain_after_exit();
     if let Some(report) = report {
         eprint!("{report}");
     }
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let _ = std::io::Write::flush(&mut std::io::stderr());
     std::process::exit(code)
 }
 
@@ -645,7 +709,9 @@ where
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
             jet_std_os_run_atexit();
-            if let Some(code) = jet_runtime_report_parked_tasks() {
+            let parked_exit = jet_runtime_report_parked_tasks();
+            jet_observe_drain_after_exit();
+            if let Some(code) = parked_exit {
                 std::process::exit(code);
             }
             value
@@ -692,6 +758,37 @@ where
                     },
                 },
             }
+        }
+    }
+}
+
+/// Catch the private marker emitted by a generated foreign bridge while the
+/// caller's Jet frame is still active. This keeps FFI stops on the one report
+/// carrier and preserves the caller's Jet source facts; the process boundary
+/// remains the fallback for bridges that cannot carry a call-site frame.
+fn jet_ffi_runtime_call<F, T>(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    run: F,
+) -> T
+where
+    F: FnOnce() -> T,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) => {
+            if let Some(message) = payload
+                .downcast_ref::<String>()
+                .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
+            {
+                let report = jet_runtime_stop_report(
+                    "E3014", file, line, fn_name, src_line, 1, 1, message, "",
+                );
+                jet_runtime_stop_unwind(report.rendered, report.exit_code, message);
+            }
+            std::panic::resume_unwind(payload)
         }
     }
 }
@@ -1700,6 +1797,57 @@ where
     }
 }
 
+/// Update a text-keyed map without allocating a replacement key for an
+/// existing entry. The ordinary update path owns its key before entering the
+/// tree; this borrowed form keeps the same ordered-map semantics while making
+/// the common read/compute/write loop pay for a key clone only on insertion.
+#[inline(always)]
+fn jet_map_update_string<V, F>(
+    m: &mut std::collections::BTreeMap<String, V>,
+    key: &String,
+    f: F,
+)
+where
+    F: FnOnce(Option<&V>) -> V,
+{
+    if let Some(existing) = m.get_mut(key) {
+        let next = {
+            let existing = &*existing;
+            f(Some(existing))
+        };
+        *existing = next;
+    } else {
+        m.insert(key.clone(), f(None));
+    }
+}
+
+/// Update a text-keyed map from a borrowed UTF-8 byte span. Strict decoding is
+/// performed before the lookup, so this is equivalent to
+/// `String.from_bytes(bytes)` followed by the ordinary string-key update, but
+/// an existing key does not allocate a temporary `String`. The map owns a key
+/// only on the vacant-entry path.
+#[inline(always)]
+fn jet_map_update_string_bytes<V, F>(
+    m: &mut std::collections::BTreeMap<String, V>,
+    bytes: &[u8],
+    f: F,
+) -> Result<(), ()>
+where
+    F: FnOnce(Option<&V>) -> V,
+{
+    let key = std::str::from_utf8(bytes).map_err(|_| ())?;
+    if let Some(existing) = m.get_mut(key) {
+        let next = {
+            let existing = &*existing;
+            f(Some(existing))
+        };
+        *existing = next;
+    } else {
+        m.insert(key.to_owned(), f(None));
+    }
+    Ok(())
+}
+
 // BTreeMap has no stable fallible reservation API. Keep this representation
 // step at the map seam; the shared Prelude owns the AllocError projection.
 fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
@@ -1890,16 +2038,16 @@ fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
 // D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
 // original string (both sides agree, mirroring `.replace`'s no-match-is-identity
 // convention — no `Option`/empty-string special case to unwrap).
-fn jet_string_after(s: &String, sep: &str) -> String {
+fn jet_string_after(s: &str, sep: &str) -> String {
     match s.find(sep) {
         Some(i) => s[i + sep.len()..].to_string(),
-        None => s.clone(),
+        None => s.to_string(),
     }
 }
-fn jet_string_before(s: &String, sep: &str) -> String {
+fn jet_string_before(s: &str, sep: &str) -> String {
     match s.find(sep) {
         Some(i) => s[..i].to_string(),
-        None => s.clone(),
+        None => s.to_string(),
     }
 }
 // D-MEM1 stage S5 (2026-07-04): zero-copy siblings of `jet_string_after`/

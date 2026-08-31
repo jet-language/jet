@@ -1,0 +1,11 @@
+use core.http.server as server
+
+fn named_zero() HTTPResponse !HTTPError -> Ok(server.response(200, "named"))
+
+fn run() {
+    mux :: server.mux()
+    mux.get("/zero", () -> Ok(server.response(200, "zero")))
+    mux.get("/named", named_zero)
+    mux.get("/one", (req: HTTPRequest) -> Ok(server.response(200, req.path())))
+    mux.get("/bad", (first: HTTPRequest, second: HTTPRequest) -> Ok(server.response(200, first.path())))
+}

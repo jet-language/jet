@@ -47,7 +47,7 @@ fn ffi_reporter(message: *const u8, len: usize) {
         String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(message, len) }).into_owned()
         // JET_VETTED_UNSAFE_END: ffi_reporter
     };
-    Concurrency::with_runtime_mut(|rt| rt.set_trap(&message));
+    Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(&message));
 }
 
 #[derive(Clone, Copy)]
@@ -80,7 +80,9 @@ unsafe impl Sync for FfiEntry {}
 
 struct FfiState {
     handle: *mut c_void,
+    clear_panic_hook_fn: unsafe extern "C" fn(),
     free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
+    take_failure_fn: unsafe extern "C" fn() -> i8,
     by_wrapper: HashMap<String, FfiEntry>,
 }
 
@@ -115,7 +117,7 @@ fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
 }
 
 fn trap(msg: &str) {
-    Concurrency::with_runtime_mut(|rt| rt.set_trap(msg));
+    Concurrency::with_runtime_mut(|rt| rt.set_host_fault(msg));
 }
 
 /// Prepare the AOT FFI bridge and bind its C-ABI trampolines for resident JIT.
@@ -167,6 +169,7 @@ pub(crate) fn clear_ffi() {
     if let Some(state) = slot.take() {
         if !state.handle.is_null() {
             unsafe {
+                (state.clear_panic_hook_fn)();
                 dlclose(state.handle);
             }
         }
@@ -218,6 +221,34 @@ fn load_cdylib(path: &Path, entries: &[jet_pkg_model::FFI::ExternEntry]) -> Resu
             std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*const u8)>(setter_ptr)
         };
         unsafe { set_reporter(crate::host_seam::guarded(ffi_reporter)) };
+        let clear_hook_name = CString::new("jet_ffi_clear_panic_hook").unwrap();
+        let clear_hook_ptr = unsafe { dlsym(handle, clear_hook_name.as_ptr()) };
+        if clear_hook_ptr.is_null() {
+            unsafe {
+                dlclose(handle);
+            }
+            return Err(format!(
+                "jit ffi: missing symbol `jet_ffi_clear_panic_hook` in {}",
+                path.display()
+            ));
+        }
+        let clear_panic_hook_fn = unsafe {
+            std::mem::transmute::<*mut c_void, unsafe extern "C" fn()>(clear_hook_ptr)
+        };
+        let failure_name = CString::new("jet_ffi_take_failure").unwrap();
+        let failure_ptr = unsafe { dlsym(handle, failure_name.as_ptr()) };
+        if failure_ptr.is_null() {
+            unsafe {
+                dlclose(handle);
+            }
+            return Err(format!(
+                "jit ffi: missing symbol `jet_ffi_take_failure` in {}",
+                path.display()
+            ));
+        }
+        let take_failure_fn = unsafe {
+            std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i8>(failure_ptr)
+        };
         let free_name = CString::new("jet_ffi_cabi_free").unwrap();
         let free_ptr = unsafe { dlsym(handle, free_name.as_ptr()) };
         let free_fn = if free_ptr.is_null() {
@@ -299,7 +330,9 @@ fn load_cdylib(path: &Path, entries: &[jet_pkg_model::FFI::ExternEntry]) -> Resu
         }
         *FFI_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(FfiState {
             handle,
+            clear_panic_hook_fn,
             free_fn,
+            take_failure_fn,
             by_wrapper,
         });
         Ok(())
@@ -315,6 +348,35 @@ fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic 
         "report this as a compiler bug".to_string(),
         Some(span),
     )
+}
+
+const FFI_RUNTIME_PANIC: &str = "panic: a foreign function panicked";
+
+fn ffi_runtime_diag(span: Span) -> Diagnostic {
+    Diagnostic::from_row("E3014", &[("msg", FFI_RUNTIME_PANIC)], Some(span))
+}
+
+fn ffi_bridge_host_fault(wrapper: &str) -> Diagnostic {
+    Diagnostic::runtime_host_fault(
+        String::new(),
+        format!("foreign FFI bridge `{wrapper}` panicked"),
+    )
+}
+
+fn call_cabi<R>(
+    state: &FfiState,
+    wrapper: &str,
+    span: Span,
+    call: impl FnOnce() -> R,
+) -> Result<R, Diagnostic> {
+    let _ = unsafe { (state.take_failure_fn)() };
+    let result = jet_codegen::scheduler::jet_scheduler_catch_foreign_boundary(call);
+    let failure = unsafe { (state.take_failure_fn)() };
+    match (failure, result) {
+        (1, _) => Err(ffi_runtime_diag(span)),
+        (0, Ok(value)) => Ok(value),
+        _ => Err(ffi_bridge_host_fault(wrapper)),
+    }
 }
 
 fn ffi_int_range_diag(span: Span) -> Diagnostic {
@@ -434,7 +496,10 @@ pub(crate) fn call_ctvalue(
             type FnStrInt = unsafe extern "C" fn(*const u8, usize) -> i64;
             let f: FnStrInt = unsafe { std::mem::transmute(entry.ptr) };
             let value = strings[0].as_deref().expect("String ABI argument");
-            Ok(int_result(unsafe { f(value.as_ptr(), value.len()) }))
+            let result = call_cabi(state, wrapper, span, || unsafe {
+                f(value.as_ptr(), value.len())
+            })?;
+            Ok(int_result(result))
         }
         ([ParamAbi::String], RetAbi::String) => {
             type FnStr = unsafe extern "C" fn(*const u8, usize, *mut *mut u8, *mut usize) -> i32;
@@ -442,7 +507,15 @@ pub(crate) fn call_ctvalue(
             let value = strings[0].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
             let mut out_len = 0;
-            let rc = unsafe { f(value.as_ptr(), value.len(), &mut out_ptr, &mut out_len) };
+            let rc = match call_cabi(state, wrapper, span, || unsafe {
+                f(value.as_ptr(), value.len(), &mut out_ptr, &mut out_len)
+            }) {
+                Ok(rc) => rc,
+                Err(error) => {
+                    release_cabi_buffer(state.free_fn, out_ptr, out_len);
+                    return Err(error);
+                }
+            };
             if rc != 0 {
                 release_cabi_buffer(state.free_fn, out_ptr, out_len);
                 return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
@@ -468,17 +541,21 @@ pub(crate) fn call_ctvalue(
             type FnIntStrInt = unsafe extern "C" fn(i64, *const u8, usize) -> i64;
             let f: FnIntStrInt = unsafe { std::mem::transmute(entry.ptr) };
             let code = strings[1].as_deref().expect("String ABI argument");
-            Ok(int_result(unsafe {
-                f(int_arg(0)?, code.as_ptr(), code.len())
-            }))
+            let number = int_arg(0)?;
+            let result = call_cabi(state, wrapper, span, || unsafe {
+                f(number, code.as_ptr(), code.len())
+            })?;
+            Ok(int_result(result))
         }
         ([ParamAbi::Int, ParamAbi::String], RetAbi::Float) => {
             type FnIntStrFloat = unsafe extern "C" fn(i64, *const u8, usize) -> f64;
             let f: FnIntStrFloat = unsafe { std::mem::transmute(entry.ptr) };
             let code = strings[1].as_deref().expect("String ABI argument");
-            Ok(float_result(unsafe {
-                f(int_arg(0)?, code.as_ptr(), code.len())
-            }))
+            let number = int_arg(0)?;
+            let result = call_cabi(state, wrapper, span, || unsafe {
+                f(number, code.as_ptr(), code.len())
+            })?;
+            Ok(float_result(result))
         }
         ([ParamAbi::Int, ParamAbi::String], RetAbi::String) => {
             type FnIntStr =
@@ -487,14 +564,24 @@ pub(crate) fn call_ctvalue(
             let code = strings[1].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
             let mut out_len = 0;
+            let number = int_arg(0)?;
             let rc = unsafe {
-                f(
-                    int_arg(0)?,
-                    code.as_ptr(),
-                    code.len(),
-                    &mut out_ptr,
-                    &mut out_len,
-                )
+                call_cabi(state, wrapper, span, || {
+                    f(
+                        number,
+                        code.as_ptr(),
+                        code.len(),
+                        &mut out_ptr,
+                        &mut out_len,
+                    )
+                })
+            };
+            let rc = match rc {
+                Ok(rc) => rc,
+                Err(error) => {
+                    release_cabi_buffer(state.free_fn, out_ptr, out_len);
+                    return Err(error);
+                }
             };
             if rc != 0 {
                 release_cabi_buffer(state.free_fn, out_ptr, out_len);
@@ -524,15 +611,26 @@ pub(crate) fn call_ctvalue(
             let code = strings[1].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
             let mut out_len = 0;
+            let first = int_arg(0)?;
+            let third = int_arg(2)?;
             let rc = unsafe {
-                f(
-                    int_arg(0)?,
-                    code.as_ptr(),
-                    code.len(),
-                    int_arg(2)?,
-                    &mut out_ptr,
-                    &mut out_len,
-                )
+                call_cabi(state, wrapper, span, || {
+                    f(
+                        first,
+                        code.as_ptr(),
+                        code.len(),
+                        third,
+                        &mut out_ptr,
+                        &mut out_len,
+                    )
+                })
+            };
+            let rc = match rc {
+                Ok(rc) => rc,
+                Err(error) => {
+                    release_cabi_buffer(state.free_fn, out_ptr, out_len);
+                    return Err(error);
+                }
             };
             if rc != 0 {
                 release_cabi_buffer(state.free_fn, out_ptr, out_len);
@@ -558,17 +656,23 @@ pub(crate) fn call_ctvalue(
         ([ParamAbi::Int], RetAbi::Int) => {
             type FnInt = unsafe extern "C" fn(i64) -> i64;
             let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(int_result(unsafe { f(int_arg(0)?) }))
+            let value = int_arg(0)?;
+            let result = call_cabi(state, wrapper, span, || unsafe { f(value) })?;
+            Ok(int_result(result))
         }
         ([ParamAbi::Int, ParamAbi::Int], RetAbi::Int) => {
             type FnIntInt = unsafe extern "C" fn(i64, i64) -> i64;
             let f: FnIntInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(int_result(unsafe { f(int_arg(0)?, int_arg(1)?) }))
+            let first = int_arg(0)?;
+            let second = int_arg(1)?;
+            let result = call_cabi(state, wrapper, span, || unsafe { f(first, second) })?;
+            Ok(int_result(result))
         }
         ([ParamAbi::Int], RetAbi::Unit) => {
             type FnInt = unsafe extern "C" fn(i64);
             let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f(int_arg(0)?) };
+            let value = int_arg(0)?;
+            call_cabi(state, wrapper, span, || unsafe { f(value) })?;
             Ok(CtValue::Unit)
         }
         ([ParamAbi::Bool], RetAbi::Bool) => {
@@ -580,12 +684,17 @@ pub(crate) fn call_ctvalue(
                     return Err(ffi_diag(wrapper, "argument 0 is not a Bool", span));
                 }
             };
-            Ok(CtValue::Bool(unsafe { f(if value { 1 } else { 0 }) } != 0))
+            let result = call_cabi(state, wrapper, span, || unsafe {
+                f(if value { 1 } else { 0 })
+            })?;
+            Ok(CtValue::Bool(result != 0))
         }
         ([ParamAbi::Float], RetAbi::Float) => {
             type FnFloat = unsafe extern "C" fn(f64) -> f64;
             let f: FnFloat = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(float_result(unsafe { f(float_arg(0)?) }))
+            let value = float_arg(0)?;
+            let result = call_cabi(state, wrapper, span, || unsafe { f(value) })?;
+            Ok(float_result(result))
         }
         (
             [ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float],
@@ -593,32 +702,38 @@ pub(crate) fn call_ctvalue(
         ) => {
             type FnSixFloat = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
             let f: FnSixFloat = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(float_result(unsafe {
+            let values = [
+                float_arg(0)?,
+                float_arg(1)?,
+                float_arg(2)?,
+                float_arg(3)?,
+                float_arg(4)?,
+                float_arg(5)?,
+            ];
+            let result = call_cabi(state, wrapper, span, || unsafe {
                 f(
-                    float_arg(0)?,
-                    float_arg(1)?,
-                    float_arg(2)?,
-                    float_arg(3)?,
-                    float_arg(4)?,
-                    float_arg(5)?,
+                    values[0], values[1], values[2], values[3], values[4], values[5],
                 )
-            }))
+            })?;
+            Ok(float_result(result))
         }
         ([], RetAbi::Unit) => {
             type FnUnit = unsafe extern "C" fn();
             let f: FnUnit = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f() };
+            call_cabi(state, wrapper, span, || unsafe { f() })?;
             Ok(CtValue::Unit)
         }
         ([], RetAbi::Int) => {
             type FnUnitInt = unsafe extern "C" fn() -> i64;
             let f: FnUnitInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(int_result(unsafe { f() }))
+            let result = call_cabi(state, wrapper, span, || unsafe { f() })?;
+            Ok(int_result(result))
         }
         ([], RetAbi::Bool) => {
             type FnUnitBool = unsafe extern "C" fn() -> i8;
             let f: FnUnitBool = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(CtValue::Bool(unsafe { f() } != 0))
+            let result = call_cabi(state, wrapper, span, || unsafe { f() })?;
+            Ok(CtValue::Bool(result != 0))
         }
         _ => Err(ffi_diag(wrapper, "has an unsupported signature", span)),
     }
@@ -677,6 +792,18 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     };
     let value = match call_ctvalue(&name, &ct_args, None, Span::new(0, 0)) {
         Ok(value) => value,
+        Err(error) if error.code == "E3014" => {
+            // The generated bridge reports the same failure through its
+            // callback. Keep this fallback for a bridge built without the
+            // callback, and recover the active Jet source facts at the host
+            // boundary rather than manufacturing an engine-local report.
+            Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(FFI_RUNTIME_PANIC));
+            return 0;
+        }
+        Err(error) if error.runtime_host_fault_parts().is_some() => {
+            trap(&error.what);
+            return 0;
+        }
         Err(error) => {
             trap(&error.what);
             return 0;
@@ -724,11 +851,19 @@ mod tests {
         let reporter = source
             .find("CString::new(\"jet_ffi_set_reporter\")")
             .unwrap();
+        let clear_hook = source
+            .find("CString::new(\"jet_ffi_clear_panic_hook\")")
+            .unwrap();
+        let failure = source
+            .find("CString::new(\"jet_ffi_take_failure\")")
+            .unwrap();
         // The installed reporter is the generated no-unwind shim, so this also
         // pins that the bridge never receives a bare `extern "C"` body (#1995).
         let install = source
             .find("set_reporter(crate::host_seam::guarded(ffi_reporter))")
             .unwrap();
-        assert!(load < reporter && reporter < install);
+        assert!(load < reporter && reporter < install && install < clear_hook && clear_hook < failure);
+        assert!(source.contains("jet_scheduler_catch_foreign_boundary(call)"));
+        assert!(source.contains("(state.clear_panic_hook_fn)();"));
     }
 }

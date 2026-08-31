@@ -542,8 +542,9 @@ fn jet_args_completion(spec: &JetArgsSpec, shell: &String) -> String {
     format!("{} completion: {}", shell, words.join(" "))
 }
 
-/// Parse argv against the spec. Returns `Err(message)` on unknown flags/options
-/// or missing required positionals. `argv[0]` (the program name) is skipped.
+/// Parse argv against the spec. Returns `Err(message)` on unknown flags/options,
+/// missing required positionals, or unconsumed bare arguments. `argv[0]` (the
+/// program name) is skipped.
 fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArgs, String> {
     let mut flags: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut options: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
@@ -705,6 +706,10 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                             options.insert(name, value);
                         }
                     }
+                    // Nested parser already assigned its bare values to the
+                    // nested options. Keep them in the result for the
+                    // ParsedArgs positional API; root validation below skips
+                    // values already validated at command scope.
                     positionals.extend(parsed.positionals);
                     explicit_flags.extend(nested_explicit_flags);
                     explicit_options.extend(nested_explicit_options);
@@ -729,10 +734,11 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
     }
 
     // D-CLI-POS1=A named-wins: a positional whose name matches an already-set
-    // option is satisfied by the named form and does not consume a bare arg.
-    // Remaining bare args fill unsatisfied positionals in declaration order
-    // by copying into `options` under the positional name so decode can read
-    // one path (`jet_parsed_option`) for both forms.
+    // option is satisfied by the named form. Its corresponding bare slot is
+    // consumed as the overridden value, but never shifts later positionals.
+    // Remaining bare args fill unsatisfied positionals in declaration order by
+    // copying into `options` under the positional name so decode can read one
+    // path (`jet_parsed_option`) for both forms.
     let mut bare_i = 0usize;
     let mut missing: Vec<&str> = Vec::new();
     for e in jet_args_all_entries(spec) {
@@ -740,6 +746,12 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
             continue;
         };
         if options.contains_key(name) {
+            // A named value wins over one bare value in the same declared
+            // positional slot. Do not let that overridden value feed a later
+            // field, but do count it so every additional value is rejected.
+            if bare_i < positionals.len() {
+                bare_i += 1;
+            }
             continue;
         }
         if bare_i < positionals.len() {
@@ -757,6 +769,19 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
             missing.push(name.as_str());
         }
     }
+    if subcommand.is_none() && bare_i < positionals.len() {
+        let surplus: Vec<String> = positionals[bare_i..]
+            .iter()
+            .map(|value| format!("`{}`", value))
+            .collect();
+        return Err(format!(
+            "unexpected argument{}: {}\n\n{}",
+            if surplus.len() == 1 { "" } else { "s" },
+            surplus.join(", "),
+            spec.help()
+        ));
+    }
+
     for (name, value) in fallbacks {
         options.entry(name).or_insert_with(|| vec![value]);
     }

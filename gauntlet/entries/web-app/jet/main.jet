@@ -13,9 +13,10 @@ fn run() {
     }
     increment := ui.button("increment", on_click: () -> increment_count())
     reset := ui.button("reset", on_click: () -> reset_count())
+    backend :: ui.null_backend()
     ui.reactive_render(() -> {
         current := count.get()
-        ui.mount(ui.null_backend(), ui.box([
+        ui.mount(backend, ui.box([
             ui.node("count: {current}", 120.0, 32.0),
             ~increment,
             ~reset

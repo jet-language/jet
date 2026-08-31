@@ -3,16 +3,69 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 use jetpack::TrustRoot::{
     allow_cache_witness, canonical_root, canonical_snapshot, canonical_targets,
     fixture_threshold_root, is_cache_witness_allowed, sign_root, sign_snapshot, sign_targets,
     sign_timestamp, BoundIdentity, CacheProvenance, CacheReceipt, FixedClock, IdentityKind,
-    PublisherIdentity, RootBootstrap, SnapshotMetaEntry, SnapshotMetadata, TargetMeta,
-    TargetsMetadata, TimestampMetadata, TrustEngine, TrustError, TrustKey, TrustPolicy,
+    public_trust_manifest, PublisherIdentity, PublicTrustKey, RootBootstrap, SnapshotMetaEntry,
+    SnapshotMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine, TrustError,
+    TrustKey, TrustPolicy,
 };
 use jetpack::SHA256;
+
+#[test]
+fn trust_publication_contract_is_owned_pending_and_has_no_fake_root() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let publication = repo.join("site/dist/keys");
+    let manifest = fs::read_to_string(publication.join("trust-manifest.json")).unwrap();
+    assert_eq!(
+        manifest.trim(),
+        "{\"schema\":1,\"domain\":\"jet-lang.dev\",\"status\":\"awaiting-key-ceremony\",\"root\":null,\"keys\":[],\"rotation\":\"offline threshold root rotation; publish a new manifest only after the old root verifies the new root\"}"
+    );
+    assert!(!publication.join("nix-index-v1.ed25519.pub").exists());
+
+    let readme = fs::read_to_string(publication.join("README.md")).unwrap();
+    let docs = fs::read_to_string(repo.join("docs/infra/trust-root.md")).unwrap();
+    for text in [
+        "https://keys.jet-lang.dev/nix-index-v1.ed25519.pub",
+        "key-id:base64-public-key",
+        "ed25519",
+        "issued_unix",
+        "expires_unix",
+        "manual update",
+    ] {
+        assert!(
+            readme.contains(text) || docs.contains(text),
+            "missing contract text: {text}"
+        );
+    }
+    assert!(!manifest.contains("jet-test-index-v1"));
+}
+
+#[test]
+fn trust_publication_exporter_rejects_the_test_index_key() {
+    let value = format!("jet-test-index-v1:{}", "A".repeat(43) + "=");
+    let error = PublicTrustKey::from_nix_line("index", &value).unwrap_err();
+    assert!(matches!(
+        error,
+        TrustError::InvalidKey { detail }
+            if detail == "test public trust key `jet-test-index-v1` cannot be published"
+    ));
+
+    let key = PublicTrustKey::from_nix_line(
+        "index",
+        "official-index-v1:11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+    )
+    .unwrap();
+    let manifest = public_trust_manifest("jet-lang.dev", None, &[key]).unwrap();
+    assert!(manifest.contains("\"key_id\":\"official-index-v1\""));
+    assert!(manifest.contains("\"algorithm\":\"ed25519\""));
+    assert!(manifest.contains("nix-index-v1.ed25519.pub"));
+}
 
 #[test]
 fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {

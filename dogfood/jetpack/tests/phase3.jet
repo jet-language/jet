@@ -95,8 +95,6 @@ fn cleanup_node(path: String) {
 
 fn cleanup(path: String) { cleanup_node(path) }
 
-fn slash(path: String) String -> { return path.replace("\\", "/") }
-
 fn mode_text(mode: Int) String -> {
     bits :: mode % 0o1000
     owner :: (bits /% 64) % 8
@@ -109,11 +107,12 @@ fn store_tree(root: String) [String] -> {
     entries :: fs.walk(root) ?? panic("phase3 store tree cannot be read")
     tree := [String]{}
     loop entry in entries {
-        relative :: slash(entry.relative)
+        relative :: entry.relative.replace("\\", "/")
         stat :: fs.stat(~entry.path) ?? panic("phase3 store entry cannot be inspected")
         if stat.is_symlink {
             target :: fs.read_link(entry.path) ?? panic("phase3 store symlink cannot be read")
-            tree.push("symlink:{relative}:{slash(target)}")
+            target_text :: target.replace("\\", "/")
+            tree.push("symlink:{relative}:{target_text}")
         } else if entry.is_dir -> tree.push("dir:{relative}/") else {
             bytes :: fs.read_bytes(entry.path) ?? panic("phase3 store file cannot be read")
             tree.push("file:{relative}:{crypto.sha256(bytes).hex()}")

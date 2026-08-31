@@ -102,6 +102,26 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
     assert_eq!(audit.excluded, 1);
 }
 
+fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String)> {
+    let index = std::env::var("JET_CORE_CONFORMANCE_SHARD_INDEX").ok();
+    let count = std::env::var("JET_CORE_CONFORMANCE_SHARD_COUNT").ok();
+    match (index, count) {
+        (None, None) => entries,
+        (Some(index), Some(count)) => {
+            let index = index.parse::<usize>().expect("Core conformance shard index must be an integer");
+            let count = count.parse::<usize>().expect("Core conformance shard count must be an integer");
+            assert!(count > 0, "Core conformance shard count must be positive");
+            assert!(index < count, "Core conformance shard index must be below its count");
+            entries
+                .into_iter()
+                .enumerate()
+                .filter_map(|(position, entry)| (position % count == index).then_some(entry))
+                .collect()
+        }
+        _ => panic!("Core conformance shard index and count must be set together"),
+    }
+}
+
 /// #2286: generated Core witnesses use the same strict resident-JIT,
 /// interpreter, and AOT oracle as the feature corpus. Discovery is a sorted
 /// filesystem walk, so adding a witness cannot silently leave it outside the
@@ -121,14 +141,30 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
         String::from_utf8_lossy(&denominator.stdout),
         String::from_utf8_lossy(&denominator.stderr)
     );
+    let denominator_stdout = String::from_utf8_lossy(&denominator.stdout);
+    let expected_programs = denominator_stdout
+        .split("; ")
+        .find_map(|field| field.trim().strip_suffix(" program(s)")?.parse::<usize>().ok())
+        .expect("Core conformance denominator must report its program count");
     with_jit_test_scope(|| {
         if skip_if_cranelift_host_unsupported() {
             return;
         }
-        let entries = core_conformance_corpus_entries();
+        let all_entries = core_conformance_corpus_entries();
+        assert_eq!(
+            all_entries.len(),
+            expected_programs,
+            "strict tier gate must discover exactly the denominator's witness programs"
+        );
+        let entries = core_conformance_shard(all_entries);
         assert!(!entries.is_empty(), "Core conformance corpus must have witnesses");
         for (stem, file) in entries {
-            assert_cranelift_three_way(&file, &stem);
+            jet::Comptime::with_ambient(
+                Some(jet::Compiler::eval_core_call_with_type),
+                None,
+                None,
+                || assert_cranelift_three_way(&file, &stem),
+            );
         }
     });
 }

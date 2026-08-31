@@ -4,15 +4,18 @@ use jet::Comptime::Build::{
     execute_build_plan_with_front_end_and_compiler, execute_build_plan_with_front_end_and_remote,
     read_packaged_file_bounded, remote_execution_identity, remote_policy_digest, ActionCache,
     ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
-    ActionOutputRecord, ActionResultRecord, ActionSpec, BuildCapability, BuildContext, BuildError,
-    BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy, BuildProvenance,
+    ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildCapability,
+    BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPlan,
+    BuildPolicy, BuildProvenance,
     BuildResourcePool, CacheHitReason, CacheMissReason, CompilerPackageSpec, ContentDigest,
     FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
     LocalCas, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
     RemoteActionRequest, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
     RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult,
-    RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, TargetKind,
-    TargetSpec, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+    RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, SysrootIdentity,
+    TargetKind,
+    TargetSpec, ToolchainResolution, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec,
+    BUILD_PLUGIN_API_VERSION,
 };
 use std::fs;
 use std::sync::{Arc, Barrier, Mutex};
@@ -3936,4 +3939,98 @@ fn compiler_package_identity_target_and_profile_force_rebuild_keys() {
     assert_ne!(base, key("jet-b", "x86_64-linux", "debug"));
     assert_ne!(base, key("jet-a", "aarch64-linux", "debug"));
     assert_ne!(base, key("jet-a", "x86_64-linux", "release"));
+}
+
+#[test]
+fn declared_hangar_toolchain_binds_virtual_mount_and_action_identity() {
+    fn plan_for(mount_identity: &str) -> (BuildPlan, ActionHandle) {
+        let mut context = BuildContext::new();
+        let provenance = BuildProvenance::jetpack_dependency(
+            "cc-toolchain@jetpack",
+            LockRecord::new("hangar", "sha256:bundle"),
+        );
+        let mount_source = format!("/hangar/objects/{mount_identity}");
+        let mount_destination = "/jet/toolchains/bundle";
+        let toolchain = context
+            .toolchain(
+                "jet-cc",
+                ToolchainSpec::target("x86_64-unknown-linux-gnu", provenance.clone())
+                    .with_host_triple("x86_64-unknown-linux-gnu")
+                    .with_linker(LinkerIdentity::new("lld", provenance.clone()))
+                    .with_sysroot(SysrootIdentity::new(
+                        "sysroot",
+                        "sha256:sysroot",
+                        provenance.clone(),
+                    ))
+                    .with_tool(
+                        "cc",
+                        format!("{mount_destination}/bin/cc"),
+                    )
+                    .with_tool(
+                        "c++",
+                        format!("{mount_destination}/bin/c++"),
+                    )
+                    .with_tool(
+                        "ld",
+                        format!("{mount_destination}/bin/ld"),
+                    )
+                    .declared_only()
+                    .with_read_only_mount_identity(
+                        mount_source,
+                        mount_destination,
+                        format!("sha256:{mount_identity}"),
+                    ),
+            )
+            .unwrap();
+        let action = context
+            .action(
+                "compile-main",
+                ActionSpec::cached([
+                    "cc",
+                    "--target=x86_64-unknown-linux-gnu",
+                    "--sysroot=/jet/toolchains/bundle/sysroot",
+                    "-c",
+                    "main.c",
+                ])
+                .with_inputs(["main.c"])
+                .with_outputs(["main.o"])
+                .with_kind(ActionKind::Compile)
+                .with_cap(BuildCapability::Exec)
+                .with_toolchain(toolchain),
+            )
+            .unwrap();
+        let app = context
+            .add_executable(
+                "app",
+                TargetSpec::new()
+                    .with_source("main.c")
+                    .with_output("app")
+                    .with_action(action)
+                    .with_toolchain(toolchain),
+            )
+            .unwrap();
+        (context.plan_with_default(app).unwrap(), action)
+    }
+
+    let (first, first_action) = plan_for("bundle-a");
+    let (second, second_action) = plan_for("bundle-b");
+
+    let first_toolchain = &first.toolchains()[1];
+    assert_eq!(
+        first_toolchain.resolution,
+        ToolchainResolution::DeclaredOnly
+    );
+    assert_eq!(first_toolchain.mounts[0].identity, "sha256:bundle-a");
+    assert_eq!(
+        first_toolchain.tools.get("cc").map(String::as_str),
+        Some("/jet/toolchains/bundle/bin/cc")
+    );
+    assert_eq!(
+        first.action(first_action).unwrap().kind,
+        ActionKind::Compile
+    );
+    assert_ne!(
+        first.action_key(first_action).unwrap(),
+        second.action_key(second_action).unwrap()
+    );
 }

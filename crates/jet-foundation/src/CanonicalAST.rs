@@ -1,7 +1,9 @@
 //! D-BUILDNORM1=A — canonical, span/comment-free serialization of a parsed
 //! program, for the content-addressed build cache (Tower #85).
 //!
-//! The build cache keys on `SHA256(canonical_bytes(bundle) + profile + version)`.
+//! The build cache keys on `SHA256(canonical_bytes(bundle) + target dossier +
+//! profile + version)`. The target dossier carries the selected target triple,
+//! runtime layer, provider identity, and Prelude source-closure identity.
 //! `canonical_bytes` turns the *pre-sema* [`ProgramBundle`] (post-parse,
 //! post-import-resolution, before any sema/codegen) into a deterministic byte
 //! string with these properties:
@@ -24,13 +26,14 @@
 //!
 //! A cache hit replays a previously-validated result, it does not bypass
 //! validation. The key captures every input that determines the generated Rust:
-//! the full parsed program (this module), the build profile, and the toolchain
-//! version (folded in by [`ast_cache_key`]'s `jet_version` salt). A hit is only
-//! ever *served* from an entry that a prior build *stored*, and storage only
-//! happens for a build that ran the whole front end (sema + codegen) to success.
-//! So a hit means: this exact program, under this exact toolchain and profile,
-//! was already type-checked and compiled once — skipping the pipeline again is
-//! replaying that verified compile, never letting unchecked code through.
+//! the full parsed program (this module), the target dossier, the build
+//! profile, and the toolchain version (folded in by [`ast_cache_key`]'s
+//! `jet_version` salt). A hit is only ever *served* from an entry that a prior
+//! build *stored*, and storage only happens for a build that ran the whole front
+//! end (sema + codegen) to success. So a hit means: this exact program, under
+//! this exact target/provider closure, toolchain, and profile, was already
+//! type-checked and compiled once — skipping the pipeline again is replaying that
+//! verified compile, never letting unchecked code through.
 //!
 //! Inputs that live *outside* the parsed AST are handled by the caller, not
 //! here: `embed_file`/`embed_bytes` bytes and the enclosing `pkg.jet` policy are
@@ -39,6 +42,43 @@
 //! external-file or manifest change can never be masked by an identical AST.
 
 use crate::AST::ProgramBundle;
+
+/// Deterministic, span-free, comment-free serialization of one parsed module's
+/// semantic content. Paths, display names, and raw source are deliberately
+/// excluded because they describe provenance rather than generated code.
+pub fn canonical_module_bytes(module: &crate::AST::LoadedModule) -> Vec<u8> {
+    let mut s = String::new();
+    append_module_semantics(&mut s, module);
+    strip_spans(&s).into_bytes()
+}
+
+fn append_module_semantics(s: &mut String, module: &crate::AST::LoadedModule) {
+    use std::fmt::Write;
+    s.push_str(&module.alias);
+    s.push('\u{1}');
+    // Visibility + web-target markers change what codegen emits, so they are
+    // part of the program's meaning. All are small deterministic values.
+    let _ = write!(s, "{:?}", module.pub_file);
+    s.push('\u{1}');
+    let _ = write!(s, "{:?}", module.no_prelude);
+    s.push('\u{1}');
+    let _ = write!(s, "{:?}", module.web_target_ceiling);
+    s.push('\u{1}');
+    // D-APP-UNIFY1=B / D-WEBDEFAULT1: the default backend changes App
+    // capability resolution and therefore belongs in the build identity.
+    let _ = write!(s, "{:?}", module.default_target);
+    s.push('\u{1}');
+    let _ = write!(s, "{:?}", module.html_path);
+    s.push('\u{1}');
+    let _ = write!(s, "{:?}", module.imports);
+    s.push('\u{1}');
+    // D-ENTRY-SCRIPT1=B: pre-sema script statements are program content
+    // too. They have not become the ordinary implicit `run` item yet, so
+    // serializing only `items` would let distinct scripts share a key.
+    let _ = write!(s, "{:?}", module.script_body);
+    s.push('\u{1}');
+    let _ = write!(s, "{:?}", module.items);
+}
 
 /// Deterministic, span-free, comment-free serialization of the parsed program.
 /// See the module docs for the exact contract.
@@ -51,30 +91,7 @@ pub fn canonical_bytes(bundle: &ProgramBundle) -> Vec<u8> {
     // AST *content* of each module is serialized — never its path, on-disk
     // display string, or raw source text (all whitespace-/location-dependent).
     for m in &bundle.modules {
-        s.push_str(&m.alias);
-        s.push('\u{1}');
-        // Visibility + web-target markers change what codegen emits, so they are
-        // part of the program's meaning. All are small deterministic values.
-        let _ = write!(s, "{:?}", m.pub_file);
-        s.push('\u{1}');
-        let _ = write!(s, "{:?}", m.no_prelude);
-        s.push('\u{1}');
-        let _ = write!(s, "{:?}", m.web_target_ceiling);
-        s.push('\u{1}');
-        // D-APP-UNIFY1=B / D-WEBDEFAULT1: the default backend changes App
-        // capability resolution and therefore belongs in the build identity.
-        let _ = write!(s, "{:?}", m.default_target);
-        s.push('\u{1}');
-        let _ = write!(s, "{:?}", m.html_path);
-        s.push('\u{1}');
-        let _ = write!(s, "{:?}", m.imports);
-        s.push('\u{1}');
-        // D-ENTRY-SCRIPT1=B: pre-sema script statements are program content
-        // too. They have not become the ordinary implicit `run` item yet, so
-        // serializing only `items` would let distinct scripts share a key.
-        let _ = write!(s, "{:?}", m.script_body);
-        s.push('\u{1}');
-        let _ = write!(s, "{:?}", m.items);
+        append_module_semantics(&mut s, m);
         s.push('\u{2}');
     }
     strip_spans(&s).into_bytes()
@@ -86,8 +103,11 @@ pub fn canonical_fragment<T: std::fmt::Debug>(value: &T) -> Vec<u8> {
     strip_spans(&format!("{value:?}")).into_bytes()
 }
 
-/// The build-cache key for a parsed program: `SHA256(canonical_bytes + 0 +
-/// profile_tag + 0 + jet_version)`, as 64 lowercase hex chars.
+/// The build-cache key for a parsed program:
+/// `SHA256(canonical_bytes + 0 + target_dossier + 0 + profile_tag + 0 + jet_version)`,
+/// as 64 lowercase hex chars. The dossier is length-framed and covers the
+/// target triple, selected runtime layer, provider identity, and Prelude
+/// source-closure identity.
 ///
 /// SHA-256 throughout, matching `Lock::LockEnvelope::output_hash`
 /// (D-JPK-CACHE1=A / D-CASTORE1=A) so the local build cache and the hangar/lock
@@ -99,9 +119,18 @@ pub fn canonical_fragment<T: std::fmt::Debug>(value: &T) -> Vec<u8> {
 /// `jet_version` is a toolchain-identity salt: a codegen change (new compiler
 /// version) must not serve a stale binary for an identical AST. The caller
 /// passes `Manifest::COMPILER_VERSION` (optionally combined with an enclosing
-/// `pkg.jet` fingerprint) here.
-pub fn ast_cache_key(bundle: &ProgramBundle, profile_tag: &str, jet_version: &str) -> String {
+/// `pkg.jet` fingerprint) here. `facts` is the already-folded build snapshot
+/// for this bundle, so changing a target profile cannot reuse another profile's
+/// artifact.
+pub fn ast_cache_key(
+    bundle: &ProgramBundle,
+    profile_tag: &str,
+    jet_version: &str,
+    facts: &crate::Facts::BuildFactSnapshot,
+) -> String {
     let mut data = canonical_bytes(bundle);
+    data.push(0);
+    data.extend_from_slice(&facts.artifact_identity_bytes());
     data.push(0);
     data.extend_from_slice(profile_tag.as_bytes());
     data.push(0);

@@ -657,3 +657,11 @@ fn suite_budget_audit_fires_on_a_row_that_should_not_exist() {
         .expect_err("a non-numeric budget must be refused");
     assert!(err.contains("not a budget in whole seconds"), "{err}");
 }
+
+#[test]
+fn semantic_corpus_policy_runs_with_suite_membership() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("suite")
+        .expect("suite corpus semantic policy");
+}

@@ -41,6 +41,356 @@ fn is_bare_member_chain(expr: &Expr) -> bool {
     }
 }
 
+/// D-FMT-PLAIN1=A: recognize only the old, fully mechanical workaround. A
+/// broader comma-removal heuristic would warn on ordinary text processing.
+fn is_fixed_projection(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Str(parts, _)
+            if parts.len() == 1
+                && matches!(
+                    &parts[0],
+                    StrPart::Interp(_, crate::AST::StrFormat::Fixed(_))
+                )
+    )
+}
+
+fn is_string_literal(expr: &Expr, expected: &str) -> bool {
+    matches!(
+        expr,
+        Expr::Str(parts, _)
+            if parts.len() == 1
+                && matches!(&parts[0], StrPart::Lit(value) if value == expected)
+    )
+}
+
+fn call_suffix_end(source: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, ch) in source.get(open..)?.char_indices() {
+        let index = open + offset;
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn redundant_fixed_cleanup_edit(
+    source: &str,
+    receiver: &Expr,
+    method_span: Span,
+    args: &[CallArg],
+    resolved_receiver: Option<&str>,
+) -> Option<TextEdit> {
+    if args.len() != 2
+        || args.iter().any(|arg| arg.label.is_some() || arg.spread)
+        || !is_string_literal(&args[0].expr, ",")
+        || !is_string_literal(&args[1].expr, "")
+        || !is_fixed_projection(receiver)
+        || resolved_receiver.is_some()
+        || !landed_core_call("core.text.fmt", "decimal", 2)
+        || crate::Collections::builtin_method_return(&Type::String, "replace", 2, false)
+            != Some(Some(Type::String))
+    {
+        return None;
+    }
+    let receiver_end = receiver.span().end;
+    let mut start = method_span.start;
+    while start > receiver_end && source.as_bytes().get(start - 1).is_some_and(u8::is_ascii_whitespace) {
+        start -= 1;
+    }
+    if start == 0 || source.as_bytes().get(start - 1) != Some(&b'.') {
+        return None;
+    }
+    start -= 1;
+    let open = method_span.end
+        + source
+            .get(method_span.end..)?
+            .find('(')?;
+    let end = call_suffix_end(source, open)?;
+    Some(TextEdit {
+        span: Span::new(start, end),
+        new_text: String::new(),
+    })
+}
+
+fn is_plain_call_arg(arg: &CallArg) -> bool {
+    arg.label.is_none() && !arg.spread
+}
+
+pub(crate) fn landed_core_call(module: &str, member: &str, arity: usize) -> bool {
+    let Some(row) = Syntax::core_call_projection(
+        module,
+        member,
+        Syntax::CoreCallCoverage::SEMA,
+        arity,
+    )
+    .ok()
+    else {
+        return false;
+    };
+    row.has_direct_symbol()
+        && crate::Sema::CheckerCoreLib::core_call_signature(module, member)
+            .is_some_and(|(params, _)| params.len() == arity)
+}
+
+fn landed_http_method(ty: &Type, method: &str, args: &[CallArg], result: Type) -> bool {
+    crate::Sema::CheckerCoreLib::http_type_method_return(ty, method, args)
+        == Some(Some(result))
+}
+
+fn http_text_result() -> Type {
+    Type::Result {
+        ok: Box::new(Type::String),
+        err: Box::new(Type::Named("HTTPError".to_string())),
+    }
+}
+
+impl<'a> Checker<'a> {
+    fn named_local_type(&self, expr: &Expr) -> Option<String> {
+        match expr.without_parens() {
+            Expr::Ident(name, _) => match &self.lookup(name)?.ty {
+                Type::Named(name) => Some(name.clone()),
+                Type::Tagged { inner, .. } => match inner.as_ref() {
+                    Type::Named(name) => Some(name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn http_body_owner<'b>(&self, body: &'b Expr) -> Option<(&'b Expr, String)> {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = body.without_parens()
+        else {
+            return None;
+        };
+        if method != "body" || !args.is_empty() {
+            return None;
+        }
+        let owner_type = self.named_local_type(receiver)?;
+        if !matches!(owner_type.as_str(), "HTTPRequest" | "HTTPResponse") {
+            return None;
+        }
+        if self.registry.contains(owner_type.as_str()) {
+            return None;
+        }
+        // The owner method and its replacement must both be present in the
+        // sema API table before this default-cap rewrite can be suggested.
+        if !landed_http_method(
+            &Type::Named(owner_type.clone()),
+            "body",
+            &[],
+            Type::Named("HTTPBody".to_string()),
+        ) || !landed_http_method(
+            &Type::Named(owner_type.clone()),
+            "text",
+            &[],
+            http_text_result(),
+        )
+        {
+            return None;
+        }
+        Some((receiver.as_ref(), owner_type))
+    }
+
+    /// D-STDLIB-SMALL1: the direct process argument projection is the one
+    /// resolved `process.argv().skip(1)` shape. Bindings, indexed reads, and
+    /// aliased module spellings stay available for corpus-level policy.
+    fn process_args_view_edit(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        method_span: Span,
+        args: &[CallArg],
+        inferred: Option<&Type>,
+    ) -> Option<TextEdit> {
+        if method != "skip"
+            || args.len() != 1
+            || !is_plain_call_arg(&args[0])
+            || !matches!(args[0].expr.without_parens(), Expr::Int(value, ..) if *value == 1)
+            || !matches!(
+                inferred,
+                Some(Type::Apply { name, args })
+                    if name == Syntax::TYPE_ITER
+                        && args.len() == 1
+                        && args[0] == Type::String
+            )
+        {
+            return None;
+        }
+        let Expr::MethodCall {
+            receiver: argv_receiver,
+            method: argv_method,
+            args: argv_args,
+            ..
+        } = receiver.without_parens()
+        else {
+            return None;
+        };
+        if argv_method != "argv" || !argv_args.is_empty() {
+            return None;
+        }
+        let (module, alias, _) = self.core_module_path_from_receiver(argv_receiver)?;
+        if module != "core.process"
+            || alias != "process"
+            || !landed_core_call("core.process", "argv", 0)
+            || !landed_core_call("core.process", "args", 0)
+        {
+            return None;
+        }
+        let start = crate::Sema::source_expr_start(argv_receiver);
+        let alias_end = crate::Sema::source_expr_end(self.source, argv_receiver)?;
+        let alias_source = self.source.get(start..alias_end)?;
+        let end = crate::Sema::source_call_end(self.source, method_span)?;
+        Some(TextEdit {
+            span: Span::new(start, end),
+            new_text: format!("{alias_source}.args()"),
+        })
+    }
+
+    /// D-HTTP-TEXT1=A: constant evaluation is the identity proof. Runtime
+    /// limits, binary reads, chunks, and bodies not reached directly from a
+    /// typed request/response remain quiet.
+    fn message_text_edit(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        method_span: Span,
+        args: &[CallArg],
+        recv_type: Option<&str>,
+    ) -> Option<TextEdit> {
+        if method != "text"
+            || recv_type != Some("HTTPBody")
+            || self.registry.contains("HTTPBody")
+            || args.len() != 1
+            || !is_plain_call_arg(&args[0])
+        {
+            return None;
+        }
+        if !landed_http_method(
+            &Type::Named("HTTPBody".to_string()),
+            "text",
+            args,
+            http_text_result(),
+        ) {
+            return None;
+        }
+        let crate::Comptime::CtValue::Int(limit) = self.evaluate_constant(&args[0].expr)? else {
+            return None;
+        };
+        if limit != crate::Sema::CheckerCoreLib::HTTP_DEFAULT_BODY_LIMIT {
+            return None;
+        }
+        let (owner, owner_type) = self.http_body_owner(receiver)?;
+        let default_limit = crate::Sema::CheckerCoreLib::http_text_default_limit(
+            &Type::Named(owner_type),
+            "text",
+            &[],
+        )?;
+        if limit != default_limit {
+            return None;
+        }
+        let owner_start = crate::Sema::source_expr_start(owner);
+        let owner_end = crate::Sema::source_expr_end(self.source, owner)?;
+        let owner_source = self.source.get(owner_start..owner_end)?;
+        let end = crate::Sema::source_call_end(self.source, method_span)?;
+        Some(TextEdit {
+            span: Span::new(owner_start, end),
+            new_text: format!("{owner_source}.text()"),
+        })
+    }
+
+    fn raw_unit_value(expr: &Expr) -> Option<&Expr> {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = expr.without_parens()
+        else {
+            return None;
+        };
+        (method == crate::Syntax::METHOD_DISTINCT_RAW && args.is_empty())
+            .then_some(receiver.as_ref())
+    }
+
+    /// D-UNIT-SCALAR1=A: reuse the identity proof from the unit operator
+    /// checker, then replace exactly one outer constructor expression.
+    fn unit_scalar_rewrap_edit(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        method_span: Span,
+        args: &[CallArg],
+        inferred: Option<&Type>,
+    ) -> Option<TextEdit> {
+        if !self.unit_scalar_rewrap_identity(receiver, method, args, inferred) {
+            return None;
+        }
+        let Expr::Binary(op, left, right, _) = args[0].expr.without_parens() else {
+            return None;
+        };
+        let (unit, scalar, operator) = match op {
+            BinOp::Mul if Self::raw_unit_value(left).is_some() => {
+                (Self::raw_unit_value(left)?, right.as_ref(), " * ")
+            }
+            BinOp::Mul if Self::raw_unit_value(right).is_some() => {
+                (Self::raw_unit_value(right)?, left.as_ref(), " * ")
+            }
+            BinOp::Div if Self::raw_unit_value(left).is_some() => {
+                (Self::raw_unit_value(left)?, right.as_ref(), " / ")
+            }
+            _ => return None,
+        };
+        let unit_start = crate::Sema::source_expr_start(unit);
+        let unit_end = crate::Sema::source_expr_end(self.source, unit)?;
+        let scalar_start = crate::Sema::source_expr_start(scalar);
+        let scalar_end = crate::Sema::source_expr_end(self.source, scalar)?;
+        let unit_source = self.source.get(unit_start..unit_end)?;
+        let scalar_source = self.source.get(scalar_start..scalar_end)?;
+        let new_text = if matches!(op, BinOp::Mul)
+            && Self::raw_unit_value(left).is_none()
+            && Self::raw_unit_value(right).is_some()
+        {
+            format!("{scalar_source}{operator}{unit_source}")
+        } else {
+            format!("{unit_source}{operator}{scalar_source}")
+        };
+        let end = crate::Sema::source_call_end(self.source, method_span)?;
+        Some(TextEdit {
+            span: Span::new(crate::Sema::source_expr_start(receiver), end),
+            new_text,
+        })
+    }
+}
+
 /// D-SUBJECT-COHERE1=A: the parser uses a function-value call node for a
 /// leading `.member(...)`, while ordinary postfix method calls use
 /// `MethodCall`. Normalize that one parser distinction before the shared
@@ -864,7 +1214,7 @@ impl<'a> Checker<'a> {
         }
         self.diags.push(Diagnostic::error(
             "E0112",
-            format!("{} can't be used in a typed literal hole", ty.show()),
+            format!("`{}` can't be used in a typed literal hole", ty.show()),
             "typed literal holes use the shared JetShow rendering contract".to_string(),
             "use a printable value, or convert it to String before the hole".to_string(),
             Some(inner.span()),
@@ -1165,7 +1515,7 @@ impl<'a> Checker<'a> {
                 "a `DateTime` literal cannot contain interpolation".to_string(),
                 "DateTime values are checked as complete RFC3339 literals before the program runs"
                     .to_string(),
-                "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+                "write a complete `DateTime{\"…\"}` literal, or parse a runtime String explicitly"
                     .to_string(),
                 Some(*literal_span),
             ));
@@ -1284,18 +1634,22 @@ impl<'a> Checker<'a> {
         // An open callback has no return row yet. If its callee does, retain
         // that row as the callback's carrier; applying the enclosing function's
         // `?` here would put a raw Result-returning closure in the wrong row.
-        // The callee row is the gate: ordinary lambdas and non-fallible calls
-        // keep the normal automatic-propagation path.
+        // A nested callee is checked under its argument's success type, so the
+        // carrier is recorded for both the direct callback root and that
+        // nested success-position call. A real Result expectation remains a
+        // carrier position and must not be reinterpreted as callback failure.
         if self.failure_carrier_inference
-            && self.expected_type.is_none()
             && matches!(result, Some(Type::Result { .. }))
+            && !matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
         {
             if self.failure_carrier.is_none() {
                 self.failure_carrier = result.clone();
                 self.ret = result.clone();
             }
             self.task_body_propagates = true;
-            return result;
+            if self.expected_type.is_none() {
+                return result;
+            }
         }
         if self.compiler_generated
             || !matches!(
@@ -1860,12 +2214,24 @@ impl<'a> Checker<'a> {
                         });
                         if borrowed_param {
                             let path = field_path(e).unwrap_or_else(|| root.to_string());
-                            self.diags.push(Diagnostic::error(
+                            let diagnostic = Diagnostic::error(
                                 "E0120",
-                                format!("`{path}` is borrowed, so it cannot escape as an owned value"),
-                                format!("`{root}` is a parameter with read access; its fields are borrowed with it"),
-                                format!("copy it explicitly with `{}{path}`, or take `{root}` with the move marker `^` (`^{root}`)", Syntax::SIGIL_COPY),
+                                format!(
+                                    "`{path}` is borrowed, so it cannot escape as an owned value"
+                                ),
+                                format!(
+                                    "`{root}` is a parameter with read access; its fields are borrowed with it"
+                                ),
+                                format!(
+                                    "copy it explicitly with `{}{path}`, or take `{root}` with the move marker `^` (`^{root}`)",
+                                    Syntax::SIGIL_COPY
+                                ),
                                 Some(e.span()),
+                            );
+                            self.diags.push(self.with_ownership_copy_edit(
+                                diagnostic,
+                                e.span(),
+                                Some(t),
                             ));
                             return ty;
                         }
@@ -2391,6 +2757,9 @@ impl<'a> Checker<'a> {
                     &before,
                     &[then_path, else_path],
                 );
+                if self.statement_expr_inference {
+                    return Some(crate::Sema::CheckerCoreLib::unit_ty());
+                }
                 match (then_ty, else_ty) {
                     (Some(a), Some(b)) => {
                         // D-TOOL2: `todo` is diverging; if one branch is a
@@ -2433,11 +2802,6 @@ impl<'a> Checker<'a> {
                                     ),
                                     Some(span),
                                 ));
-                                // The branch mismatch is the root error. Do
-                                // not return one branch's type to the outer
-                                // value checker, or a declared block result
-                                // would add a second, less precise E0113.
-                                return None;
                             } else {
                                 self.diags.push(Diagnostic::error(
                                     "E0074",
@@ -2452,6 +2816,22 @@ impl<'a> Checker<'a> {
                                         .to_string(),
                                     Some(span),
                                 ));
+                            }
+                            // Codegen still walks the typed tree to report all
+                            // source errors. Poison the invalid tail with the
+                            // existing diverging recovery node so lowering
+                            // never observes two live branch types.
+                            let else_span = else_value.span();
+                            **else_value = Expr::Todo {
+                                span: else_span,
+                                expected_type: Some(a.name()),
+                            };
+                            if self.collect_item_types.is_empty() {
+                                // The branch mismatch is the root error. Do
+                                // not return one branch's type to the outer
+                                // value checker, or a declared block result
+                                // would add a second, less precise E0113.
+                                return None;
                             }
                             Some(a)
                         }
@@ -2688,6 +3068,9 @@ impl<'a> Checker<'a> {
                 };
                 self.infer(e)
             }
+            // D-VOID1=A: `()` is the public spelling of the existing internal
+            // Unit value; no separate unit type is introduced.
+            Expr::Unit(_) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             Expr::Bool(_, _) => Some(Type::Bool),
             // D-UNIFYLIT1=A: bare `"…"` is always `String`. Domain text elaborates
             // only from `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` (typed-literal
@@ -2714,6 +3097,10 @@ impl<'a> Checker<'a> {
                 .name;
                 let fixed_selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Fixed,
+                )
+                .name;
+                let grouped_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Grouped,
                 )
                 .name;
                 let hex_selector = crate::Syntax::interpolation_selector_for_kind(
@@ -2774,8 +3161,19 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
-                                    if !is_displayable(&t, self.registry, self.trait_reg)
-                                        && !self.is_unit_type(&t)
+                                    let display_migration_lint = !self.is_unit_type(&t)
+                                        && matches!(&t, Type::Named(n)
+                                            // `BuildError` is a compiler-host-only
+                                            // carrier for the `fn build` entry.
+                                            if n != "BuildError"
+                                                && self.trait_reg.auto_printable.contains(n)
+                                                && !self.trait_reg.implements_trait(
+                                                    n,
+                                                    crate::Generics::DISPLAY,
+                                                ));
+                                    if (!is_displayable(&t, self.registry, self.trait_reg)
+                                        && !self.is_unit_type(&t))
+                                        || display_migration_lint
                                     {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
                                             &t,
@@ -2841,7 +3239,7 @@ impl<'a> Checker<'a> {
                                                         "Display is the user-facing interpolation hook; Debug is for `{{value:{debug_selector}}}`"
                                                     ),
                                                     format!(
-                                                        "add `impl {n}.Display {{ fn display(self) String -> {{ … }} }}"
+                                                        "add `impl {n}.Display {{ fn display(self) String -> {{ … }} }}`"
                                                     ),
                                                     Some(inner.span()),
                                                 ));
@@ -2896,7 +3294,7 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 crate::AST::StrFormat::Fixed(_) => {
-                                    if !matches!(t, Type::Float | Type::Int) {
+                                    if !matches!(&t, Type::Float | Type::Int) {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
@@ -2904,6 +3302,22 @@ impl<'a> Checker<'a> {
                                                 t.show()
                                             ),
                                             "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values"
+                                                .to_string(),
+                                            "pass a `Float` or exact `Int`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Grouped(_) => {
+                                    if !matches!(&t, Type::Float | Type::Int) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{grouped_selector}(n)`",
+                                                t.show()
+                                            ),
+                                            "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or exact `Int` values"
                                                 .to_string(),
                                             "pass a `Float` or exact `Int`, or use bare interpolation for this value"
                                                 .to_string(),
@@ -3138,7 +3552,7 @@ impl<'a> Checker<'a> {
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
                         format!(
-                            "`{}` was declared with `Type.{{ uninit }}`, so no value is available until you write to it — this read could see garbage",
+                            "`{}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage",
                             name
                         ),
                         format!(
@@ -4037,6 +4451,54 @@ impl<'a> Checker<'a> {
                 for (name, state) in fixed_uninit {
                     self.flow.uninit.set(&name, state);
                 }
+                if let Some(edit) = self.process_args_view_edit(
+                    receiver,
+                    method,
+                    *method_span,
+                    args,
+                    inferred.as_ref(),
+                ) {
+                    let diagnostic =
+                        Diagnostic::from_row("L0515", &[], Some(*method_span)).with_edit(edit);
+                    self.diags.push(diagnostic);
+                }
+                if let Some(edit) = self.message_text_edit(
+                    receiver,
+                    method,
+                    *method_span,
+                    args,
+                    recv_type.as_deref(),
+                ) {
+                    let diagnostic =
+                        Diagnostic::from_row("L0516", &[], Some(*method_span)).with_edit(edit);
+                    self.diags.push(diagnostic);
+                }
+                if let Some(edit) = self.unit_scalar_rewrap_edit(
+                    receiver,
+                    method,
+                    *method_span,
+                    args,
+                    inferred.as_ref(),
+                ) {
+                    let diagnostic =
+                        Diagnostic::from_row("L0519", &[], Some(*method_span)).with_edit(edit);
+                    self.diags.push(diagnostic);
+                }
+                if method == "replace"
+                    && inferred.as_ref().is_some_and(|ty| matches!(ty, Type::String))
+                {
+                    if let Some(edit) = redundant_fixed_cleanup_edit(
+                        self.source,
+                        receiver,
+                        *method_span,
+                        args,
+                        recv_type.as_deref(),
+                    ) {
+                        self.diags.push(
+                            Diagnostic::from_row("L0518", &[], Some(*method_span)).with_edit(edit),
+                        );
+                    }
+                }
                 // S40 / D-RANGE-VALUE1: the one-argument String method is the
                 // surface spelling of the existing Range-aware Slice node.
                 // The method table has already checked the argument and
@@ -4368,8 +4830,8 @@ impl<'a> Checker<'a> {
                     return Some(v.jet_type());
                 }
                 if !self.in_comptime {
-                    let globals = self.current_ct_globals();
-                    if let Some(v) = globals.get(name).cloned() {
+                    let known = self.current_ct_globals().get(name).cloned();
+                    if let Some(v) = known {
                         // D-META-STAGE1=B: the mark is part of the identifier,
                         // so a marked name is looked up like any other name and
                         // answers the type its binding was given. The folded
@@ -5200,7 +5662,7 @@ impl<'a> Checker<'a> {
                     *kind = IndexKind::Range;
                     return Some(Type::List(inner.clone()));
                 }
-                if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
+                if !index_value_ty.is_integer() {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -5268,7 +5730,7 @@ impl<'a> Checker<'a> {
                         fix,
                         Some(index.span()),
                     ));
-                } else if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
+                } else if !index_value_ty.is_integer() {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(

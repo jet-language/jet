@@ -2,29 +2,14 @@
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see
 // Source/FFI.rs) when a Jet program uses `core.archive.gzip` or
-// `core.archive.zstd`. The compiler crate (`Source/`) never depends on
-// `flate2` or `zstd`; it only ships this text. Owner-approved I6 bootstrap
-// exception (same approved dependency family as D-DEP-ARCHIVE1): `flate2`
-// (pure-Rust, `miniz_oxide` back-end) and `zstd` (Rust binding, vendors and
-// builds the C zstd source via `zstd-sys`) live inside the archive codec
-// ring package and are built from vendored/fetched source. Native-ize
-// obligation before the end of Epoch 3 (I6).
+// `core.archive.zstd`. The dependency-free canonical gzip encoder is emitted
+// separately from `jet-foundation/src/GzipKernel.rs`; this file owns native
+// gzip decoding and zstd.
 //
-// Decompression is fallible end-to-end: a
-// malformed compressed stream is safety-critical misuse and must surface
-// as a Jet `Result` `Err`, not a silent empty buffer.
+// Decompression is fallible end-to-end: a malformed compressed stream is
+// safety-critical misuse and must surface as a Jet `Result` `Err`, not a
+// silent empty buffer.
 
-/// Compress `data` with gzip (RFC 1952) at the default compression level.
-/// Returns the compressed bytes. Compression is always successful on valid input.
-pub fn jet_compress_gzip_compress(data: &[u8]) -> Vec<u8> {
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-    use std::io::Write;
-    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
-    // Infallible on a Vec<u8> writer; unwrap is safe.
-    let _ = enc.write_all(data);
-    enc.finish().unwrap_or_default()
-}
 
 /// Decompress gzip-compressed `data`. Returns an error message if `data` is
 /// not a valid gzip stream.

@@ -6,6 +6,8 @@
 //! codegen projection with one checked configuration. It does not load or
 //! link anything; those are the CLI/runtime adapters.
 
+use std::collections::BTreeMap;
+
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::ApiFreeze;
 use crate::AST::{Item, ProgramBundle};
@@ -15,6 +17,7 @@ const SUPPORTED_BINDINGS: &[&str] = &["c", "python", "swift"];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryConfig {
     pub name: String,
+    pub entry: Option<String>,
     pub loadable: bool,
     pub native: bool,
     pub bindings: Vec<String>,
@@ -25,9 +28,38 @@ fn e1341(what: impl Into<String>, why: impl Into<String>, fix: impl Into<String>
     Diagnostic::error("E1341", what.into(), why.into(), fix.into(), None)
 }
 
-fn package_facts(bundle: &ProgramBundle) -> Option<crate::Package::PackageFacts> {
-    let manifest = crate::Manifest::load(&bundle.project_root).and_then(|result| result.ok())?;
-    crate::Package::PackageFacts::parse(&manifest.raw, "package.jet").ok()
+/// Keep the closed foreign symbol namespace collision-free before Codegen
+/// publishes the header or native artifact. This is the same ASCII C spelling
+/// used by the native emitter and named bindings.
+fn c_symbol(name: &str) -> String {
+    let mut symbol = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if symbol.is_empty() || symbol.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        symbol.insert(0, '_');
+    }
+    symbol
+}
+
+fn package_facts(
+    bundle: &ProgramBundle,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    match crate::Package::PackageFacts::load(&bundle.project_root) {
+        None => Ok(None),
+        Some(Ok(facts)) => Ok(Some(facts)),
+        Some(Err(error)) => Err(vec![e1341(
+            "package manifest is not valid",
+            error.to_string(),
+            "fix `package.jet` before compiling the Library output",
+        )]),
+    }
 }
 
 /// Resolve the selected `Library` output. A manifest with one Library uses it
@@ -36,26 +68,72 @@ pub fn resolve_config(
     bundle: &ProgramBundle,
     explicit_output: Option<&str>,
 ) -> Result<LibraryConfig, Vec<Diagnostic>> {
-    let output = package_facts(bundle).and_then(|facts| {
-        let selected = explicit_output
-            .and_then(|name| facts.outputs.get(name))
-            .or_else(|| {
-                let mut libraries = facts
-                    .outputs
-                    .values()
-                    .filter(|output| output.kind == crate::Package::PackageOutputKind::Library);
-                let first = libraries.next()?;
-                libraries.next().is_none().then_some(first)
-            })?;
-        (selected.kind == crate::Package::PackageOutputKind::Library).then_some(selected.clone())
-    });
-
-    let Some(output) = output else {
+    let Some(facts) = package_facts(bundle)? else {
         return Err(vec![e1341(
             "this build does not select a Library output",
             "native and loadable artifacts are driven by a checked `outputs: .{ … }` Library fact (D-LIB-EXPORT1=C)",
             "select one Library with `--output=<name>`, or declare exactly one Library output in package.jet",
         )]);
+    };
+    let library_names = facts
+        .outputs
+        .iter()
+        .filter(|(_, output)| output.kind == crate::Package::PackageOutputKind::Library)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let output = match explicit_output {
+        Some(name) => {
+            let Some(output) = facts.outputs.get(name) else {
+                return Err(vec![e1341(
+                    format!("Library output `{name}` does not exist"),
+                    "`--output` addresses the checked name in the package output model",
+                    format!(
+                        "choose a declared Library output: {}",
+                        if library_names.is_empty() {
+                            "none".to_string()
+                        } else {
+                            library_names.join(", ")
+                        }
+                    ),
+                )]);
+            };
+            if output.kind != crate::Package::PackageOutputKind::Library {
+                return Err(vec![e1341(
+                    format!("output `{name}` is not a Library"),
+                    "`jet build --lib` publishes only outputs of kind `Library`",
+                    format!(
+                        "choose a declared Library output: {}",
+                        if library_names.is_empty() {
+                            "none".to_string()
+                        } else {
+                            library_names.join(", ")
+                        }
+                    ),
+                )]);
+            }
+            output.clone()
+        }
+        None => match library_names.as_slice() {
+            [] => {
+                return Err(vec![e1341(
+                    "this build does not select a Library output",
+                    "native and loadable artifacts are driven by a checked `outputs: .{ … }` Library fact (D-LIB-EXPORT1=C)",
+                    "select one Library with `--output=<name>`, or declare exactly one Library output in package.jet",
+                )]);
+            }
+            [name] => facts
+                .outputs
+                .get(name)
+                .expect("Library name came from package outputs")
+                .clone(),
+            names => {
+                return Err(vec![e1341(
+                    "multiple Library outputs require an explicit selection",
+                    "a native Library build must publish exactly one checked package output",
+                    format!("run `jet build --lib --output <name>`; candidates: {}", names.join(", ")),
+                )]);
+            }
+        },
     };
     let bindings = output.binding_languages();
     if let Some(language) = bindings
@@ -81,6 +159,7 @@ pub fn resolve_config(
     let native = output.is_native();
     Ok(LibraryConfig {
         name,
+        entry: output.entry.clone(),
         loadable,
         native,
         bindings,
@@ -112,31 +191,52 @@ pub fn declared_effects(bundle: &ProgramBundle) -> crate::Sema::EffectSet {
 /// projection. The wording names Library rather than the plugin backend.
 pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let surface = crate::Sema::guest_export_surface(bundle);
     let mut exports = 0usize;
-    for item in &bundle.modules[bundle.entry].items {
-        let Item::Func(function) = item else { continue };
-        if !function.is_pub || !bundle.name_ledger.public(bundle.entry, &function.name) {
-            continue;
-        }
+    let mut has_text_export = false;
+    let mut symbols = BTreeMap::new();
+    for export in surface {
         exports += 1;
-        if crate::Codegen::library_export_shape(function).is_none() {
-            diagnostics.push(Diagnostic::error(
-                "E1260",
+        let Some(shape) = export.scalar else {
+            diagnostics.push(e1341(
                 "a Library export has an unsupported signature".to_string(),
                 format!(
-                    "native Library exports currently use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar shape; `pub fn {}` is outside that boundary",
-                    function.name
+                    "native Library exports currently use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar shape; `#Export(c) fn {}` is outside that boundary",
+                    export.name
                 ),
-                "make every parameter and the return type one of the same `Int`, `Float`, `Bool`, or `Text` scalar, or drop `pub` if this function is private to the library".to_string(),
-                None,
+                "use one supported scalar type for every parameter and the return type, or remove `#Export(c)`".to_string(),
+            ));
+            continue;
+        };
+        has_text_export |= shape == crate::Sema::GuestScalar::Text;
+        let symbol = c_symbol(&export.name);
+        if let Some(previous) = symbols.insert(symbol.clone(), export.name.clone()) {
+            diagnostics.push(e1341(
+                format!(
+                    "Library exports `{previous}` and `{}` with the same C symbol `{symbol}`",
+                    export.name
+                ),
+                "C, Python, and Swift projections must name one native function unambiguously; foreign names outside ASCII collapse to the same C symbol",
+                "rename one exported function so every `#Export(c)` function has a unique ASCII C symbol",
+            ));
+        }
+    }
+    if has_text_export {
+        if let Some(function) = symbols.get("jet_text_free") {
+            diagnostics.push(e1341(
+                format!(
+                    "Library export `{function}` collides with generated C symbol `jet_text_free`"
+                ),
+                "Text results use `jet_text_free` as the one library-owned allocator release function",
+                "rename the export so it does not use `jet_text_free`",
             ));
         }
     }
     if exports == 0 {
         diagnostics.push(e1341(
             "a native Library has no exported functions",
-            "D-LIB-EXPORT1=C freezes the public `pub fn` surface and emits it for the foreign caller",
-            "mark at least one supported scalar function `pub`, or use a sealed package output instead",
+            "D-ADOPT-GUEST1=A publishes the entry module's explicit `#Export(c)` surface",
+            "mark at least one supported scalar function `#Export(c)`, or use a sealed package output instead",
         ));
     }
     diagnostics
@@ -165,19 +265,22 @@ fn e1257(delta: &str) -> Diagnostic {
     )
 }
 
-/// D-LIB-REUSE1=B / D-LIB-EXPORT1=C: freeze the exact exported surface before
+/// D-LIB-REUSE1=B / D-ADOPT-GUEST1=A: freeze the exact exported surface before
 /// a native artifact or loadable payload is emitted.
 pub fn check_and_freeze_version(bundle: &ProgramBundle, name: &str) -> Result<(), Vec<Diagnostic>> {
     let package = snapshot_package_key(name);
     let mut funcs = Vec::new();
-    for item in &bundle.modules[bundle.entry].items {
-        let Item::Func(function) = item else { continue };
-        if !function.is_pub
-            || !bundle.name_ledger.public(bundle.entry, &function.name)
-            || crate::Codegen::library_export_shape(function).is_none()
-        {
+    let surface = crate::Sema::guest_export_surface(bundle);
+    for export in surface {
+        if export.scalar.is_none() {
             continue;
         }
+        let Some(function) = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+            let Item::Func(function) = item else { return None };
+            (function.name == export.name).then_some(function)
+        }) else {
+            continue;
+        };
         funcs.push(ApiFreeze::FrozenFn {
             name: function.name.clone(),
             signature: ApiFreeze::fn_signature(function),

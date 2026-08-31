@@ -1,0 +1,84 @@
+{
+  "schema": "jet.adoption.air-gap-fixture/v1",
+  "fixture_version": "1.0.0",
+  "purpose": "deterministic offline install, replacement, and revocation state transitions",
+  "evidence_class": "fixture-only",
+  "network": {
+    "mode": "denied",
+    "attempted_connections": 0
+  },
+  "trust": {
+    "root_kind": "fixture-public-key",
+    "key_id": "fixture-root-v1",
+    "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "revoked_builders": []
+  },
+  "releases": [
+    {
+      "id": "jet-1.0.0",
+      "version": "1.0.0",
+      "builder": "builder-fixture-v1",
+      "state": "active",
+      "object": "releases/1.0.0/jet",
+      "sha256": "35028d072d1936e7d319f3c4fce32058784a0f1b5b54fec298e7974b1f947545",
+      "bytes": 22,
+      "signature": "fixture-only"
+    },
+    {
+      "id": "jet-1.1.0",
+      "version": "1.1.0",
+      "builder": "builder-fixture-v2",
+      "state": "active-before-revocation",
+      "object": "releases/1.1.0/jet",
+      "sha256": "82d81b475fe325891fa9bf00a3b17e68b42ff09784d388fc0bf40b3b075f8f98",
+      "bytes": 22,
+      "signature": "fixture-only"
+    }
+  ],
+  "revocations": [
+    {
+      "id": "builder-fixture-v2",
+      "kind": "builder",
+      "sequence": 3,
+      "reason": "fixture compromise"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "install-first-release",
+      "operation": "install",
+      "from": null,
+      "to": "jet-1.0.0",
+      "network": "denied",
+      "expected": "allow",
+      "reason": "local bytes, matching digest, and non-revoked builder"
+    },
+    {
+      "id": "replace-before-revocation",
+      "operation": "update",
+      "from": "jet-1.0.0",
+      "to": "jet-1.1.0",
+      "network": "denied",
+      "expected": "allow",
+      "reason": "local replacement was verified before its builder was revoked"
+    },
+    {
+      "id": "revoke-builder",
+      "operation": "revoke",
+      "from": "jet-1.1.0",
+      "to": "jet-1.1.0",
+      "network": "denied",
+      "expected": "deny",
+      "reason": "builder-fixture-v2 is revoked; retain receipt and rebuild"
+    },
+    {
+      "id": "deny-revoked-replacement",
+      "operation": "update",
+      "from": "jet-1.0.0",
+      "to": "jet-1.1.0",
+      "network": "denied",
+      "expected": "deny",
+      "reason": "revocation remains effective after the object was copied; rebuild from a reviewed release"
+    }
+  ]
+}

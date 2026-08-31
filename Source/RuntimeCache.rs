@@ -5,7 +5,7 @@
 //! compile that mutually dependent closure once, then link the user program.
 
 use crate::SHA256::sha256_hex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
@@ -50,6 +50,7 @@ impl std::fmt::Display for Error {
     }
 }
 
+#[must_use = "keep the runtime lease alive until its consuming rustc command exits"]
 pub struct PreparedRuntime {
     rust: String,
     runtime_rlib: Option<PathBuf>,
@@ -339,8 +340,9 @@ fn compile_artifact(
         }));
     }
 
-    // The lock serializes writers; the private directory keeps a slow compile
-    // safe if another process eventually reaps a stale lock.
+    // The owner file's OS lock serializes writers and pins the entry until the
+    // returned PreparedRuntime is dropped; the private directory isolates a
+    // slow compile.
     let temporary_id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let staging = entry.join(format!(".build.{}.{temporary_id}", std::process::id()));
     fs::create_dir_all(&staging).map_err(|error| {
@@ -399,11 +401,10 @@ fn compile_artifact(
         Error::Cache(format!("could not read {}: {error}", staged_rlib.display()))
     })?;
     let digest = sha256_hex(&bytes);
-    let _ = fs::remove_file(&rlib);
-    fs::rename(&staged_rlib, &rlib).map_err(|error| {
+    if let Err(error) = publish(&rlib, &bytes) {
         let _ = fs::remove_dir_all(&staging);
-        Error::Cache(format!("could not publish {}: {error}", rlib.display()))
-    })?;
+        return Err(error);
+    }
     let _ = fs::remove_dir_all(&staging);
     publish(
         &entry.join("artifact.sha256"),
@@ -612,7 +613,7 @@ fn safe_dir(root: &Path, entry: &Path) -> Result<(), Error> {
                 return Err(Error::Cache(format!(
                     "unsafe runtime-cache directory {}",
                     path.display()
-                )))
+                )));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -620,7 +621,7 @@ fn safe_dir(root: &Path, entry: &Path) -> Result<(), Error> {
                 return Err(Error::Cache(format!(
                     "could not inspect {}: {error}",
                     path.display()
-                )))
+                )));
             }
         }
     }
@@ -689,8 +690,30 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), Error> {
         file.sync_all().map_err(|error| {
             Error::Cache(format!("could not flush {}: {error}", path.display()))
         })?;
-        fs::rename(&temporary, path)
-            .map_err(|error| Error::Cache(format!("could not publish {}: {error}", path.display())))
+        match fs::rename(&temporary, path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Unix replaces the old file as part of rename. Windows needs
+                // the old name removed first; every call currently owns the
+                // entry lease, so cache readers cannot observe this fallback.
+                fs::remove_file(path).map_err(|remove_error| {
+                    Error::Cache(format!(
+                        "could not replace {}: {remove_error}",
+                        path.display()
+                    ))
+                })?;
+                fs::rename(&temporary, path).map_err(|rename_error| {
+                    Error::Cache(format!(
+                        "could not publish {}: {rename_error}",
+                        path.display()
+                    ))
+                })
+            }
+            Err(error) => Err(Error::Cache(format!(
+                "could not publish {}: {error}",
+                path.display()
+            ))),
+        }
     })();
     if result.is_err() {
         let _ = fs::remove_file(temporary);
@@ -737,11 +760,11 @@ fn entry_age(path: &Path) -> SystemTime {
         "libjet_runtime.rlib",
         "libjet_runtime_core.rlib",
     ]
-        .iter()
-        .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
-        .filter_map(|metadata| metadata.modified().ok())
-        .min()
-        .unwrap_or(UNIX_EPOCH)
+    .iter()
+    .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
+    .filter_map(|metadata| metadata.modified().ok())
+    .min()
+    .unwrap_or(UNIX_EPOCH)
 }
 
 fn prune_cache(root: &Path) -> Result<(), Error> {
@@ -773,85 +796,184 @@ fn prune_cache(root: &Path) -> Result<(), Error> {
         // A live preparation owns this lock from cache lookup/store through
         // its user's rustc link. Never remove an entry that lock acquisition
         // says is in use.
-        let Some(_lock) = BuildLock::try_acquire(&entry)? else {
+        let Some(lock) = BuildLock::try_acquire(&entry)? else {
             continue;
         };
+        // Rename the locked directory before releasing its lease. A concurrent
+        // builder can recreate the key at the original path, while this
+        // tombstone owns the old files and lock until removal completes.
+        if !fs::symlink_metadata(&entry)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            continue;
+        }
         let size = directory_size(&entry);
-        match fs::remove_dir_all(&entry) {
-            Ok(()) => footprint = footprint.saturating_sub(size),
+        let key = entry
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("entry");
+        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let tombstone = root.join(format!(".evict-{key}.{}.{id}", std::process::id()));
+        match fs::rename(&entry, &tombstone) {
+            Ok(()) => {
+                drop(lock);
+                match fs::remove_dir_all(&tombstone) {
+                    Ok(()) => footprint = footprint.saturating_sub(size),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        footprint = footprint.saturating_sub(size)
+                    }
+                    Err(error) => {
+                        return Err(Error::Cache(format!(
+                            "could not evict runtime cache entry {}: {error}",
+                            entry.display()
+                        )));
+                    }
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(Error::Cache(format!(
                     "could not evict runtime cache entry {}: {error}",
                     entry.display()
-                )))
+                )));
             }
         }
     }
     Ok(())
 }
 
+/// Cross-process lease for one cache entry. Eviction renames the locked entry
+/// before releasing this file, so its guard stays with the files being removed.
 struct BuildLock {
-    path: PathBuf,
+    lease_entry: PathBuf,
+    owner: Option<fs::File>,
 }
 
 impl BuildLock {
+    fn local_leases() -> &'static Mutex<HashSet<PathBuf>> {
+        static LEASES: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+        LEASES.get_or_init(|| Mutex::new(HashSet::new()))
+    }
+
+    fn reserve_local(entry: &Path) -> bool {
+        Self::local_leases()
+            .lock()
+            .unwrap()
+            .insert(entry.to_path_buf())
+    }
+
+    fn release_local(entry: &Path) {
+        Self::local_leases().lock().unwrap().remove(entry);
+    }
+
     fn try_acquire(entry: &Path) -> Result<Option<Self>, Error> {
+        if !Self::reserve_local(entry) {
+            return Ok(None);
+        }
         let path = entry.join(".build-lock");
-        match fs::create_dir(&path) {
-            Ok(()) => Ok(Some(Self { path })),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(Error::Cache(format!(
-                "could not lock {}: {error}",
-                entry.display()
-            ))),
+        let owner = match fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)
+        {
+            Ok(owner) => owner,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Self::release_local(entry);
+                return Ok(None);
+            }
+            Err(error) => {
+                Self::release_local(entry);
+                return Err(Error::Cache(format!(
+                    "could not open lock {}: {error}",
+                    entry.display()
+                )));
+            }
+        };
+        match owner.try_lock() {
+            Ok(()) => {
+                let current_lock = fs::symlink_metadata(&path)
+                    .ok()
+                    .zip(owner.metadata().ok())
+                    .is_some_and(|(path_metadata, owner_metadata)| {
+                        same_lock_file(&path_metadata, &owner_metadata)
+                    });
+                if !current_lock {
+                    drop(owner);
+                    Self::release_local(entry);
+                    return Ok(None);
+                }
+                Ok(Some(Self {
+                    lease_entry: entry.to_path_buf(),
+                    owner: Some(owner),
+                }))
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                Self::release_local(entry);
+                Ok(None)
+            }
+            Err(fs::TryLockError::Error(error)) => {
+                Self::release_local(entry);
+                Err(Error::Cache(format!(
+                    "could not lock {}: {error}",
+                    entry.display()
+                )))
+            }
         }
     }
 
     fn acquire(entry: &Path) -> Result<Self, Error> {
-        let path = entry.join(".build-lock");
         loop {
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self { path }),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = fs::metadata(&path)
-                        .and_then(|metadata| metadata.modified())
-                        .and_then(|modified| {
-                            modified.elapsed().map_err(|error| {
-                                std::io::Error::new(std::io::ErrorKind::Other, error)
-                            })
-                        })
-                        .map(|age| age > Duration::from_secs(300))
-                        .unwrap_or(false);
-                    if stale {
-                        let _ = fs::remove_dir(&path);
-                        continue;
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    fs::create_dir_all(entry).map_err(|create_error| {
+            if let Some(lock) = Self::try_acquire(entry)? {
+                if !entry.exists() {
+                    fs::create_dir_all(entry).map_err(|error| {
                         Error::Cache(format!(
-                            "could not recreate {} after eviction: {create_error}",
+                            "could not recreate {} after eviction: {error}",
                             entry.display()
                         ))
                     })?;
                 }
-                Err(error) => {
-                    return Err(Error::Cache(format!(
-                        "could not lock {}: {error}",
-                        entry.display()
-                    )))
-                }
+                return Ok(lock);
             }
+            if !entry.exists() {
+                fs::create_dir_all(entry).map_err(|error| {
+                    Error::Cache(format!(
+                        "could not recreate {} after eviction: {error}",
+                        entry.display()
+                    ))
+                })?;
+            }
+            std::thread::sleep(Duration::from_millis(25));
         }
+    }
+}
+
+fn same_lock_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return left.volume_serial_number() == right.volume_serial_number()
+            && left.file_index() == right.file_index();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        left.len() == right.len() && left.modified().ok() == right.modified().ok()
     }
 }
 
 impl Drop for BuildLock {
     fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.path);
+        // Keep the lock file inode stable. A waiter may already have opened it
+        // when this owner releases; removing it would let a third process create
+        // a different inode and enter the same cache entry concurrently.
+        drop(self.owner.take());
+        Self::release_local(&self.lease_entry);
     }
 }
 
@@ -1761,8 +1883,277 @@ use std::fmt::Debug;
 
         let two = format!("{BEGIN}fn runtime_changed() {{}}\n{END}fn main() {{}}\n");
         drop(repaired);
-        prepare_at(&root.join("cache"), rustc.as_os_str(), &two, &[], &[]).unwrap();
+        let _ = prepare_at(&root.join("cache"), rustc.as_os_str(), &two, &[], &[]).unwrap();
         assert_eq!(fs::read(&count).unwrap(), b"xxx");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    fn wait_for_child_signal(child: &mut std::process::Child, signal: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if signal.is_file() {
+                return;
+            }
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "runtime-cache child exited before {}: {:?}",
+                    signal.display(),
+                    status
+                );
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for runtime-cache child signal {}",
+                signal.display()
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    #[cfg(unix)]
+    fn seed_oversized_entry(entry: &Path) {
+        fs::create_dir_all(entry).unwrap();
+        let rlib = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(entry.join("libjet_runtime.rlib"))
+            .unwrap();
+        rlib.set_len(RUNTIME_CACHE_LIMIT_BYTES + 1).unwrap();
+        drop(rlib);
+        fs::write(entry.join("artifact.sha256"), b"seed\n").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cross_process_runtime_lease_survives_publish_and_prune() {
+        const CHILD_ROOT: &str = "JET_RUNTIME_CACHE_LEASE_CHILD_ROOT";
+        const CHILD_LOCKED: &str = "JET_RUNTIME_CACHE_LEASE_CHILD_LOCKED";
+        const CHILD_GO: &str = "JET_RUNTIME_CACHE_LEASE_CHILD_GO";
+        const CHILD_READY: &str = "JET_RUNTIME_CACHE_LEASE_CHILD_READY";
+        const CHILD_RELEASE: &str = "JET_RUNTIME_CACHE_LEASE_CHILD_RELEASE";
+
+        if let Some(child_root) = std::env::var_os(CHILD_ROOT) {
+            let child_root = PathBuf::from(child_root);
+            let cache = child_root.join("cache");
+            let pressure = cache.join(format!("{:064x}", 1));
+            let locked = PathBuf::from(std::env::var_os(CHILD_LOCKED).unwrap());
+            let go = PathBuf::from(std::env::var_os(CHILD_GO).unwrap());
+            let ready = PathBuf::from(std::env::var_os(CHILD_READY).unwrap());
+            let release = PathBuf::from(std::env::var_os(CHILD_RELEASE).unwrap());
+            let _lock = BuildLock::acquire(&pressure).unwrap();
+            fs::write(locked, b"locked").unwrap();
+            while !go.is_file() {
+                std::thread::yield_now();
+            }
+            publish(&pressure.join("child.marker"), b"published\n").unwrap();
+            prune_cache(&cache).unwrap();
+            fs::write(ready, b"pruned").unwrap();
+            while !release.is_file() {
+                std::thread::yield_now();
+            }
+            // Exit without Drop: the next prune must recover this stale OS lease.
+            std::process::exit(0);
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-cross-process-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let cache = root.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let pressure = cache.join(format!("{:064x}", 1));
+        seed_oversized_entry(&pressure);
+
+        let locked = root.join("child-locked");
+        let go = root.join("child-go");
+        let ready = root.join("child-ready");
+        let release = root.join("child-release");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("cross_process_runtime_lease_survives_publish_and_prune")
+            .env(CHILD_ROOT, &root)
+            .env(CHILD_LOCKED, &locked)
+            .env(CHILD_GO, &go)
+            .env(CHILD_READY, &ready)
+            .env(CHILD_RELEASE, &release)
+            .spawn()
+            .unwrap();
+        wait_for_child_signal(&mut child, &locked);
+
+        let generated = format!(
+            "{BEGIN}fn runtime_parent() {{}}\n{END}{CORE_BEGIN}fn core_parent() {{}}\n{CORE_END}fn main() {{}}\n"
+        );
+        let prepared = prepare_at(&cache, OsStr::new("rustc"), &generated, &[], &[]).unwrap();
+        assert!(prepared.is_split());
+        let held_core = prepared.core_rlib.as_ref().unwrap().clone();
+        fs::write(&go, b"go").unwrap();
+        wait_for_child_signal(&mut child, &ready);
+
+        let held_file = fs::File::open(&held_core).unwrap();
+        assert!(held_file.metadata().unwrap().len() > 0);
+        assert!(pressure.join("child.marker").is_file());
+        assert!(directory_size(&cache) > RUNTIME_CACHE_LIMIT_BYTES);
+        drop(held_file);
+
+        fs::write(&release, b"release").unwrap();
+        let status = child.wait().unwrap();
+        assert!(status.success());
+        prune_cache(&cache).unwrap();
+        assert!(
+            held_core.is_file(),
+            "live PreparedRuntime lease must pin Core"
+        );
+        assert!(directory_size(&cache) <= RUNTIME_CACHE_LIMIT_BYTES);
+
+        let final_pressure = cache.join(format!("{:064x}", 2));
+        seed_oversized_entry(&final_pressure);
+        let final_lock = BuildLock::acquire(&final_pressure).unwrap();
+        drop(prepared);
+        prune_cache(&cache).unwrap();
+        assert!(
+            !held_core.exists(),
+            "released PreparedRuntime lease must be reclaimable"
+        );
+        drop(final_lock);
+        prune_cache(&cache).unwrap();
+        assert!(directory_size(&cache) <= RUNTIME_CACHE_LIMIT_BYTES);
+        assert!(
+            fs::read_dir(&cache)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".evict-")),
+            "eviction tombstones must not remain after pruning"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_core_aot_shards_survive_bounded_cache_pruning() {
+        const CHILD_ROOT: &str = "JET_RUNTIME_CACHE_CONFORMANCE_CHILD_ROOT";
+        const CHILD_ROLE: &str = "JET_RUNTIME_CACHE_CONFORMANCE_CHILD_ROLE";
+        const CHILD_READY: &str = "JET_RUNTIME_CACHE_CONFORMANCE_CHILD_READY";
+        const CHILD_GO: &str = "JET_RUNTIME_CACHE_CONFORMANCE_CHILD_GO";
+        const CHILD_LINKED: &str = "JET_RUNTIME_CACHE_CONFORMANCE_CHILD_LINKED";
+
+        if let Some(child_root) = std::env::var_os(CHILD_ROOT) {
+            let child_root = PathBuf::from(child_root);
+            let role = std::env::var(CHILD_ROLE).unwrap();
+            let ready = PathBuf::from(std::env::var_os(CHILD_READY).unwrap());
+            let go = PathBuf::from(std::env::var_os(CHILD_GO).unwrap());
+            let linked = PathBuf::from(std::env::var_os(CHILD_LINKED).unwrap());
+            let (runtime_name, core_name) = match role.as_str() {
+                "a" => ("runtime_a", "core_a"),
+                "b" => ("runtime_b", "core_b"),
+                other => panic!("unexpected conformance shard role {other}"),
+            };
+            let generated = format!(
+                "{BEGIN}pub fn {runtime_name}() {{}}\n{END}{CORE_BEGIN}pub fn {core_name}() {{}}\n{CORE_END}fn main() {{ {core_name}(); }}\n"
+            );
+            let cache = child_root.join("cache");
+            let prepared =
+                prepare_at(&cache, OsStr::new("rustc"), &generated, &[], &[]).unwrap();
+            assert!(
+                prepared.is_split(),
+                "strict Core shard must publish split runtime and Core rlibs"
+            );
+            let core = prepared.core_rlib.as_ref().unwrap().clone();
+            fs::write(&ready, core.to_string_lossy().as_bytes()).unwrap();
+            while !go.is_file() {
+                std::thread::yield_now();
+            }
+            assert!(
+                core.is_file(),
+                "Core rlib must remain published until its AOT link starts"
+            );
+            let source = child_root.join(format!("shard-{role}.rs"));
+            let binary = child_root.join(format!("shard-{role}"));
+            fs::write(&source, prepared.rust()).unwrap();
+            let mut rustc = Command::new("rustc");
+            rustc
+                .args(["--edition", "2021"])
+                .arg(&source)
+                .arg("-o")
+                .arg(&binary);
+            prepared.add_rustc_args(&mut rustc);
+            let output = rustc.output().unwrap();
+            assert!(
+                output.status.success(),
+                "strict Core shard AOT link failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            fs::write(linked, b"linked").unwrap();
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-conformance-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let cache = root.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let pressure = cache.join(format!("{:064x}", 1));
+        seed_oversized_entry(&pressure);
+        let pressure_lock = BuildLock::acquire(&pressure).unwrap();
+
+        let spawn_child = |role| {
+            let ready = root.join(format!("ready-{role}"));
+            let go = root.join(format!("go-{role}"));
+            let linked = root.join(format!("linked-{role}"));
+            let child = Command::new(std::env::current_exe().unwrap())
+                .arg("concurrent_core_aot_shards_survive_bounded_cache_pruning")
+                .env(CHILD_ROOT, &root)
+                .env(CHILD_ROLE, role)
+                .env(CHILD_READY, &ready)
+                .env(CHILD_GO, &go)
+                .env(CHILD_LINKED, &linked)
+                .spawn()
+                .unwrap();
+            (child, ready, go, linked)
+        };
+        let (mut child_a, ready_a, go_a, linked_a) = spawn_child("a");
+        wait_for_child_signal(&mut child_a, &ready_a);
+        let (mut child_b, ready_b, go_b, linked_b) = spawn_child("b");
+        wait_for_child_signal(&mut child_b, &ready_b);
+        let core_a = PathBuf::from(fs::read_to_string(&ready_a).unwrap());
+        let core_b = PathBuf::from(fs::read_to_string(&ready_b).unwrap());
+        assert!(core_a.is_file(), "first Core rlib must be complete before link");
+        assert!(core_b.is_file(), "second Core rlib must be complete before link");
+
+        fs::write(&go_b, b"go").unwrap();
+        wait_for_child_signal(&mut child_b, &linked_b);
+        let status_b = child_b.wait().unwrap();
+        assert!(status_b.success(), "second strict Core shard must link");
+        assert!(
+            core_a.is_file(),
+            "sibling publish/prune must not remove first live Core rlib"
+        );
+
+        fs::write(&go_a, b"go").unwrap();
+        wait_for_child_signal(&mut child_a, &linked_a);
+        let status_a = child_a.wait().unwrap();
+        assert!(status_a.success(), "first strict Core shard must link");
+
+        drop(pressure_lock);
+        prune_cache(&cache).unwrap();
+        assert!(directory_size(&cache) <= RUNTIME_CACHE_LIMIT_BYTES);
+        assert!(
+            fs::read_dir(&cache)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    !name.starts_with(".evict-")
+                        && !name.starts_with(".build.")
+                        && !name.ends_with(".tmp")
+                }),
+            "concurrent AOT cleanup must leave no temporary cache entries"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1796,14 +2187,8 @@ use std::fmt::Debug;
         let generated = format!(
             "{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{}}\n"
         );
-        let first = prepare_at(
-            &root.join("cache"),
-            rustc.as_os_str(),
-            &generated,
-            &[],
-            &[],
-        )
-        .unwrap();
+        let first =
+            prepare_at(&root.join("cache"), rustc.as_os_str(), &generated, &[], &[]).unwrap();
         assert!(!first.cache_hit());
         drop(first);
         assert_eq!(
@@ -1820,9 +2205,16 @@ use std::fmt::Debug;
             &[],
         )
         .unwrap();
-        assert!(!compiler_changed.cache_hit(), "compiler identity must miss both artifacts");
+        assert!(
+            !compiler_changed.cache_hit(),
+            "compiler identity must miss both artifacts"
+        );
         drop(compiler_changed);
-        assert_eq!(build_count(), 4, "compiler change must rebuild both closures");
+        assert_eq!(
+            build_count(),
+            4,
+            "compiler change must rebuild both closures"
+        );
 
         let compile_cases = vec![
             (
@@ -1848,7 +2240,10 @@ use std::fmt::Debug;
             (
                 "environment flags",
                 vec![],
-                vec![(OsString::from("RUSTFLAGS"), OsString::from("-Ctarget-cpu=native"))],
+                vec![(
+                    OsString::from("RUSTFLAGS"),
+                    OsString::from("-Ctarget-cpu=native"),
+                )],
             ),
         ];
         for (input, flags, environment) in compile_cases {
@@ -1861,7 +2256,10 @@ use std::fmt::Debug;
                 &environment,
             )
             .unwrap();
-            assert!(!changed.cache_hit(), "{input} change must miss both artifacts");
+            assert!(
+                !changed.cache_hit(),
+                "{input} change must miss both artifacts"
+            );
             drop(changed);
             assert_eq!(
                 build_count(),
@@ -1894,7 +2292,8 @@ use std::fmt::Debug;
             "linker-only change must affect final link work only"
         );
 
-        let program_changed = generated.replace("fn main() {}", "fn main() { println!(\"changed\"); }");
+        let program_changed =
+            generated.replace("fn main() {}", "fn main() { println!(\"changed\"); }");
         let program_hit = prepare_at(
             &root.join("cache"),
             rustc.as_os_str(),
@@ -1973,6 +2372,34 @@ use std::fmt::Debug;
             !entry.exists(),
             "unlocked oversized entry should be evicted"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evicted_lease_does_not_remove_recreated_entry_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-recreated-lock-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let cache = root.join("cache");
+        let entry = cache.join(format!("{:064x}", 1));
+        fs::create_dir_all(&entry).unwrap();
+        let lock = BuildLock::acquire(&entry).unwrap();
+        let tombstone = cache.join(".evict-recreated");
+        fs::rename(&entry, &tombstone).unwrap();
+
+        // A concurrent waiter can recreate the key while pruning removes the
+        // old directory. Its lock belongs to the new entry and must survive
+        // cleanup of the old lease.
+        fs::create_dir_all(&entry).unwrap();
+        let replacement_lock = entry.join(".build-lock");
+        fs::write(&replacement_lock, b"replacement").unwrap();
+        drop(lock);
+
+        assert!(replacement_lock.is_file());
+        drop(BuildLock::acquire(&entry).unwrap());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2067,8 +2494,8 @@ use std::fmt::Debug;
         if Command::new("rustc").arg("-vV").output().is_err() {
             return;
         }
-        let entry = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/features/basics/branches.jet");
+        let entry =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/basics/branches.jet");
         let generated = crate::compile_with_path("", entry.to_str().unwrap())
             .expect("branches should reach codegen")
             .rust;
@@ -2077,10 +2504,18 @@ use std::fmt::Debug;
             std::process::id(),
             std::thread::current().id()
         ));
-        let prepared =
-            prepare_at(&root.join("cache"), OsStr::new("rustc"), &generated, &[], &[])
-                .expect("runtime preparation");
-        assert!(prepared.is_split(), "Core-bearing builds must use cached rlibs");
+        let prepared = prepare_at(
+            &root.join("cache"),
+            OsStr::new("rustc"),
+            &generated,
+            &[],
+            &[],
+        )
+        .expect("runtime preparation");
+        assert!(
+            prepared.is_split(),
+            "Core-bearing builds must use cached rlibs"
+        );
         let source = root.join("main.rs");
         let binary = root.join("main");
         fs::write(&source, prepared.rust()).unwrap();
@@ -2106,7 +2541,10 @@ use std::fmt::Debug;
             &[],
         )
         .unwrap();
-        assert!(warm.cache_hit(), "second preparation must reuse the closure rlib");
+        assert!(
+            warm.cache_hit(),
+            "second preparation must reuse the closure rlib"
+        );
         drop(warm);
         let _ = fs::remove_dir_all(root);
     }
@@ -2122,8 +2560,14 @@ use std::fmt::Debug;
             std::process::id(),
             std::thread::current().id()
         ));
-        let prepared = prepare_at(&root.join("cache"), OsStr::new("rustc"), &generated, &[], &[])
-            .unwrap();
+        let prepared = prepare_at(
+            &root.join("cache"),
+            OsStr::new("rustc"),
+            &generated,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert!(prepared.is_split());
         drop(prepared);
         let _ = fs::remove_dir_all(root);

@@ -3,24 +3,24 @@ Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned
     |
   5 |     t :: task greet
     |               ^^^^^
- Why: this function can access the parameter, but it does not own the value; capture requires the move marker `^`
- Fix: make the parameter owned with the move marker `^`: `greet: ^fn()`
+ Why: This function can access the parameter, but it does not own the value; capture requires the move marker `^`
+ Fix: Make the parameter owned with the move marker `^`: `greet: ^fn()`
 More: jet-lang.dev/e/E0120
 
-Error [E1102]: this task returns `fn()`, which isn't sendable
+Error [E1102]: This task returns `fn()`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:5:15
     |
   5 |     t :: task greet
     |               ^^^^^
- Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+ Why: The closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary
+Error [E1103]: Can't detach task `t` — it captured a value that can't cross a thread boundary
   --> tests/ui/task_detach_unsound.jet:6:7
     |
   6 |     t.detach()
     |       ^^^^^^
- Why: a detached task runs unsupervised; it must only hold values it owns cleanly
- Fix: fix the E1102 error at the spawn site first, then `.detach()` is safe
+ Why: A detached task runs unsupervised; it must only hold values it owns cleanly
+ Fix: Fix the E1102 error at the spawn site first, then `.detach()` is safe
 More: jet-lang.dev/e/E1103

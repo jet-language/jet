@@ -4,7 +4,8 @@ use crate::Generics::e0901;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
     alloc_method_return, app_method_return, args_spec_method_return, binary_reader_method_return,
-    civil_time_method_return, core_generic_struct_field, data_renamed_to_datatree,
+    civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
+    data_renamed_to_datatree,
     datatree_method_return, db_value_method_return, decode_error_ty, devserver_method_return,
     email_method_return, encoding_handle_method_return, expiring_method_return,
     file_handle_method_return, http_type_method_return, is_allocator_type, is_db_value_type_name,
@@ -14,7 +15,8 @@ use crate::Sema::CheckerCoreLib::{
     math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return, net_method_return,
     parsed_args_method_return, path_method_return, process_child_method_return,
     process_spec_method_return, process_stdin_method_return, process_stream_method_return,
-    reflect_method_return, regex_method_return, require_net_method_labels, result_ty,
+    reflect_method_return, regex_method_return, require_net_method_labels,
+    result_ty,
     simd_reduce_markers, sketch_method_return, sketch_type_name, terminal_session_method_return,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
@@ -410,6 +412,52 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
         ),
         "App" => matches!(method, "route" | "page" | "layout"),
         _ => false,
+    }
+}
+
+impl<'a> Checker<'a> {
+fn http_handler_param_count(&self, expr: &Expr) -> Option<usize> {
+    match expr {
+        Expr::Paren(inner, _) => self.http_handler_param_count(inner),
+        Expr::Lambda(lambda) => Some(lambda.params.len()),
+        Expr::Ident(name, _) => self
+            .funcs
+            .get(name)
+            .map(|sig| sig.params.len())
+            .or_else(|| self.lookup(name).and_then(|info| match &info.ty {
+                Type::Fn { params, .. } => Some(params.len()),
+                _ => None,
+            })),
+        _ => None,
+    }
+}
+
+fn http_route_is_fixed_path(&self, expr: &Expr) -> Option<bool> {
+    let crate::Comptime::CtValue::Str(pattern) = self.evaluate_constant(expr)? else {
+        return None;
+    };
+    Some(
+        Syntax::validate_http_route_pattern(&pattern).is_ok()
+            && pattern.split('/').skip(1).all(|segment| {
+                !segment.starts_with(Syntax::HTTP_ROUTE_PARAM_PREFIX)
+                    && !segment.starts_with(Syntax::HTTP_ROUTE_CATCH_ALL_PREFIX)
+            }),
+    )
+}
+
+}
+
+fn http_handler_type(params: Vec<Type>) -> Type {
+    Type::Fn {
+        params,
+        ret: Some(Box::new(Type::Result {
+            ok: Box::new(Type::Named("HTTPResponse".to_string())),
+            err: Box::new(Type::Named("HTTPError".to_string())),
+        })),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
     }
 }
 
@@ -1670,6 +1718,14 @@ impl<'a> Checker<'a> {
                     return Some(ty);
                 }
             }
+            let distinct_numeric_conversion = self.registry.is_distinct(type_name)
+                && self
+                    .registry
+                    .distinct_base(type_name)
+                    .is_some_and(|base| {
+                        base.is_numeric()
+                            && Syntax::numeric_conversion_source(method).is_some()
+                    });
             if ((type_name == "EncodingLimits"
                 || type_name == "CBOROptions"
                 || type_name == "XMLLimits"
@@ -1677,7 +1733,8 @@ impl<'a> Checker<'a> {
                 || type_name == "Limits"
                 || type_name == "DataLimits")
                 && method == "safe")
-                || self.resolve_method_sig(type_name, method).is_some()
+                || (!distinct_numeric_conversion
+                    && self.resolve_method_sig(type_name, method).is_some())
             {
                 self.record_static_time_effect(type_name, method, span);
                 let ret = self.check_static_method(
@@ -1885,7 +1942,7 @@ impl<'a> Checker<'a> {
                     Some(Type::List(inner)) => *inner,
                     _ => Type::Int,
                 };
-                if !Collections::is_hashable_type(&elem_ty) {
+                if !self.hashable_type_eligible(&elem_ty) {
                     self.diags.push(Diagnostic::error(
                             "E0506",
                             format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
@@ -1907,7 +1964,7 @@ impl<'a> Checker<'a> {
                     }
                     _ => Type::Int,
                 };
-                if !Collections::is_hashable_type(&elem_ty) {
+                if !self.hashable_type_eligible(&elem_ty) {
                     self.diags.push(Diagnostic::error(
                             "E0506",
                             format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
@@ -2092,7 +2149,7 @@ impl<'a> Checker<'a> {
                         }
                         _ => Type::Int,
                     });
-                if !Collections::is_hashable_type(&elem_ty) {
+                    if !self.hashable_type_eligible(&elem_ty) {
                     self.diags.push(Diagnostic::error(
                             "E0506",
                             format!(
@@ -3142,7 +3199,11 @@ impl<'a> Checker<'a> {
                     // where applicable. Observation never cancels the work;
                     // the move only discharges the local ownership duty.
                     if let Expr::Ident(name, name_span) = &**receiver {
-                        self.mark_moved(name.clone(), *name_span);
+                        self.mark_moved_by(
+                            name.clone(),
+                            *name_span,
+                            format!("{handle_ty}.{method}"),
+                        );
                     }
                     *recv_type_out = Some(handle_ty.clone());
                     return ret;
@@ -3704,6 +3765,19 @@ impl<'a> Checker<'a> {
                     if name == "HTTPRequest" || name == "HTTPResponse")
         {
             let is_request = matches!(&recv_ty, Type::Named(name) if name == "HTTPRequest");
+            // D-HTTP-MSG1=A: a client request's one-argument JSON form is the
+            // typed encoder path. Keep it distinct from request/response
+            // decode-side inference, which uses a type argument and no value.
+            if is_request && args.len() == 1 && type_args.is_empty() {
+                let value_ty = self.infer(&mut args[0].expr);
+                if let Some(value_ty) = value_ty {
+                    self.check_encodable(&value_ty, args[0].expr.span());
+                }
+                *recv_type_out = Some("HTTPRequest".to_string());
+                let ret = Type::Named("HTTPRequest".to_string());
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
             let want = if is_request { 0 } else { 1 };
             if args.len() > want {
                 self.diags
@@ -3768,25 +3842,43 @@ impl<'a> Checker<'a> {
                     method,
                     "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
                 )
-                && args.len() == 2
             {
-                self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                self.expect_core_arg(
-                    method,
-                    1,
-                    &Type::Fn {
-                        params: vec![Type::Named("HTTPRequest".to_string())],
-                        ret: Some(Box::new(Type::Result {
-                            ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                            err: Box::new(Type::Named("HTTPError".to_string())),
-                        })),
-                        effect_bound: None,
-                        return_view_provenance: None,
-                        param_contract: None,
-                        call_metadata: None,
-                    },
-                    &mut args[1],
-                );
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity(method, 2, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                } else {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    let handler_params = if self.http_handler_param_count(&args[1].expr) == Some(0)
+                        && self.http_route_is_fixed_path(&args[0].expr) == Some(true)
+                    {
+                        Vec::new()
+                    } else {
+                        vec![Type::Named("HTTPRequest".to_string())]
+                    };
+                    self.expect_core_arg(
+                        method,
+                        1,
+                        &http_handler_type(handler_params),
+                        &mut args[1],
+                    );
+                }
+            } else if matches!(
+                &recv_ty,
+                Type::Named(name) if name == "HTTPRequest" || name == "HTTPResponse"
+            ) && method == "text"
+            {
+                if args.len() > 1 {
+                    self.diags
+                        .push(wrong_core_arity(method, 1, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                } else if let Some(arg) = args.first_mut() {
+                    self.expect_core_arg(method, 0, &Type::Int, arg);
+                }
             } else if matches!(&recv_ty, Type::Named(name) if name == "HTTPClient") {
                 let want = match method {
                     "cookies"
@@ -3878,12 +3970,12 @@ impl<'a> Checker<'a> {
             });
             return ret;
         }
+        let recv_name = match &recv_ty {
+            Type::Named(n) => n.as_str(),
+            _ => "",
+        };
         // D-REGEXENGINE1=A: method calls on compiled Regex and Match values.
         if let Some(ret) = regex_method_return(&recv_ty, method, args) {
-            let recv_name = match &recv_ty {
-                Type::Named(n) => n.as_str(),
-                _ => "",
-            };
             match (recv_name, method, args.len()) {
                 ("Regex", "count", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
@@ -3895,7 +3987,7 @@ impl<'a> Checker<'a> {
                 ) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
-                ("Regex", "replace" | "replace_first" | "replace_all", 2) => {
+                ("Regex", "replace" | "replace_first", 2) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                 }
@@ -3933,7 +4025,44 @@ impl<'a> Checker<'a> {
             });
             return ret;
         }
-        // D-TIMEDEPTH1=A: method calls on Date/DateTime.
+        // D-TIMEDEPTH1=A: method calls on the shared civil-time surface.
+        let civil_recv_name = match &recv_ty {
+            Type::Named(name) => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(contract) =
+            civil_recv_name.and_then(|name| civil_time_method_contract(name, method))
+        {
+            let params = contract
+                .iter()
+                .map(|param| crate::Sema::CallBinder::BindParam {
+                    label: param.label,
+                    name: param.label,
+                    zone: param.zone,
+                    default: None,
+                    convention: AccessConvention::Read,
+                    ty: None,
+                    variadic: false,
+                    core_default: param.default,
+                })
+                .collect::<Vec<_>>();
+            if crate::Sema::CallBinder::bind_call_args(
+                method,
+                &params,
+                args,
+                span,
+                &mut self.diags,
+            )
+            .is_none()
+            {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                *recv_type_out = civil_recv_name.map(str::to_string);
+                return None;
+            }
+            self.register_binder_refs(args);
+        }
         if let Some(ret) = civil_time_method_return(&recv_ty, method, args) {
             let recv_name = match &recv_ty {
                 Type::Named(n) => n.as_str(),
@@ -3951,7 +4080,7 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                 }
-                ("Date" | "LocalDate", "add_period", 1) => {
+                ("Date" | "LocalDate", "add_period" | "subtract_period", 1) => {
                     self.expect_core_arg(
                         method,
                         0,
@@ -3959,7 +4088,7 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                 }
-                ("Date" | "LocalDate", "truncate" | "format", 1) => {
+                ("Date" | "LocalDate", "truncate" | "format" | "format_checked", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
                 ("Date" | "LocalDate", "replace", 3) => {
@@ -3967,7 +4096,29 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
                     }
                 }
-                ("DateTime", "plus_duration", 1) => {
+                ("Date" | "LocalDate", "with", argc) if argc == 3 || argc == 4 => {
+                    for i in 0..3 {
+                        self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
+                    }
+                    if argc == 4 {
+                        self.expect_core_arg(method, 3, &Type::String, &mut args[3]);
+                    }
+                }
+                ("Date" | "LocalDate", "until" | "since", argc) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalDate".to_string()),
+                        &mut args[0],
+                    );
+                    for index in 1..argc.min(4) {
+                        self.expect_core_arg(method, index, &Type::String, &mut args[index]);
+                    }
+                    if argc > 4 {
+                        self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
+                    }
+                }
+                ("DateTime", "plus_duration" | "subtract_duration", 1) => {
                     self.expect_core_arg(
                         method,
                         0,
@@ -3983,26 +4134,7 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                 }
-                ("DateTime", "in_zone", 1) => {
-                    self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
-                }
-                ("DateTime", "truncate" | "round" | "floor" | "ceil" | "format", 1) => {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                }
-                ("DateTime", "replace", 6) => {
-                    for i in 0..6 {
-                        self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
-                    }
-                }
-                ("ZonedDateTime", "add_duration", 1) => {
-                    self.expect_core_arg(
-                        method,
-                        0,
-                        &Type::Named("Duration".to_string()),
-                        &mut args[0],
-                    );
-                }
-                ("ZonedDateTime", "add_period", 1) => {
+                ("DateTime", "add_period" | "subtract_period", 1) => {
                     self.expect_core_arg(
                         method,
                         0,
@@ -4010,8 +4142,178 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                 }
-                ("ZonedDateTime", "format", 1) => {
+                ("DateTime", "until" | "since", argc) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("DateTime".to_string()),
+                        &mut args[0],
+                    );
+                    for index in 1..argc.min(4) {
+                        self.expect_core_arg(method, index, &Type::String, &mut args[index]);
+                    }
+                    if argc > 4 {
+                        self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
+                    }
+                }
+                ("DateTime", "in_zone", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
+                }
+                ("DateTime", "truncate" | "floor" | "ceil", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("DateTime", "truncate" | "floor" | "ceil", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                }
+                ("DateTime", "round", argc) if (1..=3).contains(&argc) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    if argc > 1 {
+                        self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                    }
+                    if argc > 2 {
+                        self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
+                    }
+                }
+                ("DateTime", "format" | "format_checked", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("DateTime", "replace", 6) => {
+                    for i in 0..6 {
+                        self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
+                    }
+                }
+                ("DateTime", "with", argc) if argc == 6 || argc == 7 => {
+                    for i in 0..6 {
+                        self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
+                    }
+                    if argc == 7 {
+                        self.expect_core_arg(method, 6, &Type::String, &mut args[6]);
+                    }
+                }
+                ("LocalTime", "add_duration" | "subtract_duration", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("LocalTime", "truncate" | "floor" | "ceil", argc)
+                    if argc == 1 || argc == 2 => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    if argc == 2 {
+                        self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                    }
+                }
+                ("LocalTime", "round", argc) if (1..=3).contains(&argc) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    if argc > 1 {
+                        self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                    }
+                    if argc > 2 {
+                        self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
+                    }
+                }
+                ("LocalTime", "until" | "since", argc) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalTime".to_string()),
+                        &mut args[0],
+                    );
+                    for index in 1..argc.min(4) {
+                        self.expect_core_arg(method, index, &Type::String, &mut args[index]);
+                    }
+                    if argc > 4 {
+                        self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
+                    }
+                }
+                ("ZonedDateTime", "add_duration" | "subtract_duration", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("ZonedDateTime", "add_period" | "subtract_period", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Period".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("ZonedDateTime", "format" | "format_checked", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("ZonedDateTime", "format_rfc9557", 0) => {}
+                ("ZonedDateTime", "with_time", argc) if argc == 1 || argc == 2 => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalTime".to_string()),
+                        &mut args[0],
+                    );
+                    if argc == 2 {
+                        self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
+                    }
+                }
+                ("ZonedDateTime", "with_zone", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
+                }
+                ("ZonedDateTime", "until" | "since", argc) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("ZonedDateTime".to_string()),
+                        &mut args[0],
+                    );
+                    for index in 1..argc.min(4) {
+                        self.expect_core_arg(method, index, &Type::String, &mut args[index]);
+                    }
+                    if argc > 4 {
+                        self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
+                    }
+                }
+                ("Zone", "next_transition" | "previous_transition", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                }
+                ("Zone", "start_of_day" | "hours_in_day", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalDate".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("ZonedDateTime", "start_of_day" | "hours_in_day" | "next_transition" | "previous_transition", 0) => {}
+                ("Period", "add" | "sub", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Period".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("Period", "total_in", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    let anchor_ty = crate::AST::canonicalize_union(vec![
+                        Type::Named("Date".to_string()),
+                        Type::Named("LocalDate".to_string()),
+                        Type::Named("DateTime".to_string()),
+                    ]);
+                    self.expect_core_arg(method, 1, &anchor_ty, &mut args[1]);
+                }
+                ("Duration", "round", argc) if (1..=3).contains(&argc) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    if argc > 1 {
+                        self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                    }
+                    if argc > 2 {
+                        self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
+                    }
                 }
                 _ => {
                     for a in args.iter_mut() {
@@ -4077,18 +4379,21 @@ impl<'a> Checker<'a> {
                         _ => None,
                     };
                     let size = direct_size.or_else(|| {
-                        let globals = self.current_ct_globals();
-                        match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                            &args[0].expr,
-                            self.ct_funcs,
-                            self.ct_externs,
-                            self.ct_base_dir,
-                            &globals,
-                            self.core_imports,
-                            self.gates,
-                            0,
-                            None,
-                        ) {
+                        let evaluated = {
+                            let globals = self.current_ct_globals();
+                            crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                                &args[0].expr,
+                                self.ct_funcs,
+                                self.ct_externs,
+                                self.ct_base_dir,
+                                globals.as_ref(),
+                                self.core_imports,
+                                self.gates,
+                                0,
+                                None,
+                            )
+                        };
+                        match evaluated {
                             Ok((CtValue::Int(value), inputs)) => {
                                 self.ct_embed_inputs.extend(inputs);
                                 Some(value)
@@ -5429,27 +5734,37 @@ impl<'a> Checker<'a> {
                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
                         )
                     {
-                        self.diags.push(Diagnostic::error(
-                                "E0120",
-                                format!(
-                                    "`{}` was not moved here, so `.{}()` cannot take it with the move marker `^`",
-                                    n, method
-                                ),
-                                "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
-                                format!(
-                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
-                                    Syntax::SIGIL_COPY,
-                                    n,
-                                    method,
-                                    n,
-                                    Syntax::SIGIL_MOVE,
-                                    info.ty.name()
-                                ),
-                                Some(*nspan),
-                            ));
+                        let source_ty = info.ty.clone();
+                        let diagnostic = Diagnostic::error(
+                            "E0120",
+                            format!(
+                                "`{}` was not moved here, so `.{}()` cannot take it with the move marker `^`",
+                                n, method
+                            ),
+                            "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
+                            format!(
+                                "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
+                                Syntax::SIGIL_COPY,
+                                n,
+                                method,
+                                n,
+                                Syntax::SIGIL_MOVE,
+                                source_ty.name()
+                            ),
+                            Some(*nspan),
+                        );
+                        self.diags.push(self.with_ownership_copy_edit(
+                            diagnostic,
+                            *nspan,
+                            Some(&source_ty),
+                        ));
                     }
                 }
-                self.mark_moved(n.clone(), *nspan);
+                self.mark_moved_by(
+                    n.clone(),
+                    *nspan,
+                    format!("{dispatch_type_name}.{method}"),
+                );
             }
         }
         self.check_method_args(

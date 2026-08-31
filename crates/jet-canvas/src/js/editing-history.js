@@ -1042,14 +1042,11 @@
 
   function runCurrentGraph() {
     if (!canvasCapability("runtime_output")) return;
-    const run = actionEntries.find((item) => item.action_id === "canvas.command:run")
-      || actionEntries.find((item) => item.action_id === "canvas.command:dev")
-      || null;
+    const run = actionEntries.find((item) => item.action_id === "canvas.command:run") || null;
     if (!run) {
       runHud.textContent = "Run permission loading";
       loadCanvasActions().then(() => {
-        const ready = actionEntries.find((item) => item.action_id === "canvas.command:run")
-          || actionEntries.find((item) => item.action_id === "canvas.command:dev");
+        const ready = actionEntries.find((item) => item.action_id === "canvas.command:run");
         if (ready) renderCommandAuthority(ready);
         else setCanvasState("permission", "Run is unavailable", "Canvas could not load run authority. Jet source stays unchanged; retry the action catalog.", [
           { label: "Open Source", run: openSourceRecovery },
@@ -1115,7 +1112,12 @@
     const requestedSourceId = selectedSourceId || latestDoc.source_id || null;
     const body = { schema_version: 1, revision: requestedRevision, action_id: item.action_id, confirmed };
     if (typeof canvasClientId === "function") body.client_id = canvasClientId();
-    if (typeof canvasSelectedOutput === "function" && canvasSelectedOutput()) body.output = canvasSelectedOutput();
+    if (item.action_id === "canvas.command:run") {
+      const selectedOutput = typeof canvasSelectedOutput === "function" ? canvasSelectedOutput() : "";
+      const selectedTarget = typeof canvasSelectedTarget === "function" ? canvasSelectedTarget() : "";
+      if (selectedOutput) body.output = selectedOutput;
+      if (selectedTarget) body.target = selectedTarget;
+    }
     if (requestedSourceId) body.source_id = requestedSourceId;
     if (item.action_id === "canvas.command:check") body.source_text = sourceEditMode && sourceEditor ? sourceEditor.value : (latestDoc.source_text || "");
     runHud.textContent = item.title + " running";

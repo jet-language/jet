@@ -13,8 +13,10 @@ Resolve guidance in this order:
 1. the owner's current explicit instruction;
 2. ratified Tower verdicts and their acceptance terms;
 3. the relevant domain spec;
-4. this file and the nearest nested `AGENTS.md`;
-5. task-specific skills.
+4. invariants I1–I9 and owner gates in this file;
+5. `docs/agents/owner-guidance.md` for owner-maintained agent conduct;
+6. remaining rules in this file and the nearest nested `AGENTS.md`;
+7. task-specific skills.
 
 Code shows implementation state, not design authority. A newer ratified ruling beats stale code or prose. On conflict,
 follow the higher authority, record it, and stop only the affected slice. Never average contradictory rules.
@@ -41,6 +43,11 @@ no compatibility obligation.
 ## Load context by trigger
 
 Read this file, then relevant code, tests, and the current diff. Load only task-triggered references:
+
+Before using any skill or dispatching any agent, read
+`docs/agents/owner-guidance.md`. It is the single owner-maintained source for
+agent behavior. Agents may read it but must never edit it. The owner edits it
+through Tower's **Guidance** tab.
 
 - language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
   `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`; adding syntax

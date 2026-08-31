@@ -1,8 +1,10 @@
 // D-LINALG1 + D-SIMD2 (ratified 2026-06-24): built-in linear-algebra and SIMD
 // lane types. Vectors Vec2/Vec3/Vec4, matrices Mat3/Mat4, and portable SIMD
 // lanes F32x4/F64x2 -- a closed compiler-provided family with operator
-// overloading. SIMD lowers to a safe scalar-array fallback (no intrinsics, no
-// std::simd feature gate), so it is memory-safe by construction (I1).
+// overloading. SIMD uses one safe fixed-array Prelude implementation: common
+// float widths dispatch to native instructions when available, and every other
+// target keeps the scalar-array fallback (no std::simd feature gate), so it is
+// memory-safe by construction (I1).
 fn run() {
     // Linear algebra: construct vectors positionally; +/-/element-wise * are
     // overloaded on the closed math family.

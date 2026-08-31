@@ -1,3 +1,5 @@
+const JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
 fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
         cmd: cmd.clone(),
@@ -9,7 +11,7 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
         stdout: jet_std::ProcessStreamMode::Capture,
         stderr: jet_std::ProcessStreamMode::Capture,
         timeout_ms: None,
-        output_limit: None,
+        output_limit: Some(JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES as i64),
         cpu_time_limit_ms: None,
         memory_limit_bytes: None,
         open_file_limit: None,

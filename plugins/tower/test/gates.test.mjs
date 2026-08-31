@@ -22,7 +22,7 @@ const reviewPasses = () => ({
   boilOcean: 'The breadth pass checked for missing choices.',
   hybrid: 'The hybrid pass combined compatible strengths.',
   cooperative: 'The cooperative pass strengthened every option.',
-  adversarial: 'The adversarial pass attacked the recommendation.',
+  adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.',
 });
 
 const ballot = (extra = {}) => ({
@@ -126,6 +126,19 @@ test('review summaries contain one or two sentences', () => {
     (e) => e.code === 'E_BALLOT' && /reviewPasses\.adversarial.*1-2 sentences/.test(e.message));
 });
 
+test('adversarial review rejects the author family and accepts a rival family', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const sameFamily = reviewPasses();
+  sameFamily.adversarial = 'Author model family: Family A. Adversarial model family: family_a. The adversarial pass attacked the recommendation.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Same family', ...ballot({ reviewPasses: sameFamily }) })),
+    (e) => e.code === 'E_BALLOT' && /author and adversarial model families must differ/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-RIVAL', title: 'Rival family', ...ballot() }));
+  assert.equal(result.reviewPasses.adversarial, reviewPasses().adversarial);
+});
+
+
 test('short ballot needs the owner request and rejects review records', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
@@ -198,7 +211,7 @@ test('hybrid metadata is optional and does not gate a ballot', () => {
 test('--draft exempts validation and stays out of the decide lane + counts', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'WIP', draft: true }));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: reviewPasses() }));
   assert.equal(result.draft, true);
   const proj = db.project(st.load());
   const card = proj.cards.find(c => c.num === 1);
@@ -209,7 +222,7 @@ test('--draft exempts validation and stays out of the decide lane + counts', () 
 test('decision update --ready validates then clears draft', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-R1', title: 'WIP', draft: true }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-R1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: reviewPasses() }));
   assert.throws(
     () => st.mutate((s) => db.updateDecision(s, 'D-R1', { ready: true }, 'agent')),
     (e) => e.code === 'E_BALLOT');

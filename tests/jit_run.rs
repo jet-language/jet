@@ -245,12 +245,29 @@ fn run() {
     jet_jit::reset_jit_trace_for_test();
     let interpreted = match dev_iteration(&shown, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(diags) => panic!("forced interpreter rejected event fixture: {diags:?}"),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected event fixture: {diags:?}")
+        }
     };
     assert_eq!(
-        interpreted,
-        "1|2|3|4|5\n",
+        interpreted, "1|2|3|4|5\n",
         "interpreter event callback lost its payload or captures"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let default_run = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => {
+            panic!("default run must safely deopt the unsupported callback ABI: {diags:?}")
+        }
+    };
+    assert_eq!(
+        default_run, "1|2|3|4|5\n",
+        "default run changed meaning while deopting the unsupported callback ABI"
+    );
+    assert!(
+        !jet_jit::jit_executed_for_test() && jet_jit::deopt_invoked_for_test(),
+        "unsupported callback ABI must not enter native JIT code"
     );
 
     let error = jet_jit::try_compile_bundle(&bundle)
@@ -271,8 +288,10 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
         "HTTP teardown must join every worker, including unfinished workers"
     );
     assert!(
-        prelude.contains("let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);")
-            && prelude.contains("if already_requested { return jet_http_server_wait_for_report(server); }")
+        prelude.contains(
+            "let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);"
+        ) && prelude
+            .contains("if already_requested { return jet_http_server_wait_for_report(server); }")
             && prelude.contains("report = server.inner.report_ready.wait(report).unwrap();"),
         "duplicate HTTP shutdown must wait for the first shutdown's worker joins"
     );
@@ -280,13 +299,23 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
     let concurrency = include_str!("../crates/jet-jit/src/Concurrency.rs");
     assert!(
         concurrency.contains("let _guard = RuntimeAccessGuard::enter();")
-            && concurrency.contains("HTTP_SHARED_RUNTIME.load(Ordering::Acquire)"),
-        "HTTP callbacks must pin the shared runtime before loading its pointer"
+            && concurrency.contains("HTTP_SHARED_RUNTIME.load(Ordering::Acquire)")
+            && concurrency.contains("static HTTP_RUNTIME_EPOCH")
+            && concurrency.contains("epoch == HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)")
+            && concurrency.contains("HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel)")
+            && concurrency.contains("set_active_runtime_local(Some(rt_ptr))"),
+        "HTTP callbacks must pin and validate the resident runtime before loading its pointer"
     );
     let hosts = include_str!("../crates/jet-jit/src/net_http_hosts.rs");
     assert!(
         hosts.contains("jet_http_server_shutdown(&server, &grace)")
-            && hosts.contains("Concurrency::with_http_runtime_quiesced(||"),
+            && hosts.contains("Concurrency::with_http_runtime_quiesced(||")
+            && hosts.matches("let epoch = Concurrency::http_runtime_epoch();").count() == 3
+            && hosts
+                .matches("Concurrency::try_with_http_jet_runtime_at(epoch, ||")
+                .count()
+                == 4
+            && !hosts.contains("Concurrency::with_http_jet_runtime(||"),
         "JIT teardown must stop HTTP servers and quiesce callbacks"
     );
 
@@ -323,6 +352,43 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
     assert!(
         hot_swap_handles < hot_swap_runtime && hot_swap_handles < hot_swap_module,
         "hot-swap must quiesce HTTP workers before taking the runtime or dropping the old module"
+    );
+}
+
+#[test]
+fn jit_http2_shutdown_race_drains_dispatch_tasks_and_epoch_guards_web_callbacks() {
+    let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+    assert!(
+        prelude.contains("let mut dispatch_tasks = JetHTTP2DispatchTasks::default();")
+            && prelude.contains("dispatch_tasks.push(task, control.clone());")
+            && prelude.contains("drop(requests);\n    dispatch_tasks.drain();")
+            && prelude.contains("impl Drop for JetHTTP2DispatchTasks"),
+        "HTTP/2 shutdown must cancel and synchronously drain every dispatch task"
+    );
+    assert!(
+        prelude.contains("for (task, control) in std::mem::take(&mut self.tasks)")
+            && !prelude.contains(
+                "let _task = jet_scheduler_spawn_blocking_with_control(move || {\n                    let result = jet_http2_dispatch"
+            ),
+        "HTTP/2 dispatch joins must stay owned through shutdown"
+    );
+
+    let web = include_str!("../crates/jet-jit/src/Web.rs");
+    assert_eq!(
+        web.matches("let epoch = Concurrency::http_runtime_epoch();")
+            .count(),
+        3,
+        "route/page/layout, action/form/data, and mount callbacks need epochs"
+    );
+    assert_eq!(
+        web.matches("Concurrency::try_with_http_jet_runtime_at(epoch, ||")
+            .count(),
+        3,
+        "every Web callback reaching a JIT pointer must validate its epoch"
+    );
+    assert!(
+        !web.contains("Concurrency::with_http_jet_runtime(||"),
+        "Web callbacks must not use the non-validating runtime boundary"
     );
 }
 
@@ -760,6 +826,87 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn process_pipeline_output_limit_matches_aot_resident_jit_and_interpreter() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_process_pipeline_output_limit");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("pipeline_output_limit.jet");
+    let test_binary = std::env::current_exe().unwrap();
+    fs::write(
+        &file,
+        format!(
+            r#"use core.process as process
+
+fn run() {{
+    direct_source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+    direct_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_SINK", "1")
+    direct :: process.pipeline([direct_source, direct_sink])
+    if direct == {{
+        .Ok(_) -> {{ print("direct:accepted") }}
+        .Err(_) -> {{ print("direct:refused") }}
+    }}
+
+    source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+        .output_limit(1024)
+    sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_SINK", "1")
+    result :: process.pipeline([source, sink])
+    if result == {{
+        .Ok(_) -> {{ print("limit:accepted") }}
+        .Err(_) -> {{ print("limit:refused") }}
+    }}
+
+    broken_source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+        .output_limit(1048576)
+    broken_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_closed_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_CLOSED_SINK", "1")
+    broken :: process.pipeline([broken_source, broken_sink])
+    if broken == {{
+        .Ok(_) -> {{ print("broken:accepted") }}
+        .Err(_) -> {{ print("broken:refused") }}
+    }}
+}}
+"#,
+            test_binary = jet_string(&test_binary),
+        ),
+    )
+    .unwrap();
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT stderr: {}", String::from_utf8_lossy(&aot.stderr));
+    assert_eq!(aot.stdout, b"direct:accepted\nlimit:refused\nbroken:refused\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(file.to_str().unwrap(), false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("resident pipeline failed: {diags:#?}"),
+    };
+    assert_eq!(resident, "direct:accepted\nlimit:refused\nbroken:refused\n");
+    assert!(jet_jit::jit_executed_for_test(), "pipeline must execute in resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test(), "pipeline must not deopt");
+    assert!(!jet_jit::fallback_invoked_for_test(), "pipeline must not fall back");
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(file.to_str().unwrap(), false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("forced interpreter pipeline failed: {diags:#?}"),
+    };
+    assert_eq!(interpreted, "direct:accepted\nlimit:refused\nbroken:refused\n");
+    assert!(!jet_jit::jit_executed_for_test(), "forced proof must not execute resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test(), "forced proof must not deopt");
+    assert!(!jet_jit::fallback_invoked_for_test(), "forced proof must not fall back");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn prompt_helpers_preserve_behavior_through_named_deopt() {
     if skip_if_cranelift_host_unsupported() {
@@ -974,6 +1121,38 @@ fn process_probe_helper() {
         ),
     )
     .unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn process_pipeline_flood_helper() {
+    if std::env::var("JET_PROCESS_PIPELINE_FLOOD").as_deref() != Ok("1") {
+        return;
+    }
+    let mut output = std::io::stdout();
+    let chunk = [b'x'; 8192];
+    for _ in 0..64 {
+        output.write_all(&chunk).unwrap();
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn process_pipeline_sink_helper() {
+    if std::env::var("JET_PROCESS_PIPELINE_SINK").as_deref() != Ok("1") {
+        return;
+    }
+    let mut input = std::io::stdin();
+    let mut sink = std::io::sink();
+    std::io::copy(&mut input, &mut sink).unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn process_pipeline_closed_sink_helper() {
+    if std::env::var("JET_PROCESS_PIPELINE_CLOSED_SINK").as_deref() != Ok("1") {
+        return;
+    }
 }
 
 /// Argument-taking builders stay resident and match the AOT lens byte for
@@ -1321,6 +1500,426 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn map_has_key_runs_resident_for_supported_key_shapes() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_map_has_key");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("map_has_key.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    strings := [String:Int]{}
+    strings.add("present", 1).drop("seed string map")
+    print(strings.has_key("present"))
+    print(strings.has_key("missing"))
+
+    ints := [Int:String]{}
+    ints.add(7, "present").drop("seed int map")
+    print(ints.has_key(7))
+    print(ints.has_key(8))
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("map has_key fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "fixture must lower to TIR: {}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("fixture must compile in resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT fixture failed");
+    let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
+    assert_eq!(expected, "true\nfalse\ntrue\nfalse\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "fixture must execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    let reference = (expected, String::new(), 0);
+    assert_eq!(resident, reference, "resident JIT map has_key drifted");
+    assert_eq!(interpreted, reference, "interpreter map has_key drifted");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn string_is_empty_runs_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_string_is_empty");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("string_is_empty.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    print("".is_empty())
+    print("present".is_empty())
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("string is_empty fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("fixture must compile in resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT fixture failed");
+    let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
+    assert_eq!(expected, "true\nfalse\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    let reference = (expected, String::new(), 0);
+    assert_eq!(resident, reference, "resident JIT String.is_empty drifted");
+    assert_eq!(
+        interpreted, reference,
+        "interpreter String.is_empty drifted"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn data_tree_for_in_nested_conditions_run_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_data_tree_for_in");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("data_tree_for_in.jet");
+    fs::write(
+        &file,
+        r#"fn text_value(value: DataTree) String -> {
+    return if value == {
+        .Text(text) -> ~text
+        else -> ""
+    }
+}
+
+fn run() {
+    rows := [DataTree]{
+        DataTree.Text("target"),
+        DataTree.Text("other")
+    }
+    found := false
+    loop row in rows {
+        if text_value(~row) == "target" && !found && true -> found = true
+    }
+    print(found)
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "DataTree fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "DataTree fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("DataTree fixture must compile in resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT DataTree fixture failed");
+    let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
+    assert_eq!(expected, "true\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    let reference = (expected, String::new(), 0);
+    assert_eq!(resident, reference, "resident JIT DataTree loop drifted");
+    assert_eq!(interpreted, reference, "interpreter DataTree loop drifted");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mapped_string_list_flatten_compiles_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_mapped_string_flatten");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n",
+    )
+    .unwrap();
+    let file = dir.join("mapped_string_flatten.jet");
+    fs::write(
+        &file,
+        r#"fn flatten_words(contents: String) [String] -> {
+    return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
+}
+fn run() {
+    words :: flatten_words("one two\nthree four")
+    neighbors :: flatten_words("five six")
+    print(words.len())
+    print(words[0])
+    print(words[3])
+    print(neighbors[1])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("flatten fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "flatten fixture diagnostics: {diagnostics:#?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "flatten fixture must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(
+        !plan.whole_interp,
+        "flatten fixture must select the resident tier: deopt={:?}, gap={:?}",
+        plan.deopt,
+        plan.gap
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("flatten fixture must compile in resident JIT: {error}"));
+    let outcome = jet_jit::run_resident_strict_for_test(&bundle)
+        .unwrap_or_else(|error| panic!("flatten fixture must execute strictly resident: {error}"));
+    let RunOutcome::Ran {
+        stdout,
+        stderr,
+        exit_code,
+    } = outcome
+    else {
+        panic!("flatten fixture returned diagnostics");
+    };
+    assert_eq!((stdout, stderr, exit_code), ("4\none\nfour\nsix\n".into(), String::new(), 0));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn data_tree_try_sort_by_desc_closure_runs_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_data_tree_try_sort_by_desc");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("data_tree_try_sort_by_desc.jet");
+    fs::write(
+        &file,
+        r#"fn text_value(value: DataTree) String !Never -> {
+    return if value == {
+        .Text(text) -> ~text
+        else -> ""
+    }
+}
+
+fn run() {
+    rows := [DataTree]{
+        DataTree.Text("a"),
+        DataTree.Text("c"),
+        DataTree.Text("b")
+    }
+    rows.sort_by_desc((row: DataTree) -> text_value(~row))
+    loop row in rows {
+        print(text_value(~row))
+    }
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree sort fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "DataTree sort fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "DataTree sort fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("DataTree sort fixture must compile in resident JIT: {error}"));
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert_eq!(resident, "c\nb\na\n");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    assert_eq!(interpreted, "c\nb\na\n");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tower_data_tree_helpers_select_resident_tier() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    // Load a clean source copy. The repository's checked-in `.jet/receipts`
+    // belong to dogfood measurements, not this compiler regression, and a
+    // developer's Hangar contents must not decide whether JIT safety is tested.
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("dogfood/tower");
+    let dir = common::unique_tmp("jit_tower_data_tree_helpers");
+    fs::create_dir_all(&dir).unwrap();
+    fs::copy(source_root.join("run.jet"), dir.join("run.jet")).unwrap();
+    fs::copy(source_root.join("package.jet"), dir.join("package.jet")).unwrap();
+    let path = dir.join("run.jet");
+    let shown = path.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("Tower run should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "Tower run should type-check: {diagnostics:#?}"
+    );
+
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("Tower run must compile in resident JIT: {error}"));
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let deopt_names: Vec<&str> = plan.deopt.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        deopt_names,
+        vec!["stream_response", "verify_file_hash"],
+        "Tower run has unexpected resident gaps: {:?}",
+        plan.deopt
+    );
+    for name in [
+        "normalize_decisions",
+        "normalize_epochs",
+        "active_cards_for_epoch",
+        "done_cards_for_epoch",
+        "done_card_ref",
+        "burndown30",
+    ] {
+        assert!(
+            plan.native.contains(name),
+            "Tower DataTree helper `{name}` must select resident JIT: deopt={:?}, whole_interp={:?}",
+            plan.deopt,
+            plan.whole_interp
+        );
+    }
+    assert!(
+        !plan.whole_interp,
+        "Tower DataTree helpers must not force whole-program interpretation: deopt={:?}",
+        plan.deopt
+    );
+    assert!(
+        plan.native.contains("run"),
+        "Tower entry must remain resident JIT: deopt={:?}, whole_interp={:?}",
+        plan.deopt,
+        plan.whole_interp
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Card #2029: a total lowering failure must not read as Covered.
 #[test]
 fn lowering_failure_is_not_resident_covered() {
@@ -1348,5 +1947,68 @@ fn lowering_failure_is_not_resident_covered() {
             panic!("expected Unavailable, got Gap({detail})")
         }
     }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jit_list_mutations_preserve_dense_arena_values() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_dense_list_mutations");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("dense_list_mutations.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    values := [10, 20, 30]
+    values.insert(1, 99)
+    print(values.remove(0, .Slot) ?? -1)
+    print(values.pop() ?? -1)
+    print(values[0])
+    print(values[1])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("dense list fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "dense list fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "dense list fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("dense list fixture must compile in resident JIT: {error}"));
+
+    let expected = "10\n30\n99\n20\n";
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT dense list failed");
+    assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("resident dense list failed: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert_eq!(resident, expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("interpreted dense list failed: {diags:?}"),
+    };
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, interpreted);
+
     let _ = fs::remove_dir_all(&dir);
 }

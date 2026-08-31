@@ -55,6 +55,13 @@ pub fn bind(
     let source_path = source_path
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve Python source: {error}")))?;
+    let source_on_disk = std::fs::read_to_string(&source_path)
+        .map_err(|error| BindError::Io(format!("could not read Python source: {error}")))?;
+    if source_on_disk != source {
+        return Err(BindError::Source(
+            "Python source text does not match the declared source file".into(),
+        ));
+    }
     check_python(&source_path)?;
     std::fs::create_dir_all(cache).map_err(|error| {
         BindError::Io(format!("could not create Python binding cache: {error}"))

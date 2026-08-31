@@ -102,7 +102,7 @@ fn build_and_run(
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     let mut rustc_cmd = Command::new("rustc");
-    common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &out.ffi {
         rustc_cmd
@@ -208,7 +208,7 @@ fn build_and_run_multi(
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     let mut rustc_cmd = Command::new("rustc");
-    common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
     let rustc = rustc_cmd.arg("-o").arg(&bin).output().unwrap();
     assert!(
         rustc.status.success(),

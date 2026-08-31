@@ -32,11 +32,13 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
     let mut needed: HashSet<(String, String)> = HashSet::new();
     for item in &mut module.items {
         walk_item_exprs(item, &mut |expr| {
-            let Expr::Try(_, _, TryConvert::Typed(fn_name), _) = expr else {
+            let Expr::Try(_, _, TryConvert::Typed { source, target, .. }, _) = expr else {
                 return;
             };
+            let source = source.name();
+            let target = target.name();
             for conversion in &shipped {
-                if fn_name == &super::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty) {
+                if source == conversion.from_ty && target == conversion.to_ty {
                     needed.insert((conversion.from_ty.clone(), conversion.to_ty.clone()));
                 }
             }

@@ -475,6 +475,7 @@ pub const TYPE_SH: &str = "Sh";
 /// D-REGEX-LIT1=D: `Regex.{"…"}` is a compile-checked pattern value.
 pub const TYPE_REGEX: &str = "Regex";
 
+
 /// D-BOUND-HEAD1=A: checked URL/Path/DateTime literal heads. `Url` remains the
 /// internal nominal spelling; source type declarations use the canonical URL.
 pub const TYPE_URL: &str = "URL";

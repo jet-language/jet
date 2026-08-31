@@ -1,17 +1,8 @@
-Error [E2417]: explicit failure domain ``E`` is not an Error type
+Error [E2417]: Explicit failure domain ``E`` is not an Error type
   --> tests/ui/drop_method_silences_e0402.jet:5:8
     |
   5 | fn f() Int !E -> Ok(1)
     |        ^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
-
-Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
-  --> tests/ui/drop_method_silences_e0402.jet:9:5
-    |
-  9 |     f().drop("testing purposes only")
-    |     ^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E -> Err`
- Fix: add `impl E -> Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402

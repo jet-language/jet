@@ -364,25 +364,6 @@ fn sha3_raw(data: &[u8], rate: usize, output_len: usize) -> Vec<u8> {
     out
 }
 
-fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    let mut key_block = if key.len() > 64 {
-        sha256_raw_with_iv(key, SHA256_IV).to_vec()
-    } else {
-        key.to_vec()
-    };
-    key_block.resize(64, 0);
-    let mut inner = vec![0x36u8; 64];
-    let mut outer = vec![0x5cu8; 64];
-    for index in 0..64 {
-        inner[index] ^= key_block[index];
-        outer[index] ^= key_block[index];
-    }
-    inner.extend_from_slice(data);
-    let inner_hash = sha256_raw_with_iv(&inner, SHA256_IV);
-    outer.extend_from_slice(&inner_hash);
-    sha256_raw_with_iv(&outer, SHA256_IV)
-}
-
 pub fn jet_crypto_sha1_hex(data: &Vec<u8>) -> String {
     sha_hex_encode(&sha1_raw(data))
 }
@@ -431,10 +412,10 @@ pub fn jet_crypto_pbkdf2_hmac(
     for block in 1..=block_count {
         let mut input = salt.clone();
         input.extend_from_slice(&block.to_be_bytes());
-        let mut u = hmac_sha256(password, &input);
+        let mut u = jet_hmac_sha256(password, &input);
         let mut mixed = u;
         for _ in 1..iterations {
-            u = hmac_sha256(password, &u);
+            u = jet_hmac_sha256(password, &u);
             for (left, right) in mixed.iter_mut().zip(u) {
                 *left ^= right;
             }

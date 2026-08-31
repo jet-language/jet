@@ -1,0 +1,43 @@
+// #1414 compute workload: fixed 16k coordinates with a reproducible stride.
+// The integer recurrence is the checksum oracle used by every adapter.
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("read input")
+    if raw.contains("nope") || raw.contains("stride=0") {
+        print("reject=invalid-number")
+        print("samples=0")
+        print("checksum=0")
+        return
+    }
+    width := 0
+    height := 0
+    stride := 0
+    iterations := 0
+    loop line in raw.lines() {
+        fields :: line.split("=").to_list()
+        if fields.len() != 2 -> next
+        value :: Int.parse(fields[1]) ?? panic("invalid number")
+        if fields[0] == "width" -> width = value
+        if fields[0] == "height" -> height = value
+        if fields[0] == "stride" -> stride = value
+        if fields[0] == "iterations" -> iterations = value
+    }
+    samples := 0
+    checksum := 0
+    loop y in 0..height, stride {
+        loop x in 0..width, stride {
+            value := (x * 31 + y * 17 + iterations) % 1000003
+            checksum = (checksum + value) % 1000000007
+            samples += 1
+        }
+    }
+    print("samples={samples}")
+    print("checksum={checksum}")
+}

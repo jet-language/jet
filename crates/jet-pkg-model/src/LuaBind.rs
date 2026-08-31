@@ -104,13 +104,13 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
 }
 
 const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
-    ("open", "() => Int"),
-    ("take_error", "() => Int"),
+    ("open", "() Int"),
+    ("take_error", "() Int"),
     ("cancel", "(handle: Int)"),
     ("close", "(handle: Int)"),
     (
         "view_get_int",
-        "(handle: Int, table: Int, key: String) => Int",
+        "(handle: Int, table: Int, key: String) Int",
     ),
     (
         "view_set_int",
@@ -125,16 +125,78 @@ fn render_jet(abi: &str, functions: &[String]) -> String {
         out.push_str(&format!("    fn {name}{signature} = \"{abi}_{name}\"\n"));
     }
     for name in functions {
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
         out.push_str(&format!(
-            "    fn {name}_view(handle: Int, deadline_ms: Int) => Int = \"{abi}_view_{name}\"\n"
+            "    fn {name}_view(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n"
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub struct TableView {{ session: Int, table: Int }}\npub enum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nimpl TableView.Close {{\n    fn close(^self) {{ abi.view_release(self.session, self.table) }}\n}}\n\npub fn open() => Session !LuaError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(LuaError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\npub fn view_get_int(view: TableView, key: String) => Int !LuaError {{\n    value :: abi.view_get_int(view.session, view.table, key)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    return Ok(value)\n}}\n\npub fn view_set_int(view: TableView, key: String, value: Int) => Bool !LuaError {{\n    abi.view_set_int(view.session, view.table, key, value)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    return Ok(true)\n}}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub struct TableView {{ session: Int, table: Int }}\n#Error\npub enum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
+    out.push_str(&crate::Bindgen::render_lua_decode_status("LuaError"));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "LuaError",
+        crate::Bindgen::DecoderProtocol::LuaRawJson,
+    ));
+    out.push_str(
+        r#"impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+impl TableView.Close {
+    fn close(^self) { abi.view_release(self.session, self.table) }
+}
+
+pub fn open() Session !LuaError -> {
+    handle :: abi.open()
+    decode_status(abi.take_error())
+    return Ok(Session{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+pub fn view_get_int(view: TableView, key: String) Int !LuaError -> {
+    value :: abi.view_get_int(view.session, view.table, key)
+    decode_status(abi.take_error())
+    return Ok(value)
+}
+
+pub fn view_set_int(view: TableView, key: String, value: Int) Bool !LuaError -> {
+    abi.view_set_int(view.session, view.table, key, value)
+    decode_status(abi.take_error())
+    return Ok(true)
+}
+
+"#,
+    );
     for name in functions {
-        out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) => DataTree !LuaError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code == 2 {{ return Err(LuaError.Timeout) }}\n    if code == 3 {{ return Err(LuaError.Cancelled) }}\n    if code == 5 {{ return Err(LuaError.Limit) }}\n    if code == 4 {{ return Err(LuaError.CommandFailed) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    value := json.parse(raw) ?? return Err(LuaError.Protocol)\n    return Ok(value)\n}}\n\npub fn {name}_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T !LuaError {{\n    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)\n    value := {name}(session, tree, deadline_ms)?\n    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)\n    return Ok(decoded)\n}}\n\npub fn {name}_view(session: Session, deadline_ms: Int) => TableView !LuaError {{\n    table :: abi.{name}_view(session.value, deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code == 2 {{ return Err(LuaError.Timeout) }}\n    if code == 3 {{ return Err(LuaError.Cancelled) }}\n    if code == 5 {{ return Err(LuaError.Limit) }}\n    if code == 4 {{ return Err(LuaError.CommandFailed) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    return Ok(TableView.{{ session: session.value, table: table }})\n}}\n\n"));
+        out.push_str(&format!(
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !LuaError -> {{
+    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
+}}
+
+pub fn {name}_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) T !LuaError -> {{
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := {name}(session, tree, deadline_ms)
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}}
+
+pub fn {name}_view(session: Session, deadline_ms: Int) TableView !LuaError -> {{
+    table :: abi.{name}_view(session.value, deadline_ms)
+    decode_status(abi.take_error())
+    return Ok(TableView{{ session: session.value, table: table }})
+}}
+
+"#
+        ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet("registry", &["probe".into()])
 }
 
 fn render_c(abi: &str, source: &str, functions: &[String]) -> String {
@@ -386,7 +448,10 @@ fn ident(v: &str) -> bool {
 }
 fn reserved(v: &str) -> bool {
     GENERATED_FIXED_FUNCTIONS.iter().any(|(name, _)| *name == v)
-        || matches!(v, "Session" | "TableView" | "LuaError")
+        || matches!(
+            v,
+            "Session" | "TableView" | "LuaError" | "decode_response" | "decode_status"
+        )
         || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
         || crate::Syntax::JET_TYPE_LIST.contains(&v)
 }
@@ -525,6 +590,20 @@ mod tests {
     fn codec_has_null_and_cycle_guards() {
         assert!(super::JSON_CODEC.contains("jet.null"));
         assert!(super::JSON_CODEC.contains("cycle"));
+    }
+    #[test]
+    fn response_decoder_centralizes_raw_lua_status_and_payload_handling() {
+        let jet = super::render_jet("jet_lua_test", &["probe".into()]);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("fn decode_status(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.probe(").count(), 1);
+        assert_eq!(jet.matches("decode_response(raw, code)").count(), 1);
+        assert_eq!(jet.matches("decode_status(abi.take_error())").count(), 4);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 0);
+        assert!(jet.contains("if code == 4 -> return Err(LuaError.CommandFailed)"));
+        assert!(jet.contains("if code == 6 -> return Err(LuaError.Protocol)"));
+        assert!(super::reserved("decode_response"));
+        assert!(super::reserved("decode_status"));
     }
     #[test]
     fn table_view_reads_live_lua_without_json() {

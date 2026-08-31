@@ -1,62 +1,44 @@
-Error [E2417]: explicit failure domain `String (text)` is not an Error type
+Error [E2417]: Explicit failure domain `String (text)` is not an Error type
   --> tests/ui/fallible_arm_table_tail.jet:1:12
     |
   1 | fn maybe() Int !String -> .Ok(1)
     |            ^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E0330]: can't infer the enum type for `.Ok`
+Error [E0330]: Can't infer the enum type for `.Ok`
   --> tests/ui/fallible_arm_table_tail.jet:1:27
     |
   1 | fn maybe() Int !String -> .Ok(1)
     |                           ^^^^^^
- Why: a leading-dot variant needs a known enum type from context
- Fix: add a type annotation, or write the full form `EnumName.Ok`
+ Why: A leading-dot variant needs a known enum type from context
+ Fix: Add a type annotation, or write the full form `EnumName.Ok`
 More: jet-lang.dev/e/E0330
 
-Error [E0307]: this `if` over `Int (a whole number)` has no `else` arm — range arms can't cover every value
+Error [E0307]: This `if` over `Int (a whole number)` has no `else` arm — range arms can't cover every value
   --> tests/ui/fallible_arm_table_tail.jet:5:5
     |
   5 |     if result == {
     |     ^^^^^^^^^^^^^^
  Why: `Int (a whole number)` has infinitely many values; range arms only cover a subset
- Fix: add `else -> { … }` to handle values not matched by any range
+ Fix: Add `else -> { … }` to handle values not matched by any range
 More: jet-lang.dev/e/E0307
 
-Error [E0305]: pattern `Ok` doesn't match Int (a whole number)
+Error [E0305]: Pattern `Ok` doesn't match Int (a whole number)
   --> tests/ui/fallible_arm_table_tail.jet:6:9
     |
   6 |         .Ok(_) -> { print(true) }
     |         ^^^^^^
- Why: variant patterns only work on enum values
- Fix: test an enum value, or use `Val` / `None` for optionals
+ Why: Variant patterns only work on enum values
+ Fix: Test an enum value, or use `Val` / `None` for optionals
 More: jet-lang.dev/e/E0305
 
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/fallible_arm_table_tail.jet:6:21
-    |
-  6 |         .Ok(_) -> { print(true) }
-    |                     ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116
-
-Error [E0305]: pattern `Err` doesn't match Int (a whole number)
+Error [E0305]: Pattern `Err` doesn't match Int (a whole number)
   --> tests/ui/fallible_arm_table_tail.jet:7:9
     |
   7 |         .Err(_) -> { print(false) }
     |         ^^^^^^^
- Why: variant patterns only work on enum values
- Fix: test an enum value, or use `Val` / `None` for optionals
+ Why: Variant patterns only work on enum values
+ Fix: Test an enum value, or use `Val` / `None` for optionals
 More: jet-lang.dev/e/E0305
-
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/fallible_arm_table_tail.jet:7:22
-    |
-  7 |         .Err(_) -> { print(false) }
-    |                      ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116

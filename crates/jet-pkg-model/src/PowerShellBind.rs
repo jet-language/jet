@@ -236,6 +236,7 @@ pub struct Session {{
     value: Int
 }}
 
+#Error
 pub enum PowerShellError {{
     NotRunning
     Timeout
@@ -245,37 +246,36 @@ pub enum PowerShellError {{
     Limit
 }}
 
-impl Session.Close {{
-    fn close(^self) {{ abi.close(self.value) }}
-}}
-
-pub fn close(session: ^Session) {{}}
-
-pub fn open() Session !PowerShellError -> {{
-    handle :: abi.open()
-    if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
-    return Ok(Session{{ value: handle }})
-}}
-
-pub fn cancel(session: Session) {{ abi.cancel(session.value) }}
-
 "#
     ));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "PowerShellError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
+    out.push_str(
+        r#"impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(session: ^Session) {}
+
+pub fn open() Session !PowerShellError -> {
+    handle :: abi.open()
+    if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
+    return Ok(Session{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+"#,
+    );
     for function in functions {
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
             r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PowerShellError -> {{
     raw :: {}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 -> return Err(PowerShellError.NotRunning)
-    if code == 2 -> return Err(PowerShellError.Timeout)
-    if code == 3 -> return Err(PowerShellError.Cancelled)
-    if code == 5 -> return Err(PowerShellError.Limit)
-    if code != 0 -> return Err(PowerShellError.Protocol)
-    response := json.parse(raw) ?? return Err(PowerShellError.Protocol)
-    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded -> return Err(PowerShellError.CommandFailed)
-    return Ok(response.field("value") ?? DataTree.Null)
+    return decode_response(raw, code)
 }}
 
 "#,
@@ -283,6 +283,17 @@ pub fn cancel(session: Session) {{ abi.cancel(session.value) }}
         ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet(
+        "registry",
+        &[BoundFunction {
+            pwsh: "Transform".into(),
+            jet: "transform".into(),
+        }],
+    )
 }
 
 fn render_c(
@@ -547,7 +558,15 @@ fn powershell_ident(v: &str) -> bool {
 fn reserved_jet_function(v: &str) -> bool {
     matches!(
         v,
-        "open" | "take_error" | "cancel" | "close" | "abi" | "json" | "Session" | "PowerShellError"
+        "open"
+            | "take_error"
+            | "cancel"
+            | "close"
+            | "decode_response"
+            | "abi"
+            | "json"
+            | "Session"
+            | "PowerShellError"
     ) || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
         || crate::Syntax::JET_TYPE_LIST.contains(&v)
 }
@@ -579,6 +598,16 @@ mod tests {
         assert!(!jet.contains("=>"));
         assert!(!jet.contains("Session.{"));
         assert!(worker.contains("'Get-Stateful'"));
+    }
+    #[test]
+    fn renders_one_response_decoder_for_powershell_operations() {
+        let functions = super::parse_function_names(b"Transform\nFail\n").unwrap();
+        let jet = super::render_jet("ops", &functions);
+        assert_eq!(jet.matches("fn decode_response(").count(), 1);
+        assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
+        assert_eq!(jet.matches("raw :: abi.fail(").count(), 1);
+        assert_eq!(jet.matches("return decode_response(raw, code)").count(), 2);
     }
 
     #[test]

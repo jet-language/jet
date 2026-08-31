@@ -82,10 +82,6 @@ function debugSourceForConfiguration(configuration) {
   return canonicalProgram(source);
 }
 
-function shellQuote(value) {
-  return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
-}
-
 function uriArgToPath(uriArg) {
   if (typeof uriArg === "string" && uriArg.startsWith("file:")) {
     return vscode.Uri.parse(uriArg).fsPath;
@@ -94,9 +90,12 @@ function uriArgToPath(uriArg) {
 }
 
 function runJetInTerminal(serverPath, args) {
-  const terminal = vscode.window.createTerminal("Jet");
+  const terminal = vscode.window.createTerminal({
+    name: "Jet",
+    shellPath: serverPath,
+    shellArgs: args,
+  });
   terminal.show();
-  terminal.sendText([shellQuote(serverPath), ...args.map(shellQuote)].join(" "));
 }
 
 function debugFile(file) {

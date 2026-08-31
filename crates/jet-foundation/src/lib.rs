@@ -18,6 +18,7 @@ mod ExactUnitConversion;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
+pub mod GzipKernel;
 pub mod JSON;
 pub mod JSONNumber;
 pub mod JitBackend;
@@ -33,6 +34,8 @@ pub mod App;
 pub mod CborBudget;
 #[path = "CborKernel.rs"]
 pub mod CborKernel;
+#[path = "CsvKernel.rs"]
+pub mod CsvKernel;
 pub mod JetTrace;
 pub mod Layout;
 pub mod LintPolicy;

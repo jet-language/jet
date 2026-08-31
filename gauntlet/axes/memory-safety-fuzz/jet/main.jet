@@ -1,0 +1,58 @@
+use core.files as files
+
+fn run() {
+    bytes :: files.read_bytes("fuzz-input.bin") ?? panic("fuzz input")
+    if bytes.len() == 0 || bytes.len() % 64 != 0 -> panic("invalid fuzz corpus")
+
+    checksum := 0
+    semantic := 0
+    valid := 0
+    boundary := 0
+    oob := 0
+    use_after_free := 0
+    wrong_output := 0
+    position := 0
+    kind := 0
+    declared_length := 0
+    requested_index := 0
+    bounded_length := 0
+    payload_index := 0
+    value := 0
+
+    loop byte in bytes {
+        checksum += Int.from_u64(U64.from_u8(byte))
+        record_offset := position % 64
+        if record_offset == 0 {
+            kind = Int.from_u64(U64.from_u8(byte))
+            payload_index = 0
+            value = 0
+        }
+        if record_offset == 1 {
+            declared_length = Int.from_u64(U64.from_u8(byte))
+            bounded_length = if declared_length < 60 -> declared_length else -> 60
+        }
+        if record_offset == 2 {
+            requested_index = Int.from_u64(U64.from_u8(byte))
+        }
+        if record_offset >= 4 {
+            if kind == 0 || kind == 2 {
+                if payload_index < bounded_length -> value += Int.from_u64(U64.from_u8(byte))
+            } else if payload_index == requested_index && requested_index < 60 {
+                value = Int.from_u64(U64.from_u8(byte))
+                if kind == 4 -> value = value ~| 0xA5
+            }
+            payload_index += 1
+        }
+        if record_offset == 63 {
+            if kind == 0 -> valid += 1
+            if kind == 1 -> boundary += 1
+            if kind == 2 -> oob += 1
+            if kind == 3 -> use_after_free += 1
+            if kind == 4 -> wrong_output += 1
+            safe_index := if requested_index < 60 -> requested_index else -> 60
+            semantic += value + ((kind + 1) * 257) + bounded_length + safe_index
+        }
+        position += 1
+    }
+    print("cases {position / 64} valid {valid} boundary {boundary} oob {oob} use_after_free {use_after_free} wrong_output {wrong_output} bytes {bytes.len()} checksum {checksum} semantic {semantic}")
+}

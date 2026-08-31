@@ -42,7 +42,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // String-only.
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
-        | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
+        | ("to_upper", 0) | ("to_lower", 0) | ("to_ascii_upper", 0) | ("to_ascii_lower", 0)
+        | ("repeat", 1) | ("slice", 2)
         | ("trim_start", 0) | ("trim_end", 0)
         | ("pad_start", 2) | ("pad_end", 2)
         | ("is_alphabetic", 0) | ("is_numeric", 0)
@@ -85,8 +86,15 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
         | ("write_u8", 1) | ("write_byte", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
+        | ("write_i8", 1)
+        | ("write_i16_le", 1) | ("write_i16_be", 1)
         | ("write_u32_le", 1) | ("write_u32_be", 1)
-        | ("write_u64_le", 1) | ("write_u64_be", 1) | ("write_bytes", 1) | ("write", 1)
+        | ("write_i32_le", 1) | ("write_i32_be", 1)
+        | ("write_u64_le", 1) | ("write_u64_be", 1)
+        | ("write_i64_le", 1) | ("write_i64_be", 1)
+        | ("write_f32_le", 1) | ("write_f32_be", 1)
+        | ("write_f64_le", 1) | ("write_f64_be", 1)
+        | ("write_bytes", 1) | ("write", 1)
         | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
         | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
         | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
@@ -381,6 +389,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "under_limit"
                 | "header"
                 | "body"
+                | "text"
                 | "timeout"
                 | "connect_timeout"
                 | "read_timeout"
@@ -401,6 +410,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("HTTPResponse") => matches!(
             method,
             "status"
+                | "text"
                 | "json"
                 | "body"
                 | "header"
@@ -541,24 +551,48 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "add_days"
                 | "add_months"
                 | "add_period"
+                | "subtract_period"
                 | "diff_days"
                 | "weekday"
                 | "iso_weekday"
                 | "day_of_year"
                 | "iso_week"
+                | "iso_week_year"
                 | "quarter_of_year"
                 | "days_in_month"
                 | "is_leap_year"
                 | "truncate"
                 | "replace"
                 | "format"
+                | "format_checked"
+                | "until"
+                | "since"
+                | "with"
                 | "to_string"
                 | "equal"
                 | "compare"
         ),
         Some("LocalTime") => matches!(
             method,
-            "hour" | "minute" | "second" | "to_string" | "equal" | "compare"
+            "hour"
+                | "minute"
+                | "second"
+                | "millisecond"
+                | "microsecond"
+                | "nanosecond"
+                | "add_duration"
+                | "subtract_duration"
+                | "round"
+                | "truncate"
+                | "floor"
+                | "ceil"
+                | "until"
+                | "since"
+                | "format"
+                | "format_checked"
+                | "to_string"
+                | "equal"
+                | "compare"
         ),
         Some("DateTime") => matches!(
             method,
@@ -570,25 +604,51 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "nanosecond"
                 | "to_timestamp"
                 | "to_unix_ms"
+                | "to_unix_s"
+                | "to_unix_us"
+                | "to_unix_ns"
                 | "date"
                 | "time"
                 | "plus_duration"
+                | "subtract_duration"
                 | "difference"
+                | "add_period"
+                | "subtract_period"
+                | "until"
+                | "since"
                 | "truncate"
                 | "round"
                 | "floor"
                 | "ceil"
                 | "replace"
+                | "with"
                 | "in_zone"
                 | "format_rfc3339"
                 | "format"
+                | "format_checked"
                 | "to_string"
                 | "equal"
                 | "compare"
         ),
         Some("Instant") => matches!(method, "elapsed_millis" | "elapsed" | "equal" | "compare"),
-        Some("Period") => matches!(method, "to_string"),
-        Some("Zone") => matches!(method, "name"),
+        Some("Period") => matches!(
+            method,
+            "years"
+                | "months"
+                | "days"
+                | "sign"
+                | "is_zero"
+                | "abs"
+                | "negated"
+                | "add"
+                | "sub"
+                | "total_in"
+                | "to_string"
+        ),
+        Some("Zone") => matches!(
+            method,
+            "name" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day"
+        ),
         Some("ZonedDateTime") => matches!(
             method,
             "date"
@@ -598,8 +658,20 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "to_datetime"
                 | "zone"
                 | "add_duration"
+                | "subtract_duration"
                 | "add_period"
+                | "subtract_period"
+                | "with_time"
+                | "with_zone"
+                | "until"
+                | "since"
+                | "next_transition"
+                | "previous_transition"
+                | "start_of_day"
+                | "hours_in_day"
                 | "format"
+                | "format_rfc9557"
+                | "format_checked"
                 | "to_string"
                 | "equal"
                 | "compare"
@@ -685,9 +757,7 @@ pub(crate) fn resolve_numeric_conversion_op(
     // direct `TryFrom<i64>` would inspect the carrier's signed spelling and
     // reject or sign-wrap values whose high bit is set. The existing CastAs
     // adapters instead select the exact `Int.from_u64` Prelude path.
-    if target_name == "Int"
-        && matches!(parse_int_name_tir(source_name), Some((false, _)))
-    {
+    if target_name == "Int" && matches!(parse_int_name_tir(source_name), Some((false, _))) {
         return Some(TNumericOp::CastAs {
             dst_rust: dst_rust.to_string(),
         });

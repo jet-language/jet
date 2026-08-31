@@ -5,7 +5,7 @@ use core.files as files
 fn run() {
     log_path :: Path.from("/tmp").join("jet_log_job.txt")
     _ :: fs.write(log_path, "INFO boot\nERROR disk full\nWARN retry\nERROR timeout\nINFO done\n")
-    handle :: files.open(~log_path) ?? return Err("open log")
+    handle :: files.open(~log_path)
     errors := 0
     loop line in handle.lines() {
         if line.starts_with("ERROR") {

@@ -111,7 +111,14 @@ pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Ty
 /// declared type.
 fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
     match e {
-        Expr::Paren(inner, _) => declared_field_ty(inner, cx, env),
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => declared_field_ty(inner, cx, env),
+        Expr::Index { base, .. } => {
+            let base_ty = tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
+            match base_ty {
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(*inner),
+                _ => None,
+            }
+        }
         Expr::Field(base, field, _) => {
             let base_ty =
                 tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
@@ -163,8 +170,38 @@ fn builtin_recv_ty(
     cx: &Cx,
     env: &LowerEnv,
 ) -> Option<Type> {
+    let mut receiver = receiver;
+    let mut unwrap_carrier = false;
+    loop {
+        match receiver {
+            Expr::Paren(inner, _) | Expr::Copy(inner, _) => receiver = inner,
+            Expr::Try(inner, ..) => {
+                unwrap_carrier = true;
+                receiver = inner;
+            }
+            _ => break,
+        }
+    }
     if let Some(ty) = tir_recv_jet_ty(receiver, env) {
-        return Some(ty);
+        return Some(if unwrap_carrier {
+            match ty {
+                Type::Result { ok, .. } | Type::Option(ok) => {
+                    crate::Codegen::TIR::builtin_dispatch_ty(*ok)
+                }
+                other => other,
+            }
+        } else {
+            ty
+        });
+    }
+    if let Expr::Call(call) = receiver {
+        if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) {
+            let ty = match crate::Codegen::TIR::call_return_type(cx, &call.name) {
+                Type::Result { ok, .. } | Type::Option(ok) => *ok,
+                other => other,
+            };
+            return Some(crate::Codegen::TIR::builtin_dispatch_ty(ty));
+        }
     }
     let ty = crate::Codegen::TIR::builtin_dispatch_ty(declared_field_ty(receiver, cx, env)?);
     if crate::Collections::builtin_method_return(&ty, method, nargs, false).is_some() {
@@ -561,10 +598,9 @@ pub(crate) fn resolve_builtin_op(
         ("pad_end", 2) => TBuiltinOp::PadEnd,
         ("count", 1) if is_list => TBuiltinOp::CountList,
         ("count", 1) if is_string => TBuiltinOp::StringCount,
-        ("counts", 0)
-            if is_list
-                || matches!(&rty, Some(Type::FixedList { .. }))
-                || is_iter => TBuiltinOp::Counts,
+        ("counts", 0) if is_list || matches!(&rty, Some(Type::FixedList { .. })) || is_iter => {
+            TBuiltinOp::Counts
+        }
         ("extend", 1) if is_list => TBuiltinOp::ExtendList,
         // D-TYPE2-MEASURE1=A: fixed lists join through the same builtin; emit
         // picks the const-generic fixed shape from the FixedList types.
@@ -622,6 +658,8 @@ pub(crate) fn resolve_builtin_op(
         ("before", 1) => TBuiltinOp::Before,
         ("to_upper", 0) => TBuiltinOp::ToUpper,
         ("to_lower", 0) => TBuiltinOp::ToLower,
+        ("to_ascii_upper", 0) if is_string => TBuiltinOp::ToAsciiUpper,
+        ("to_ascii_lower", 0) if is_string => TBuiltinOp::ToAsciiLower,
         ("slice", 2) if is_string => {
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::Slice { line }
@@ -878,10 +916,9 @@ pub(crate) fn resolve_builtin_op(
         ("count", 0) if is_bit_set => TBuiltinOp::BitSetCount,
         (
             "write_u8" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le"
-            | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le"
-            | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le"
-            | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le"
-            | "write_f64_be" | "write_bytes",
+            | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be"
+            | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le"
+            | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes",
             1,
         ) if is_byte_buffer => TBuiltinOp::ByteBufferWrite {
             method: method.to_string(),
@@ -1040,10 +1077,22 @@ pub(crate) fn resolve_closure_op(
         "any" => TClosureOp::Any,
         "all" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAll,
         "all" => TClosureOp::All,
+        "sort_by"
+            if fallible_callback
+                && matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 1) =>
+        {
+            TClosureOp::TrySortBy
+        }
         "sort_by" if matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 2) => {
             TClosureOp::SortByCompare
         }
         "sort_by" => TClosureOp::SortBy,
+        "sort_by_desc"
+            if fallible_callback
+                && matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 1) =>
+        {
+            TClosureOp::TrySortByDesc
+        }
         "sort_by_desc" => TClosureOp::SortByDesc,
         "reduce" => TClosureOp::Reduce,
         // D-ITER1: new closure adapters.
@@ -1120,7 +1169,11 @@ pub(crate) fn resolve_closure_op(
     };
     if matches!(
         op,
-        TClosureOp::SortBy | TClosureOp::SortByDesc | TClosureOp::SortByCompare
+        TClosureOp::SortBy
+            | TClosureOp::SortByDesc
+            | TClosureOp::TrySortBy
+            | TClosureOp::TrySortByDesc
+            | TClosureOp::SortByCompare
     ) {
         debug_assert_eq!(
             crate::Collections::builtin_receiver_borrow(recv_ty, method),

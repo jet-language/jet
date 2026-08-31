@@ -3,13 +3,14 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::AST::{CtKey, CtValue, Type};
+use jet_codegen::AST::{CtKey, CtReport, CtValue, Type};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::Concurrency;
 use crate::JitResultValue;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+use crate::runtime_host::JitCallableSlot;
 
 enum NetHttpHandle {
     TcpListener(Arc<JetTCPListener>),
@@ -542,40 +543,99 @@ fn decode_result(handle: i64) -> Option<(bool, u64)> {
 }
 
 type HTTPHandlerFn = unsafe extern "C" fn(i64) -> i64;
+type HTTPHandlerWithEnvFn = unsafe extern "C" fn(i64, i64) -> i64;
+type HTTPZeroHandlerFn = unsafe extern "C" fn() -> i64;
+type HTTPZeroHandlerWithEnvFn = unsafe extern "C" fn(i64) -> i64;
 
-fn wrap_http_handler(fn_ptr: i64) -> JetHTTPHandler {
-    let f: HTTPHandlerFn = unsafe { std::mem::transmute(fn_ptr as usize) };
-    Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
-        Concurrency::with_http_jet_runtime(|| {
-            let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
-            let res_h = unsafe { f(req_h) };
-            match decode_result(res_h) {
-                Some((true, bits)) => {
-                    let resp_h = bits as i64;
-                    match take_handle(resp_h) {
-                        Some(NetHttpHandle::HTTPResponse(resp)) => Ok(resp),
-                        other => {
-                            if let Some(v) = other {
-                                let _ = push_handle(v);
-                            }
-                            Err(JetHTTPError::IO {
-                                operation: "handler response".into(),
-                            })
-                        }
+fn decode_http_handler_result(res_h: i64) -> Result<JetHTTPResponse, JetHTTPError> {
+    match decode_result(res_h) {
+        Some((true, bits)) => {
+            let resp_h = bits as i64;
+            match take_handle(resp_h) {
+                Some(NetHttpHandle::HTTPResponse(resp)) => Ok(resp),
+                other => {
+                    if let Some(v) = other {
+                        let _ = push_handle(v);
                     }
+                    Err(JetHTTPError::IO {
+                        operation: "handler response".into(),
+                    })
                 }
-                Some((false, bits)) => {
-                    let msg = Concurrency::with_runtime_mut(|rt| {
-                        rt.heap
-                            .clone_string(bits as i64)
-                            .unwrap_or_else(|| "handler error".into())
-                    });
-                    Err(JetHTTPError::IO { operation: msg })
-                }
-                None => Err(JetHTTPError::IO {
-                    operation: "handler result".into(),
-                }),
             }
+        }
+        Some((false, bits)) => {
+            let msg = Concurrency::with_runtime_mut(|rt| {
+                rt.heap
+                    .clone_string(bits as i64)
+                    .unwrap_or_else(|| "handler error".into())
+            });
+            Err(JetHTTPError::IO { operation: msg })
+        }
+        None => Err(JetHTTPError::IO {
+            operation: "handler result".into(),
+        }),
+    }
+}
+
+fn resident_http_callable(handle: i64) -> Option<(usize, JitCallableSlot)> {
+    Concurrency::http_callable_snapshot(handle)
+}
+
+fn invalid_http_handler() -> JetHTTPHandler {
+    Arc::new(|_| {
+        Err(JetHTTPError::IO {
+            operation: "invalid resident HTTP handler".into(),
+        })
+    })
+}
+
+fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
+    let Some((epoch, slot)) = resident_http_callable(callable) else {
+        return invalid_http_handler();
+    };
+    Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+        Concurrency::try_with_http_jet_runtime_at(epoch, || {
+            let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
+            let res_h = unsafe {
+                if slot.has_env {
+                    let f: HTTPHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+                    f(slot.env, req_h)
+                } else {
+                    let f: HTTPHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+                    f(req_h)
+                }
+            };
+            decode_http_handler_result(res_h)
+        })
+        .unwrap_or_else(|| {
+            Err(JetHTTPError::IO {
+                operation: "HTTP handler runtime unavailable".into(),
+            })
+        })
+    })
+}
+
+fn wrap_http_zero_handler(callable: i64) -> JetHTTPHandler {
+    let Some((epoch, slot)) = resident_http_callable(callable) else {
+        return invalid_http_handler();
+    };
+    Arc::new(move |_req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+        Concurrency::try_with_http_jet_runtime_at(epoch, || {
+            let res_h = unsafe {
+                if slot.has_env {
+                    let f: HTTPZeroHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+                    f(slot.env)
+                } else {
+                    let f: HTTPZeroHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+                    f()
+                }
+            };
+            decode_http_handler_result(res_h)
+        })
+        .unwrap_or_else(|| {
+            Err(JetHTTPError::IO {
+                operation: "HTTP handler runtime unavailable".into(),
+            })
         })
     })
 }
@@ -1546,6 +1606,16 @@ fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64
     0
 }
 
+fn jet_jit_http_mux_add_zero(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
+    let method = clone_string(method);
+    let pattern = clone_string(pattern);
+    let handler = wrap_http_zero_handler(fn_ptr);
+    if let Some(mux) = http_mux(mux) {
+        jet_http_mux_add_handler(&mux, &method, &pattern, handler);
+    }
+    0
+}
+
 fn jet_jit_http_response(status: i64, body: i64) -> i64 {
     let body = clone_string(body);
     push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
@@ -1601,6 +1671,30 @@ fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
     .and_then(|r| r.ok()))
 }
 
+fn jet_jit_http_req_text(req: i64) -> i64 {
+    match with_handle(req, |h| match h {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_request_text(request)),
+        _ => None,
+    }) {
+        Some(Ok(text)) => result_ok_handle(alloc_string(text)),
+        Some(Err(error)) => http_err(error),
+        None => result_err("invalid HTTPRequest".into()),
+    }
+}
+
+fn jet_jit_http_req_text_with_limit(req: i64, limit: i64) -> i64 {
+    match with_handle(req, |h| match h {
+        NetHttpHandle::HTTPRequest(request) => {
+            Some(jet_http_request_text_with_limit(request, limit))
+        }
+        _ => None,
+    }) {
+        Some(Ok(text)) => result_ok_handle(alloc_string(text)),
+        Some(Err(error)) => http_err(error),
+        None => result_err("invalid HTTPRequest".into()),
+    }
+}
+
 fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
     match with_handle(body, |h| match h {
         NetHttpHandle::HTTPBody(b) => Some(jet_http_body_text(b, limit)),
@@ -1634,6 +1728,30 @@ fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64) -> i64 {
         Some(Ok(s)) => result_ok_handle(alloc_string(s)),
         Some(Err(e)) => http_err(e),
         None => result_err("invalid HTTPBody".into()),
+    }
+}
+
+fn jet_jit_http_resp_text(resp: i64) -> i64 {
+    match with_handle(resp, |h| match h {
+        NetHttpHandle::HTTPResponse(response) => Some(jet_http_response_text(response)),
+        _ => None,
+    }) {
+        Some(Ok(text)) => result_ok_handle(alloc_string(text)),
+        Some(Err(error)) => http_err(error),
+        None => result_err("invalid HTTPResponse".into()),
+    }
+}
+
+fn jet_jit_http_resp_text_with_limit(resp: i64, limit: i64) -> i64 {
+    match with_handle(resp, |h| match h {
+        NetHttpHandle::HTTPResponse(response) => {
+            Some(jet_http_response_text_with_limit(response, limit))
+        }
+        _ => None,
+    }) {
+        Some(Ok(text)) => result_ok_handle(alloc_string(text)),
+        Some(Err(error)) => http_err(error),
+        None => result_err("invalid HTTPResponse".into()),
     }
 }
 
@@ -2224,6 +2342,7 @@ fn jet_jit_ws_message_text(msg: i64) -> i64 {
 
 type HTTPClosureFn = unsafe extern "C" fn(i64, i64) -> i64;
 type HTTPMiddlewareFn = unsafe extern "C" fn(i64) -> i64;
+type HTTPMiddlewareWithEnvFn = unsafe extern "C" fn(i64, i64) -> i64;
 
 fn list_of_strings(rows: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -2237,7 +2356,7 @@ fn list_of_strings(rows: Vec<String>) -> i64 {
 }
 
 /// Bind a capturing Jet HTTP handler. `caps` is a heap list of capture handles.
-fn jet_jit_http_handler_bind(fn_ptr: i64, caps: i64) -> i64 {
+fn jet_jit_http_handler_bind(callable: i64, caps: i64) -> i64 {
     let env = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         let len = rt.heap.list_len(caps).unwrap_or(0);
@@ -2248,23 +2367,28 @@ fn jet_jit_http_handler_bind(fn_ptr: i64, caps: i64) -> i64 {
         }
         list
     });
-    bind_http_closure(fn_ptr, env)
+    bind_http_closure(callable, env)
 }
 
 /// Single-capture bind: pack `cap0` into a fresh env list in the host.
-fn jet_jit_http_handler_bind1(fn_ptr: i64, cap0: i64) -> i64 {
+fn jet_jit_http_handler_bind1(callable: i64, cap0: i64) -> i64 {
     let env = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         let _ = rt.heap.list_push_int(list, cap0);
         list
     });
-    bind_http_closure(fn_ptr, env)
+    bind_http_closure(callable, env)
 }
 
-fn bind_http_closure(fn_ptr: i64, env: i64) -> i64 {
-    let f: HTTPClosureFn = unsafe { std::mem::transmute(fn_ptr as usize) };
+fn bind_http_closure(callable: i64, env: i64) -> i64 {
+    let Some((epoch, slot)) =
+        resident_http_callable(callable).filter(|(_, slot)| slot.has_env)
+    else {
+        return push_handle(NetHttpHandle::HTTPHandler(invalid_http_handler()));
+    };
+    let f: HTTPClosureFn = unsafe { std::mem::transmute(slot.fn_ptr as usize) };
     let handler: JetHTTPHandler = Arc::new(move |req: JetHTTPRequest| {
-        Concurrency::with_http_jet_runtime(|| {
+        Concurrency::try_with_http_jet_runtime_at(epoch, || {
             let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
             let res_h = unsafe { f(env, req_h) };
             match decode_result(res_h) {
@@ -2291,6 +2415,11 @@ fn bind_http_closure(fn_ptr: i64, env: i64) -> i64 {
                     operation: "handler result".into(),
                 }),
             }
+        })
+        .unwrap_or_else(|| {
+            Err(JetHTTPError::IO {
+                operation: "HTTP handler runtime unavailable".into(),
+            })
         })
     });
     push_handle(NetHttpHandle::HTTPHandler(handler))
@@ -2322,13 +2451,24 @@ fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
     let Some(mux) = http_mux(mux) else {
         return 0;
     };
-    let f: HTTPMiddlewareFn = unsafe { std::mem::transmute(mw_fn as usize) };
+    let Some((epoch, slot)) = resident_http_callable(mw_fn) else {
+        return 0;
+    };
     jet_http_mux_middleware(
         &mux,
         Arc::new(move |next| {
-            Concurrency::with_http_jet_runtime(|| {
+            Concurrency::try_with_http_jet_runtime_at(epoch, || {
                 let next_h = push_handle(NetHttpHandle::HTTPHandler(next));
-                let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f(next_h) }));
+                let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                    if slot.has_env {
+                        let f: HTTPMiddlewareWithEnvFn =
+                            std::mem::transmute(slot.fn_ptr as usize);
+                        f(slot.env, next_h)
+                    } else {
+                        let f: HTTPMiddlewareFn = std::mem::transmute(slot.fn_ptr as usize);
+                        f(next_h)
+                    }
+                }));
                 let fail = |op: &'static str| -> JetHTTPHandler {
                     Arc::new(move |_| Err(JetHTTPError::IO { operation: op.into() }))
                 };
@@ -2350,6 +2490,13 @@ fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
                     }
                     Err(_) => fail("middleware panic"),
                 }
+            })
+            .unwrap_or_else(|| {
+                Arc::new(|_| {
+                    Err(JetHTTPError::IO {
+                        operation: "HTTP middleware runtime unavailable".into(),
+                    })
+                }) as JetHTTPHandler
             })
         }) as JetHTTPMiddleware,
     );
@@ -2461,6 +2608,16 @@ fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
     push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_body(
         req, &body,
     )))
+}
+
+fn jet_jit_http_client_request_json(req: i64, body: i64) -> i64 {
+    let body = clone_string(body);
+    let Some(req) = take_http_request(req) else {
+        return 0;
+    };
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_json_text(req, &body),
+    ))
 }
 
 fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) -> i64 {
@@ -2663,12 +2820,15 @@ host_fns! {
     ready_writable: "jet_jit_net_ready_writable" => jet_jit_net_ready_writable: sig1;
     http_mux_new: "jet_jit_http_mux_new" => jet_jit_http_mux_new: sig0;
     http_mux_add: "jet_jit_http_mux_add" => jet_jit_http_mux_add: sig4;
+    http_mux_add_zero: "jet_jit_http_mux_add_zero" => jet_jit_http_mux_add_zero: sig4;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
     http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
     http_req_method: "jet_jit_http_req_method" => jet_jit_http_req_method: sig1;
     http_req_path: "jet_jit_http_req_path" => jet_jit_http_req_path: sig1;
     http_req_param: "jet_jit_http_req_param" => jet_jit_http_req_param: sig2;
     http_req_header: "jet_jit_http_req_header" => jet_jit_http_req_header: sig2;
+    http_req_text: "jet_jit_http_req_text" => jet_jit_http_req_text: sig1;
+    http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
     http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
     http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;
@@ -2683,6 +2843,8 @@ host_fns! {
     http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
     http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
     http_client_resp_body: "jet_jit_http_client_resp_body" => jet_jit_http_client_resp_body: sig1;
+    http_resp_text: "jet_jit_http_resp_text" => jet_jit_http_resp_text: sig1;
+    http_resp_text_with_limit: "jet_jit_http_resp_text_with_limit" => jet_jit_http_resp_text_with_limit: sig2;
     http_server_bind: "jet_jit_http_server_bind" => jet_jit_http_server_bind: sig2;
     http_server_local_addr: "jet_jit_http_server_local_addr" => jet_jit_http_server_local_addr: sig1;
     http_server_serve: "jet_jit_http_server_serve" => jet_jit_http_server_serve: sig1;
@@ -2704,6 +2866,7 @@ host_fns! {
     http_static_file_range: "jet_jit_http_static_file_range" => jet_jit_http_static_file_range: sig3;
     http_client_request_new: "jet_jit_http_client_request_new" => jet_jit_http_client_request_new: sig2;
     http_client_request_body: "jet_jit_http_client_request_body" => jet_jit_http_client_request_body: sig2;
+    http_client_request_json: "jet_jit_http_client_request_json" => jet_jit_http_client_request_json: sig2;
     http_client_request_form: "jet_jit_http_client_request_form" => jet_jit_http_client_request_form: sig3;
     http_client_request_cookie: "jet_jit_http_client_request_cookie" => jet_jit_http_client_request_cookie: sig3;
     http_client_request_header: "jet_jit_http_client_request_header" => jet_jit_http_client_request_header: sig3;
@@ -2846,7 +3009,12 @@ pub(crate) fn runtime_http_mux_add_callback(
         let value = callback_result.map_err(|operation| JetHTTPError::IO { operation })?;
         let value = match value {
             CtValue::Present(value) => *value,
-            CtValue::Failed(_) => {
+            CtValue::Failed(CtReport::Told(error)) => {
+                return Err(http_error_from_value(&error).unwrap_or(JetHTTPError::IO {
+                    operation: "handler returned an error".to_string(),
+                }))
+            }
+            CtValue::Failed(CtReport::Clean(_)) => {
                 return Err(JetHTTPError::IO {
                     operation: "handler returned an error".to_string(),
                 })
@@ -4168,6 +4336,80 @@ fn http_error_value(error: JetHTTPError) -> CtValue {
     marshal_http_error(error).1
 }
 
+/// Decode the canonical `HTTPError` carrier when an interpreter handler
+/// returns it. This is only the CtValue/Prelude boundary adapter; the
+/// variants and fields come from `HTTPMessage.rs`.
+fn http_error_from_value(value: &CtValue) -> Option<JetHTTPError> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return None;
+    };
+    if type_name != "HTTPError" {
+        return None;
+    }
+    let unit = || args.is_empty().then_some(());
+    let field = |name: &str| {
+        args.iter()
+            .find_map(|(field, value)| (field.as_deref() == Some(name)).then_some(value))
+            .or_else(|| {
+                args.first()
+                    .filter(|(field, _)| field.is_none())
+                    .map(|(_, value)| value)
+            })
+    };
+    let int = |name: &str| match field(name) {
+        Some(CtValue::Int(value)) => Some(*value),
+        _ => None,
+    };
+    let text = |name: &str| match field(name) {
+        Some(CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    };
+    let operation = || match field("operation") {
+        Some(CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        }) if type_name == "HTTPOperation" && args.is_empty() => match variant.as_str() {
+            "ClientConnect" => Some(JetHTTPOperation::ClientConnect),
+            "ServerBind" => Some(JetHTTPOperation::ServerBind),
+            "ServeListener" => Some(JetHTTPOperation::ServeListener),
+            _ => None,
+        },
+        _ => None,
+    };
+    match variant.as_str() {
+        "InvalidMethod" => unit().map(|_| JetHTTPError::InvalidMethod),
+        "InvalidUrl" => unit().map(|_| JetHTTPError::InvalidUrl),
+        "InvalidHeader" => unit().map(|_| JetHTTPError::InvalidHeader),
+        "InvalidStatus" => unit().map(|_| JetHTTPError::InvalidStatus),
+        "BodyConsumed" => unit().map(|_| JetHTTPError::BodyConsumed),
+        "InvalidFraming" => unit().map(|_| JetHTTPError::InvalidFraming),
+        "UnsupportedEncoding" => unit().map(|_| JetHTTPError::UnsupportedEncoding),
+        "Cancelled" => unit().map(|_| JetHTTPError::Cancelled),
+        "BodyTooLarge" => int("limit").map(|limit| JetHTTPError::BodyTooLarge { limit }),
+        "Resolve" => text("host").map(|host| JetHTTPError::Resolve { host }),
+        "Connect" => text("address").map(|address| JetHTTPError::Connect { address }),
+        "TLS" => text("stage").map(|stage| JetHTTPError::TLS { stage }),
+        "Timeout" => text("phase").map(|phase| JetHTTPError::Timeout { phase }),
+        "Proxy" => text("stage").map(|stage| JetHTTPError::Proxy { stage }),
+        "Redirect" => text("reason").map(|reason| JetHTTPError::Redirect { reason }),
+        "Protocol" => text("version").map(|version| JetHTTPError::Protocol { version }),
+        "IO" => text("operation").map(|operation| JetHTTPError::IO { operation }),
+        "Policy" => text("reason").map(|reason| JetHTTPError::Policy { reason }),
+        "ResourceUnavailable" => {
+            text("resource").map(|resource| JetHTTPError::ResourceUnavailable { resource })
+        }
+        "Internal" => text("incident_id").map(|incident_id| JetHTTPError::Internal { incident_id }),
+        "UnsupportedTarget" => operation().map(|operation| JetHTTPError::UnsupportedTarget { operation }),
+        _ => None,
+    }
+}
+
 fn http_ct_handle(type_name: &str, handle: i64) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -4504,6 +4746,17 @@ pub(crate) fn runtime_http_request_body(
     )))
 }
 
+pub(crate) fn runtime_http_request_json(
+    request: i64,
+    body: String,
+) -> Result<i64, String> {
+    let request =
+        take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_json_text(request, &body),
+    )))
+}
+
 // CtValue ambient adapters for the HTTP Prelude handle projections. The
 // evaluator owns no HTTP policy; these only borrow the same included Prelude
 // functions that the Cranelift host exports above.
@@ -4518,6 +4771,31 @@ pub(crate) fn runtime_http_req_method(request: i64) -> Result<String, String> {
 pub(crate) fn runtime_http_req_path(request: i64) -> Result<String, String> {
     with_handle(request, |handle| match handle {
         NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_path(request)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_text(
+    request: i64,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => {
+            Some(jet_http_request_text(request).map_err(http_error_value))
+        }
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_text_with_limit(
+    request: i64,
+    limit: i64,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => {
+            Some(jet_http_request_text_with_limit(request, limit).map_err(http_error_value))
+        }
         _ => None,
     })
     .ok_or_else(|| "invalid HTTPRequest".to_string())
@@ -4585,6 +4863,31 @@ pub(crate) fn runtime_http_req_trailers(
 pub(crate) fn runtime_http_resp_status(response: i64) -> Result<i64, String> {
     with_handle(response, |handle| match handle {
         NetHttpHandle::HTTPResponse(response) => Some(jet_http_srv_response_status(response)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())
+}
+
+pub(crate) fn runtime_http_resp_text(
+    response: i64,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => {
+            Some(jet_http_response_text(response).map_err(http_error_value))
+        }
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())
+}
+
+pub(crate) fn runtime_http_resp_text_with_limit(
+    response: i64,
+    limit: i64,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => {
+            Some(jet_http_response_text_with_limit(response, limit).map_err(http_error_value))
+        }
         _ => None,
     })
     .ok_or_else(|| "invalid HTTPResponse".to_string())
@@ -4683,9 +4986,178 @@ pub(crate) fn runtime_http_request_new(method: String, url: String) -> i64 {
     )))
 }
 
+fn ws_error_value(error: JetWsError) -> CtValue {
+    let (variant, args) = match error {
+        JetWsError::InvalidUrl => ("InvalidUrl", Vec::new()),
+        JetWsError::InvalidHandshake => ("InvalidHandshake", Vec::new()),
+        JetWsError::Protocol => ("Protocol", Vec::new()),
+        JetWsError::Timeout => ("Timeout", Vec::new()),
+        JetWsError::Closed => ("Closed", Vec::new()),
+        JetWsError::Cancelled => ("Cancelled", Vec::new()),
+        JetWsError::UnsupportedTarget => ("UnsupportedTarget", Vec::new()),
+        JetWsError::MessageTooLarge { limit } => (
+            "MessageTooLarge",
+            vec![(Some("limit".to_string()), CtValue::Int(limit))],
+        ),
+        JetWsError::IO { operation } => (
+            "IO",
+            vec![(Some("operation".to_string()), CtValue::Str(operation))],
+        ),
+    };
+    CtValue::Enum {
+        type_name: "WsError".to_string(),
+        variant: variant.to_string(),
+        args,
+    }
+}
+
+fn ws_invalid_handle(type_name: &str) -> CtValue {
+    ws_error_value(JetWsError::IO {
+        operation: format!("invalid {type_name}"),
+    })
+}
+
+pub(crate) fn runtime_ws_connect(url: String) -> Result<i64, CtValue> {
+    jet_ws_connect(&url)
+        .map(|connection| {
+            push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(connection))))
+        })
+        .map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_upgrade(request: i64) -> Result<i64, CtValue> {
+    match with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_ws_upgrade(request)),
+        _ => None,
+    }) {
+        Some(Ok(connection)) => Ok(push_handle(NetHttpHandle::WsConn(Arc::new(
+            Mutex::new(connection),
+        )))),
+        Some(Err(error)) => Err(ws_error_value(error)),
+        None => Err(ws_invalid_handle("HTTPRequest")),
+    }
+}
+
+pub(crate) fn runtime_ws_send_text(connection: i64, text: String) -> Result<(), CtValue> {
+    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
+    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    jet_ws_send_text(&connection, &text).map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_send_bytes(connection: i64, bytes: Vec<u8>) -> Result<(), CtValue> {
+    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
+    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    jet_ws_send_binary(&connection, &bytes).map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_recv(connection: i64) -> Result<i64, CtValue> {
+    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
+    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    jet_ws_recv(&connection)
+        .map(|message| push_handle(NetHttpHandle::WsMessage(message)))
+        .map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_close(
+    connection: i64,
+    code: i64,
+    reason: String,
+) -> Result<(), CtValue> {
+    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
+    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    jet_ws_close(&connection, code, &reason).map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_message_is_text(message: i64) -> Result<bool, CtValue> {
+    with_handle(message, |handle| match handle {
+        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_text(message)),
+        _ => None,
+    })
+    .ok_or_else(|| ws_invalid_handle("WsMessage"))
+}
+
+pub(crate) fn runtime_ws_message_is_binary(message: i64) -> Result<bool, CtValue> {
+    with_handle(message, |handle| match handle {
+        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_binary(message)),
+        _ => None,
+    })
+    .ok_or_else(|| ws_invalid_handle("WsMessage"))
+}
+
+pub(crate) fn runtime_ws_message_is_close(message: i64) -> Result<bool, CtValue> {
+    with_handle(message, |handle| match handle {
+        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_close(message)),
+        _ => None,
+    })
+    .ok_or_else(|| ws_invalid_handle("WsMessage"))
+}
+
+pub(crate) fn runtime_ws_message_text(message: i64) -> Result<String, CtValue> {
+    with_handle(message, |handle| match handle {
+        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_text(message)),
+        _ => None,
+    })
+    .ok_or_else(|| ws_invalid_handle("WsMessage"))?
+    .map_err(ws_error_value)
+}
+
+pub(crate) fn runtime_ws_message_bytes(message: i64) -> Result<Vec<u8>, CtValue> {
+    with_handle(message, |handle| match handle {
+        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_bytes(message)),
+        _ => None,
+    })
+    .ok_or_else(|| ws_invalid_handle("WsMessage"))?
+    .map_err(ws_error_value)
+}
+
 #[cfg(test)]
 mod http_i9_adapter_tests {
     use super::*;
+
+    #[test]
+    fn websocket_error_marshalling_uses_canonical_surface_shape() {
+        let invalid = ws_error_value(JetWsError::InvalidUrl);
+        assert!(matches!(
+            invalid,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "WsError" && variant == "InvalidUrl" && args.is_empty()
+        ));
+
+        let operation = ws_error_value(JetWsError::IO {
+            operation: "connect".to_string(),
+        });
+        assert!(matches!(
+            operation,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "WsError"
+                    && variant == "IO"
+                    && matches!(
+                        args.as_slice(),
+                        [(Some(field), CtValue::Str(value))]
+                            if field == "operation" && value == "connect"
+                    )
+        ));
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "windows"
+    ))]
+    #[test]
+    fn websocket_adapter_reaches_prelude_url_validator() {
+        let result = runtime_ws_connect("ws://127.0.0.1/path\r\nInjected: yes".to_string());
+        assert!(matches!(
+            result,
+            Err(CtValue::Enum { type_name, variant, args })
+                if type_name == "WsError" && variant == "InvalidUrl" && args.is_empty()
+        ));
+    }
 
     #[test]
     fn http_error_marshalling_uses_canonical_surface_shape() {

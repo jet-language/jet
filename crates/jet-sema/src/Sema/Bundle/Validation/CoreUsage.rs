@@ -4,10 +4,12 @@
 //! under the card #510 boundary.
 
 use super::*;
-use crate::AST::Type;
+use crate::AST::{ExternFn, Func, Param, TraitMethodSig, Type};
+use crate::Sema::TypeRegistry;
 
 pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
+const CORE_MATH_TYPES_USAGE: &str = "core.math::__mathtypes__";
 
 fn is_core_closure_marker(usage: &str) -> bool {
     usage.starts_with(CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
@@ -104,40 +106,218 @@ pub(crate) fn collect_used_core(
         }
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_core_stmts(&f.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Func(f) => collect_core_func(
+                    f,
+                    &module_imports,
+                    &states[idx].registry,
+                    &mut used,
+                    &mut spans,
+                    &mut ffi_cb,
+                ),
                 Item::Struct(s) => {
                     for field in &s.fields {
-                        collect_core_type_usage(&field.ty, &mut used, &mut spans, Some(field.ty_span));
+                        collect_core_field(
+                            field,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
                     }
-                    for m in &s.methods {
-                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
+                    for method in &s.methods {
+                        collect_core_func(
+                            method,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                    for trait_impl in &s.trait_impls {
+                        collect_core_trait_impl(
+                            trait_impl,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                    collect_core_stmts(
+                        &s.validate_block,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    );
+                    for binding in &s.cli_bindings {
+                        collect_core_expr(
+                            &binding.target,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
                     }
                 }
                 Item::Enum(e) => {
                     for variant in &e.variants {
                         match &variant.payload {
                             crate::AST::VariantPayload::Single(ty, span) => {
-                                collect_core_type_usage(ty, &mut used, &mut spans, Some(*span));
+                                collect_core_type_usage(
+                                    ty,
+                                    &states[idx].registry,
+                                    &mut used,
+                                    &mut spans,
+                                    Some(*span),
+                                );
                             }
                             crate::AST::VariantPayload::Named(fields) => {
                                 for field in fields {
-                                    collect_core_type_usage(&field.ty, &mut used, &mut spans, Some(field.ty_span));
+                                    collect_core_type_usage(
+                                        &field.ty,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        Some(field.ty_span),
+                                    );
                                 }
                             }
                             crate::AST::VariantPayload::Unit => {}
                         }
+                        if let Some(expression) = &variant.discriminant_expr {
+                            collect_core_expr(
+                                expression,
+                                &module_imports,
+                                &states[idx].registry,
+                                &mut used,
+                                &mut spans,
+                                &mut ffi_cb,
+                            );
+                        }
                     }
-                    for m in &e.methods {
-                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
+                    for method in &e.methods {
+                        collect_core_func(
+                            method,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                    for trait_impl in &e.trait_impls {
+                        collect_core_trait_impl(
+                            trait_impl,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
                     }
                 }
                 Item::Impl(i) => {
-                    for m in &i.methods {
-                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
+                    for method in &i.methods {
+                        collect_core_func(
+                            method,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                    for (_, span, ty) in &i.assoc_type_impls {
+                        collect_core_type_usage(
+                            ty,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            Some(*span),
+                        );
                     }
                 }
-                Item::Test(t) => collect_core_stmts(&t.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Const(c) => collect_core_expr(&c.value, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Test(t) => {
+                    collect_core_params(
+                        &t.params,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    );
+                    collect_core_stmts(
+                        &t.body,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    );
+                }
+                Item::Const(c) => {
+                    if let Some(ty) = &c.ty {
+                        collect_core_type_usage(
+                            ty,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            Some(c.name_span),
+                        );
+                    }
+                    collect_core_expr(
+                        &c.value,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    );
+                }
+                Item::Trait(t) => {
+                    for method in &t.methods {
+                        collect_core_trait_method(
+                            method,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                }
+                Item::ExternRust(block) => {
+                    for function in &block.functions {
+                        collect_core_extern_fn(
+                            function,
+                            &module_imports,
+                            &states[idx].registry,
+                            &mut used,
+                            &mut spans,
+                            &mut ffi_cb,
+                        );
+                    }
+                }
+                Item::Distinct(definition) => collect_core_type_usage(
+                    &definition.base,
+                    &states[idx].registry,
+                    &mut used,
+                    &mut spans,
+                    Some(definition.base_span),
+                ),
+                Item::ErrorConv(definition) => collect_core_stmts(
+                    &definition.body,
+                    &module_imports,
+                    &states[idx].registry,
+                    &mut used,
+                    &mut spans,
+                    &mut ffi_cb,
+                ),
                 Item::CodeModule(cm) => {
                     let Some(body) = &cm.body else { continue };
                     let mut scoped_imports = module_imports.clone();
@@ -158,18 +338,87 @@ pub(crate) fn collect_used_core(
                     }
                     for inner in body {
                         match inner {
-                            Item::Func(f) => collect_core_stmts(
-                                &f.body,
+                            Item::Func(f) => collect_core_func(
+                                f,
                                 &scoped_imports,
+                                &states[idx].registry,
                                 &mut used,
                                 &mut spans,
                                 &mut ffi_cb,
                             ),
                             Item::Struct(s) => {
-                                for method in &s.methods {
-                                    collect_core_stmts(
-                                        &method.body,
+                                for field in &s.fields {
+                                    collect_core_field(
+                                        field,
                                         &scoped_imports,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                                for method in &s.methods {
+                                    collect_core_func(
+                                        method,
+                                        &scoped_imports,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                                for trait_impl in &s.trait_impls {
+                                    collect_core_trait_impl(
+                                        trait_impl,
+                                        &scoped_imports,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            Item::Enum(e) => {
+                                for variant in &e.variants {
+                                    match &variant.payload {
+                                        crate::AST::VariantPayload::Single(ty, span) => {
+                                            collect_core_type_usage(
+                                                ty,
+                                                &states[idx].registry,
+                                                &mut used,
+                                                &mut spans,
+                                                Some(*span),
+                                            );
+                                        }
+                                        crate::AST::VariantPayload::Named(fields) => {
+                                            for field in fields {
+                                                collect_core_type_usage(
+                                                    &field.ty,
+                                                    &states[idx].registry,
+                                                    &mut used,
+                                                    &mut spans,
+                                                    Some(field.ty_span),
+                                                );
+                                            }
+                                        }
+                                        crate::AST::VariantPayload::Unit => {}
+                                    }
+                                }
+                                for method in &e.methods {
+                                    collect_core_func(
+                                        method,
+                                        &scoped_imports,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                                for trait_impl in &e.trait_impls {
+                                    collect_core_trait_impl(
+                                        trait_impl,
+                                        &scoped_imports,
+                                        &states[idx].registry,
                                         &mut used,
                                         &mut spans,
                                         &mut ffi_cb,
@@ -178,14 +427,62 @@ pub(crate) fn collect_used_core(
                             }
                             Item::Impl(i) => {
                                 for method in &i.methods {
-                                    collect_core_stmts(
-                                        &method.body,
+                                    collect_core_func(
+                                        method,
                                         &scoped_imports,
+                                        &states[idx].registry,
                                         &mut used,
                                         &mut spans,
                                         &mut ffi_cb,
                                     );
                                 }
+                                for (_, span, ty) in &i.assoc_type_impls {
+                                    collect_core_type_usage(
+                                        ty,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        Some(*span),
+                                    );
+                                }
+                            }
+                            Item::Trait(t) => {
+                                for method in &t.methods {
+                                    collect_core_trait_method(
+                                        method,
+                                        &scoped_imports,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            Item::Distinct(definition) => collect_core_type_usage(
+                                &definition.base,
+                                &states[idx].registry,
+                                &mut used,
+                                &mut spans,
+                                Some(definition.base_span),
+                            ),
+                            Item::Const(c) => {
+                                if let Some(ty) = &c.ty {
+                                    collect_core_type_usage(
+                                        ty,
+                                        &states[idx].registry,
+                                        &mut used,
+                                        &mut spans,
+                                        Some(c.name_span),
+                                    );
+                                }
+                                collect_core_expr(
+                                    &c.value,
+                                    &scoped_imports,
+                                    &states[idx].registry,
+                                    &mut used,
+                                    &mut spans,
+                                    &mut ffi_cb,
+                                );
                             }
                             _ => {}
                         }
@@ -194,17 +491,13 @@ pub(crate) fn collect_used_core(
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)
                 | Item::FactDecl(_)
-                | Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
-                | Item::ExternRust(_)
                 | Item::Module(_)
-                | Item::Distinct(_)
                 | Item::TypeAlias(_) // D-TYPEALIAS1: erases
                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
                 | Item::CModule(_)
-                | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
-                | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+                | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: expanded before this pass
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
                 | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before usage collection
                 | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
@@ -229,13 +522,183 @@ fn note_core_usage(
     }
 }
 
+fn note_builtin_math_type(
+    name: &str,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    span: Option<crate::Diagnostics::Span>,
+) {
+    // Sema's closed math family wins only when the name is not a user type.
+    // Keep the same registry guard here so Core reachability cannot turn a
+    // user-defined `F32x8`/`Vec3` into an unrelated Prelude dependency.
+    if !registry.contains(name) && is_math_type(name) {
+        note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, span);
+    }
+}
+
+fn collect_core_params(
+    params: &[Param],
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    for param in params {
+        collect_core_type_usage(
+            &param.ty,
+            registry,
+            used,
+            spans,
+            Some(param.ty_span),
+        );
+        if let Some(default) = &param.default {
+            collect_core_expr(default, imports, registry, used, spans, ffi_cb);
+        }
+    }
+}
+
+fn collect_core_func_signature(
+    function: &Func,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    // D-SIMD3: the scalar opt-out is a semantic function fact. Its generated
+    // loop calls the shared barrier even when the body has no lane-shaped type.
+    if function
+        .markers
+        .iter()
+        .any(|marker| marker.name == Syntax::MARKER_SCALAR)
+    {
+        note_core_usage(
+            used,
+            spans,
+            CORE_MATH_TYPES_USAGE,
+            Some(function.name_span),
+        );
+    }
+    collect_core_params(&function.params, imports, registry, used, spans, ffi_cb);
+    if let Some(return_type) = &function.return_type {
+        collect_core_type_usage(
+            return_type,
+            registry,
+            used,
+            spans,
+            function.return_type_span.or(Some(function.name_span)),
+        );
+    }
+}
+
+fn collect_core_func(
+    function: &Func,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    collect_core_func_signature(function, imports, registry, used, spans, ffi_cb);
+    collect_core_stmts(
+        &function.body,
+        imports,
+        registry,
+        used,
+        spans,
+        ffi_cb,
+    );
+}
+
+fn collect_core_trait_method(
+    method: &TraitMethodSig,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    collect_core_params(&method.params, imports, registry, used, spans, ffi_cb);
+    if let Some(return_type) = &method.return_type {
+        collect_core_type_usage(
+            return_type,
+            registry,
+            used,
+            spans,
+            Some(method.name_span),
+        );
+    }
+    if let Some(body) = &method.default_body {
+        collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
+    }
+}
+
+fn collect_core_extern_fn(
+    function: &ExternFn,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    collect_core_params(&function.params, imports, registry, used, spans, ffi_cb);
+    if let Some(return_type) = &function.return_type {
+        collect_core_type_usage(
+            return_type,
+            registry,
+            used,
+            spans,
+            function.return_type_span.or(Some(function.name_span)),
+        );
+    }
+}
+
+fn collect_core_field(
+    field: &crate::AST::Field,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    collect_core_type_usage(&field.ty, registry, used, spans, Some(field.ty_span));
+    if let Some(expression) = &field.computed {
+        collect_core_expr(expression, imports, registry, used, spans, ffi_cb);
+    }
+    if let Some(expression) = &field.default {
+        collect_core_expr(expression, imports, registry, used, spans, ffi_cb);
+    }
+}
+
+fn collect_core_trait_impl(
+    trait_impl: &crate::AST::TraitImplBlock,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    for method in &trait_impl.methods {
+        collect_core_func(method, imports, registry, used, spans, ffi_cb);
+    }
+    for (_, span, ty) in &trait_impl.assoc_type_impls {
+        collect_core_type_usage(ty, registry, used, spans, Some(*span));
+    }
+}
+
 fn collect_core_type_usage(
     ty: &Type,
+    registry: &TypeRegistry,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     span: Option<crate::Diagnostics::Span>,
 ) {
     match ty {
+        Type::Named(name) if !registry.contains(name) && is_math_type(name) => {
+            note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, span);
+        }
         // D-CONFIG-ENV1: a type-only crypto carrier still needs the hidden
         // RustCrypto bridge. Most call-site paths carry the internal nominal
         // tag, but field-marker plumbing can leave the qualified leaf visible
@@ -255,7 +718,7 @@ fn collect_core_type_usage(
             ) =>
         {
             note_core_usage(used, spans, "core.crypto::__nominal__", span);
-            collect_core_type_usage(inner, used, spans, span);
+            collect_core_type_usage(inner, registry, used, spans, span);
         }
         Type::Tagged { inner, .. }
         | Type::List(inner)
@@ -263,35 +726,35 @@ fn collect_core_type_usage(
         | Type::Shared(inner)
         | Type::FixedList { elem: inner, .. }
         | Type::InlineRange { base: inner, .. } => {
-            collect_core_type_usage(inner, used, spans, span)
+            collect_core_type_usage(inner, registry, used, spans, span)
         }
         Type::Map { key, value, .. }
         | Type::Result {
             ok: key,
             err: value,
         } => {
-            collect_core_type_usage(key, used, spans, span);
-            collect_core_type_usage(value, used, spans, span);
+            collect_core_type_usage(key, registry, used, spans, span);
+            collect_core_type_usage(value, registry, used, spans, span);
         }
         Type::Fn { params, ret, .. } => {
             for param in params {
-                collect_core_type_usage(param, used, spans, span);
+                collect_core_type_usage(param, registry, used, spans, span);
             }
             if let Some(ret) = ret {
-                collect_core_type_usage(ret, used, spans, span);
+                collect_core_type_usage(ret, registry, used, spans, span);
             }
         }
         Type::Tuple(fields) => {
             for (_, field) in fields {
-                collect_core_type_usage(field, used, spans, span);
+                collect_core_type_usage(field, registry, used, spans, span);
             }
         }
         Type::Apply { args, .. } | Type::Union(args) => {
             for arg in args {
-                collect_core_type_usage(arg, used, spans, span);
+                collect_core_type_usage(arg, registry, used, spans, span);
             }
         }
-        Type::Quantity { base, .. } => collect_core_type_usage(base, used, spans, span),
+        Type::Quantity { base, .. } => collect_core_type_usage(base, registry, used, spans, span),
         _ => {}
     }
 }
@@ -392,6 +855,7 @@ fn helper_import_chain(usage: &str, core_imports: &HashMap<String, String>) -> S
 pub(crate) fn collect_core_stmts(
     stmts: &[Stmt],
     imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     ffi_cb: &mut HashSet<String>,
@@ -399,21 +863,26 @@ pub(crate) fn collect_core_stmts(
     for stmt in stmts {
         match stmt {
             Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
-                collect_core_expr(e, imports, used, spans, ffi_cb)
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb)
             }
-            Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans, ffi_cb),
+            Stmt::Val(b) => {
+                if let Some(ty) = &b.ty {
+                    collect_core_type_usage(ty, registry, used, spans, b.ty_span);
+                }
+                collect_core_expr(&b.init, imports, registry, used, spans, ffi_cb);
+            }
             Stmt::Assign { target, value, .. } => {
-                collect_core_lvalue(target, imports, used, spans, ffi_cb);
-                collect_core_expr(value, imports, used, spans, ffi_cb);
+                collect_core_lvalue(target, imports, registry, used, spans, ffi_cb);
+                collect_core_expr(value, imports, registry, used, spans, ffi_cb);
             }
-            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
+            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, registry, used, spans, ffi_cb),
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
-                collect_core_expr(e, imports, used, spans, ffi_cb)
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb)
             }
             Stmt::Return(None, _) => {}
             Stmt::While { cond, body, .. } => {
-                collect_core_expr(cond, imports, used, spans, ffi_cb);
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_expr(cond, imports, registry, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
@@ -423,20 +892,20 @@ pub(crate) fn collect_core_stmts(
                         step,
                         exclusive: _,
                     } => {
-                        collect_core_expr(start, imports, used, spans, ffi_cb);
-                        collect_core_expr(end, imports, used, spans, ffi_cb);
+                        collect_core_expr(start, imports, registry, used, spans, ffi_cb);
+                        collect_core_expr(end, imports, registry, used, spans, ffi_cb);
                         if let Some(step) = step {
-                            collect_core_expr(step, imports, used, spans, ffi_cb);
+                            collect_core_expr(step, imports, registry, used, spans, ffi_cb);
                         }
                     }
                     ForKind::In { collection, step } => {
-                        collect_core_expr(collection, imports, used, spans, ffi_cb);
+                        collect_core_expr(collection, imports, registry, used, spans, ffi_cb);
                         if let Some(step) = step {
-                            collect_core_expr(step, imports, used, spans, ffi_cb);
+                            collect_core_expr(step, imports, registry, used, spans, ffi_cb);
                         }
                     }
                 }
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             Stmt::Switch {
                 subject,
@@ -459,13 +928,13 @@ pub(crate) fn collect_core_stmts(
                 {
                     note_core_usage(used, spans, "core.concurrency::select", Some(*span));
                 }
-                collect_core_expr(subject, imports, used, spans, ffi_cb);
+                collect_core_expr(subject, imports, registry, used, spans, ffi_cb);
                 for arm in arms {
-                    collect_core_expr(&arm.cond, imports, used, spans, ffi_cb);
-                    collect_core_stmts(&arm.body, imports, used, spans, ffi_cb);
+                    collect_core_expr(&arm.cond, imports, registry, used, spans, ffi_cb);
+                    collect_core_stmts(&arm.body, imports, registry, used, spans, ffi_cb);
                 }
                 if let Some(body) = else_body {
-                    collect_core_stmts(body, imports, used, spans, ffi_cb);
+                    collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
                 }
             }
             Stmt::CountedLoop {
@@ -475,13 +944,17 @@ pub(crate) fn collect_core_stmts(
                 body,
                 ..
             } => {
-                collect_core_expr(&init.init, imports, used, spans, ffi_cb);
-                collect_core_expr(cond, imports, used, spans, ffi_cb);
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                if let Some(ty) = &init.ty {
+                    collect_core_type_usage(ty, registry, used, spans, init.ty_span);
+                }
+                collect_core_expr(&init.init, imports, registry, used, spans, ffi_cb);
+                collect_core_expr(cond, imports, registry, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
                 if let Some(step) = step {
                     collect_core_stmts(
                         std::slice::from_ref(step.as_ref()),
                         imports,
+                        registry,
                         used,
                         spans,
                         ffi_cb,
@@ -494,7 +967,7 @@ pub(crate) fn collect_core_stmts(
                 // has no Core import for `collect_used_core` to observe, so
                 // record the compiler-owned runtime seam explicitly.
                 note_core_usage(used, spans, "core.concurrency::task", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
@@ -506,25 +979,25 @@ pub(crate) fn collect_core_stmts(
             | Stmt::AuthorityScope { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => {
-                collect_core_stmts(body, imports, used, spans, ffi_cb)
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb)
             }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
             Stmt::Shield { body, span } => {
                 note_core_usage(used, spans, "core.concurrency::shield", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             // D-REACTCORE1: reactive blocks implicitly use `core.reactive`.
             Stmt::Reactive { body, span, .. } => {
                 note_core_usage(used, spans, "core.reactive", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
             // D-META-STAGE1=B (formerly D-CTMARKER1): collect Core usage from comptime block body.
             Stmt::ComptimeBlock { body, .. } => {
-                collect_core_stmts(body, imports, used, spans, ffi_cb)
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb)
             }
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
@@ -534,29 +1007,29 @@ pub(crate) fn collect_core_stmts(
                 else_body,
                 ..
             } => {
-                collect_core_expr(cond, imports, used, spans, ffi_cb);
-                collect_core_stmts(then_body, imports, used, spans, ffi_cb);
+                collect_core_expr(cond, imports, registry, used, spans, ffi_cb);
+                collect_core_stmts(then_body, imports, registry, used, spans, ffi_cb);
                 if let Some(eb) = else_body {
-                    collect_core_stmts(eb, imports, used, spans, ffi_cb);
+                    collect_core_stmts(eb, imports, registry, used, spans, ffi_cb);
                 }
             }
             // Collect Core usage from context block fields and body.
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields {
-                    collect_core_expr(e, imports, used, spans, ffi_cb);
+                    collect_core_expr(e, imports, registry, used, spans, ffi_cb);
                 }
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             // D-TERM1 (ratified 2026-06-22): collect Core usage from live block body.
             // The live block implicitly uses `core.term` (jet_term_enter/leave), so
             // we mark it as used here.
             Stmt::Live { body, span, .. } => {
                 note_core_usage(used, spans, "core.term", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
             // D-DOTSCOPE1: collect core usage in a scope-member region body.
             Stmt::ScopeMember { body, .. } => {
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
             }
         }
     }
@@ -565,6 +1038,7 @@ pub(crate) fn collect_core_stmts(
 pub(crate) fn collect_core_lvalue(
     lv: &LValue,
     imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     ffi_cb: &mut HashSet<String>,
@@ -572,56 +1046,89 @@ pub(crate) fn collect_core_lvalue(
     match lv {
         LValue::Local { .. } => {}
         LValue::Index { base, index, .. } => {
-            collect_core_expr(base, imports, used, spans, ffi_cb);
-            collect_core_expr(index, imports, used, spans, ffi_cb);
+            collect_core_expr(base, imports, registry, used, spans, ffi_cb);
+            collect_core_expr(index, imports, registry, used, spans, ffi_cb);
         }
         // D-MUTSELF1: `place.field = v` — the base place may use a core import.
-        LValue::Field { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
+        LValue::Field { base, .. } => {
+            collect_core_expr(base, imports, registry, used, spans, ffi_cb)
+        }
     }
 }
 
 pub(crate) fn collect_core_expr(
     expr: &Expr,
     imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     ffi_cb: &mut HashSet<String>,
 ) {
-    // D-SIMD2 / D-LINALG1: a built-in math type used anywhere (constructor, static
-    // method, or instance method on a math-typed receiver-by-name) pulls in the
-    // CoreLib prelude that defines the `jet_math_*` helpers. Detect it syntactically;
-    // a math-type *constructor* call and a static `T.method(...)` both surface the
-    // type NAME, which is enough to require the prelude.
+    // D-SIMD2 / D-LINALG1: a built-in math type used anywhere (constructor,
+    // static method, or instance method on an inferred math-typed receiver)
+    // pulls in the CoreLib prelude that defines the `jet_math_*` helpers.
+    // A constructor and static `T.method(...)` surface the type NAME; an
+    // instance receiver can instead be a local or field, so use its inferred
+    // `recv_type` below.
     match expr {
-        Expr::Call(c) if is_math_type(&c.name) => {
-            note_core_usage(used, spans, "core.math::__mathtypes__", Some(c.name_span));
-        }
-        Expr::Call(c)
-            if c.name == crate::Syntax::TYPE_DECIMAL
-                || c.name == crate::Syntax::TYPE_FRACTION
-                || c.name == crate::Syntax::TYPE_COMPLEX =>
-        {
-            note_core_usage(used, spans, "core.math::__precise__", Some(c.name_span));
+        Expr::Call(c) => {
+            note_builtin_math_type(&c.name, registry, used, spans, Some(c.name_span));
+            if matches!(
+                c.name.as_str(),
+                crate::Syntax::TYPE_DECIMAL
+                    | crate::Syntax::TYPE_FRACTION
+                    | crate::Syntax::TYPE_COMPLEX
+            ) {
+                note_core_usage(used, spans, "core.math::__precise__", Some(c.name_span));
+            }
+            for ty in &c.type_args {
+                collect_core_type_usage(ty, registry, used, spans, Some(c.name_span));
+            }
+            if let Some(return_type) = &c.resolved_ret {
+                collect_core_type_usage(
+                    return_type,
+                    registry,
+                    used,
+                    spans,
+                    Some(c.name_span),
+                );
+            }
         }
         Expr::MethodCall {
             receiver,
             method_span,
+            owner_type_args,
+            type_args,
+            resolved_ret,
             ..
         } => {
             if let Expr::Ident(n, _) = receiver.as_ref() {
-                if is_math_type(n) {
-                    note_core_usage(used, spans, "core.math::__mathtypes__", Some(*method_span));
-                }
+                note_builtin_math_type(n, registry, used, spans, Some(*method_span));
                 // D-PATHFS1: `Path.from(...)` or any Path static call triggers path prelude.
                 if n == "Path" {
                     note_core_usage(used, spans, "core.files::__pathapi__", Some(*method_span));
                 }
             }
+            for ty in owner_type_args.iter().chain(type_args.iter()) {
+                collect_core_type_usage(ty, registry, used, spans, Some(*method_span));
+            }
+            if let Some(return_type) = resolved_ret {
+                collect_core_type_usage(
+                    return_type,
+                    registry,
+                    used,
+                    spans,
+                    Some(*method_span),
+                );
+            }
         }
         _ => {}
     }
     match expr {
-        Expr::PtrFromAddr { addr, .. } => collect_core_expr(addr, imports, used, spans, ffi_cb),
+        Expr::PtrFromAddr { elem, addr, span, .. } => {
+            collect_core_type_usage(elem, registry, used, spans, Some(*span));
+            collect_core_expr(addr, imports, registry, used, spans, ffi_cb);
+        }
         Expr::MethodCall {
             receiver,
             method,
@@ -650,6 +1157,13 @@ pub(crate) fn collect_core_expr(
                     | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
             ) {
                 note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
+            }
+            // D-SIMD3: instance methods on locals/fields carry the built-in
+            // math type only in sema's inferred receiver; retain the same
+            // prelude as constructor/static calls so AOT and resident JIT see
+            // the lane helpers.
+            if let Some(recv_type) = recv_type {
+                note_builtin_math_type(recv_type, registry, used, spans, Some(*method_span));
             }
             // Epoch 3 String surface delegates Unicode classification, title
             // casing, trimming, and display-width padding to the pinned
@@ -805,7 +1319,7 @@ pub(crate) fn collect_core_expr(
                     }
                 }
             }
-            collect_core_expr(receiver, imports, used, spans, ffi_cb);
+            collect_core_expr(receiver, imports, registry, used, spans, ffi_cb);
             for arg in args {
                 // D-CABI-CALLBACK1: a qualified `#Extern`-module call
                 // (`c.callback_twice(increment, x)`) resolves through
@@ -816,7 +1330,7 @@ pub(crate) fn collect_core_expr(
                         ffi_cb.insert(name.clone());
                     }
                 }
-                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
+                collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::Call(c) => {
@@ -851,13 +1365,13 @@ pub(crate) fn collect_core_expr(
                         ffi_cb.insert(name.clone());
                     }
                 }
-                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
+                collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            collect_core_expr(callee, imports, used, spans, ffi_cb);
+            collect_core_expr(callee, imports, registry, used, spans, ffi_cb);
             for arg in args {
-                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
+                collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::Field(inner, member, span) => {
@@ -866,9 +1380,9 @@ pub(crate) fn collect_core_expr(
             {
                 note_core_usage(used, spans, "core::json", Some(*span));
             }
-            collect_core_expr(inner, imports, used, spans, ffi_cb);
+            collect_core_expr(inner, imports, registry, used, spans, ffi_cb);
         }
-        Expr::OptField { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
+        Expr::OptField { base, .. } => collect_core_expr(base, imports, registry, used, spans, ffi_cb),
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
@@ -878,11 +1392,11 @@ pub(crate) fn collect_core_expr(
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
+        | Expr::Err(inner, _) => collect_core_expr(inner, imports, registry, used, spans, ffi_cb),
         Expr::Try(inner, _, _, note) => {
-            collect_core_expr(inner, imports, used, spans, ffi_cb);
+            collect_core_expr(inner, imports, registry, used, spans, ffi_cb);
             if let Some(note) = note {
-                collect_core_expr(note, imports, used, spans, ffi_cb);
+                collect_core_expr(note, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::Binary(_, lhs, rhs, _)
@@ -891,28 +1405,28 @@ pub(crate) fn collect_core_expr(
             index: rhs,
             ..
         } => {
-            collect_core_expr(lhs, imports, used, spans, ffi_cb);
-            collect_core_expr(rhs, imports, used, spans, ffi_cb);
+            collect_core_expr(lhs, imports, registry, used, spans, ffi_cb);
+            collect_core_expr(rhs, imports, registry, used, spans, ffi_cb);
         }
         Expr::CompareChain { operands, .. } => {
             for e in operands.iter() {
-                collect_core_expr(e, imports, used, spans, ffi_cb);
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::Slice {
             base, start, end, range, ..
         } => {
-            collect_core_expr(base, imports, used, spans, ffi_cb);
+            collect_core_expr(base, imports, registry, used, spans, ffi_cb);
             if let Some(range) = range {
-                collect_core_expr(range, imports, used, spans, ffi_cb);
+                collect_core_expr(range, imports, registry, used, spans, ffi_cb);
             } else {
-                collect_core_expr(start, imports, used, spans, ffi_cb);
-                collect_core_expr(end, imports, used, spans, ffi_cb);
+                collect_core_expr(start, imports, registry, used, spans, ffi_cb);
+                collect_core_expr(end, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::Range { start, end, .. } => {
-            collect_core_expr(start, imports, used, spans, ffi_cb);
-            collect_core_expr(end, imports, used, spans, ffi_cb);
+            collect_core_expr(start, imports, registry, used, spans, ffi_cb);
+            collect_core_expr(end, imports, registry, used, spans, ffi_cb);
         }
         Expr::Str(parts, _) => {
             for part in parts {
@@ -926,6 +1440,7 @@ pub(crate) fn collect_core_expr(
                         format,
                         crate::AST::StrFormat::Pretty
                             | crate::AST::StrFormat::Fixed(_)
+                            | crate::AST::StrFormat::Grouped(_)
                             | crate::AST::StrFormat::Hex(_)
                             | crate::AST::StrFormat::Pad { .. }
                             | crate::AST::StrFormat::PadLeft { .. }
@@ -941,63 +1456,89 @@ pub(crate) fn collect_core_expr(
                             Some(e.span()),
                         );
                     }
-                    collect_core_expr(e, imports, used, spans, ffi_cb);
+                    collect_core_expr(e, imports, registry, used, spans, ffi_cb);
                 }
             }
         }
         Expr::ListLit(items, _) => {
             for e in items {
-                collect_core_expr(e, imports, used, spans, ffi_cb);
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb);
             }
         }
-        Expr::TupleLit(fields, _, _) => {
+        Expr::TupleLit(fields, span, ty) => {
+            if let Some(ty) = ty {
+                collect_core_type_usage(ty, registry, used, spans, Some(*span));
+            }
             for (_, e) in fields {
-                collect_core_expr(e, imports, used, spans, ffi_cb);
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::MapLit(items, _) => {
             for (k, v) in items {
-                collect_core_expr(k, imports, used, spans, ffi_cb);
-                collect_core_expr(v, imports, used, spans, ffi_cb);
+                collect_core_expr(k, imports, registry, used, spans, ffi_cb);
+                collect_core_expr(v, imports, registry, used, spans, ffi_cb);
             }
         }
-        Expr::StructLit { fields, .. } => {
+        Expr::StructLit {
+            type_name,
+            type_args,
+            fields,
+            span,
+            ..
+        } => {
+            note_builtin_math_type(type_name, registry, used, spans, Some(*span));
+            for ty in type_args {
+                collect_core_type_usage(ty, registry, used, spans, Some(*span));
+            }
             for (_, _, e) in fields {
-                collect_core_expr(e, imports, used, spans, ffi_cb);
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb);
             }
         }
         Expr::TypedLit { head, body, span } => {
-            if let Some(Type::Named(name)) = head {
-                note_typed_head_core_usage(used, spans, name, Some(*span));
+            if let Some(head) = head {
+                collect_core_type_usage(head, registry, used, spans, Some(*span));
+                if let Type::Named(name) = head {
+                    note_typed_head_core_usage(used, spans, name, Some(*span));
+                }
             }
-            body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
+            body.for_each_expr(|e| collect_core_expr(e, imports, registry, used, spans, ffi_cb));
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 match arg {
-                    EnumLitArg::Positional(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
-                    EnumLitArg::Named { expr, .. } => collect_core_expr(expr, imports, used, spans, ffi_cb),
+                    EnumLitArg::Positional(e) => {
+                        collect_core_expr(e, imports, registry, used, spans, ffi_cb)
+                    }
+                    EnumLitArg::Named { expr, .. } => {
+                        collect_core_expr(expr, imports, registry, used, spans, ffi_cb)
+                    }
                 }
             }
         }
-        Expr::PatternTest { subject, .. } => collect_core_expr(subject, imports, used, spans, ffi_cb),
+        Expr::PatternTest { subject, .. } => {
+            collect_core_expr(subject, imports, registry, used, spans, ffi_cb)
+        }
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            collect_core_expr(value, imports, used, spans, ffi_cb);
+            collect_core_expr(value, imports, registry, used, spans, ffi_cb);
             match fallback {
-                OrFallback::Value(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
+                OrFallback::Value(e) => {
+                    collect_core_expr(e, imports, registry, used, spans, ffi_cb)
+                }
                 OrFallback::Block { body, value, .. } => {
-                    collect_core_stmts(body, imports, used, spans, ffi_cb);
+                    collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
                     if let Some(value) = value {
-                        collect_core_expr(value, imports, used, spans, ffi_cb);
+                        collect_core_expr(value, imports, registry, used, spans, ffi_cb);
                     }
                 }
-                OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
+                OrFallback::Return(Some(e), _) => {
+                    collect_core_expr(e, imports, registry, used, spans, ffi_cb)
+                }
                 OrFallback::Return(None, _) => {}
                 OrFallback::Panic { args, .. } => {
                     for arg in args {
-                        collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
+                        collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
                     }
                 }
                 OrFallback::Break(_)
@@ -1006,10 +1547,25 @@ pub(crate) fn collect_core_expr(
                 | OrFallback::ContinueLabel(..) => {}
             }
         }
-        Expr::Lambda(lam) => match &lam.body {
-            LambdaBody::Expr(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
-            LambdaBody::Block(stmts) => collect_core_stmts(stmts, imports, used, spans, ffi_cb),
-        },
+        Expr::Lambda(lam) => {
+            for param in &lam.params {
+                if let Some(ty) = &param.ty {
+                    collect_core_type_usage(ty, registry, used, spans, param.ty_span);
+                }
+            }
+            if let Some(ty) = &lam.result_type {
+                collect_core_type_usage(ty, registry, used, spans, Some(lam.span));
+            }
+            if let Some(ty) = &lam.error_type {
+                collect_core_type_usage(ty, registry, used, spans, Some(lam.span));
+            }
+            match &lam.body {
+                LambdaBody::Expr(e) => collect_core_expr(e, imports, registry, used, spans, ffi_cb),
+                LambdaBody::Block(stmts) => {
+                    collect_core_stmts(stmts, imports, registry, used, spans, ffi_cb)
+                }
+            }
+        }
         Expr::If {
             cond,
             then_body,
@@ -1018,11 +1574,11 @@ pub(crate) fn collect_core_expr(
             else_value,
             ..
         } => {
-            collect_core_expr(cond, imports, used, spans, ffi_cb);
-            collect_core_stmts(then_body, imports, used, spans, ffi_cb);
-            collect_core_expr(then_value, imports, used, spans, ffi_cb);
-            collect_core_stmts(else_body, imports, used, spans, ffi_cb);
-            collect_core_expr(else_value, imports, used, spans, ffi_cb);
+            collect_core_expr(cond, imports, registry, used, spans, ffi_cb);
+            collect_core_stmts(then_body, imports, registry, used, spans, ffi_cb);
+            collect_core_expr(then_value, imports, registry, used, spans, ffi_cb);
+            collect_core_stmts(else_body, imports, registry, used, spans, ffi_cb);
+            collect_core_expr(else_value, imports, registry, used, spans, ffi_cb);
         }
         Expr::ComptimeName {
             value: Some(crate::AST::CtValue::Struct { type_name, .. }),
@@ -1036,6 +1592,7 @@ pub(crate) fn collect_core_expr(
         Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
+        | Expr::Unit(_)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)
         | Expr::Absent(_)
@@ -1048,8 +1605,10 @@ pub(crate) fn collect_core_expr(
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)
         | Expr::BinMatchLit(_, _) => {}
-        Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
-        Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
-        Expr::MemberSpread { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
+        Expr::Paren(inner, _) => collect_core_expr(inner, imports, registry, used, spans, ffi_cb),
+        Expr::Spread(inner, _) => collect_core_expr(inner, imports, registry, used, spans, ffi_cb),
+        Expr::MemberSpread { base, .. } => {
+            collect_core_expr(base, imports, registry, used, spans, ffi_cb)
+        }
     }
 }

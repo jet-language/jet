@@ -1,15 +1,12 @@
-use core.files as fs
-use core.process as process
+use core.files as files
 
-fn run() {
-    path :: process.argv().get(1) ?? "notes.txt"
-    input :: fs.read(path) ?? panic("read failed")
-    lines := [String]{}
-    loop line in input.lines() {
-        trimmed :: line.trim()
-        clean :: "{trimmed}"
-        if clean.len() > 0 -> lines.push(clean)
-    }
+#CLI
+struct Args {
+    input: String
+}
+
+fn run(args: Args) {
+    lines := (files.read(args.input) ?? panic("read failed")).lines().filter(line -> !line.trim().is_empty()).map(line -> line.trim())
     lines.sort()
     print("lines {lines.len()}")
     loop line in lines -> print(line)

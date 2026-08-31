@@ -1,28 +1,28 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
+Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/derive_generated_collision.jet:10:29
     |
  10 | fn Point.debug_string(self) -> String :: "existing"
     |                             ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+ Why: A return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: Write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 More: jet-lang.dev/e/E0068
 
-Error [E0065]: this function uses the retired `::` body marker.
+Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/derive_generated_collision.jet:10:39
     |
  10 | fn Point.debug_string(self) -> String :: "existing"
     |                                       ^^
  Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: replace `::` with `->`; `jet fmt` applies this fix.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
 More: jet-lang.dev/e/E0065
 
-Error [E0105]: generated method `debug_string` from `derive T.DebugText` collides with existing method `Point.debug_string`
+Error [E0105]: Generated method `debug_string` from `derive T.DebugText` collides with existing method `Point.debug_string`
   --> tests/ui/derive_generated_collision.jet:2:8
     |
   2 |     fn debug_string(self) String -> T.@name
     |        ^^^^^^^^^^^^
  Why: `derive T.DebugText` and existing method `Point.debug_string` both define a member named `debug_string` on `Point`
- Fix: rename the generated member in `derive T.DebugText`, or rename the colliding member
+ Fix: Rename the generated member in `derive T.DebugText`, or rename the colliding member
 generated member `debug_string` from `derive T.DebugText` at span 28..40
 existing method `Point.debug_string` at span 117..129
 More: jet-lang.dev/e/E0105

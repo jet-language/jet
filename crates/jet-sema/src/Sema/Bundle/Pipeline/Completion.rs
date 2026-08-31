@@ -55,7 +55,7 @@ pub(super) fn complete_bundle_check(
     resolve_outputs(
         bundle,
         &states,
-        &name_ledger,
+        &mut name_ledger,
         mode,
         explicit_output,
         &mut diags,
@@ -241,7 +241,7 @@ pub(super) fn complete_bundle_check(
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     if mode == CompileMode::Check {
         if let Some(cache) = incremental.as_deref_mut() {
-            cache.begin_bundle(bundle);
+            cache.begin_bundle(bundle, &name_ledger);
         }
     } else {
         incremental = None;
@@ -275,7 +275,12 @@ pub(super) fn complete_bundle_check(
             incremental.as_deref_mut(),
         );
         dedupe_unknown_names(&mut module_diags);
+        super::super::prune_conversion_cascades(&mut module_diags);
         dedupe_soft_public_lints(&mut module_diags);
+        // Spans are local to a module. Attach same-span causes before this
+        // batch joins the other modules, so an identical byte range in a
+        // separate source file can never become a false dependency.
+        attach_known_cause_links(&mut module_diags);
         diags.extend(module_diags);
         for pending in &mut local_pending_diagnostics {
             pending.function_key = name_ledger
@@ -680,6 +685,7 @@ pub(super) fn complete_bundle_check(
     if !allow_compiler_api && mode != CompileMode::Check {
         super::super::strip_build_only_entries(bundle);
     }
+    jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
     (
         diags,
         super::super::super::Effects::SemIndexEffectFacts {
@@ -693,6 +699,36 @@ pub(super) fn complete_bundle_check(
             fact_registry,
         },
     )
+}
+
+/// Project the causal edges that survive the checker into the one report
+/// batch. `E0104` is the call-owned root for the recoverable call shape that
+/// can still produce a failure-domain report; `E0112` and other argument
+/// diagnostics remain independent because fixing them does not necessarily
+/// remove the caller's failure-domain mismatch.
+fn attach_known_cause_links(diagnostics: &mut [Diagnostic]) {
+    for index in 0..diagnostics.len() {
+        let dependent = &diagnostics[index];
+        if dependent.code != "E2404" || !dependent.cause.is_empty() {
+            continue;
+        }
+        let Some(span) = dependent.span else {
+            continue;
+        };
+        let cause = diagnostics
+            .iter()
+            .enumerate()
+            .find_map(|(candidate_index, candidate)| {
+                (candidate_index != index
+                    && candidate.code == "E0104"
+                    && candidate.span == Some(span))
+                    .then(|| candidate.clone())
+            });
+        let Some(cause) = cause else {
+            continue;
+        };
+        diagnostics[index] = dependent.clone().caused_by(&cause);
+    }
 }
 
 /// D-STRUCT-PLANE1=A: loader and sema already resolve file/import targets into

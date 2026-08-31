@@ -130,6 +130,12 @@ impl JetDisplay for JetWasmFraction {
     }
 }
 
+impl JetDebug for JetWasmFraction {
+    fn jet_debug(&self) -> String {
+        self.to_string_rep()
+    }
+}
+
 impl std::fmt::Display for JetWasmFraction {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.to_string_rep())
@@ -321,6 +327,12 @@ impl JetWasmDecimal {
 
 impl JetDisplay for JetWasmDecimal {
     fn jet_display(&self) -> String {
+        self.to_string_rep()
+    }
+}
+
+impl JetDebug for JetWasmDecimal {
+    fn jet_debug(&self) -> String {
         self.to_string_rep()
     }
 }

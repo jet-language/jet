@@ -12,6 +12,8 @@ use crate::AST::Type;
 /// `.text()` → `String ![FieldError]`
 /// `.bool()` → `Bool ![FieldError]`
 /// `.float()` → `Float ![FieldError]`
+/// `.to_text()` → `String?`
+/// `.equal_unordered(other)` → `Bool`
 pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
     let decode_err = || Box::new(decode_error_ty());
     match (method, n_args) {
@@ -39,6 +41,8 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
             ok: Box::new(Type::Float),
             err: decode_err(),
         }),
+        ("to_text", 0) => Some(Type::Option(Box::new(Type::String))),
+        ("equal_unordered", 1) => Some(Type::Bool),
         _ => None,
     }
 }

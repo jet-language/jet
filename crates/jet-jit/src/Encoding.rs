@@ -665,146 +665,45 @@ fn jet_jit_base32_decode(text: i64) -> i64 {
     }
 }
 
-// ── CSV (mirrors jet_ring_csv_parse / jet_ring_csv_render) ────────────────────
+// ── CSV (shared with the AOT Prelude and comptime parser) ─────────────────────
 
-fn csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    let mut field = String::new();
-    let mut chars = text.chars().peekable();
-    let mut quoted = false;
-    let mut closed_quote = false;
-    let mut record = 1usize;
-    let mut line = 1usize;
-    let mut column = 0usize;
-    let mut ended_record = false;
-
-    while let Some(ch) = chars.next() {
-        column += 1;
-        ended_record = false;
-        if quoted {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    column += 1;
-                    field.push('"');
-                } else {
-                    quoted = false;
-                    closed_quote = true;
-                }
-            } else {
-                field.push(ch);
-                if ch == '\n' {
-                    line += 1;
-                    column = 0;
-                }
-            }
-            continue;
-        }
-
-        if closed_quote {
-            match ch {
-                ',' => {
-                    row.push(std::mem::take(&mut field));
-                    closed_quote = false;
-                }
-                '\r' if chars.peek() == Some(&'\n') => {
-                    chars.next();
-                    row.push(std::mem::take(&mut field));
-                    rows.push(std::mem::take(&mut row));
-                    closed_quote = false;
-                    ended_record = true;
-                    record += 1;
-                    line += 1;
-                    column = 0;
-                }
-                '\n' => {
-                    row.push(std::mem::take(&mut field));
-                    rows.push(std::mem::take(&mut row));
-                    closed_quote = false;
-                    ended_record = true;
-                    record += 1;
-                    line += 1;
-                    column = 0;
-                }
-                _ => {
-                    return Err(format!(
-                        "E2701: CSV row {record}, line {line}, column {column} — only quote, comma, CRLF, LF, or EOF may follow a closing quote"
-                    ))
-                }
-            }
-            continue;
-        }
-
-        match ch {
-            '"' if field.is_empty() => quoted = true,
-            '"' => {
-                return Err(format!(
-                    "E2701: CSV row {record}, line {line}, column {column} — quote inside an unquoted field"
-                ))
-            }
-            ',' => row.push(std::mem::take(&mut field)),
-            '\r' if chars.peek() == Some(&'\n') => {
-                chars.next();
-                row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
-                ended_record = true;
-                record += 1;
-                line += 1;
-                column = 0;
-            }
-            '\r' => {
-                return Err(format!(
-                    "E2701: CSV row {record}, line {line}, column {column} — bare CR is not a record ending"
-                ))
-            }
-            '\n' => {
-                row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
-                ended_record = true;
-                record += 1;
-                line += 1;
-                column = 0;
-            }
-            _ => field.push(ch),
-        }
-    }
-    if quoted {
-        return Err(format!(
-            "E2701: CSV row {record}, line {line}, column {} — quoted field ended before its closing quote",
-            column + 1
-        ));
-    }
-    if !ended_record {
-        row.push(field);
-        rows.push(row);
-    }
-    Ok(rows)
+fn csv_parse(
+    text: &str,
+    delimiter: &str,
+    header: bool,
+    skip_blank: bool,
+) -> Result<Vec<jet_foundation::CsvKernel::CsvRecord>, String> {
+    let delimiter = jet_foundation::CsvKernel::delimiter(delimiter)?;
+    jet_foundation::CsvKernel::parse(
+        text,
+        jet_foundation::CsvKernel::CsvOptions {
+            delimiter,
+            header,
+            skip_blank,
+        },
+    )
 }
 
 fn csv_render(rows: &[Vec<String>]) -> String {
-    rows.iter()
-        .map(|row| {
-            row.iter()
-                .map(|field| {
-                    if field.contains(',')
-                        || field.contains('"')
-                        || field.contains('\n')
-                        || field.contains('\r')
-                    {
-                        format!("\"{}\"", field.replace('"', "\"\""))
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    jet_foundation::CsvKernel::render(rows)
+}
+
+fn alloc_csv_records(records: Vec<jet_foundation::CsvKernel::CsvRecord>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let outer = rt.heap.alloc_empty_list();
+        for record in records {
+            let fields = rt.heap.alloc_empty_list();
+            for cell in record.fields {
+                let sid = rt.heap.alloc_string(cell);
+                let _ = rt.heap.list_push_int(fields, sid);
+            }
+            let row = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(row, 0, fields);
+            let _ = rt.heap.record_set_int(row, 1, record.line);
+            let _ = rt.heap.list_push_int(outer, row);
+        }
+        outer
+    })
 }
 
 fn alloc_string_rows(rows: Vec<Vec<String>>) -> i64 {
@@ -840,9 +739,28 @@ fn clone_string_rows(list: i64) -> Vec<Vec<String>> {
     })
 }
 
-fn jet_jit_csv_parse(text: i64) -> i64 {
-    match csv_parse(&clone_string(text)) {
-        Ok(rows) => result_ok(alloc_string_rows(rows) as u64),
+fn jet_jit_csv_parse(text: i64, delimiter: i64, header: i64, skip_blank: i64) -> i64 {
+    match csv_parse(
+        &clone_string(text),
+        &clone_string(delimiter),
+        header != 0,
+        skip_blank != 0,
+    ) {
+        Ok(rows) => result_ok(alloc_string_rows(
+            rows.into_iter().map(|row| row.fields).collect(),
+        ) as u64),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+fn jet_jit_csv_rows(text: i64, delimiter: i64, header: i64, skip_blank: i64) -> i64 {
+    match csv_parse(
+        &clone_string(text),
+        &clone_string(delimiter),
+        header != 0,
+        skip_blank != 0,
+    ) {
+        Ok(rows) => result_ok(alloc_csv_records(rows) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -1676,7 +1594,7 @@ fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 {
 /// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
 /// (mirrors `jet_enc_csv_decode` before `T::jet_decode`).
 fn jet_jit_csv_decode_trees(text: i64) -> i64 {
-    match csv_parse(&clone_string(text)) {
+    match csv_parse(&clone_string(text), ",", false, false) {
         Ok(rows) => {
             let mut it = rows.into_iter();
             let Some(header) = it.next() else {
@@ -1686,10 +1604,11 @@ fn jet_jit_csv_decode_trees(text: i64) -> i64 {
             let mut handles = Vec::new();
             for row in it {
                 let obj: Vec<(String, json_rt::DataTree)> = header
+                    .fields
                     .iter()
                     .enumerate()
                     .map(|(c, name)| {
-                        let cell = row.get(c).cloned().unwrap_or_default();
+                        let cell = row.fields.get(c).cloned().unwrap_or_default();
                         (name.clone(), json_rt::DataTree::Text(cell))
                     })
                     .collect();
@@ -1747,6 +1666,26 @@ fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
     match json_rt::decode_int(&tree) {
         Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
+    }
+}
+
+/// `__jet_Decode for Char`, with String's shared coercion policy and the
+/// Prelude's exact single-scalar error.
+fn jet_jit_datatree_decode_char(tree: i64) -> i64 {
+    let Some(tree) = read_datatree(tree) else {
+        return result_err_decode("", "invalid DataTree");
+    };
+    let text = match json_rt::decode_string(&tree) {
+        Ok(text) => text,
+        Err(errors) => return result_err_fields(errors),
+    };
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(value), None) => result_ok(value as u64),
+        _ => result_err_fields(json_rt::FieldError::one(format!(
+            "expected a single Char, found {:?}",
+            text
+        ))),
     }
 }
 
@@ -1846,6 +1785,18 @@ fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
     result_err_decode("", &reason)
 }
 
+fn jet_jit_datatree_decode_map_error(tree: i64) -> i64 {
+    let reason = read_datatree(tree)
+        .map(|tree| {
+            format!(
+                "expected an object, found {}",
+                json_rt::datatree_kind_for(&tree)
+            )
+        })
+        .unwrap_or_else(|| "expected an object, found value".to_string());
+    result_err_decode("", &reason)
+}
+
 fn jet_jit_decode_error_under(result: i64, index: i64) -> i64 {
     let Some(errors) = result_errors(result) else {
         return result;
@@ -1879,6 +1830,18 @@ fn jet_jit_decode_error_accumulate(accum: i64, result: i64, index: i64) -> i64 {
         &format!("[{index}]"),
         errors,
     ));
+    result_err_fields(combined)
+}
+
+/// Add one failed map value to the resident `[FieldError]` accumulator.
+/// Object keys are already strings, so the path is the wire key itself.
+fn jet_jit_decode_error_accumulate_segment(accum: i64, result: i64, segment: i64) -> i64 {
+    let Some(errors) = result_errors(result) else {
+        return accum;
+    };
+    let mut combined = result_errors(accum).unwrap_or_default();
+    let segment = clone_string(segment);
+    combined.extend(json_rt::FieldError::under_errors(&segment, errors));
     result_err_fields(combined)
 }
 
@@ -1916,6 +1879,20 @@ fn jet_jit_datatree_float(tree: i64) -> i64 {
     match json_rt::decode_float(&tree) {
         Ok(value) => result_ok(value.to_bits()),
         Err(errors) => result_err_fields(errors),
+    }
+}
+
+/// D-DATATREE-ERGO1=A: the JIT only marshals the resident heap tree into the
+/// shared Prelude operation; it does not reimplement scalar policy here.
+fn jet_jit_datatree_to_text(tree: i64) -> i64 {
+    pack_opt_string(read_datatree(tree).and_then(|tree| tree.to_text()))
+}
+
+/// D-DATATREE-ERGO1=A: compare through the shared Prelude tree operation.
+fn jet_jit_datatree_equal_unordered(left: i64, right: i64) -> i64 {
+    match (read_datatree(left), read_datatree(right)) {
+        (Some(left), Some(right)) => i64::from(left.equal_unordered(&right)),
+        _ => 0,
     }
 }
 
@@ -2297,6 +2274,11 @@ host_fns! {
             sig_quaternary.params.push(AbiParam::new(types::I64));
         }
         sig_quaternary.returns.push(AbiParam::new(types::I64));
+        let mut sig_quinary = Signature::new(cc);
+        for _ in 0..5 {
+            sig_quinary.params.push(AbiParam::new(types::I64));
+        }
+        sig_quinary.returns.push(AbiParam::new(types::I64));
 
 
     }
@@ -2308,7 +2290,8 @@ host_fns! {
     b64_decode_url: "jet_jit_b64_decode_url" => jet_jit_b64_decode_url: sig_unary;
     base32_encode: "jet_jit_base32_encode" => jet_jit_base32_encode: sig_unary;
     base32_decode: "jet_jit_base32_decode" => jet_jit_base32_decode: sig_unary;
-    csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_unary;
+    csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_quaternary;
+    csv_rows: "jet_jit_csv_rows" => jet_jit_csv_rows: sig_quaternary;
     csv_to_string: "jet_jit_csv_to_string" => jet_jit_csv_to_string: sig_unary;
     csv_tree_to_string: "jet_jit_csv_tree_to_string" => jet_jit_csv_tree_to_string: sig_unary;
     uuid_v4: "jet_jit_uuid_v4" => jet_jit_uuid_v4: sig_nullary;
@@ -2348,18 +2331,23 @@ host_fns! {
     datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
     datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
     datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
+    datatree_decode_char: "jet_jit_datatree_decode_char" => jet_jit_datatree_decode_char: sig_unary;
     decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
     decode_inline_range: "jet_jit_decode_inline_range" => jet_jit_decode_inline_range: sig_ternary;
     decode_f32_range: "jet_jit_decode_f32_range" => jet_jit_decode_f32_range: sig_unary;
     decode_fixed_len: "jet_jit_decode_fixed_len" => jet_jit_decode_fixed_len: sig_binary;
     datatree_decode_list_error: "jet_jit_datatree_decode_list_error" => jet_jit_datatree_decode_list_error: sig_unary;
+    datatree_decode_map_error: "jet_jit_datatree_decode_map_error" => jet_jit_datatree_decode_map_error: sig_unary;
     decode_error_under: "jet_jit_decode_error_under" => jet_jit_decode_error_under: sig_binary;
     decode_error_under_segment: "jet_jit_decode_error_under_segment" => jet_jit_decode_error_under_segment: sig_binary;
     decode_error_accumulate: "jet_jit_decode_error_accumulate" => jet_jit_decode_error_accumulate: sig_ternary;
+    decode_error_accumulate_segment: "jet_jit_decode_error_accumulate_segment" => jet_jit_decode_error_accumulate_segment: sig_ternary;
     datatree_decode_union_error: "jet_jit_datatree_decode_union_error" => jet_jit_datatree_decode_union_error: sig_nullary;
     datatree_text: "jet_jit_datatree_text" => jet_jit_datatree_text: sig_unary;
     datatree_bool: "jet_jit_datatree_bool" => jet_jit_datatree_bool: sig_unary;
     datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
+    datatree_to_text: "jet_jit_datatree_to_text" => jet_jit_datatree_to_text: sig_unary;
+    datatree_equal_unordered: "jet_jit_datatree_equal_unordered" => jet_jit_datatree_equal_unordered: sig_binary;
     datatree_pack: "jet_jit_datatree_pack" => jet_jit_datatree_pack: sig_binary;
     published_schema_empty: "jet_jit_published_schema_empty" => jet_jit_published_schema_empty: sig_nullary;
     published_schema_merge: "jet_jit_published_schema_merge" => jet_jit_published_schema_merge: sig_binary;

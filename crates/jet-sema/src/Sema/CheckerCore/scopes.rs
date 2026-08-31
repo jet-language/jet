@@ -2,7 +2,9 @@ use crate::Diagnostics::Span;
 use crate::Sema::Registration::already_defined;
 use crate::Sema::{Checker, LocalInfo};
 use crate::AST::{AccessConvention, Expr, Type};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+
 impl<'a> Checker<'a> {
     pub(crate) fn push_scope(&mut self) {
         self.flow.enter_scope();
@@ -44,6 +46,7 @@ impl<'a> Checker<'a> {
         let sendable = self.sendability_problem(&info.ty, true).is_none();
         self.flow.bindings.set_at(name, depth, info);
         self.flow.sendability.set_at(name, depth, sendable);
+        self.flow.path_strings.remove_at(name, depth);
         self.flow
             .origins
             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
@@ -65,14 +68,22 @@ impl<'a> Checker<'a> {
             .any(|s| s.contains(name))
     }
 
-    pub(crate) fn current_ct_globals(&self) -> HashMap<String, crate::Comptime::CtValue> {
+    pub(crate) fn current_ct_globals(
+        &self,
+    ) -> Cow<'_, HashMap<String, crate::Comptime::CtValue>> {
+        // Most semantic expressions do not open a comptime scope. Borrow the
+        // immutable module globals instead of cloning every known value for
+        // each node; overlays still receive the exact old merged snapshot.
+        if self.ct_scopes.iter().all(|scope| scope.is_empty()) {
+            return Cow::Borrowed(self.ct_globals);
+        }
         let mut globals = self.ct_globals.clone();
         for scope in &self.ct_scopes {
             for (name, value) in scope {
                 globals.insert(name.clone(), value.clone());
             }
         }
-        globals
+        Cow::Owned(globals)
     }
 
     /// Record what a folded initializer changed about earlier bindings.
@@ -126,7 +137,7 @@ impl<'a> Checker<'a> {
         &self,
         expr: &crate::AST::Expr,
     ) -> Option<crate::Comptime::CtValue> {
-        let mut globals = self.current_ct_globals();
+        let mut globals = self.current_ct_globals().into_owned();
         for (name, info) in self.flow.bindings.all() {
             if let Some(value) = &info.constant_value {
                 globals.insert(name.to_string(), value.clone());
@@ -276,6 +287,7 @@ impl<'a> Checker<'a> {
         self.flow.narrow.remove_at(name, depth);
         self.flow.sendability.remove_at(name, depth);
         self.flow.frozen.remove_at(name, depth);
+        self.flow.path_strings.remove_at(name, depth);
         self.flow.bindings.set_at(name, depth, info);
         self.flow.sendability.set_at(name, depth, true);
         self.flow
@@ -331,6 +343,7 @@ impl<'a> Checker<'a> {
                 },
             );
             self.flow.sendability.set_at(&name, depth, true);
+            self.flow.path_strings.remove_at(&name, depth);
             self.flow.origins.set_at(
                 &name,
                 depth,

@@ -80,6 +80,7 @@ mod collection_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");

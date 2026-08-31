@@ -27,6 +27,66 @@ impl Default for BuildStamp {
         }
     }
 }
+/// Stable target inputs that distinguish one emitted Prelude artifact from
+/// another. The target triple remains the adjacent `BuildFactSnapshot` fact;
+/// these fields capture the selected runtime layer, provider, and source
+/// closure that the triple alone cannot identify.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetDossier {
+    /// The selected runtime ring for the reachable Prelude closure.
+    pub layer: crate::RingLayer::RuntimeLayer,
+    /// An opaque, stable provider identity. Providers should include their
+    /// content digest in this value when their implementation can change.
+    pub provider_identity: String,
+    /// An opaque, stable identity for the canonical Prelude source closure.
+    pub closure_identity: String,
+}
+
+impl Default for TargetDossier {
+    fn default() -> Self {
+        Self {
+            layer: crate::RingLayer::RuntimeLayer::Std,
+            provider_identity: "hosted-default".to_string(),
+            closure_identity: "prelude-hosted-v1".to_string(),
+        }
+    }
+}
+
+impl TargetDossier {
+    pub fn new(
+        layer: crate::RingLayer::RuntimeLayer,
+        provider_identity: impl Into<String>,
+        closure_identity: impl Into<String>,
+    ) -> Self {
+        Self {
+            layer,
+            provider_identity: provider_identity.into(),
+            closure_identity: closure_identity.into(),
+        }
+    }
+
+    /// Canonical bytes for the target dossier portion of an artifact key.
+    ///
+    /// Length framing is intentional: it keeps field boundaries unambiguous,
+    /// so identities such as `("ab", "c")` cannot collide with `("a", "bc")`.
+    pub fn cache_bytes(&self, target_triple: &str) -> Vec<u8> {
+        let mut bytes = b"jet-target-dossier-v1\0".to_vec();
+        for value in [
+            target_triple,
+            self.layer.as_str(),
+            self.provider_identity.as_str(),
+            self.closure_identity.as_str(),
+        ] {
+            append_cache_frame(&mut bytes, value.as_bytes());
+        }
+        bytes
+    }
+}
+
+fn append_cache_frame(bytes: &mut Vec<u8>, value: &[u8]) {
+    bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(value);
+}
 
 /// The one typed snapshot consumed by every front-end fact reader. Engines do
 /// not discover any of these values; they only receive the folded literals.
@@ -38,6 +98,9 @@ pub struct BuildFactSnapshot {
     /// Target identity used by target-aware compiler facts. This is an
     /// internal build input, not a user-declared fact row.
     pub target_triple: String,
+    /// Stable identity of the selected runtime layer, provider, and Prelude
+    /// source closure. This is folded into artifact/cache keys.
+    pub target_dossier: TargetDossier,
     pub profile: String,
     pub stamp: BuildStamp,
     /// Resolved contribution chains used by `jet explain`; fact readers still
@@ -67,6 +130,7 @@ impl Default for BuildFactSnapshot {
             package_version: "0.0.0".to_string(),
             os: crate::OSTarget::OSTarget::host(),
             target_triple: crate::Layout::TargetLayout::host_triple(),
+            target_dossier: TargetDossier::default(),
             profile: "dev".to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
@@ -91,12 +155,24 @@ impl BuildFactSnapshot {
             package_version: "0.0.0".to_string(),
             os,
             target_triple: crate::Layout::TargetLayout::host_triple(),
+            target_dossier: TargetDossier::default(),
             profile: profile.to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
             settings: BTreeMap::new(),
             setting_provenance: BTreeMap::new(),
         }
+    }
+
+    /// Set the target dossier while retaining the rest of the folded facts.
+    pub fn with_target_dossier(mut self, target_dossier: TargetDossier) -> Self {
+        self.target_dossier = target_dossier;
+        self
+    }
+
+    /// Canonical target identity bytes for artifact and runtime cache keys.
+    pub fn artifact_identity_bytes(&self) -> Vec<u8> {
+        self.target_dossier.cache_bytes(&self.target_triple)
     }
 
     pub fn contribution(&self, name: &str) -> Option<&crate::Policy::EffectiveFact> {
@@ -544,7 +620,11 @@ pub fn project_reachability(
 
 #[cfg(test)]
 mod tests {
-    use super::{fact_covers, project_reachability, FactKind, FactRegistry, ReachabilityRow};
+    use super::{
+        fact_covers, project_reachability, BuildFactSnapshot, FactKind, FactRegistry,
+        ReachabilityRow, TargetDossier,
+    };
+    use crate::RingLayer::RuntimeLayer;
     use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
@@ -606,6 +686,28 @@ mod tests {
         assert_eq!(
             result.path("effects", "root", "FS").unwrap(),
             &vec!["root".to_string(), "mid".to_string(), "leaf".to_string()]
+        );
+    }
+
+    #[test]
+    fn target_dossier_identity_is_framed_and_profile_sensitive() {
+        let hosted = BuildFactSnapshot::default();
+        let freestanding = hosted.clone().with_target_dossier(TargetDossier::new(
+            RuntimeLayer::Core,
+            "board.uart",
+            "prelude-core-v1",
+        ));
+
+        assert_ne!(
+            hosted.artifact_identity_bytes(),
+            freestanding.artifact_identity_bytes()
+        );
+
+        let left = TargetDossier::new(RuntimeLayer::Core, "ab", "c");
+        let right = TargetDossier::new(RuntimeLayer::Core, "a", "bc");
+        assert_ne!(
+            left.cache_bytes("test-target"),
+            right.cache_bytes("test-target")
         );
     }
 }

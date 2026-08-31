@@ -1,14 +1,36 @@
 # TIR semantic core (for #668 freeze)
 
-**Status:** living inventory for D-ONECORE1 / #779. Canonical definitions stay in
-`crates/jet-codegen/src/Codegen/TIR/mod.rs` and its exhaustive engine matches.
-This page records which surface forms desugar away before engines see them.
+**Status:** living inventory for D-ONECORE1 / #779, amended by #2301. Canonical
+definitions stay in `crates/jet-codegen/src/Codegen/TIR/mod.rs` and its
+exhaustive engine matches. This page records which surface forms desugar away
+before engines see them and the optimizer fact-channel contract.
 
 ## Law (R12 / D-ONECORE1=A)
 
 One structured semantic core. Every engine (AOT emit, Cranelift, interpreter)
 consumes that core exhaustively. Surface sugar expands in lowering (or earlier
 sema rewrite) into core nodes engines already handle.
+
+## Fact channel (#2301 / #668 amendment)
+
+The frozen TIR exposes one typed, read-only `TFactChannel` view. It projects
+facts already selected by sema from existing TIR carriers; it is not a side
+table, a third IR, or a third executable lens. The view has no per-node heap
+allocation. Its first classes and carriers are:
+
+| Fact | TIR carrier | Missing fact |
+|---|---|---|
+| Type | `TExpr.ty`, typed locals/parameters, `TFunc.ret` | Keep the conservative typed operation. |
+| Integer bounds | `Type::integer_range`, exact integer literals, `TNumericOp::InlineRange`, fixed-list proof | Keep the checked range/index operation. |
+| Exclusivity | sema `AccessConvention` lowered to `TCallArg` borrow flags and `Borrow` nodes | Keep shared/unknown memory dependencies and wrappers. |
+| Purity | sema `Func.is_pure` and `AutoVectorizationFacts.effect_free_body` | Do not apply a reorder or vector hint. |
+| Comptime value | sema comptime binding facts lowered to `TExprKind::CtLit` | Keep runtime evaluation/serialization. |
+
+The channel is consumed read-only by both executable lenses. A missing field
+means “not proven”; it never authorizes codegen to re-derive sema policy. A
+private SSA implementation may be derived inside an optimized lens, but it is
+not a third semantic representation or source of truth. Every TIR construct
+remains exhaustive for AOT, Cranelift, interpreter, and web.
 
 ## Desugared at lowering (engines must not special-case)
 

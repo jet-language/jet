@@ -1716,8 +1716,8 @@ fn git_ls_remote(url: &str, pattern: &str) -> Result<String, ProviderError> {
             "network disabled by JETPACK_DENY_NETWORK while refreshing source channels".to_string(),
         ));
     }
-    let out = std::process::Command::new("git")
-        .args(["ls-remote", "--refs", url, pattern])
+    let out = Provider::hardened_git_command()
+        .args(["ls-remote", "--refs", "--", url, pattern])
         .output()
         .map_err(|e| ProviderError::Channel(format!("could not run `git ls-remote`: {e}")))?;
     if !out.status.success() {

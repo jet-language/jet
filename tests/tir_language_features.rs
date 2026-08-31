@@ -349,6 +349,37 @@ fn run() { _ :: apply((value: Int) -> value) }
     );
 }
 
+#[test]
+fn function_value_arguments_preserve_public_callable_contracts() {
+    let src = "\
+fn factory(action: fn(*, force: Bool) Int) Int { return action(force: true) }
+fn invoke(callback: fn(fn(*, force: Bool) Int) Int) Int { return callback(plain) }
+fn plain(value: Bool) Int -> 1
+fn run() { _ :: invoke(factory) }
+";
+    let diagnostics = jet::compile(src)
+        .expect_err("a function value with the wrong public label must be rejected");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        "expected E0112 for a callable-contract mismatch: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn unannotated_function_values_do_not_erase_strict_callable_contracts() {
+    let src = "\
+fn factory(action: fn(*, force: Bool) Int) Int { return action(force: true) }
+fn invoke(callback: fn(fn(*, force: Bool) Int) Int, plain: fn(Bool) Int) Int { return callback(plain) }
+fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
+";
+    let diagnostics = jet::compile(src)
+        .expect_err("an unannotated function value must not satisfy a strict callable type");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        "expected E0112 for a missing strict callable contract: {diagnostics:#?}"
+    );
+}
+
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
 /// `Name.from_kind(x)` → newtype
 /// `__jet_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native

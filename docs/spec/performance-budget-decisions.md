@@ -35,7 +35,7 @@ tree; it never infers an edit from a timestamp or ambient cache file.
 
 Every candidate records source-tree and patch identities, cache scenario,
 compiler/Core digests, target, profile, backend, linker, host, one fixed
-warmup, twenty samples, elapsed variance, peak RSS, workload bytes, edit bytes,
+warmup, twenty samples, process CPU-time variance, peak RSS, workload bytes, edit bytes,
 and resident-compiler phase totals. The built-in `dev` profile measures the
 production Cranelift JIT lens; optimized `release` measures the rustc AOT lens.
 Missing or changed inputs, unsupported targets,
@@ -257,6 +257,50 @@ Exact compatible slices may satisfy matching facts but never stand in for the
 whole policy. Missing, stale, mismatched, unavailable, inconclusive, warning,
 and failure states remain visible under REPORT1/OUTPUT1; failures fail. Every
 surface reads the same `BudgetReport` and shared evaluator.
+
+## D-COSTLAW1=A — Typed cost transparency
+
+Jet keeps optimizer excellence and cost transparency together. A cost that the
+optimizer proves it removed appears in `jet explain --cost`, but does not emit a
+lint. A semantic cost that remains visible in lowered code stays reportable.
+
+The five cost rows are:
+
+1. **View materialization.** A read-only view crosses an owning boundary and
+   must copy.
+2. **Map copy-on-write.** A shared map spine is copied before mutation.
+3. **Exact-Int spill.** An operation leaves the packed `Int` range and uses the
+   exact big-number representation.
+4. **Outcome construction.** A `Result` or `Option` carrier is built before an
+   immediate consumer fast path can remove that work.
+5. **Generic representation fallback.** A collection uses its generic
+   representation because no shape proof selected a direct representation.
+
+The sema checker supplies view-copy `L2510` rows. Typed TIR supplies the other
+four rows and the complete explain projection. Before projection, the shared
+cost seam verifies that every sema-checked reachable callable has a matching
+TIR body. A type-parameterized, foreign, or otherwise uncovered reachable
+surface is an explicit completeness failure; it is never silently omitted.
+`jet check` and `jet lint --cost` merge these sources and deduplicate identical
+diagnostics at one source site. They keep only semantic remainders inside
+loops. `jet explain --cost` also keeps optimizer-proven removals. Backends do
+not reconstruct cost from emitted Rust. Every explain row uses the honest
+`tier=shared-tir` label.
+
+```jet
+loop item in items {
+    out.push(item.view())        // view materialization: L2510 when semantic
+    counts[item.key] += 1        // map copy-on-write: L2510 when semantic
+    total += item                // exact-Int spill: L2510 when semantic
+    result :: read(item)         // outcome construction: L2510 when semantic
+    value := items[index]        // generic fallback: L2510 when semantic
+}
+```
+
+`jet check` keeps ordinary code quiet unless a semantic remainder repeats in a
+loop. `jet lint --cost file.jet` reports those rows directly. `jet explain --cost
+file.jet` reports both semantic remainders and optimizer-proven removals, so a
+missing lint row is explainable rather than silent.
 
 ## Reconciliation and precedence
 

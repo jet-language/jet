@@ -1,9 +1,12 @@
 use core.process as process
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: git_diff_review INPUT_ROOT")
-    root :: args.get(1) ?? panic("missing input root")
+#CLI
+struct WorkloadArgs {
+    root: String
+}
+
+fn run(args: WorkloadArgs) {
+    root :: args.root
     timeout :: Duration.seconds(5) ?? panic("bad timeout")
     result :: process.cmd([
         "git",
@@ -30,6 +33,7 @@ fn run() {
     deleted := 0
     modified := 0
     rows := [String]{}
+    // Raw git --name-status protocol: it is not RFC-4180 CSV.
     loop line in output.split("\n") {
         if line != "" {
             fields :: line.split("\t").to_list()

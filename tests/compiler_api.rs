@@ -392,6 +392,144 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
     ));
 }
 
+
+#[test]
+fn package_views_read_real_inputs_through_comptime_and_match_goldens() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_package_views_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join(".jet")).expect("create package view fixture");
+    fs::write(
+        root.join("package.jet"),
+        r#"
+name: "demo"
+version: "1.2.3"
+edition: "2028"
+description: "typed package"
+license: "MIT"
+repository: "https://example.test/demo"
+runtime: "hosted"
+target: "native"
+deps: {
+    gitdep: {
+        git: "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private",
+        tag: "v1",
+    },
+    local: ./deps/local,
+}
+"#,
+    )
+    .expect("write package manifest fixture");
+    fs::write(
+        root.join(".jet/lock"),
+        r#"
+version = 1
+[root]
+dependencies = ["gitdep"]
+[[package]]
+name = "gitdep"
+version = "1.0.0"
+source = { git = "https://lock-user:lock-secret@example.test/acme/tool?token=lock-secret", tag = "v1" }
+locked = { rev = "deadbeef", tree-hash = "tree", last-modified = 42 }
+fingerprint = "lock-fp"
+content-hash = "lock-hash"
+dependencies = []
+layer = "hosted"
+inferred-layer = "hosted"
+"#,
+    )
+    .expect("write lock fixture");
+    fs::write(
+        root.join("env.jet"),
+        r#"
+module profile.base {
+    packages: []
+}
+module profile.dev {
+    extends: ["base"],
+    packages: [],
+    collisions: { "bin/editor": "editor@default" }
+}
+"#,
+    )
+    .expect("write profile fixture");
+
+    let manifest = jet::Compiler::read_manifest(&root).expect("read manifest view");
+    let package = jet::Compiler::read_package(&root).expect("read package view");
+    let lock = jet::Compiler::read_lock(&root).expect("read lock view");
+    let profiles = jet::Compiler::read_profiles(&root).expect("read profile view");
+    assert_eq!(manifest.dependencies, package.dependencies);
+    assert_eq!(
+        manifest.dependencies[0].source,
+        r#"{ git: "https://example.test/acme/tool", tag: "v1" }"#
+    );
+    assert_eq!(lock.packages[0].source_kind, "git");
+    assert_eq!(profiles.profiles.len(), 2);
+
+    let read = |operation| {
+        jet::Compiler::eval_core_call(
+            "core.compiler",
+            operation,
+            Vec::new(),
+            jet::Diagnostics::Span::new(0, 0),
+        )
+        .expect("compiler callback handles package view")
+        .expect("package view is present")
+    };
+    let (values, inputs) = jet::Comptime::with_package_read_context(&root, || {
+        (
+            read("manifest"),
+            read("package"),
+            read("lock"),
+            read("profiles"),
+        )
+    });
+    let json = |value: jet::AST::CtValue| match value {
+        jet::AST::CtValue::Present(value) => value.to_json(),
+        other => panic!("expected a present package view, got {other:?}"),
+    };
+    let (manifest_json, package_json, lock_json, profiles_json) = values;
+    assert_eq!(
+        json(manifest_json),
+        r#"{"schema_version":1,"file":"package.jet","jet":null,"edition":"2028","description":"typed package","license":"MIT","repository":"https://example.test/demo","layer":"hosted","target":"native","dependencies":[{"name":"gitdep","source":"{ git: \"https://example.test/acme/tool\", tag: \"v1\" }"},{"name":"local","source":"./deps/local"}],"packages":[],"outputs":[],"build_profiles":[]}"#
+    );
+    assert_eq!(
+        json(package_json),
+        r#"{"schema_version":1,"file":"package.jet","jet":null,"edition":"2028","description":"typed package","license":"MIT","repository":"https://example.test/demo","layer":"hosted","target":"native","dependencies":[{"name":"gitdep","source":"{ git: \"https://example.test/acme/tool\", tag: \"v1\" }"},{"name":"local","source":"./deps/local"}],"packages":[],"outputs":[],"build_profiles":[]}"#
+    );
+    assert_eq!(
+        json(lock_json),
+        r#"{"schema_version":1,"file":".jet/lock","version":1,"root_dependencies":["gitdep"],"packages":[{"name":"gitdep","version":"1.0.0","source_kind":"git","source":"tag = \"v1\"","revision":"deadbeef","fingerprint":"lock-fp","content_hash":"lock-hash","dependencies":[],"layer":"hosted","inferred_layer":"hosted"}]}"#
+    );
+    assert_eq!(
+        json(profiles_json),
+        r#"{"schema_version":1,"file":"env.jet","profiles":[{"name":"base","extends":[],"packages":[],"collisions":[],"sources":["profile.base"]},{"name":"dev","extends":["base"],"packages":[],"collisions":[{"key":"bin/editor","value":"editor@default"}],"sources":["profile.dev"]}]}"#
+    );
+    let input_paths: std::collections::BTreeSet<_> =
+        inputs.into_iter().map(|input| input.path).collect();
+    assert!(input_paths.contains("package.jet"));
+    assert!(input_paths.contains(".jet/lock"));
+    assert!(input_paths.contains("env.jet"));
+}
+
+#[test]
+fn package_views_remain_compile_time_only() {
+    let diagnostics = jet::compile(
+        "use core.compiler as compiler\nfn run() { compiler.package() }\n",
+    )
+    .expect_err("package views must not become a runtime capability");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+        "expected compile-time-only diagnostic, got {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("compile-time only")),
+        "diagnostic must teach the phase boundary: {diagnostics:?}"
+    );
+}
 #[test]
 fn compiler_cli_unknown_operation_uses_structured_error_object() {
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))

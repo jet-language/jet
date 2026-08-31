@@ -14,11 +14,19 @@
 // Everything else is an agent's, inert, or done. #516: there is no
 // greenlight/activate gate — a fresh card lands straight in an agent lane;
 // the owner's only confirmation mechanism is ratifying a decision ballot.
-import { dataFile, historyFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
+import {
+  backupRequiredAt, dataFile, historyFile, projectRoot,
+  readJSON, withDirectoryAuthority, writeJSON, newId, today, now,
+} from './paths.mjs';
 import { withLock } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import {
-  hasPendingRepair, recoverPendingRepair, recoverPendingRepairLocked,
+  HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
+  formatHardeningEvidence, normalizeHardeningFixture, prepareHardening,
+} from './hardening.mjs';
+import {
+  beginRepairTransaction, finishRepairTransaction, hasPendingRepairAt,
+  recoverPendingRepair, recoverPendingRepairLocked,
 } from './repair-journal.mjs';
 
 export const VERSION = 4;
@@ -34,6 +42,9 @@ export const PHASES = [
   { id: 'frozen',   label: 'Frozen',   seq: -1, who: 'owner', blurb: 'Owner-only — paused; the owner unpauses with a phase update' },
 ];
 export const PHASE_IDS = PHASES.map(p => p.id);
+// `triage` is a read-only legacy spelling still present in older boards. It
+// remains accepted as data, but no other phase value may enter a projection.
+const STORED_PHASE_IDS = new Set([...PHASE_IDS, 'triage']);
 export const ACTIVE = ['deciding', 'planning', 'ready', 'building', 'verify'];
 
 export const LANES = {
@@ -52,6 +63,53 @@ export class TowerError extends Error {
 }
 const fail = (code, msg) => { throw new TowerError(code, msg); };
 
+// Both JSON stores share one journal and one pre-write backup pair. The journal
+// stays present until both atomic renames and the containing directory sync
+// complete; any error or process crash therefore recovers one coherent pair.
+function writeJSONHeld(root, name, value) {
+  root.writeAtomic(name, JSON.stringify(value, null, 2) + '\n');
+}
+
+function withStorePairTransaction(dataDir, liveFile, config, work, prepare = null) {
+  const archive = historyFile(dataDir);
+  return withDirectoryAuthority(dataDir, root => {
+    // Keep the backup directory pinned for the full pair transaction. A
+    // second path lookup between the two backups or journal phases could
+    // otherwise follow an attacker-controlled replacement.
+    const backupAuthority = root.ensureDirectory('backups');
+    try {
+      const removeEmptyHistory = !root.tryStat('history.json');
+      if (removeEmptyHistory) writeJSONHeld(root, 'history.json', emptyHistory());
+      const prepared = prepare ? prepare(root, backupAuthority) : undefined;
+      const liveBackup = backupRequiredAt(root, liveFile, config.backups, backupAuthority);
+      const historyBackup = backupRequiredAt(root, archive, config.backups, backupAuthority);
+      beginRepairTransaction(dataDir, {
+        liveBackup,
+        historyBackup,
+        manifestHash: `store:${process.pid}:${Date.now()}`,
+      }, root, backupAuthority);
+      const result = work(root, prepared);
+      root.sync();
+      finishRepairTransaction(dataDir, root, backupAuthority);
+      if (removeEmptyHistory) {
+        let current = emptyHistory();
+        try { current = JSON.parse(root.read('history.json').toString('utf8')); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        if (JSON.stringify(current) === JSON.stringify(emptyHistory())) {
+          root.remove('history.json');
+          root.sync();
+        }
+      }
+      return result;
+    } catch (error) {
+      try { recoverPendingRepairLocked(dataDir, root, backupAuthority); } catch { /* leave journal for next reader */ }
+      throw error;
+    } finally {
+      backupAuthority.close();
+    }
+  });
+}
+
 // A board is born with one active epoch: every card must live in an epoch, be
 // a sidequest, or be frozen (owner ruling 2026-08-05), so an epoch-less board
 // would have nowhere to put epoch-track work.
@@ -67,43 +125,146 @@ export function openStore(dataDir) {
   const file = dataFile(dataDir);
   if (!file) fail('E_NO_DATA', 'no Tower data found — run `tower init` in your project root (or set TOWER_DATA)');
   const config = loadConfig(dataDir);
+  // The fixture guard needs the host root, but publicConfig/UI must never see
+  // filesystem routing details. Non-enumerable keeps this runtime context out
+  // of persisted config and projected JSON.
+  Object.defineProperties(config, {
+    dataDir: { value: dataDir, enumerable: false },
+    projectRoot: { value: projectRoot(dataDir), enumerable: false },
+  });
 
-  // A repair journal is the two-store commit marker. Check before and after
-  // unlocked reads so a concurrent repair cannot expose a persistent split.
+  // A repair journal is the two-store commit marker. Normal reads stay
+  // unlocked, but take two bounded snapshots through one held data-directory
+  // descriptor and require both files plus the live revision to remain
+  // identical. A completed pair commit therefore cannot return the old live
+  // file with the new history (or vice versa).
   recoverPendingRepair(dataDir, file);
-  const consistentRead = (read) => {
-    if (hasPendingRepair(dataDir)) recoverPendingRepair(dataDir, file);
-    let value = read();
-    if (hasPendingRepair(dataDir)) {
-      recoverPendingRepair(dataDir, file);
-      value = read();
+  const snapshotAt = (root, name, fallback, label, parse = true) => {
+    try {
+      const path = `${root.expectedPath}/${name}`;
+      const bytes = root.read(name, undefined, `cannot read unsafe ${label}: ${path}`);
+      return { bytes, value: parse ? JSON.parse(bytes.toString('utf8')) : null };
+    } catch (error) {
+      if (error.code === 'ENOENT') return { bytes: null, value: fallback };
+      throw error;
     }
-    return value;
   };
-  const loadRaw = () => normalize(readJSON(file, empty(config.project)), loadHistoryRaw(dataDir).cards);
-  const load = () => consistentRead(loadRaw);
+  const sameBytes = (left, right) => (left === null && right === null)
+    || (!!left && !!right && left.equals(right));
+  const pairSnapshotAt = (root, heldBackups = null, parse = true) => {
+    const pendingBefore = hasPendingRepairAt(root, heldBackups);
+    const live = snapshotAt(root, 'tower.json', empty(config.project), 'live store', parse);
+    const history = snapshotAt(root, 'history.json', emptyHistory(), 'history store', parse);
+    const pendingAfter = hasPendingRepairAt(root, heldBackups);
+    root.guard('read board pair');
+    return { pending: pendingBefore || pendingAfter, live, history };
+  };
+  const preparedPairAt = (root, heldBackups = null) => {
+    const pair = pairSnapshotAt(root, heldBackups);
+    if (pair.pending) fail('E_CONFLICT', 'repair transaction is still pending; retry the operation');
+    validateStoredState(pair.live.value, 'live store');
+    validateStoredHistory(pair.history.value, 'history store');
+    return {
+      state: normalize(pair.live.value, pair.history.value.cards),
+      history: { ...emptyHistory(), ...pair.history.value },
+    };
+  };
+  let liveCache = null;
+  const readConsistentPair = () => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const { first, second } = withDirectoryAuthority(dataDir, root => {
+        const backupAuthority = root.tryStat('backups') ? root.child('backups') : null;
+        try {
+          return {
+            first: pairSnapshotAt(root, backupAuthority),
+            second: pairSnapshotAt(root, backupAuthority, false),
+          };
+        } finally {
+          backupAuthority?.close();
+        }
+      });
+      if (first.pending) {
+        recoverPendingRepair(dataDir, file);
+        continue;
+      }
+      if (second.pending) {
+        recoverPendingRepair(dataDir, file);
+        continue;
+      }
+      if (!sameBytes(first.live.bytes, second.live.bytes)
+        || !sameBytes(first.history.bytes, second.history.bytes))
+        continue;
+      validateStoredState(first.live.value, 'live store');
+      validateStoredHistory(first.history.value, 'history store');
+      const state = normalize(first.live.value, first.history.value.cards);
+      liveCache = { bytes: first.live.bytes, state };
+      return {
+        state,
+        history: { ...emptyHistory(), ...first.history.value },
+      };
+    }
+    fail('E_CONFLICT', 'board changed during read; retry the operation');
+  };
+  const readConsistentLive = () => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const snapshot = withDirectoryAuthority(dataDir, root => {
+        const backupAuthority = root.tryStat('backups') ? root.child('backups') : null;
+        try {
+          const pendingBefore = hasPendingRepairAt(root, backupAuthority);
+          const live = snapshotAt(root, 'tower.json', empty(config.project), 'live store', false);
+          const pendingAfter = hasPendingRepairAt(root, backupAuthority);
+          root.guard('read live board');
+          return { pending: pendingBefore || pendingAfter, live };
+        } finally {
+          backupAuthority?.close();
+        }
+      });
+      if (snapshot.pending) {
+        recoverPendingRepair(dataDir, file);
+        continue;
+      }
+      if (liveCache && sameBytes(liveCache.bytes, snapshot.live.bytes)) return liveCache.state;
+      const value = snapshot.live.bytes === null
+        ? snapshot.live.value
+        : JSON.parse(snapshot.live.bytes.toString('utf8'));
+      validateStoredState(value, 'live store');
+      const state = normalize(value, null, false);
+      liveCache = { bytes: snapshot.live.bytes, state };
+      return state;
+    }
+    fail('E_CONFLICT', 'board changed during read; retry the operation');
+  };
+
+  const loadPair = () => readConsistentPair();
+  const loadLive = () => readConsistentLive();
+  const load = () => loadPair().state;
 
   // history.json can change through another CLI process. Read it fresh so a
   // long-lived server handle cannot retain a pre-repair archive indefinitely.
-  const loadHistory = () => consistentRead(() => loadHistoryRaw(dataDir));
+  const loadHistory = () => loadPair().history;
 
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
   const mutate = (fn, { expectRev } = {}) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
-    const s = loadRaw();
-    if (expectRev != null && Number(expectRev) !== s.meta.rev)
-      fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
-    const history = loadHistoryRaw(dataDir);
-    const result = fn(s, config, history);
-    // #461: single chokepoint — every write gets a chance to retire aged-out
-    // cards/decisions/events to history.json before tower.json is persisted.
-    syncMilestones(s, undefined, history.cards);
-    retire(s, config, dataDir);
-    s.meta.rev += 1;
-    backup(file, config.backups);
-    writeJSON(file, s);
-    return { result, state: s };
+    return withStorePairTransaction(dataDir, file, config, (root, pair) => {
+      const s = pair.state;
+      if (expectRev != null && Number(expectRev) !== s.meta.rev)
+        fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
+      const history = pair.history;
+      const historyBefore = JSON.stringify(history);
+      const result = fn(s, config, history);
+      if (JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
+      // #461: single chokepoint — every write gets a chance to retire aged-out
+      // cards/decisions/events to history.json before tower.json is persisted.
+      syncMilestones(s, undefined, history.cards);
+      retire(s, config, dataDir, history, root);
+      validateStoredState(s, 'live store');
+      validateStoredHistory(history, 'history store');
+      s.meta.rev += 1;
+      writeJSONHeld(root, 'tower.json', s);
+      return { result, state: s };
+    }, preparedPairAt);
   });
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
@@ -114,16 +275,20 @@ export function openStore(dataDir) {
   // is exactly the overwrite class that once deleted 112 cards.
   const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
-    const cur = loadRaw();
+    const currentPair = readConsistentPair();
+    const cur = currentPair.state;
     if (expectRev == null)
       fail('E_USAGE', `restore requires expectRev — read the board first and pass its meta.rev (currently ${cur.meta.rev})`);
     if (Number(expectRev) !== cur.meta.rev)
       fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
-    const s = normalize(prevState, loadHistoryRaw(dataDir).cards);
-    s.meta.rev = cur.meta.rev + 1;
-    backup(file, config.backups);
-    writeJSON(file, s);
-    return { result: { restored: true }, state: s };
+    return withStorePairTransaction(dataDir, file, config, (root, pair) => {
+      if (pair.state.meta.rev !== cur.meta.rev)
+        fail('E_CONFLICT', `undo refused: board changed during restore (rev ${pair.state.meta.rev} ≠ ${cur.meta.rev})`);
+      const s = normalize(prevState, pair.history.cards);
+      s.meta.rev = cur.meta.rev + 1;
+      writeJSONHeld(root, 'tower.json', s);
+      return { result: { restored: true }, state: s };
+    }, preparedPairAt);
   });
 
   // Bring a single archived card or decision back to the live board
@@ -131,20 +296,21 @@ export function openStore(dataDir) {
   // doesn't immediately re-retire on the next write.
   const restoreArchived = (ref, by) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
-    const s = loadRaw();
-    const h = loadHistoryRaw(dataDir);
-    const result = restoreFromHistory(s, h, ref, by);
-    syncMilestones(s, undefined, h.cards);
-    s.meta.rev += 1;
-    backup(file, config.backups);
-    writeJSON(file, s);
-    writeJSON(historyFile(dataDir), h);
-    return { result, state: s };
+    return withStorePairTransaction(dataDir, file, config, (root, pair) => {
+      const s = pair.state;
+      const h = pair.history;
+      const result = restoreFromHistory(s, h, ref, by);
+      syncMilestones(s, undefined, h.cards);
+      s.meta.rev += 1;
+      writeJSONHeld(root, 'tower.json', s);
+      writeJSONHeld(root, 'history.json', h);
+      return { result, state: s };
+    }, preparedPairAt);
   });
 
   return {
-    file, dataDir, config, load, mutate, restore, restoreArchived, loadHistory,
-    project: () => project(load(), config, loadHistory()),
+    file, dataDir, config, load, loadLive, loadPair, mutate, restore, restoreArchived, loadHistory,
+    project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }
 
@@ -156,8 +322,163 @@ export function openStore(dataDir) {
 // tower.json (see `mutate`/`restoreArchived` above), committed to git.
 export const emptyHistory = () => ({ version: 1, decisions: [], cards: [], events: [] });
 
+const CRITERION_STATUSES = new Set(['open', 'met', 'verified']);
+const MILESTONE_STATUSES = new Set(['open', 'review-ready', 'met']);
+const EPOCH_STATUSES = new Set(['active', 'arrived', 'planned', 'done', 'open']);
+const DECISION_STATUSES = new Set(['open', 'ratified']);
+
+const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function validateStoredString(value, label, { nullable = true, nonEmpty = false } = {}) {
+  if (value === undefined) return;
+  if (value === null && nullable) return;
+  if (typeof value !== 'string' || (nonEmpty && !value.trim()))
+    fail('E_INVALID', `${label} must be ${nullable ? 'a string or null' : 'a string'}`);
+}
+
+function validateStoredNumber(value, label, { integer = false, min = null } = {}) {
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER
+    || (integer && !Number.isSafeInteger(value)) || (min != null && value < min))
+    fail('E_INVALID', `${label} must be a canonical ${integer ? 'integer' : 'finite number'}`);
+}
+
+function validateStoredCriterion(item, index, source) {
+  const label = `${source} criterion ${index + 1}`;
+  if (!plainObject(item)) fail('E_INVALID', `${label} must be an object`);
+  validateStoredNumber(item.n, `${label}.n`, { integer: true, min: 1 });
+  if (item.status !== undefined && !CRITERION_STATUSES.has(item.status))
+    fail('E_INVALID', `${label}.status must be open, met, or verified`);
+  validateStoredString(item.text, `${label}.text`, { nullable: false });
+  for (const key of ['metBy', 'verifiedBy', 'evidence', 'at'])
+    validateStoredString(item[key], `${label}.${key}`);
+}
+
+function validateStoredCriteria(criteria, source) {
+  if (criteria === undefined) return;
+  if (!Array.isArray(criteria)) fail('E_INVALID', `${source}.criteria must be an array`);
+  const seen = new Set();
+  criteria.forEach((item, index) => {
+    validateStoredCriterion(item, index, source);
+    if (item.n !== undefined) {
+      if (seen.has(item.n)) fail('E_INVALID', `${source}.criteria has duplicate n ${item.n}`);
+      seen.add(item.n);
+    }
+  });
+}
+
+function validateStoredEpoch(epoch, index, source) {
+  const label = `${source} epoch ${index + 1}`;
+  if (!plainObject(epoch)) fail('E_INVALID', `${label} must be an object`);
+  validateStoredString(epoch.id, `${label}.id`, { nullable: false, nonEmpty: true });
+  validateStoredString(epoch.name, `${label}.name`, { nullable: false });
+  validateStoredString(epoch.goal, `${label}.goal`, { nullable: false });
+  validateStoredNumber(epoch.num, `${label}.num`, { integer: true, min: 1 });
+  validateStoredNumber(epoch.order, `${label}.order`, { integer: true, min: 0 });
+  if (epoch.status !== undefined && !EPOCH_STATUSES.has(epoch.status))
+    fail('E_INVALID', `${label}.status is not a canonical epoch status`);
+  if (epoch.exitCriteria !== undefined) {
+    if (!Array.isArray(epoch.exitCriteria) || !epoch.exitCriteria.every(item => typeof item === 'string'))
+      fail('E_INVALID', `${label}.exitCriteria must be an array of strings`);
+  }
+}
+
+function validateStoredMilestone(milestone, index, source) {
+  const label = `${source} milestone ${index + 1}`;
+  if (!plainObject(milestone)) fail('E_INVALID', `${label} must be an object`);
+  validateStoredString(milestone.id, `${label}.id`, { nullable: false, nonEmpty: true });
+  validateStoredString(milestone.epochId, `${label}.epochId`, { nullable: false, nonEmpty: true });
+  validateStoredString(milestone.title, `${label}.title`, { nullable: false });
+  validateStoredString(milestone.goal, `${label}.goal`, { nullable: false });
+  if (milestone.status !== undefined && !MILESTONE_STATUSES.has(milestone.status))
+    fail('E_INVALID', `${label}.status is not a canonical milestone status`);
+  validateStoredCriteria(milestone.criteria, label);
+}
+
+function validateStoredCard(card, index, source, seenNums, seenIds) {
+  const label = `${source} card ${index + 1}`;
+  if (!plainObject(card)) fail('E_INVALID', `${label} must be an object`);
+  validateStoredString(card.id, `${label}.id`, { nullable: false, nonEmpty: true });
+  if (card.id !== undefined) {
+    if (seenIds.has(card.id)) fail('E_INVALID', `${source} has duplicate card id ${card.id}`);
+    seenIds.add(card.id);
+  }
+  validateStoredNumber(card.num, `${label}.num`, { integer: true, min: 1 });
+  if (card.num !== undefined) {
+    if (seenNums.has(card.num)) fail('E_INVALID', `${source} has duplicate card number ${card.num}`);
+    seenNums.add(card.num);
+  }
+  validateStoredNumber(card.workOrder, `${label}.workOrder`, { min: 0 });
+  validateStoredPhase(card, source);
+  validateStoredString(card.epoch, `${label}.epoch` , { nullable: true, nonEmpty: true });
+  validateStoredString(card.milestoneId, `${label}.milestoneId`, { nullable: true, nonEmpty: true });
+  validateStoredCriteria(card.criteria, label);
+}
+
+function validateStoredDecision(decision, index, source) {
+  const label = `${source} decision ${index + 1}`;
+  if (!plainObject(decision)) fail('E_INVALID', `${label} must be an object`);
+  validateStoredString(decision.id, `${label}.id`, { nullable: false, nonEmpty: true });
+  validateStoredString(decision.cardId, `${label}.cardId`, { nullable: true, nonEmpty: true });
+  if (decision.status !== undefined && !DECISION_STATUSES.has(decision.status))
+    fail('E_INVALID', `${label}.status is not a canonical decision status`);
+  if (decision.options !== undefined) {
+    if (!Array.isArray(decision.options)) fail('E_INVALID', `${label}.options must be an array`);
+    for (const [optionIndex, option] of decision.options.entries()) {
+      if (!plainObject(option)) fail('E_INVALID', `${label}.options[${optionIndex}] must be an object`);
+      validateStoredString(option.key, `${label}.options[${optionIndex}].key`, { nullable: false });
+      validateStoredString(option.name, `${label}.options[${optionIndex}].name`, { nullable: false });
+    }
+  }
+}
+
+function validateStoredPhase(card, source) {
+  if (!card || !Object.hasOwn(card, 'phase') || card.phase == null) return;
+  if (typeof card.phase !== 'string' || !STORED_PHASE_IDS.has(card.phase))
+    fail('E_INVALID', `${source} has an invalid phase value`);
+}
+
+function validateStoredPhases(cards, source) {
+  for (const card of Array.isArray(cards) ? cards : []) validateStoredPhase(card, source);
+}
+
+export function validateStoredState(state, source = 'live store') {
+  if (!plainObject(state)) fail('E_INVALID', `${source} must be an object`);
+  if (state.meta !== undefined && !plainObject(state.meta)) fail('E_INVALID', `${source}.meta must be an object`);
+  for (const key of ['nextNum', 'rev']) validateStoredNumber(state[key], `${source}.${key}`, { integer: true, min: key === 'nextNum' ? 1 : 0 });
+  if (state.meta) {
+    validateStoredNumber(state.meta.nextNum, `${source}.meta.nextNum`, { integer: true, min: 1 });
+    validateStoredNumber(state.meta.rev, `${source}.meta.rev`, { integer: true, min: 0 });
+  }
+  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) {
+    if (state[key] !== undefined && !Array.isArray(state[key])) fail('E_INVALID', `${source}.${key} must be an array`);
+  }
+  const seenNums = new Set();
+  const seenIds = new Set();
+  (state.epochs || []).forEach((epoch, index) => validateStoredEpoch(epoch, index, source));
+  (state.milestones || []).forEach((milestone, index) => validateStoredMilestone(milestone, index, source));
+  (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
+  (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
+  return state;
+}
+
+export function validateStoredHistory(history, source = 'history store') {
+  if (!plainObject(history)) fail('E_INVALID', `${source} must be an object`);
+  for (const key of ['decisions', 'cards', 'events']) {
+    if (history[key] !== undefined && !Array.isArray(history[key])) fail('E_INVALID', `${source}.${key} must be an array`);
+  }
+  const seenNums = new Set();
+  const seenIds = new Set();
+  (history.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
+  (history.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
+  return history;
+}
+
 function loadHistoryRaw(dataDir) {
-  return { ...emptyHistory(), ...(readJSON(historyFile(dataDir), null) || {}) };
+  const raw = readJSON(historyFile(dataDir), null);
+  if (raw == null) return emptyHistory();
+  validateStoredHistory(raw);
+  return { ...emptyHistory(), ...raw };
 }
 
 // Treat a 'YYYY-MM-DD' stamp as UTC midnight; "older than N days" = more
@@ -186,9 +507,9 @@ const LIVE_EVENTS = 500;
 // in history.json is removed from live without a duplicate append — undo
 // can reintroduce a stale live copy of something already retired (history is
 // never rolled back), and this is how that self-heals on the next write.
-function retire(s, config, dataDir) {
+function retire(s, config, dataDir, history = null, root = null) {
   const days = config.retireAfterDays ?? 3;
-  const h = loadHistoryRaw(dataDir);
+  const h = history || loadHistoryRaw(dataDir);
   const hasCard = (id) => h.cards.some(x => x.id === id);
   const hasDecision = (id) => h.decisions.some(x => x.id === id);
   let dirty = false;
@@ -244,7 +565,10 @@ function retire(s, config, dataDir) {
     dirty = true;
   }
 
-  if (dirty) writeJSON(historyFile(dataDir), h);
+  if (dirty) {
+    if (root) writeJSONHeld(root, 'history.json', h);
+    else writeJSON(historyFile(dataDir), h);
+  }
 }
 
 // Accept a card by id or tracking number in a history{cards} bag.
@@ -300,7 +624,8 @@ export function restoreFromHistory(s, h, ref, by) {
   fail('E_NOT_FOUND', `no archived card or decision ${ref}`);
 }
 
-export function normalize(s, historyCards = null) {
+export function normalize(s, historyCards = null, sync = true) {
+  if (s !== undefined && s !== null) validateStoredState(s, 'live store');
   s = s && typeof s === 'object' ? s : empty();
   s.meta = { version: VERSION, project: 'Project', nextNum: 1, rev: 0, ...(s.meta || {}) };
   s.meta.version = VERSION;
@@ -319,14 +644,18 @@ export function normalize(s, historyCards = null) {
   }
   delete s.meta.currentEpoch;
   for (const c of s.cards) {
+    validateStoredPhase(c, 'live card');
     c.blockedBy ||= [];
     c.log ||= [];
     c.criteria ||= [];
     c.refs ||= [];
     c.tags ||= [];
+    if (c.hardeningDedupAliases != null && !Array.isArray(c.hardeningDedupAliases)) c.hardeningDedupAliases = [];
+    if (c.hardeningEvidence != null && !Array.isArray(c.hardeningEvidence)) c.hardeningEvidence = [];
     if (!('parentId' in c)) c.parentId = null;
     c.needsAcceptance = !!c.needsAcceptance;
   }
+  if (historyCards != null) validateStoredHistory({ cards: historyCards }, 'history store');
   for (const m of s.milestones) {
     m.criteria = normalizeMilestoneCriteria(m.criteria);
     if (!['open', 'review-ready', 'met'].includes(m.status)) m.status = 'open';
@@ -345,7 +674,7 @@ export function normalize(s, historyCards = null) {
     const replacement = legacySupersededBy[d.id];
     if (replacement && !d.supersededBy && decisionIds.has(replacement)) d.supersededBy = replacement;
   }
-  syncMilestones(s, undefined, historyCards == null ? [] : historyCards);
+  if (sync) syncMilestones(s, undefined, historyCards == null ? [] : historyCards);
   return s;
 }
 
@@ -562,6 +891,12 @@ function projectCardSummary(c) {
     completedAt: c.completedAt, blockedBy: c.blockedBy, refs: c.refs,
     lane: c.lane, openQ: c.openQ, questions: c.questions,
   };
+  if (c.hardeningDedupKey) {
+    summary.hardeningDedupKey = c.hardeningDedupKey;
+    summary.hardeningDedupAliases = c.hardeningDedupAliases || [];
+    summary.hardeningFindingId = c.hardeningFindingId || null;
+    summary.hardeningSeverity = c.hardeningSeverity || c.priority;
+  }
   // The Now view needs only the small owner-verification ballot slice before
   // it can fetch the full card detail on demand.
   const acceptance = (c.decisions || []).filter(d => (d.group === 'acceptance' || d.id?.startsWith('D-ACCEPT-')) && d.status !== 'ratified')
@@ -577,7 +912,13 @@ const cardSummary = (c) => ({
   updated: c.updated, archived: !!c.archived,
 });
 
+function validateProjectedPhases(s, history) {
+  validateStoredPhases(s?.cards, 'live card');
+  validateStoredPhases(history?.cards, 'archived card');
+}
+
 export function project(s, config = null, history = null) {
+  validateProjectedPhases(s, history);
   const cards = s.cards.map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
   const historyCards = history?.cards || [];
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
@@ -612,12 +953,12 @@ export function project(s, config = null, history = null) {
 // Board HTTP reads use this projection. Keep the initial payload useful for
 // navigation, but leave descriptions, logs, criteria, and ratified decisions
 // for the card detail endpoint. Closed-card content is in projectClosed().
-export function projectBoard(s, config = null, history = null) {
-  const historyCards = history?.cards || [];
+export function projectBoard(s, config = null) {
+  validateProjectedPhases(s);
   const active = s.cards.filter(c => c.phase !== 'done');
   const activeIds = new Set(active.map(c => c.id));
   const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions)));
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
+  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (lane) => cards.filter(c => c.lane.lane === lane);
   const openDecisions = s.decisions.filter(d => isBlocking(d) && !d.draft);
   const genericDecisions = openDecisions.filter(d => d.group !== 'acceptance');
@@ -625,6 +966,15 @@ export function projectBoard(s, config = null, history = null) {
   const recentlyDecided = s.decisions.filter(d => d.status === 'ratified' && !d.draft && !isOlderThanDays(d.ratifiedAt, bufferDays))
     .map(d => ({ id: d.id, title: d.title, outcome: d.outcome, comment: d.comment || '', ratifiedAt: d.ratifiedAt, cardId: d.cardId }))
     .sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''));
+  const noticeMessages = s.questions.filter(q => q.kind === 'message' && q.status === 'open');
+  const noticeIds = new Set(noticeMessages.map(q => q.cardId));
+  const cursor = s.meta.completionCursor;
+  if (cursor) {
+    for (const c of s.cards) {
+      if (c.phase === 'done' && completionTime(c) > cursor) noticeIds.add(c.id);
+    }
+  }
+  const noticeCards = s.cards.filter(c => c.phase === 'done' && noticeIds.has(c.id)).map(cardSummary);
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, s.cards.filter(c => c.phase === p).length])),
     forYou: genericDecisions.length,
@@ -635,27 +985,17 @@ export function projectBoard(s, config = null, history = null) {
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
   };
-  const closedIds = new Set([...s.cards.filter(c => c.phase === 'done'), ...historyCards].map(c => c.id));
-  const closedMessages = [
-    ...s.questions.filter(q => closedIds.has(q.cardId) && q.kind === 'message' && q.status === 'open'),
-    ...historyCards.flatMap(c => (c.questions || []).filter(q => q.kind === 'message' && q.status === 'open')),
-  ];
   return {
     meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones,
     phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
     questions: s.questions.filter(q => activeIds.has(q.cardId)), ideas: s.ideas,
     papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
-    radar: radarData(s, historyCards),
-    closed: {
-      rev: s.meta.rev,
-      counts: { done: s.cards.filter(c => c.phase === 'done').length, archived: historyCards.length },
-      cards: [...s.cards.filter(c => c.phase === 'done').map(cardSummary), ...historyCards.map(c => cardSummary({ ...c, archived: true }))],
-      messages: closedMessages,
-    },
+    notices: { cards: noticeCards, messages: noticeMessages }, radar: radarData(s),
   };
 }
 
 export function projectClosed(s, config = null, history = null) {
+  validateProjectedPhases(s, history);
   const h = history || emptyHistory();
   const liveDone = s.cards.filter(c => c.phase === 'done')
     .map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
@@ -664,11 +1004,17 @@ export function projectClosed(s, config = null, history = null) {
     // for lane or board semantics.
     ...projectCardRecord(c, h.decisions, h.cards, c.questions || []), archived: true,
   }));
-  return { rev: s.meta.rev, cards: [...liveDone, ...archived], counts: { done: liveDone.length, archived: archived.length } };
+  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, h.cards) }));
+  return {
+    rev: s.meta.rev, cards: [...liveDone, ...archived],
+    counts: { done: liveDone.length, archived: archived.length },
+    milestones, radar: radarData(s, h.cards),
+  };
 }
 
 // Return one full card for the detail modal without building the full board.
 export function projectCard(s, ref, history = null) {
+  validateProjectedPhases(s, history);
   const live = findCard(s, ref);
   if (live) return projectCardRecord(live, s.decisions, s.cards, s.questions);
   const h = history || emptyHistory();
@@ -744,6 +1090,25 @@ export function findCard(s, ref) {
 }
 const mustCard = (s, ref) => findCard(s, ref) || fail('E_NOT_FOUND', `no card ${ref}`);
 
+function hasHardeningKey(card, key) {
+  const wanted = String(key ?? '').trim();
+  return !!wanted && (card?.hardeningDedupKey === wanted
+    || (card?.hardeningDedupAliases || []).includes(wanted));
+}
+
+// Resolve a hardening identity across the live board and append-only archive.
+// Live wins when an undo or interrupted repair briefly exposes both copies.
+export function findHardeningMatch(s, history, key) {
+  const live = (s?.cards || []).find(card => hasHardeningKey(card, key));
+  if (live) return { card: live, archived: false };
+  const archived = (history?.cards || []).find(card => hasHardeningKey(card, key));
+  return archived ? { card: archived, archived: true } : null;
+}
+
+export function findHardeningCard(s, history, key) {
+  return findHardeningMatch(s, history, key)?.card || null;
+}
+
 // Store known blocker refs canonically. Card lanes accept #N for convenience;
 // preserve dangling add-time refs so lint can report them, while update keeps
 // the existing hard rejection for an unknown replacement.
@@ -799,10 +1164,14 @@ export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
 // (a different reviewer). Card-embedded, no own id — addressed by (card, n).
 function normalizeCriterion(it, i) {
   const source = typeof it === 'string' ? { text: it } : (it || {});
+  const n = source.n ?? (i + 1);
+  const status = source.status ?? 'open';
+  validateStoredNumber(n, `criterion ${i + 1}.n`, { integer: true, min: 1 });
+  if (!CRITERION_STATUSES.has(status)) fail('E_INVALID', `criterion ${i + 1}.status must be open, met, or verified`);
   return {
-    n: source.n ?? (i + 1),
+    n,
     text: String(source.text || '').trim(),
-    status: ['open', 'met', 'verified'].includes(source.status) ? source.status : 'open',
+    status,
     metBy: source.metBy ?? null,
     verifiedBy: source.verifiedBy ?? null,
     evidence: source.evidence || '',
@@ -823,10 +1192,14 @@ function assertCriterionText(raw) {
 
 function normalizeMilestoneCriterion(it, i) {
   const source = typeof it === 'string' ? { text: it } : (it || {});
+  const n = source.n ?? (i + 1);
+  const status = source.status ?? 'open';
+  validateStoredNumber(n, `milestone criterion ${i + 1}.n`, { integer: true, min: 1 });
+  if (!CRITERION_STATUSES.has(status)) fail('E_INVALID', `milestone criterion ${i + 1}.status must be open, met, or verified`);
   return {
-    n: source.n ?? (i + 1),
+    n,
     text: String(source.text || '').trim(),
-    status: ['open', 'met', 'verified'].includes(source.status) ? source.status : 'open',
+    status,
     metBy: source.metBy ?? null,
     verifiedBy: source.verifiedBy ?? null,
     evidence: source.evidence || '',
@@ -868,7 +1241,8 @@ function resolveParentId(s, parent) {
   return found.id;
 }
 
-export function addCard(s, p, config) {
+export function addCard(s, p, config, history = emptyHistory()) {
+  if (hasHardeningPayload(p)) return addOrUpdateHardeningCard(s, p, config, history).card;
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'card needs a title');
   checkEnum(p.kind, config.kinds, 'kind');
   checkEnum(p.track, config.tracks, 'track');
@@ -881,6 +1255,10 @@ export function addCard(s, p, config) {
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   if (p.criteria !== undefined) assertCriterionText(p.criteria);
+  const num = p.num == null ? s.meta.nextNum++ : Number(p.num);
+  validateStoredNumber(num, 'card.num', { integer: true, min: 1 });
+  const workOrder = p.workOrder == null || p.workOrder === '' ? undefined : Number(p.workOrder);
+  validateStoredNumber(workOrder, 'card.workOrder', { min: 0 });
   const blockedBy = normalizeBlockedBy(s, p.blockedBy);
   const parentId = 'parentId' in p || 'parent' in p
     ? resolveParentId(s, p.parentId ?? p.parent)
@@ -889,7 +1267,7 @@ export function addCard(s, p, config) {
     fail('E_INVALID', 'card cannot parent itself');
   const card = {
     id: p.id || newId('c'),
-    num: p.num || s.meta.nextNum++,
+    num,
     title: String(p.title).trim(),
     body: p.body || '',
     kind: p.kind || config.kinds[0],
@@ -901,7 +1279,7 @@ export function addCard(s, p, config) {
     plan: p.plan || null,
     checkSteps: p.checkSteps || null,
     blockedBy,
-    workOrder: p.workOrder != null ? Number(p.workOrder) : undefined,
+    workOrder,
     assignee: p.assignee || null,
     log: p.log || [],
     criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
@@ -917,15 +1295,169 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId'];
+function prepareHardeningOrFail(p, previous = null) {
+  try { return prepareHardening(p, previous); }
+  catch (error) {
+    if (error instanceof HardeningInputError) fail(error.code, error.message);
+    throw error;
+  }
+}
+
+function appendHardeningEvidence(card, prepared) {
+  card.hardeningEvidence ||= [];
+  if (prepared.evidence) {
+    const digest = prepared.evidence.bundleDigest;
+    if (!card.hardeningEvidence.some(item => item.bundleDigest === digest)) {
+      card.hardeningEvidence.push(prepared.evidence);
+      const block = formatHardeningEvidence(prepared.evidence);
+      card.body = [String(card.body || '').trim(), block].filter(Boolean).join('\n\n');
+    }
+  }
+  if (prepared.body && !String(card.body || '').includes(prepared.body))
+    card.body = [String(card.body || '').trim(), prepared.body].filter(Boolean).join('\n\n');
+}
+
+function applyHardeningMetadata(s, card, prepared, by, action) {
+  const oldKey = card.hardeningDedupKey;
+  card.hardeningSchemaVersion = prepared.schemaVersion;
+  card.hardeningSeam = prepared.seam;
+  card.hardeningRelation = prepared.relation;
+  card.hardeningWrongTierMask = prepared.wrongTierMask;
+  card.hardeningInputPartition = prepared.inputPartition;
+  card.hardeningDedupKey = prepared.key;
+  card.hardeningDedupAliases = [...new Set([
+    ...(card.hardeningDedupAliases || []),
+    ...(prepared.aliases || []),
+    ...(oldKey && oldKey !== prepared.key ? [oldKey] : []),
+  ])].filter(key => key !== prepared.key);
+  card.hardeningFindingId = prepared.findingId;
+  card.hardeningSeverity = card.hardeningSeverity === 'P0' ? 'P0' : prepared.severity;
+  card.hardeningState = 'open';
+  if (prepared.fixture) card.hardeningFixture = prepared.fixture;
+  appendHardeningEvidence(card, prepared);
+  card.log ||= [];
+  const digest = prepared.evidence?.bundleDigest || card.hardeningEvidence.at(-1)?.bundleDigest || 'none';
+  card.log.unshift({ at: today(), by, text: `Hardening ${action}: ${prepared.findingId} (${digest})` });
+  touchCard(card, by);
+  logEvent(s, { by, action: 'hardening.card-upsert', ref: card.id, note: `${action} ${prepared.key}` });
+  return card;
+}
+
+function hardeningMatches(s, history, keys) {
+  const wanted = new Set(keys.filter(Boolean));
+  const matches = [];
+  for (const card of s.cards || []) {
+    if ([card.hardeningDedupKey, ...(card.hardeningDedupAliases || [])].some(key => wanted.has(key)))
+      matches.push({ card, archived: false });
+  }
+  for (const card of history?.cards || []) {
+    if ([card.hardeningDedupKey, ...(card.hardeningDedupAliases || [])].some(key => wanted.has(key)))
+      matches.push({ card, archived: true });
+  }
+  return matches;
+}
+
+const HARDENING_IDENTITY_FIELDS = [
+  'hardeningSchemaVersion', 'schemaVersion', 'hardeningSeam', 'rootSeam', 'semanticPrimitive',
+  'hardeningRelation', 'violatedRelation', 'relation', 'hardeningWrongTierMask', 'wrongTierMask',
+  'hardeningInputPartition', 'inputPartition', 'hardeningDedupKey', 'hardening_dedup_key',
+  'hardeningDedupAliases', 'hardeningFindingId', 'findingId',
+];
+const HARDENING_COMPONENT_FIELDS = HARDENING_IDENTITY_FIELDS.filter(key => ![
+  'hardeningDedupKey', 'hardening_dedup_key', 'hardeningDedupAliases', 'hardeningFindingId', 'findingId',
+].includes(key));
+
+// The only hardening write entry point. The caller must invoke it from
+// store.mutate, so key lookup, archive reuse, and card creation share one lock.
+export function addOrUpdateHardeningCard(s, p, config, history = emptyHistory()) {
+  if (!p?.by || !String(p.by).trim()) fail('E_INVALID', 'hardening card writes need --by <agent>');
+  const ref = p.ref ?? p.cardRef;
+  const referenced = ref == null ? null : findCard(s, ref);
+  let prepared = prepareHardeningOrFail(p, referenced);
+  const keys = [prepared.key, ...prepared.aliases, String(p.hardeningDedupKey || '').trim()].filter(Boolean);
+  let matches = hardeningMatches(s, history, keys);
+  if (referenced && referenced.hardeningDedupKey && !matches.some(item => item.card.id === referenced.id))
+    matches = [{ card: referenced, archived: false }, ...matches];
+  const ids = [...new Set(matches.map(item => item.card.id))];
+  if (ids.length > 1)
+    fail('E_DUPLICATE', `hardening key resolves to multiple cards: ${ids.join(', ')}`);
+  if (matches.length) {
+    const existing = matches[0].card;
+    const findingProvided = ['hardeningFindingId', 'findingId', 'finding_id']
+      .some(key => p[key] !== undefined && p[key] !== null && String(p[key]).trim());
+    // A recurrence carrying an old key is evidence for the existing root
+    // seam, not permission to demote that seam to an unclassified new card.
+    // The finding ID is likewise card-stable unless triage explicitly changes it.
+    const identity = !HARDENING_COMPONENT_FIELDS.some(key => p[key] !== undefined)
+      ? { hardeningDedupKey: existing.hardeningDedupKey }
+      : {};
+    if (!findingProvided) identity.hardeningFindingId = existing.hardeningFindingId;
+    if (Object.keys(identity).length)
+      prepared = prepareHardeningOrFail({ ...p, ...identity }, existing);
+  }
+  if (!matches.length) {
+    if (p.phase === 'done' || p.phase === 'frozen')
+      fail('E_INVALID', 'hardening runner cannot create a terminal card');
+    const card = addCard(s, {
+      title: prepared.title,
+      body: '',
+      kind: p.kind,
+      track: p.track,
+      epoch: p.epoch,
+      milestoneId: p.milestoneId,
+      phase: p.phase,
+      priority: prepared.priority,
+      plan: p.plan,
+      checkSteps: p.checkSteps,
+      blockedBy: p.blockedBy,
+      workOrder: p.workOrder,
+      refs: p.refs,
+      parent: p.parent,
+      by: p.by,
+      needsAcceptance: false,
+    }, config);
+    applyHardeningMetadata(s, card, prepared, p.by, 'added');
+    return { card, action: 'added', archived: false };
+  }
+
+  let match = matches[0];
+  if (match.archived) {
+    restoreFromHistory(s, history, match.card.id, p.by);
+    match = { card: findCard(s, match.card.id), archived: false, restored: true };
+  }
+  const card = match.card;
+  if (!card) fail('E_NOT_FOUND', `hardening card ${prepared.key} disappeared during restore`);
+  if (card.phase === 'frozen' && p.by !== 'owner')
+    fail('E_OWNER_LANE', `card #${card.num} is frozen — owner-only until the owner moves it out`);
+  if (p.phase === 'done' || p.phase === 'frozen')
+    fail('E_INVALID', 'hardening runner cannot close or freeze a card');
+  const reopen = card.phase === 'done' || match.restored;
+  const patch = { by: p.by, priority: card.priority === 'P0' ? 'P0' : prepared.priority };
+  if (p.title !== undefined) patch.title = prepared.title;
+  if (p.phase !== undefined && !reopen) patch.phase = p.phase;
+  if (reopen) patch.phase = 'building';
+  if (p.hardeningFixture !== undefined) patch.hardeningFixture = prepared.fixture;
+  if (Object.keys(patch).length > 1)
+    updateCard(s, card.id, patch, config);
+  applyHardeningMetadata(s, card, prepared, p.by, reopen ? 'reopened' : 'updated');
+  return { card, action: reopen ? 'reopened' : 'updated', archived: !!match.restored };
+}
+
+export function updateHardeningCard(s, ref, p, config, history = emptyHistory()) {
+  return addOrUpdateHardeningCard(s, { ...p, ref }, config, history);
+}
+
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified. Owner writes keep the
 // legacy bypass and audit event. needsAcceptance remains transport-hard.
-function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAcceptance = c.needsAcceptance) {
+function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAcceptance = c.needsAcceptance, config = {}) {
   if (targetPhase !== 'done') return null;
   if (needsAcceptance && by === 'owner')
     fail('E_ACCEPTANCE_OWNER_UI', `card #${c.num} requires owner verification — caller-supplied by:owner cannot close it; use the dedicated owner verification UI`);
+  const fixtureIssue = hardeningFixtureIssue(c, config);
+  if (fixtureIssue) fail('E_HARDENING_FIXTURE', fixtureIssue);
   const items = criteria || [];
   const unsettled = items.filter(i => !['met', 'verified'].includes(i.status));
   if (by !== 'owner' && !items.length)
@@ -1041,6 +1573,10 @@ export function updateCard(s, ref, patch, config) {
   const c = mustCard(s, ref);
   const oldPhase = c.phase;
   const oldMilestoneId = c.milestoneId;
+  if (HARDENING_IDENTITY_FIELDS.some(key => Object.hasOwn(patch, key)))
+    fail('E_INVALID', 'hardening identity changes must use the atomic hardening card upsert');
+  if (c.hardeningDedupKey && Object.hasOwn(patch, 'body'))
+    patch.body = [String(c.body || '').trim(), String(patch.body || '').trim()].filter(Boolean).join('\n\n');
   // Basic shape validation runs before the owner-lane authorization check, so
   // a malformed request always reports E_INVALID/E_NOT_FOUND regardless of
   // who sent it or what lane the card is in.
@@ -1064,10 +1600,22 @@ export function updateCard(s, ref, patch, config) {
   if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy, { rejectUnknown: true });
   if ('refs' in patch) checkRefs(patch.refs);
   if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
+  if ('workOrder' in patch) {
+    const workOrder = patch.workOrder == null || patch.workOrder === '' ? undefined : Number(patch.workOrder);
+    validateStoredNumber(workOrder, 'card.workOrder', { min: 0 });
+    patch.workOrder = workOrder;
+  }
   if ('parentId' in patch || 'parent' in patch) {
     const resolved = resolveParentId(s, 'parentId' in patch ? patch.parentId : patch.parent);
     if (resolved === c.id) fail('E_INVALID', 'card cannot parent itself');
     patch.parentId = resolved;
+  }
+  if ('hardeningFixture' in patch) {
+    try { patch.hardeningFixture = normalizeHardeningFixture(patch.hardeningFixture, c.hardeningFindingId); }
+    catch (error) {
+      if (error instanceof HardeningInputError) fail(error.code, error.message);
+      throw error;
+    }
   }
   // Incremental tag edits (CLI --add-tag / --remove-tag) compose onto current tags.
   if ('addTags' in patch || 'removeTags' in patch) {
@@ -1090,13 +1638,17 @@ export function updateCard(s, ref, patch, config) {
   const candidateAcceptance = 'needsAcceptance' in patch
     ? patch.needsAcceptance === true || patch.needsAcceptance === 'true'
     : c.needsAcceptance;
+  const candidateCard = {
+    ...c,
+    ...(Object.hasOwn(patch, 'hardeningFixture') ? { hardeningFixture: patch.hardeningFixture } : {}),
+  };
   const phaseOverride = 'phase' in patch
-    ? applyDoneGate(s, c, patch.phase, patch.by, candidateCriteria, candidateAcceptance)
+    ? applyDoneGate(s, candidateCard, patch.phase, patch.by, candidateCriteria, candidateAcceptance, config)
     : null;
   for (const k of CARD_FIELDS) {
     if (k in patch) {
       if (k === 'phase') c.phase = phaseOverride || patch.phase;
-      else if (k === 'workOrder') c[k] = patch[k] == null || patch[k] === '' ? undefined : Number(patch[k]);
+      else if (k === 'workOrder') c[k] = patch[k];
       else if (k === 'needsAcceptance') c.needsAcceptance = patch.needsAcceptance === true || patch.needsAcceptance === 'true';
       else if (k === 'criteria') c.criteria = Array.isArray(patch.criteria) ? patch.criteria.map((it, i) => normalizeCriterion(it, i)) : c.criteria;
       else if (k === 'tags') c.tags = patch.tags;
@@ -1118,6 +1670,7 @@ export function updateCard(s, ref, patch, config) {
   }
   if (oldPhase !== 'done' && c.phase === 'done') c.completedAt = now();
   if (oldPhase === 'done' && c.phase !== 'done') delete c.completedAt;
+  if (c.hardeningDedupKey && c.phase === 'done') c.hardeningState = 'fixed';
   if (patch.logEntry) c.log.unshift({ at: today(), by: patch.by || 'agent', text: patch.logEntry });
   touchCard(c, patch.by);
   syncMilestones(s, [oldMilestoneId, c.milestoneId]);
@@ -1275,7 +1828,29 @@ const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
 const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
 const orderedReviewPasses = (passes) => Object.fromEntries(REVIEW_PASS_KEYS.map(key => [key, passes[key]]));
+const dissentPrefix = /^Author model family: ([^.]+)\. Adversarial model family: ([^.]+)\./;
 
+function dissentMetadata(pass) {
+  if (typeof pass !== 'string') return null;
+  const match = dissentPrefix.exec(pass);
+  if (!match) return null;
+  return {
+    author: match[1].trim(),
+    adversarial: match[2].trim(),
+    summary: pass.slice(match[0].length).trim(),
+  };
+}
+
+function dissentMetadataGaps(p) {
+  const metadata = dissentMetadata(p.reviewPasses?.adversarial);
+  if (!metadata) return ['reviewPasses.adversarial (must begin with `Author model family: <family>. Adversarial model family: <family>.`)'];
+  const normalize = (family) => family.toLowerCase().replace(/[\s_-]+/g, '-');
+  if (normalize(metadata.author) === normalize(metadata.adversarial))
+    return ['reviewPasses.adversarial (author and adversarial model families must differ)'];
+  return [];
+}
+
+const reviewPassSummary = (key, pass) => key === 'adversarial' ? (dissentMetadata(pass)?.summary || pass) : pass;
 function proseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
@@ -1335,7 +1910,7 @@ export function plainLanguageGaps(p) {
     gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} use`, item?.use));
   }
   for (const key of REVIEW_PASS_KEYS)
-    gaps.push(...proseDensityGaps(`reviewPasses.${key}`, p.reviewPasses?.[key]));
+    gaps.push(...proseDensityGaps(`reviewPasses.${key}`, reviewPassSummary(key, p.reviewPasses?.[key])));
   if (typeof p.checkInstructions === 'string')
     gaps.push(...proseDensityGaps('checkInstructions', p.checkInstructions));
   return gaps;
@@ -1385,12 +1960,13 @@ export function ballotGaps(p) {
       missing.push('reviewPasses');
     } else {
       for (const key of REVIEW_PASS_KEYS) {
-        const summary = passes[key];
+        const summary = reviewPassSummary(key, passes[key]);
         if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
         else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
       }
       for (const key of Object.keys(passes).filter(key => !REVIEW_PASS_KEYS.includes(key)))
         missing.push(`reviewPasses.${key} (unexpected)`);
+      missing.push(...dissentMetadataGaps(p));
     }
   } else if (ballotMode === 'short') {
     if (!p.shortAuthorizedBy || !String(p.shortAuthorizedBy).trim()) missing.push('shortAuthorizedBy');
@@ -1419,9 +1995,15 @@ export function addDecision(s, p) {
   if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   const draft = !!p.draft;
-  if (!draft && p.group !== 'acceptance') {
+  if (!systemAcceptance && p.group !== 'acceptance') {
     const gaps = ballotGaps(p);
-    if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
+    const familyGaps = (p.ballotMode || 'full') === 'full' ? dissentMetadataGaps(p) : [];
+    if (draft) {
+      if (familyGaps.length)
+        fail('E_BALLOT', `ballot draft missing required model-family metadata: ${familyGaps.join(', ')}`);
+    } else if (gaps.length) {
+      fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
+    }
   }
   const supersededBy = verdictSupersededBy(s, p);
   const ballotMode = p.group === 'acceptance' ? null : (p.ballotMode || 'full');
@@ -1513,10 +2095,12 @@ export function auditAcceptanceRejection(s, decisionId, route, reason, by) {
 
 export function reopenDecision(s, decisionId, by) {
   const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
-  d.status = 'open'; delete d.outcome; delete d.ratifiedAt;
-  const card = s.cards.find(c => c.id === d.cardId);
-  if (card) touchCard(card, by || 'owner');
-  logEvent(s, { by: by || 'owner', action: 'decision.reopen', ref: d.id });
+  if (typeof by !== 'string' || !by.trim()) fail('E_INVALID', 'reopen needs --by <actor>');
+  if (d.status === 'ratified' && by !== 'owner')
+    fail('E_OWNER_ONLY', 'reopening a ratified decision is owner-only');
+  d.status = 'open'; delete d.outcome; delete d.ratifiedAt; const card = s.cards.find(c => c.id === d.cardId);
+  if (card) touchCard(card, by);
+  logEvent(s, { by, action: 'decision.reopen', ref: d.id });
   return d;
 }
 
@@ -1524,10 +2108,17 @@ export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
   if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-') || patch.group === 'acceptance')
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
+  if (d.status === 'ratified' && by !== 'owner')
+    fail('E_OWNER_ONLY', 'updating a ratified decision is owner-only');
   for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy'])
     if (k in patch) d[k] = patch[k];
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
+  if (d.group !== 'acceptance' && d.status !== 'ratified' && d.ballotMode !== 'short') {
+    const familyGaps = dissentMetadataGaps(d);
+    if (familyGaps.length)
+      fail('E_BALLOT', `ballot update missing required model-family metadata: ${familyGaps.join(', ')}`);
+  }
   // Every edit to an open ready ballot re-runs the gate. --ready does the
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
@@ -1577,6 +2168,8 @@ export function mintVerdict(s, ref, outcome, title, by, supersedes) {
 
 export function deleteDecision(s, id, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
+  if (d.status === 'ratified' && by !== 'owner')
+    fail('E_OWNER_ONLY', 'deleting a ratified decision is owner-only');
   const dependents = s.decisions.filter(x => x.supersededBy === id);
   if (dependents.length)
     fail('E_REFERENCED', `cannot delete decision ${id}; supersession link used by ${dependents.map(x => x.id).join(', ')}`);
@@ -1602,12 +2195,13 @@ export function addQuestion(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'question needs text');
   if (p.kind === 'message') fail('E_INVALID', 'use message add for agent messages');
+  if (!p.by) fail('E_INVALID', 'question add needs --by <owner or agent>');
   const q = { id: newId('q'), cardId: card.id, decisionId: p.decisionId || null,
-    by: p.by || 'owner', kind: p.kind || 'question',
+    by: p.by, kind: p.kind || 'question',
     text: String(p.text).trim(), status: 'open', answer: '', created: now() };
   s.questions.push(q);
-  touchCard(card, p.by || 'owner');
-  logEvent(s, { by: p.by || 'owner', action: 'question.add', ref: q.id });
+  touchCard(card, p.by);
+  logEvent(s, { by: p.by, action: 'question.add', ref: q.id });
   return { ...q, cardNum: card.num };
 }
 export function answerQuestion(s, id, answer, by) {

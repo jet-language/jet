@@ -1729,7 +1729,7 @@ fn main() {
     let rs = dir.join("runtime_laws.rs");
     let bin = dir.join("runtime_laws");
     let mut rustc = Command::new("rustc");
-    common::add_generated_rust(
+    let _runtime_lease = common::add_generated_rust(
         &mut rustc,
         &rs,
         &rust,

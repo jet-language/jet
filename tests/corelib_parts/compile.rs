@@ -1,4 +1,23 @@
 #[test]
+fn trivial_aot_without_scheduler_compiles() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_trivial_without_scheduler_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "trivial_without_scheduler", "fn run() {}", &[], None);
+    assert_eq!(code, 0, "trivial AOT failed: {stderr}");
+    assert_eq!(stdout, "");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn range_interval_proves_fixed_array_index() {
     let src = r#"
 tag Checked { deny: [Net] }
@@ -356,7 +375,7 @@ fn run() {
     let rust = dir.join("args_parse_or_exit.rs");
     let bin = dir.join("args_parse_or_exit");
     let mut command = Command::new("rustc");
-    common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
     let built = command.arg("-o").arg(&bin).output().unwrap();
     assert!(
         built.status.success(),
@@ -382,6 +401,77 @@ fn run() {
     let bad_stderr = String::from_utf8_lossy(&bad.stderr);
     assert!(bad_stderr.contains("unknown option `--verbse`"));
     assert!(bad_stderr.contains("did you mean `--verbose`?"));
+}
+
+#[test]
+fn core_args_parse_or_exit_rejects_surplus_bare_arguments() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_args_surplus_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.args as args
+use core.process as process
+
+fn run() {
+    spec :: args.spec()
+        .option("name", "display name", "NAME")
+        .positional("name", "display name")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.option("name") ?? "none")
+}
+"#;
+    let path = dir.join("args_surplus.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected surplus builder fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    let rust = dir.join("args_surplus.rs");
+    let bin = dir.join("args_surplus");
+    let mut command = Command::new("rustc");
+    let _runtime_lease = common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
+    let built = command.arg("-o").arg(&bin).output().unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected generated code:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = |args: &[&str]| Command::new(&bin).args(args).output().unwrap();
+
+    let named = run(&["bare-loses", "--name", "named"]);
+    assert_eq!(named.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&named.stdout), "named\n");
+    assert!(named.stderr.is_empty());
+
+    let help = run(&["--help"]);
+    assert_eq!(help.status.code(), Some(0));
+    let help_stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(help_stdout.contains("Usage:"), "{help_stdout}");
+    assert!(help_stdout.contains("name"), "{help_stdout}");
+    assert!(help.stderr.is_empty());
+
+    let bad = run(&["first", "second", "third"]);
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(bad.stdout.is_empty());
+    let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(bad_stderr.contains("unexpected arguments"), "{bad_stderr}");
+    assert!(
+        bad_stderr.contains("`second`") && bad_stderr.contains("`third`"),
+        "{bad_stderr}"
+    );
+    assert!(bad_stderr.contains("Usage:"), "{bad_stderr}");
+
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -468,7 +558,7 @@ fn run() {
     let rs = dir.join("named_indirect_aot.rs");
     let bin = dir.join("named_indirect_aot");
     let mut rustc = Command::new("rustc");
-    common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
     let built = rustc.arg("-o").arg(&bin).output().unwrap();
     assert!(
         built.status.success(),
@@ -709,7 +799,7 @@ fn run() {
     let rs = dir.join("main.rs");
     let bin = dir.join("interrupt-runtime");
     let mut command = Command::new("rustc");
-    common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
     let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&rustc.stderr));
 
@@ -781,7 +871,7 @@ fn run() {
     let rs = dir.join("main.rs");
     let bin = dir.join("interrupt-deadline");
     let mut command = Command::new("rustc");
-    common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
     let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(
         rustc.status.success(),
@@ -987,7 +1077,7 @@ fn run() {
     let rs = dir.join("main.rs");
     let bin = dir.join("interrupt-tiers");
     let mut rustc = Command::new("rustc");
-    common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
     let built = rustc.arg("-o").arg(&bin).output().unwrap();
     assert!(
         built.status.success(),

@@ -543,6 +543,23 @@ pub(crate) fn if_cond_in_subset(
         add_str_match_pattern_binding_names(pattern, &mut names);
         return Some(names.into_iter().collect());
     }
+    // D-BINPAT1: a binary-pattern condition in value-form dispatch. Its
+    // captured fields become locals in the then-branch, just like string
+    // interpolation holes; lowering performs the shared scan before entering
+    // that branch.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::BinMatch { .. },
+        ..
+    } = cond
+    {
+        if !expr_in_subset(subject, cx, locals) {
+            return None;
+        }
+        let mut names = HashSet::new();
+        add_bin_match_pattern_binding_names(pattern, &mut names);
+        return Some(names.into_iter().collect());
+    }
     // The atomic optional-binding (if-let) form. Conjunctions recurse above so each
     // later atom is checked with every earlier binding in scope.
     if let Expr::PatternTest {
@@ -710,23 +727,6 @@ pub(crate) fn switch_in_subset(
     if !expr_in_subset(subject, cx, locals) {
         return false;
     }
-    if std::env::var_os("JET_DEBUG_STRUCT_PATTERN").is_some() {
-        eprintln!("[DEBUG-STRUCT] subject={subject:?}");
-        for arm in arms {
-            let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
-            eprintln!(
-                "[DEBUG-STRUCT] cond={:?} struct={:?} plain={} range={} str={} bin={} fallible={} variant={}",
-                arm.cond,
-                struct_pat,
-                arm_is_plain_cond(cx, &arm.cond, subject),
-                arm_head_range(cx, &arm.cond, subject).is_some(),
-                arm_str_match_pattern(cx, &arm.cond, subject).is_some(),
-                arm_bin_match_pattern(cx, &arm.cond, subject).is_some(),
-                arm_fallible_pattern(cx, &arm.cond, subject).is_some(),
-                arm_variant_pattern(cx, &arm.cond, subject).is_some(),
-            );
-        }
-    }
     if crate::AST::is_subjectless_guard(subject, span) {
         // D-CONC-CHAN2=D: a subjectless readiness table is one covered TIR
         // wait, not an ordinary boolean guard. Keep the coverage proof in
@@ -824,7 +824,10 @@ pub(crate) fn switch_in_subset(
         }
         if let Some(body) = else_body {
             let mut else_locals = locals.clone();
-            if !body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals)) {
+            if !body
+                .iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+            {
                 return false;
             }
         }

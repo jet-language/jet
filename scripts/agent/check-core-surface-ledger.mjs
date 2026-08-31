@@ -1689,7 +1689,7 @@ function keysForMember(member, prefixes, container) {
 }
 
 // A Jet member that only qualifies another member of the same container is the
-// same workflow spelled longer: sha256_bytes beside sha256, tcp_read_bytes
+// same workflow spelled longer: a separate text/bytes hash helper beside a typed digest, tcp_read_bytes
 // beside tcp_read, dns_srv_port beside dns_srv, now_utc beside now. Scoring the
 // qualified form separately produced a win for every suffix of a member that
 // already matched. It reports the verdict of the member it qualifies.

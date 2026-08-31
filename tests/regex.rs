@@ -43,9 +43,13 @@ fn run_regex(src: &str) -> String {
         "core.regex must not reference the old regex crate"
     );
     let user_rust = common::strip_vetted_prelude_modules(&out.rust);
+    let unsafe_lines = user_rust
+        .lines()
+        .filter(|line| !common::unsafe_keyword_columns(line).is_empty())
+        .collect::<Vec<_>>();
     assert!(
-        !user_rust.contains("unsafe"),
-        "I1: regex output must not contain unsafe"
+        unsafe_lines.is_empty(),
+        "I1: regex output must not contain unsafe: {unsafe_lines:?}"
     );
 
     let rs = dir.join("regex_test.rs");
@@ -87,10 +91,10 @@ fn run() {
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
     // single braces are string interpolation (S8).
-    print(re.is_match(pattern: .{"\d{{4}}"}, text: text))
+    print(re.is_match(pattern: {"\\d{{4}}"}, text: text))
 
     // match + capture groups: whole + each group
-    m :: re.match(.{"(\d{{4}})-(\d{{2}})-(\d{{2}})"}, text)
+    m :: re.match({"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
     if m == Val(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
@@ -101,24 +105,23 @@ fn run() {
     }
 
     // no match -> None optional
-    none_match :: re.match(.{"zzz"}, text)
+    none_match :: re.match({"zzz"}, text)
     if none_match == None {
         print("no-match")
     }
 
     // find / find_all
-    first :: re.find(.{"\d+"}, text)
+    first :: re.find({"\\d+"}, text)
     print(first ?? "none")
-    nums :: re.find_all(.{"\d+"}, text)
+    nums :: re.find_all({"\\d+"}, text)
     print(nums.len())
 
-    // replace / replace_first / replace_all (with group reference)
-    print(re.replace(.{"ok"}, "done", text))
-    print(re.replace_first(.{"\d"}, "#", "1-2"))
-    print(re.replace_all(.{"\d"}, "#", text))
+    // replace (all matches) / explicit first-match sibling
+    print(re.replace({"\\d"}, "#", text))
+    print(re.replace_first({"\\d"}, "#", "1-2"))
 
     // split
-    parts :: re.split(.{"-"}, "a-b-c")
+    parts :: re.split({"-"}, "a-b-c")
     print(parts.len())
 }
 "##;
@@ -133,10 +136,9 @@ fn run() {
     assert_eq!(lines[6], "no-match", "non-matching pattern yields None");
     assert_eq!(lines[7], "2024", "find first match");
     assert_eq!(lines[8], "3", "find_all count (2024, 06, 21)");
-    assert_eq!(lines[9], "2024-06-21 build done", "replace first");
-    assert_eq!(lines[10], "#-2", "replace_first digit");
-    assert_eq!(lines[11], "####-##-## build ok", "replace_all digits");
-    assert_eq!(lines[12], "3", "split into 3 parts");
+    assert_eq!(lines[9], "####-##-## build ok", "replace all digits");
+    assert_eq!(lines[10], "#-2", "first-mode digit");
+    assert_eq!(lines[11], "3", "split into 3 parts");
 }
 
 #[test]
@@ -151,10 +153,11 @@ use core.regex as re
 
 fn run() {
     pattern :: "(unclosed"
-    if re.compile(pattern) == {
-        .Ok(_) -> { print("unexpected-ok") }
-        .Err(e) -> { print("caught") }
+    compiled :: re.compile(pattern) ?? {
+        print("caught")
+        return
     }
+    print("unexpected-ok")
 }
 "##;
     let out = run_regex(src);
@@ -171,13 +174,13 @@ fn inferred_and_explicit_regex_literals_are_direct_values() {
 use core.regex as re
 
 fn run() {
-    print(re.find(.{"\d+"}, "id=42") ?? "none")
-    print(re.find(pattern: .{"[a-z]+"}, text: "123jet") ?? "none")
-    digits :: Regex.{"\d+"}
+    print(re.find({"\\d+"}, "id=42") ?? "none")
+    print(re.find(pattern: {"[a-z]+"}, text: "123jet") ?? "none")
+    digits :: Regex{"\d+"}
     print(digits.is_match("room 7"))
     runtime_pattern :: "\\w+"
-    runtime :: re.compile(runtime_pattern)
-    if runtime == .Ok(_) { print("runtime-result") }
+    runtime :: re.compile(runtime_pattern) ?? panic("runtime pattern")
+    print("runtime-result")
 }
 "##;
     assert_eq!(
@@ -217,7 +220,7 @@ fn run() {
     print(pieces[1])
 
     word :: re.compile("\\w+") ?? panic("bad word")
-    print(word.replace_all_with("a b", (m: Match) => "hit"))
+    print(word.replace_all_with("a b", (m: Match) -> "hit"))
 }
 "##;
     let out = run_regex(src);
@@ -234,19 +237,32 @@ fn run() {
 }
 
 #[test]
-fn regex_value_fidelity_is_shared_by_jit_and_interpreter() {
-    let src = r#"fn run() {
-    rx :: Regex{"a"}
-    print(rx.replace("x", "a-a"))
-    print(rx.replace_first("x", "a-a"))
+fn regex_value_fidelity_is_shared_by_all_tiers() {
+    let src = r#"use core.regex as re
 
+fn run() {
+    rx :: Regex{"a"}
+    print(rx.replace("a-a", "x"))
+    print(rx.replace_first("a-a", "x"))
+
+    print(Regex{""}.replace("abc", "x"))
     zero_width :: Regex{""}.split("abc")
     print(zero_width.len())
     print(zero_width[1])
     print(zero_width[2])
     print(zero_width[3])
+    limited_zero_width :: Regex{""}.split_limit("abc", 3)
+    print(limited_zero_width.len())
+    print(limited_zero_width[2])
 
-    m :: Regex{"(é)"}.match("aé")
+    unicode_text :: "aé"
+    unicode_zero_width :: Regex{""}.split(unicode_text)
+    print(unicode_zero_width.len())
+    print(unicode_zero_width[1])
+    print(unicode_zero_width[2])
+    print(unicode_zero_width[3] == "")
+
+    m :: Regex{"(é)"}.match(unicode_text)
     if m == Val(mat) {
         print(mat.start())
         print(mat.end())
@@ -254,28 +270,26 @@ fn regex_value_fidelity_is_shared_by_jit_and_interpreter() {
         print(mat.group_end(1) ?? -1)
     }
 
+    ascii_parts :: re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d")
+    print(ascii_parts.len())
     print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
 }
 "#;
-    let expected = "x-x-x\nx-a-a\n5\na\nb\nc\n1\n2\n1\n2\nfalse\n";
-    let (jit_code, jit_out, jit_err) = tir_support::jit_run("regex_value_fidelity", src);
-    assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
-    assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
-    let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("regex_value_fidelity", src);
-    assert_eq!(interpreter_code, jit_code, "interpreter exit disagreed:\n{interpreter_err}");
-    assert_eq!(interpreter_out, jit_out, "interpreter stdout disagreed:\n{interpreter_err}");
-    assert_eq!(interpreter_err, jit_err, "interpreter stderr disagreed");
+    tir_support::assert_tiers_agree(
+        "regex_value_fidelity",
+        src,
+        "x-x\nx-a\nxaxbxcx\n5\na\nb\nc\n3\nbc\n4\na\né\ntrue\n1\n2\n1\n2\n3\nfalse\n",
+    );
 }
 
 #[test]
 fn typed_head_raw_escapes_agree_across_tiers() {
     let src = r#"fn run() {
-    digits :: Regex.{"\d+"}
+    digits :: Regex{"\d+"}
     print(digits.is_match("7"))
-    slash_n :: Regex.{"a\nb"}
+    slash_n :: Regex{"a\nb"}
     print(slash_n.is_match("7"))
-    braces :: Regex.{"x{{2}}"}
+    braces :: Regex{"x{{2}}"}
     print(braces.is_match("xx"))
 }
 "#;

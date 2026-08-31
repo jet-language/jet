@@ -702,6 +702,312 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
     );
 }
 
+fn assert_cli_rejection(output: Output, label: &str, expected: &[&str]) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{label} returned the wrong exit status:\n{stderr}"
+    );
+    assert!(output.stdout.is_empty(), "{label} wrote to stdout");
+    for text in expected {
+        assert!(stderr.contains(text), "{label} omitted `{text}`:\n{stderr}");
+    }
+}
+
+#[test]
+fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("canonical_cli_recipe");
+    let fixtures = [
+        ("examples/features/cli/typed_entry_args.jet", "typed.jet"),
+        ("examples/features/io/args_spec.jet", "builder.jet"),
+        ("examples/features/cli/positionals.jet", "positionals.jet"),
+    ];
+
+    for (source, name) in fixtures {
+        fs::copy(root.join(source), scratch.join(name))
+            .unwrap_or_else(|error| panic!("copy `{source}`: {error}"));
+    }
+
+    let mut binaries = Vec::new();
+    for (_, name) in fixtures {
+        let build = run_jet(
+            &["build", name],
+            &scratch.path,
+            &scratch.join(&format!("cache/build-{name}")),
+        );
+        assert!(
+            build.status.success(),
+            "AOT build of `{name}` failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let stem = name.strip_suffix(".jet").expect("fixture extension");
+        binaries.push((name, scratch.join("build").join(stem)));
+    }
+
+    for (name, binary) in &binaries {
+        let aot_help = Command::new(binary)
+            .arg("--help")
+            .current_dir(&scratch.path)
+            .output()
+            .unwrap_or_else(|error| panic!("run AOT `{name} --help`: {error}"));
+        let default_help = run_jet(
+            &["run", *name, "--", "--help"],
+            &scratch.path,
+            &scratch.join(&format!("cache/help-default-{name}")),
+        );
+        let interpreted_help = run_jet(
+            &["run", "--interpret", *name, "--", "--help"],
+            &scratch.path,
+            &scratch.join(&format!("cache/help-interpreter-{name}")),
+        );
+        for (tier, output) in [
+            ("AOT", &aot_help),
+            ("default `jet run`", &default_help),
+            ("interpreter", &interpreted_help),
+        ] {
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{tier} `{name} --help` failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("Usage:"),
+                "{tier} `{name} --help` omitted Usage"
+            );
+        }
+        assert_eq!(
+            help_body(&aot_help.stdout),
+            help_body(&default_help.stdout),
+            "AOT and default help body differs for `{name}`"
+        );
+        assert_eq!(
+            help_body(&aot_help.stdout),
+            help_body(&interpreted_help.stdout),
+            "AOT and interpreter help body differs for `{name}`"
+        );
+
+        let bad_cases = if *name == "positionals.jet" {
+            vec![
+                (
+                    "unknown",
+                    vec!["add", "--not-a-real-option"],
+                    vec!["unknown option", "Usage:"],
+                ),
+                (
+                    "surplus",
+                    vec!["add", "accepted", "surplus-a", "surplus-b"],
+                    vec![
+                        "unexpected arguments",
+                        "`surplus-a`",
+                        "`surplus-b`",
+                        "Usage:",
+                    ],
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    "unknown",
+                    vec!["--not-a-real-option"],
+                    vec!["unknown option", "Usage:"],
+                ),
+                (
+                    "surplus",
+                    vec!["surplus-a", "surplus-b"],
+                    vec!["unexpected arguments", "`surplus-a`", "`surplus-b`", "Usage:"],
+                ),
+            ]
+        };
+
+        for (case, args, expected) in bad_cases {
+            let aot = Command::new(binary)
+                .args(&args)
+                .current_dir(&scratch.path)
+                .output()
+                .unwrap_or_else(|error| panic!("run AOT `{name}` {case}: {error}"));
+            assert_cli_rejection(aot, &format!("AOT `{name}` {case}"), &expected);
+
+            let default = run_jet(
+                &{
+                    let mut run_args = vec!["run", *name, "--"];
+                    run_args.extend(args.iter().copied());
+                    run_args
+                },
+                &scratch.path,
+                &scratch.join(&format!("cache/{case}-default-{name}")),
+            );
+            assert_cli_rejection(
+                default,
+                &format!("default `jet run` `{name}` {case}"),
+                &expected,
+            );
+
+            let interpreted = run_jet(
+                &{
+                    let mut run_args = vec!["run", "--interpret", *name, "--"];
+                    run_args.extend(args.iter().copied());
+                    run_args
+                },
+                &scratch.path,
+                &scratch.join(&format!("cache/{case}-interpreter-{name}")),
+            );
+            assert_cli_rejection(
+                interpreted,
+                &format!("interpreter `{name}` {case}"),
+                &expected,
+            );
+        }
+    }
+
+    let (_, positionals) = binaries
+        .iter()
+        .find(|(name, _)| *name == "positionals.jet")
+        .expect("positionals fixture binary");
+    let args = ["add", "bare-loses", "--text", "named-wins"];
+    let aot = Command::new(positionals)
+        .args(args)
+        .current_dir(&scratch.path)
+        .output()
+        .expect("run AOT named-over-positional CLI");
+    let default = run_jet(
+        &[
+            "run",
+            "positionals.jet",
+            "--",
+            "add",
+            "bare-loses",
+            "--text",
+            "named-wins",
+        ],
+        &scratch.path,
+        &scratch.join("cache/named-default"),
+    );
+    let interpreted = run_jet(
+        &[
+            "run",
+            "--interpret",
+            "positionals.jet",
+            "--",
+            "add",
+            "bare-loses",
+            "--text",
+            "named-wins",
+        ],
+        &scratch.path,
+        &scratch.join("cache/named-interpreter"),
+    );
+    for (tier, output) in [
+        ("AOT", &aot),
+        ("default `jet run`", &default),
+        ("interpreter", &interpreted),
+    ] {
+        assert!(
+            output.status.success(),
+            "{tier} named-over-positional CLI failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("named-wins"), "{tier} lost named value: {stdout}");
+        assert!(!stdout.contains("bare-loses"), "{tier} kept bare value: {stdout}");
+    }
+    assert_eq!(aot.stdout, default.stdout);
+    assert_eq!(aot.stdout, interpreted.stdout);
+}
+
+fn help_body(output: &[u8]) -> &[u8] {
+    output
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|newline| &output[newline + 1..])
+        .expect("generated CLI help must have a Usage line")
+}
+
+#[test]
+fn builder_cli_named_value_overrides_positional_on_all_native_tiers() {
+    let scratch = common::Scratch::new("builder_cli_named_precedence");
+    fs::write(
+        scratch.join("builder_named.jet"),
+        r#"use core.args as args
+use core.process as process
+
+fn run() {
+    spec :: args.spec()
+        .option("name", "display name", "NAME")
+        .positional("name", "display name")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.option("name") ?? "none")
+}
+"#,
+    )
+    .expect("write builder precedence fixture");
+
+    let build = run_jet(
+        &["build", "builder_named.jet"],
+        &scratch.path,
+        &scratch.join("cache/build"),
+    );
+    assert!(
+        build.status.success(),
+        "AOT build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = scratch.join("build/builder_named");
+    let args = ["bare-loses", "--name", "named-wins"];
+    let aot = Command::new(&binary)
+        .args(args)
+        .current_dir(&scratch.path)
+        .output()
+        .expect("run AOT builder precedence fixture");
+    let default = run_jet(
+        &[
+            "run",
+            "builder_named.jet",
+            "--",
+            "bare-loses",
+            "--name",
+            "named-wins",
+        ],
+        &scratch.path,
+        &scratch.join("cache/named-default"),
+    );
+    let interpreted = run_jet(
+        &[
+            "run",
+            "--interpret",
+            "builder_named.jet",
+            "--",
+            "bare-loses",
+            "--name",
+            "named-wins",
+        ],
+        &scratch.path,
+        &scratch.join("cache/named-interpreter"),
+    );
+
+    for (tier, output) in [
+        ("AOT", &aot),
+        ("default `jet run`", &default),
+        ("interpreter", &interpreted),
+    ] {
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{tier} builder precedence failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "named-wins\n",
+            "{tier} did not prefer the named value"
+        );
+    }
+    assert_eq!(aot.stdout, default.stdout);
+    assert_eq!(aot.stdout, interpreted.stdout);
+}
+
 #[test]
 fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

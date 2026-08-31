@@ -1,8 +1,26 @@
-Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
-  --> tests/ui/e2404_no_error_conv.jet:14:12
+Error [E2417]: Explicit failure domain ``FileErr`` is not an Error type
+  --> tests/ui/e2404_no_error_conv.jet:11:12
     |
- 14 |     inner()?
-    |            ^
- Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+ 11 | fn inner() String !FileErr -> Ok("hi")
+    |            ^^^^^^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [E2417]: Explicit failure domain ``AppErr`` is not an Error type
+  --> tests/ui/e2404_no_error_conv.jet:13:12
+    |
+ 13 | fn outer() String !AppErr -> {
+    |            ^^^^^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [E2404]: `?` can't turn the `FileErr` from `inner` into `AppErr` here
+  --> tests/ui/e2404_no_error_conv.jet:14:5
+    |
+ 14 |     inner()
+    |     ^^^^^
+ Why: `inner` is defined at `e2404_no_error_conv.jet:11:4` with effective failure contract `explicit !FileErr`; the caller's `explicit !AppErr` contract has no route from `FileErr` to `AppErr`
+ Fix: Declare the caller with `FileErr` as its failure domain, or add `impl FileErr -> AppErr { … }`; otherwise handle `inner` locally with `??`
+More: jet-lang.dev/e/E2404

@@ -63,16 +63,6 @@ fn normalized_path(raw: String) String !TranscriptError -> {
     return Ok(normalized.to_string())
 }
 
-fn slash(path: String) String !TranscriptError -> {
-    return Ok(path.replace("\\", "/"))
-}
-
-fn is_under(path: String, base: String) Bool !TranscriptError -> {
-    path_text :: slash(path)
-    base_text :: slash(base)
-    return Ok(path_text == base_text || path_text.starts_with("{base_text}/"))
-}
-
 // Read-only inspection may use the private dogfood cache or checked-in fixtures.
 fn fixture_base() String !TranscriptError -> {
     local :: Path.from("tests").join("fixtures").join("phase1")
@@ -89,7 +79,7 @@ pub fn validate_store_root(root: String) String !TranscriptError -> {
     home :: Path.home()
     dogfood :: normalized_path(home.join(".cache").join("jet-dogfood").to_string())
     fixtures :: fixture_base()
-    if is_under(~checked, ~dogfood) || is_under(~checked, ~fixtures) -> return Ok(checked)
+    if Path.from(~checked).is_within(Path.from(~dogfood)) || Path.from(~checked).is_within(Path.from(~fixtures)) -> return Ok(checked)
     return Err(TranscriptError{message: "store root must be under the Jet dogfood cache or the fixture tree"})
 }
 
@@ -98,7 +88,7 @@ fn validate_private_store_root(root: String) String !TranscriptError -> {
     base :: normalized_path(
         Path.home().join(".cache").join("jet-dogfood").join("jetpack-transcripts").to_string()
     )
-    if checked == base || !is_under(~checked, ~base) {
+    if checked == base || !Path.from(~checked).is_within(Path.from(~base)) {
         return Err(TranscriptError{message: "writable store root must be a private child of the Jet dogfood transcript cache"})
     }
     return Ok(checked)
@@ -109,7 +99,7 @@ pub fn store_tree(root: String) [String] !TranscriptError -> {
     entries :: fs.walk(checked) ?? return Err(TranscriptError{message: "store tree cannot be read"})
     tree := [String]{}
     loop entry in entries {
-        relative :: slash(entry.relative)
+        relative :: entry.relative.replace("\\", "/")
         if {
             entry.is_dir -> {
                 tree.push("dir:{relative}/")
@@ -450,7 +440,7 @@ fn maybe_compare_oracle(
     fs.symlink(outside, link) ?? panic("symlink test link failed")
     candidate :: link.join("store").to_string()
 
-    result :: cli.execute(["list"], ".", candidate)
+    result :: cli.list_command(candidate)
     assert(result.exit_code == 2, "symlinked store root was accepted")
     assert(result.stdout.contains("symbolic link"), "symlink rejection lost its cause")
 }
@@ -526,18 +516,14 @@ fn maybe_compare_oracle(
     assert(lock_plan != manifest_plan, "lock contents did not affect the plan")
 }
 
-#Test("CLI preserves parser causes in structured errors") {
-    parsed :: cli.execute(["unsupported"], ".", phase1_store("cli-cause"))
-    assert(parsed.exit_code == 2, "unsupported command changed the exit contract")
-    assert(parsed.stdout.contains("unsupported command unsupported"), "CLI parse cause was lost")
-
+#Test("CLI preserves command causes in structured errors") {
     temp :: fs.temp_dir("jetpack-cli-cause") ?? panic("CLI cause temp directory failed")
     fixture :: phase1_root() ?? panic("CLI cause fixture root cannot be resolved")
     project :: Path.from(temp.path).join("project")
     fs.copy_dir(fixture, project) ?? panic("CLI cause fixture copy failed")
     package_path :: project.join("package.jet")
     fs.write(~package_path, "name: \"broken\"\n") ?? panic("CLI cause malformed manifest write failed")
-    plan_result :: cli.execute(["plan"], project.to_string(), phase1_store("cli-plan-cause"))
+    plan_result :: cli.plan_command(project.to_string(), phase1_store("cli-plan-cause"), "dogfood")
     assert(plan_result.exit_code == 2, "plan error changed the exit contract")
     assert(plan_result.stdout.contains("package.jet: manifest field"), "CLI plan cause was lost")
 }

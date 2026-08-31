@@ -5,6 +5,7 @@ use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit::emit_symbol_call;
+use crate::Codegen::TIR::emit::emit_tir_display_value;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::enc_arg_is_json;
 use crate::Codegen::TIR::enc_arg_is_string_rows;
@@ -715,11 +716,16 @@ fn emit_plain_core_call(
     // exact Int. The AOT wrappers marshal the packed Int carrier to the same
     // Prelude kernel without converting it through f64.
     if module == "core.text.fmt"
-        && method == "decimal"
+        && matches!(method, "decimal" | "grouped")
         && args.first().is_some_and(|value| value.ty == Type::Int)
     {
+        let helper_name = if method == "grouped" {
+            "jet_fmt_grouped_int_aot"
+        } else {
+            "jet_fmt_decimal_int_aot"
+        };
         return Some(emit_symbol_call(
-            &helper("jet_fmt_decimal_int_aot"),
+            &helper(helper_name),
             &format!("{}, {}", arg(0), arg(1)),
         ));
     }
@@ -771,6 +777,11 @@ pub(crate) fn emit_tir_core_call(
         } else {
             rendered
         }
+    };
+    let display_arg = |i: usize| {
+        args.get(i)
+            .map(|value| emit_tir_display_value(value, cx))
+            .unwrap_or_default()
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     let is_workflow_id = |ty: &Type| {
@@ -978,7 +989,20 @@ pub(crate) fn emit_tir_core_call(
         // the Rust unsafe context; engines do not own sentry policy.
         ("core.mem", "address_of") => {
             let place = arg(0);
-            format!("{}jet_mem::jet_sentry_address_of((&({place}) as *const _))", cx.root_prefix)
+            let helper = if args.first().is_some_and(|arg| {
+                matches!(
+                    crate::Codegen::TIR::tir_address_lifetime(arg),
+                    crate::Codegen::TIR::TAddressLifetime::Stack
+                )
+            }) {
+                "jet_sentry_stack_address_of"
+            } else {
+                "jet_sentry_address_of"
+            };
+            format!(
+                "{}jet_mem::{helper}((&({place}) as *const _))",
+                cx.root_prefix,
+            )
         }
         ("core.mem", "volatile_read") => {
             format!("{}jet_mem::jet_sentry_volatile_read(({}), \"valid_ptr\")", cx.root_prefix, arg(0))
@@ -1549,9 +1573,33 @@ pub(crate) fn emit_tir_core_call(
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
             format!("{}({}, {})", helper("jet_enc_jsonl_writer"), arg(0), limits)
         }
+        ("core.encoding.csv", "rows") => {
+            format!(
+                "{}(&({}), &({}), {}, {})",
+                helper("jet_ring_csv_rows"),
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3)
+            )
+        }
         ("core.encoding.csv", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
-            format!("{}({}, {})", helper("jet_enc_csv_reader"), arg(0), limits)
+            let delimiter = args
+                .get(2)
+                .map(|_| arg(2))
+                .unwrap_or_else(|| "\",\".to_string()".to_string());
+            let header = args.get(3).map(|_| arg(3)).unwrap_or_else(|| "false".to_string());
+            let skip_blank = args.get(4).map(|_| arg(4)).unwrap_or_else(|| "false".to_string());
+            format!(
+                "{}({}, {}, {}, {}, {})",
+                helper("jet_enc_csv_reader"),
+                arg(0),
+                limits,
+                delimiter,
+                header,
+                skip_blank
+            )
         }
         ("core.encoding.csv", "writer") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
@@ -2641,12 +2689,6 @@ pub(crate) fn emit_tir_core_call(
         
         
         ("core.crypto", "sha256") => format!("{}(&({}))", regex_fn("jet_crypto_sha256_typed_impl"), arg(0)),
-        ("core.crypto", "sha512_bytes") => {
-            format!("{}(&({}))", regex_fn("jet_crypto_sha512_impl"), arg(0))
-        }
-        ("core.crypto", "blake3_bytes") => {
-            format!("{}(&({}))", regex_fn("jet_crypto_blake3_impl"), arg(0))
-        }
         ("core.crypto", "constant_time_equal_bytes") => format!(
             "{}(&({}), &({}))",
             regex_fn("jet_crypto_constant_time_equal_bytes_impl"),
@@ -3451,14 +3493,14 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.term", "eprint") => format!(
-            "{{ let _ = {}jet_term_write_stderr_line(&(({}).jet_show()), false); }}",
+            "{{ let _ = {}jet_term_write_stderr_line(&({}), false); }}",
             cx.root_prefix,
-            arg(0)
+            display_arg(0)
         ),
         ("core.term", "print") => format!(
-            "{{ let _ = {}jet_term_write_stdout_line(&(({}).jet_show()), false); }}",
+            "{{ let _ = {}jet_term_write_stdout_line(&({}), false); }}",
             cx.root_prefix,
-            arg(0)
+            display_arg(0)
         ),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         

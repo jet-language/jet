@@ -10,9 +10,9 @@ use super::{
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::{
-    ambient_err_local, ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
-    TFnValueKind, THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind,
-    TStmt, TStrPart,
+    ambient_err_local, ListSpreadPart, TAddressLifetime, TCallArg, TCoreClosureKind, TEnumPayload,
+    TExpr, TExprKind, TFnValueKind, THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback,
+    TPlace, TRequireKind, TStmt, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, exact_big, exact_int_value};
 use crate::Comptime::{
@@ -34,6 +34,7 @@ mod math_lib_pure {
 #[allow(dead_code)]
 mod render_time_rt {
     #![allow(dead_code)]
+    include!("../../../Prelude/Core/Duration.rs");
     include!("../../../Prelude/Core/Time.rs");
 }
 
@@ -522,7 +523,9 @@ pub fn tir_place_address_key(expr: &TExpr) -> String {
                 tir_place_address_key(index)
             )
         }
-        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => tir_place_address_key(place),
+        TExprKind::Borrow { place, .. }
+        | TExprKind::Deref(place)
+        | TExprKind::DistinctCtor { arg: place, .. } => tir_place_address_key(place),
         _ => format!("ty:{}", expr.ty.show()),
     }
 }
@@ -559,6 +562,16 @@ pub fn stable_place_address(key: &str) -> i64 {
     } else {
         identity
     }
+}
+
+fn stable_sentry_place_address(key: &str, lifetime: TAddressLifetime) -> usize {
+    let key = match lifetime {
+        TAddressLifetime::Stack => jet_foundation::MemSentry::jet_sentry_current_frame()
+            .map(|frame| format!("stack::{frame}::{key}"))
+            .unwrap_or_else(|| format!("unframed-stack::{key}")),
+        _ => key.to_string(),
+    };
+    stable_place_address(&key) as usize
 }
 
 /// One computed-field memo slot identity shared by JIT getter probes and
@@ -1182,6 +1195,7 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
         | THostCall::YieldSend { value: recv }
         | THostCall::ExpectSnapshot { value: recv, .. } => vec![recv.as_ref()],
         THostCall::StrMatchScan { subject, .. } => vec![subject.as_ref()],
+        THostCall::BinMatchScan { subject, .. } => vec![subject.as_ref()],
         THostCall::FixedListIndex { base, index, .. } => vec![base.as_ref(), index.as_ref()],
         // A GC edit seeds the generated `value` root before evaluating these
         // expressions. The host-call arm evaluates them after that seed.
@@ -1201,7 +1215,6 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
         } => vec![value.as_ref(), duration.as_ref(), clock.as_ref()],
         THostCall::GcRead { .. }
         | THostCall::FnName(_)
-        | THostCall::BinMatchScan { .. }
         | THostCall::SwitchSubjectField { .. }
         | THostCall::SwitchSubjectValue
         | THostCall::NumericBounds { .. }
@@ -1945,10 +1958,13 @@ fn prelude_time_render(value: &CtValue) -> Option<String> {
             .to_string_fmt(),
         ),
         "LocalTime" => Some(
-            render_time_rt::JetLocalTime::new(
+            render_time_rt::JetLocalTime::with_nanosecond(
                 render_time_int(value, "hour")?,
                 render_time_int(value, "minute")?,
                 render_time_int(value, "second")?,
+                render_time_int(value, "nanosecond")
+                    .unwrap_or(0)
+                    .clamp(0, 999_999_999) as u32,
             )
             .to_string_fmt(),
         ),
@@ -1961,8 +1977,7 @@ fn prelude_time_render(value: &CtValue) -> Option<String> {
         )),
         "Zone" => Some(render_time_zone(value)?.to_string_fmt()),
         "ZonedDateTime" => {
-            let (secs, nanos) =
-                render_time_datetime_parts(render_time_field(value, "instant")?)?;
+            let (secs, nanos) = render_time_datetime_parts(render_time_field(value, "instant")?)?;
             let zone = render_time_zone(render_time_field(value, "zone")?)?;
             Some(
                 render_time_rt::JetDateTime::from_timestamp_ns(secs, nanos)
@@ -1974,8 +1989,36 @@ fn prelude_time_render(value: &CtValue) -> Option<String> {
     }
 }
 
+fn prelude_error_render(value: &CtValue) -> Option<String> {
+    let CtValue::Struct {
+        type_name, fields, ..
+    } = value
+    else {
+        return None;
+    };
+    let type_name = crate::Codegen::nominal_leaf(type_name)
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
+    let field = match type_name {
+        "TextError" => "message",
+        "RangeError" => "reason",
+        _ => return None,
+    };
+    fields.iter().find_map(|(name, value)| {
+        (name == field)
+            .then_some(value)
+            .and_then(|value| match value {
+                CtValue::Str(text) => Some(text.clone()),
+                _ => None,
+            })
+    })
+}
+
 fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
     if let Some(text) = prelude_time_render(value) {
+        return Some(text);
+    }
+    if let Some(text) = prelude_error_render(value) {
         return Some(text);
     }
     match (value, ty) {
@@ -2751,7 +2794,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             },
             Type::Named(_) | Type::Apply { .. } => match value {
                 CtValue::Struct { type_name, fields } => {
-                    let field_types = self.struct_field_types.get(&type_name).map(Vec::as_slice);
+                    let canonical = self.canonical_nominal(&type_name);
+                    let key = canonical.as_deref().unwrap_or(type_name.as_str());
+                    let field_types = self.struct_field_types.get(key).map(Vec::as_slice);
                     self.clone_structural_fields(type_name, fields, field_types)
                 }
                 other => self.clone_structural_untyped(other),
@@ -2873,12 +2918,88 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }))
     }
 
+    /// D-FAIL-CARRIER1=A: strip the success view a producer's return lowering
+    /// added, and hand the failure carrier back untouched when there is one.
+    ///
+    /// Sema admits a payload consumer -- a field read, a codec's `String` text
+    /// argument -- only where the static type IS the payload, never an `?T` or
+    /// `!T`. So a `Present` arriving at one of those consumers is not a user
+    /// optional: it is the carrier the callee's own return lowering wrapped and
+    /// that AOT and the JIT strip at the call boundary. A `Failed` carrier is
+    /// still the answer and propagates unchanged, and any other value is the
+    /// payload itself, so a genuinely wrong receiver still reaches its
+    /// diagnostic below.
+    fn carried_payload(value: CtValue) -> Result<CtValue, CtValue> {
+        match value {
+            CtValue::Present(inner) => match *inner {
+                failed @ CtValue::Failed(_) => Err(failed),
+                payload => Ok(payload),
+            },
+            failed @ CtValue::Failed(_) => Err(failed),
+            payload => Ok(payload),
+        }
+    }
+
+    /// D-SERDE2=A / I9: a generated codec is a top-level `Item::Impl` owned by
+    /// the module that DECLARES the type, so it lowers exactly once, under that
+    /// module's canonical owner (`<dir>::plan.jet::ListReport::encode`). Every
+    /// consumer names the same type by a local spelling -- the bare leaf inside
+    /// the declaring module, an alias path (`plan.ListReport`) outside it -- so
+    /// the exact instance key misses for every imported codec until #2252's
+    /// nominal projection maps that spelling onto the declaring identity.
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
         let concrete = crate::Codegen::TIR::generic_method_instance_key(ty, method, &[]);
-        self.funcs.get(&concrete).copied().or_else(|| match ty {
-            Type::Apply { name, .. } => self.funcs.get(&format!("{name}::{method}")).copied(),
-            _ => None,
-        })
+        if let Some(func) = self.funcs.get(&concrete).copied() {
+            return Some(func);
+        }
+        let base = match ty {
+            Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+            _ => ty.name(),
+        };
+        if let Some(func) = self.funcs.get(&format!("{base}::{method}")).copied() {
+            return Some(func);
+        }
+        let canonical = self.canonical_nominal(&base);
+        canonical.and_then(|canonical| self.funcs.get(&format!("{canonical}::{method}")).copied())
+    }
+
+    /// The canonical codec dispatch seam. Generated and custom Codable
+    /// methods carry this marker through lowering, regardless of whether the
+    /// owner is named, generic, or an enum. Keep those registered bodies in
+    /// TIR so deopt uses the same Encode/Decode implementation as resident
+    /// execution; ordinary calls may still use the native bridge.
+    fn is_canonical_serde_body(func: &crate::Codegen::TIR::TFunc) -> bool {
+        match &func.kind {
+            crate::Codegen::TIR::TFuncKind::TraitMethod {
+                serde: Some(crate::Codegen::TIR::SerdeCodec::Encode),
+                ..
+            }
+            | crate::Codegen::TIR::TFuncKind::TraitMethod {
+                serde: Some(crate::Codegen::TIR::SerdeCodec::Decode),
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
+    /// #2252: project a TIR nominal spelling onto the canonical identity every
+    /// generated codec, imported method, and registered shape row is keyed by.
+    /// `nominal_identities` is built once by `TIR::lower_jit_program` from the
+    /// name ledger and the recorded import aliases, so this is a lookup of a
+    /// fact, never a search for a name that ends the right way. `None` means
+    /// the spelling is already canonical or has no row at all -- a Prelude
+    /// type, a local nominal, or a leaf two modules could claim -- so an
+    /// ambiguous name keeps missing and the caller reports the unsupported
+    /// body instead of running another module's code.
+    ///
+    /// The projected identity is returned owned on purpose: every nominal-keyed
+    /// evaluator table below is read while the receiver is also mutated, and an
+    /// owned key keeps the projection out of that borrow.
+    pub(super) fn canonical_nominal(&self, name: &str) -> Option<String> {
+        self.nominal_identities
+            .get(name)
+            .filter(|identity| identity.as_str() != name)
+            .cloned()
     }
 
     /// D-SERDE-ENGINE1 / D-UNIONTYPE1=A: the sema union validator has already
@@ -2975,7 +3096,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         signed: false,
                         bits: 8
                     }
-                ) =>
+                ) || matches!(inner.as_ref(), Type::Named(name) if name == "U8") =>
             {
                 let CtValue::List(values) = value else {
                     return Err(unsupported("Encode byte list value", self.span()));
@@ -3024,7 +3145,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     if let Some(codec_name) = builtin_codec_name(ty) {
                         return builtin_codec_encode(value, codec_name, self.span());
                     }
-                    if let Some(base) = self.distinct_bases.get(name).cloned() {
+                    let canonical = self.canonical_nominal(name);
+                    let key = canonical.as_deref().unwrap_or(name.as_str());
+                    if let Some(base) = self.distinct_bases.get(key).cloned() {
                         return self.eval_serde_encode_value(value, &base);
                     }
                 }
@@ -3047,7 +3170,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         type_name: &str,
         tree: &CtValue,
     ) -> Result<Option<Result<CtValue, CtValue>>, Diagnostic> {
-        let Some(plan) = self.codec_migrations.get(type_name).cloned() else {
+        let canonical = self.canonical_nominal(type_name);
+        let key = canonical.as_deref().unwrap_or(type_name);
+        let Some(plan) = self.codec_migrations.get(key).cloned() else {
             return Ok(None);
         };
         let Some(mut pairs) = datatree_object_pairs(tree) else {
@@ -3081,7 +3206,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             unsupported(&format!("migration default `{default_fn}`"), self.span())
                         })?;
                         let mut child = HashMap::new();
-                        let value = self.run_func(func, Vec::new(), &mut child)?;
+                        // Synthetic migration helpers are ordinary Jet
+                        // callables, so `run_func` returns their shared
+                        // success carrier. The migration plan stores the
+                        // declared field type, which is the payload that the
+                        // AOT step encodes; normalize at this boundary before
+                        // invoking the canonical field encoder.
+                        let value = Self::normalize_eval_value(
+                            self.run_func(func, Vec::new(), &mut child)?,
+                            ty,
+                        );
                         let encoded = self.eval_serde_encode_value(value, ty)?;
                         pairs.push((key.clone(), encoded));
                     }
@@ -3109,7 +3243,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             )
                         })?;
                         let mut child = HashMap::new();
-                        let converted = self.run_func(func, vec![old], &mut child)?;
+                        // As with `add`, converter functions are lowered as
+                        // ordinary callables. Strip only the carrier implied
+                        // by that callable at the declared target boundary;
+                        // Option/Result targets retain their own semantics.
+                        let converted = Self::normalize_eval_value(
+                            self.run_func(func, vec![old], &mut child)?,
+                            to_ty,
+                        );
                         *encoded = self.eval_serde_encode_value(converted, to_ty)?;
                     }
                 }
@@ -3138,13 +3279,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             return Err(shape());
         };
         let target = (**ok).clone();
-        let Some(CtValue::Str(text)) = argv.first() else {
-            return Err(unsupported(
-                &format!("`{module}.{method}()` text argument"),
-                span,
-            ));
+        // D-FAIL-CARRIER1=A: the text parameter is declared `String`, so a
+        // carrier arriving here is the producer's success view; a failed one is
+        // the decode's answer.
+        let text = match argv.first().cloned().map(Self::carried_payload) {
+            Some(Ok(CtValue::Str(text))) => text,
+            Some(Err(carrier)) => return Ok(carrier),
+            _ => {
+                return Err(unsupported(
+                    &format!("`{module}.{method}()` text argument"),
+                    span,
+                ))
+            }
         };
-        let text = text.clone();
         let decoded = if module == "core.encoding.csv" {
             self.decode_codec_rows(&target, text, span)?
         } else {
@@ -3210,7 +3357,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         let parsed = apply_core_call(
             "core.encoding.csv",
             "parse",
-            vec![CtValue::Str(text)],
+            vec![
+                CtValue::Str(text),
+                CtValue::Str(",".to_string()),
+                CtValue::Bool(false),
+                CtValue::Bool(false),
+            ],
             span,
             self.repl_mode,
         )?;
@@ -3553,13 +3705,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
             }
             Type::List(inner) | Type::FixedList { elem: inner, .. }
-                if matches!(
+                if (matches!(
                     inner.as_ref(),
                     Type::IntN {
                         signed: false,
                         bits: 8
                     }
-                ) && matches!(tree, CtValue::Bytes(_)) =>
+                ) || matches!(inner.as_ref(), Type::Named(name) if name == "U8"))
+                    && matches!(tree, CtValue::Bytes(_)) =>
             {
                 let CtValue::Bytes(bytes) = tree else {
                     unreachable!();
@@ -3674,10 +3827,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
             Type::Named(_) | Type::Apply { .. } => {
                 if let Type::Named(name) = ty {
-                    if let Some(base) = self.distinct_bases.get(name).cloned() {
+                    // The projected identity is owned, so the same key still
+                    // names the row after the decode below borrows `self`
+                    // mutably.
+                    let canonical = self.canonical_nominal(name);
+                    let key = canonical.as_deref().unwrap_or(name.as_str());
+                    if let Some(base) = self.distinct_bases.get(key).cloned() {
                         let decoded = self.eval_datatree_decode(tree, &base)?;
                         if let (Some((lo, hi)), CtValue::Present(value)) =
-                            (self.distinct_ranges.get(name), &decoded)
+                            (self.distinct_ranges.get(key), &decoded)
                         {
                             if !matches!(value.as_ref(), CtValue::Int(n) if (*lo..=*hi).contains(n))
                             {
@@ -3697,8 +3855,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     unsupported(&format!("Decode body for `{}`", ty.name()), self.span())
                 })?;
                 let mut child = HashMap::new();
+                let migration_key = ty.name();
+                let migration_key = self
+                    .canonical_nominal(&migration_key)
+                    .unwrap_or(migration_key);
                 let migration_trace_start =
-                    self.codec_migrations.contains_key(&ty.name()).then(|| {
+                    self.codec_migrations.contains_key(&migration_key).then(|| {
                         self.sink.as_ref().map_or(0, |sink| {
                             sink.lock().expect("evaluator sink poisoned").stderr.len()
                         })
@@ -3716,7 +3878,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             sink.stderr.truncate(start + line_end + 1);
                         }
                     }
-                    match self.apply_codec_migration(&ty.name(), &tree)? {
+                    match self.apply_codec_migration(&migration_key, &tree)? {
                         Some(Ok(migrated)) => {
                             let mut child = HashMap::new();
                             return self.run_func(func, vec![migrated], &mut child);
@@ -4300,10 +4462,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 parent: cond,
                                 cond: inner,
                             });
-                            work.push(EvalExprWork::IfCondition {
-                                state,
-                                cond: inner,
-                            });
+                            work.push(EvalExprWork::IfCondition { state, cond: inner });
                         }
                         TIfCond::Plain(expr)
                         | TIfCond::IsNone { subj: expr }
@@ -4469,8 +4628,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         let value = eval_expr_cache_take(expr).ok_or_else(|| {
                             unreachable!("fallback branch value missing from evaluator worklist")
                         })?;
+                        // A direct fallible call in a return fallback lowers through
+                        // `Try`: on failure that node records the real carrier in
+                        // `pending_return` and returns a scaffolding `Unit`. The
+                        // enclosing `return_value` then wraps that Unit as `Ok(())`
+                        // for the declared result type. Preserve the pending carrier
+                        // instead of replacing it with that synthetic success value;
+                        // AOT returns the callee's Result directly.
                         if matches!(fallback, TOrFallback::Return(Some(_))) {
-                            self.pending_return = Some(value);
+                            let returned = self.pending_return.take().unwrap_or(value);
+                            self.pending_return = Some(returned);
                             eval_expr_cache_put(original, CtValue::Unit);
                         } else {
                             eval_expr_cache_put(original, value);
@@ -5299,9 +5466,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 return Err(unsupported("`mem.address_of` at compile time", source_span));
             }
             let key = tir_place_address_key(&args[0]);
-            let address = stable_place_address(&key) as usize;
+            let lifetime = crate::Codegen::TIR::tir_address_lifetime(&args[0]);
+            let address = stable_sentry_place_address(&key, lifetime);
             let (bytes, _) = sentry_layout(&args[0].ty);
-            jet_foundation::MemSentry::jet_sentry_register_allocation(address, bytes);
+            if lifetime == TAddressLifetime::Stack {
+                jet_foundation::MemSentry::jet_sentry_register_stack_allocation(address, bytes);
+            } else {
+                jet_foundation::MemSentry::jet_sentry_register_allocation(address, bytes);
+            }
             if let Some(local) = super::raw_place_local(&args[0]) {
                 self.sentry_places.insert(address, local.name.clone());
             }
@@ -5512,34 +5684,17 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             let value = argv.first().ok_or_else(|| {
                 unsupported("core.encoding.cbor encoder missing its value", source_span)
             })?;
-            let tree = self.eval_serde_encode_value(value.clone(), &args[0].ty)?;
-            let fields = HashMap::new();
-            return Ok(
-                match crate::Comptime::cbor_encode_typed_for_tir(
-                    &tree,
-                    &Type::Named("DataTree".to_string()),
-                    &fields,
-                    method == "to_bytes_canonical",
-                ) {
-                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                    Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
-                        type_name: "CBORError".to_string(),
-                        fields: vec![
-                            (
-                                "kind".to_string(),
-                                CtValue::Enum {
-                                    type_name: "CBORErrorKind".to_string(),
-                                    variant: "Unsupported".to_string(),
-                                    args: Vec::new(),
-                                },
-                            ),
-                            ("byte_offset".to_string(), CtValue::Int(0)),
-                            ("path".to_string(), CtValue::Str("$".to_string())),
-                            ("reason".to_string(), CtValue::Str(reason)),
-                        ],
-                    })),
-                },
-            );
+            let value_ty = args.first().map(|arg| &arg.ty).ok_or_else(|| {
+                unsupported("core.encoding.cbor encoder missing its value type", source_span)
+            })?;
+            let tree = self.eval_serde_encode_value(value.clone(), value_ty)?;
+            return Ok(match crate::Comptime::cbor_encode_for_tir(
+                &tree,
+                method == "to_bytes_canonical",
+            ) {
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(error)),
+            });
         }
         // D-MIGRATE3=A: typed text-codec decode uses the resolved return type.
         // The UNTYPED lenient `json.decode(text)` form is NOT that call: AOT
@@ -5679,8 +5834,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             return Err(unsupported("columnar list element", self.span()));
         };
         let elem = elem.clone();
+        let canonical = self.canonical_nominal(&elem);
+        let key = canonical.as_deref().unwrap_or(elem.as_str());
         let order: Vec<String> = {
-            let Some(fields) = self.struct_field_types.get(&elem) else {
+            let Some(fields) = self.struct_field_types.get(key) else {
                 return Err(unsupported("columnar list element shape", self.span()));
             };
             fields.iter().map(|(name, _)| name.clone()).collect()
@@ -5962,34 +6119,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             let v = self.eval_expr_child(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => {
-                                    let manual = match &e.ty {
-                                        Type::Named(type_name) => {
-                                            let canonical_type_name = crate::Codegen::nominal_leaf(
-                                                type_name,
-                                            )
-                                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                            .unwrap_or_else(|| {
-                                                crate::Codegen::nominal_leaf(type_name)
-                                            });
-                                            [
-                                                format!("{type_name}::debug"),
-                                                format!("{canonical_type_name}::debug"),
-                                            ]
-                                            .into_iter()
-                                            .find_map(|key| self.funcs.get(&key).copied())
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(func) = manual {
-                                        let mut child = HashMap::new();
-                                        child.insert("self".to_string(), v.clone());
-                                        match self.run_func(func, Vec::new(), &mut child)? {
-                                            CtValue::Str(text) => text,
-                                            _ => self.debug_value_typed(&v, &e.ty),
-                                        }
-                                    } else {
-                                        self.debug_value_typed(&v, &e.ty)
-                                    }
+                                    self.render_debug_value(&v, &e.ty)?
                                 }
                                 crate::AST::StrFormat::Pretty => {
                                     unreachable!(
@@ -5997,18 +6127,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                     )
                                 }
                                 crate::AST::StrFormat::Display => {
-                                    show_typed_value(&v, &e.ty, false)
-                                        .unwrap_or(self.show_value(&v, scope)?)
+                                    self.render_display_value(&v, &e.ty, scope)?
                                 }
                                 crate::AST::StrFormat::Fixed(_) => {
                                     unreachable!(
                                         "Fixed interpolation lowers to core.text.fmt.decimal"
                                     )
                                 }
-                                crate::AST::StrFormat::Hex(_) => {
+                                crate::AST::StrFormat::Grouped(_) => {
                                     unreachable!(
-                                        "Hex interpolation lowers to core.text.fmt.hex"
+                                        "Grouped interpolation lowers to core.text.fmt.grouped"
                                     )
+                                }
+                                crate::AST::StrFormat::Hex(_) => {
+                                    unreachable!("Hex interpolation lowers to core.text.fmt.hex")
                                 }
                                 crate::AST::StrFormat::Pad { .. } => {
                                     unreachable!("Pad interpolation lowers to core.text.fmt.pad")
@@ -6181,6 +6313,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 Some(value) => self.eval_expr_child(value, scope)?,
                                 None => CtValue::Unit,
                             };
+                            // The inline-block tail is the expression evaluator's
+                            // hand-written Return path, so it must honor the same
+                            // pending carrier that `exec_stmt(TStmt::Return)` uses.
+                            // A fallible call returned from a `?? {}` handler is
+                            // lowered as `Ok(Try(call))`: Try records `Err` in
+                            // `pending_return` and evaluates to synthetic `Unit`.
+                            // Do not replace that carrier with `Ok(Unit)`.
+                            let value = self.pending_return.take().unwrap_or(value);
                             self.pending_return = Some(value);
                             Ok(CtValue::Unit)
                         }
@@ -6246,10 +6386,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Ok(CtValue::Unit);
                     }
                 }
-                let shown = match show_typed_value(&v, &inner.ty, false) {
-                    Some(shown) => shown,
-                    None => self.show_value(&v, scope)?,
-                };
+                let shown = self.render_display_value(&v, &inner.ty, scope)?;
                 self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
@@ -6429,7 +6566,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 Ok(CtValue::Bool(true))
             }
-            TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
+            TExprKind::Call { name, args, .. } => self.eval_call(name, args, &expr.ty, scope),
             TExprKind::IfExpr { .. } => {
                 unreachable!("if expression bypassed its evaluator continuation")
             }
@@ -6614,7 +6751,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         _ => unreachable!(),
                     }
                 }
-                let mut r = self.eval_expr_child(recv, scope)?;
+                // D-FAIL-CARRIER1=A: a builtin receiver whose DECLARED type is
+                // not itself a carrier can still arrive wearing the success view
+                // a cross-module callee's return lowering added. Unwrap only
+                // there: an `?T` receiver keeps its own combinators (`OptionZip`)
+                // because its declared type says the carrier is the value.
+                let mut r = match &recv.ty {
+                    Type::Option(_) | Type::Result { .. } => self.eval_expr_child(recv, scope)?,
+                    _ => match Self::carried_payload(self.eval_expr_child(recv, scope)?) {
+                        Ok(payload) => payload,
+                        Err(carrier) => return Ok(carrier),
+                    },
+                };
                 let progress = progress_parts(&r);
                 let iter = progress_iter_parts(&r);
                 if let Some((items, _, _, _, _, _, _, _)) = &progress {
@@ -6683,9 +6831,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // read window that misses is a program-side stop, not a
                 // comptime build error, exactly as for the mutable form above.
                 let raw = eval_builtin(op, &mut r, argv, self.span());
-                let runtime_line = view_op_line(op).or_else(|| {
-                    sequence_argument_op(op).then(|| self.span_line(self.span()))
-                });
+                let runtime_line = view_op_line(op)
+                    .or_else(|| sequence_argument_op(op).then(|| self.span_line(self.span())));
                 let mut result = match runtime_line {
                     Some(line) => self.route_runtime_panic(raw, "E3001", line)?,
                     None => raw?,
@@ -6890,10 +7037,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     crate::Codegen::TIR::THandleOp::TaskJoin => {
                         return self.take_task(&r);
                     }
-                    crate::Codegen::TIR::THandleOp::TaskDetach => {
-                        let _ = self.take_task(&r)?;
-                        return Ok(CtValue::Unit);
-                    }
                     crate::Codegen::TIR::THandleOp::SerdeEncode => {
                         return self.eval_serde_encode_value(r, &recv.ty);
                     }
@@ -6901,6 +7044,17 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return self.eval_datatree_decode(r, target);
                     }
                     _ => {}
+                }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::HTTPClientMethod { kind, method }
+                        if kind == "HTTPRequest" && method == "json" && args.len() == 1
+                ) {
+                    let value = argv
+                        .first()
+                        .cloned()
+                        .ok_or_else(|| unsupported("HTTP JSON request value", self.span()))?;
+                    argv[0] = self.eval_serde_encode_value(value, &args[0].ty)?;
                 }
                 if let crate::Codegen::TIR::THandleOp::RegexMethod { method, .. } = op {
                     if method == "replace_all_with" {
@@ -7030,6 +7184,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
                         | crate::Codegen::TIR::THandleOp::HTTPServerMethod { method, .. }
                         if method == "json"
+                ) && !matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::HTTPClientMethod { kind, method }
+                        if kind == "HTTPRequest" && method == "json" && args.len() == 1
                 );
                 if http_json {
                     result = match result {
@@ -7125,7 +7283,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         Type::Apply { name, args }
                             if name == "VjpRun" && args.len() == 1
                     );
-                let r = self.eval_expr_child(recv, scope)?;
+                let r = match Self::carried_payload(self.eval_expr_child(recv, scope)?) {
+                    Ok(value) => value,
+                    Err(carrier) => return Ok(carrier),
+                };
                 if vjp_grads {
                     let CtValue::Struct { fields, .. } = &r else {
                         return Err(unsupported("compute.vjp result", self.span()));
@@ -7581,7 +7742,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 source_first_string_literal,
                 operator_line,
             } => {
-                let mut r = self.eval_expr_child(recv, scope)?;
+                // D-FAIL-CARRIER1=A: same rule as the builtin receiver above --
+                // a declared non-carrier receiver reads its payload, a declared
+                // `?T`/`!T` receiver keeps the carrier it is typed to hold.
+                let mut r = match &recv.ty {
+                    Type::Option(_) | Type::Result { .. } => self.eval_expr_child(recv, scope)?,
+                    _ => match Self::carried_payload(self.eval_expr_child(recv, scope)?) {
+                        Ok(payload) => payload,
+                        Err(carrier) => return Ok(carrier),
+                    },
+                };
                 let template_source = args
                     .iter()
                     .find_map(|arg| arg.template_items.as_deref())
@@ -7876,12 +8046,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 if let Type::Named(type_name) = &recv.ty {
                     names.push(format!("{type_name}::{}", method.name));
+                    // D-SERDE2=A / I9: an imported method lowers under the
+                    // module that DECLARES its type, while the consumer names
+                    // that type by a local spelling (`plan.ListReport`, or the
+                    // bare leaf). #2252's nominal projection maps the spelling
+                    // onto the declaring module's identity, which is what the
+                    // lowered name carries.
+                    if let Some(canonical) = self.canonical_nominal(type_name) {
+                        names.push(format!("{canonical}::{}", method.name));
+                    }
                 }
                 if let CtValue::Struct { type_name, .. } = &r {
                     names.push(format!("{type_name}::{}", method.name));
+                    if let Some(canonical) = self.canonical_nominal(type_name) {
+                        names.push(format!("{canonical}::{}", method.name));
+                    }
                 }
                 for name in names {
-                    if let Some(func) = self.funcs.get(&name).copied() {
+                    let resolved = self.funcs.get(&name).copied();
+                    if let Some(func) = resolved {
                         let mut child = HashMap::new();
                         // Instance methods lower `self` into the env, not `params`.
                         let has_receiver = matches!(
@@ -7976,14 +8159,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         // the trail never prints — one tier paying for text no
                         // tier shows.
                         let mut note_failure = None;
-                        let note_text = note.as_ref().map(|note| match self.eval_expr_child(note, scope) {
-                            Ok(CtValue::Str(note)) => note,
-                            Ok(other) => other.jet_show(),
-                            Err(diagnostic) => {
-                                note_failure = Some(diagnostic);
-                                String::new()
-                            }
-                        });
+                        let note_text =
+                            note.as_ref()
+                                .map(|note| match self.eval_expr_child(note, scope) {
+                                    Ok(CtValue::Str(note)) => note,
+                                    Ok(other) => other.jet_show(),
+                                    Err(diagnostic) => {
+                                        note_failure = Some(diagnostic);
+                                        String::new()
+                                    }
+                                });
                         if let Some(diagnostic) = note_failure {
                             return Err(diagnostic);
                         }
@@ -8007,34 +8192,29 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 };
                                 CtValue::failed(e)
                             }
-                            crate::Codegen::TIR::TTryConvert::Typed(conv_fn) => {
-                                let func = self.funcs.get(conv_fn).copied().ok_or_else(|| {
+                            crate::Codegen::TIR::TTryConvert::Typed {
+                                fn_name,
+                                source,
+                                target,
+                            } => {
+                                let func = self.funcs.get(fn_name).copied().ok_or_else(|| {
                                     unsupported(
-                                        &format!("error conversion `{conv_fn}`"),
+                                        &format!("error conversion `{fn_name}`"),
                                         self.span(),
                                     )
                                 })?;
-                                let default_conversion = matches!(
-                                    func.ret.as_ref(),
-                                    Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
-                                )
-                                .then(|| {
-                                    conv_fn
-                                        .strip_prefix(&mangle_generated("errconv_"))
-                                        .and_then(|stem| stem.split_once("_to_"))
-                                        .map(|(source, target)| {
-                                            (source.to_string(), target.to_string())
-                                        })
-                                })
-                                .flatten();
+                                let default_conversion =
+                                    crate::Codegen::TIR::try_target_is_default_error(
+                                        inner, convert,
+                                    )
+                                    .then(|| (source.name(), target.name()));
                                 // A native bridge may already provide a fully
                                 // structured default error. Preserve that report
                                 // across the ordinary conversion function instead
                                 // of flattening its identity and details back to
                                 // display text.
-                                let source_error = default_conversion
-                                    .as_ref()
-                                    .and_then(|_| e.to_jet_err());
+                                let source_error =
+                                    default_conversion.as_ref().and_then(|_| e.to_jet_err());
                                 let mut child = HashMap::new();
                                 match self.run_func(func, vec![*e], &mut child)? {
                                     CtValue::Failed(report) => {
@@ -8042,9 +8222,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                             (default_conversion, source_error)
                                         {
                                             jet_foundation::Outcome::jet_err_apply_conversion(
-                                                &mut error,
-                                                source,
-                                                target,
+                                                &mut error, source, target,
                                             );
                                             CtValue::failed(Box::new(CtValue::from_jet_err(&error)))
                                         } else {
@@ -8059,9 +8237,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                                 source_error.or_else(|| other.to_jet_err())
                                             {
                                                 jet_foundation::Outcome::jet_err_apply_conversion(
-                                                    &mut error,
-                                                    source,
-                                                    target,
+                                                    &mut error, source, target,
                                                 );
                                                 CtValue::from_jet_err(&error)
                                             } else {
@@ -8431,12 +8607,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         }
                     }
                 }
-                crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
-                    let subject = self
-                        .switch_subject
-                        .as_ref()
-                        .ok_or_else(|| unsupported("binary pattern outside switch", self.span()))?;
-                    let hit = super::bin_match_scan_value(subject, parts, false);
+                crate::Codegen::TIR::THostCall::BinMatchScan {
+                    subject,
+                    parts,
+                    probe,
+                } => {
+                    let subject = self.eval_expr_child(subject, scope)?;
+                    let hit = super::bin_match_scan_value(&subject, parts, false);
                     match probe {
                         crate::Codegen::TIR::TMatchProbe::IsSome => {
                             Ok(CtValue::Bool(hit.is_some()))
@@ -9420,7 +9597,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     return self.eval_expr_child(inner, scope);
                 }
                 let key = tir_place_address_key(inner);
-                let address = stable_place_address(&key) as usize;
+                let lifetime = crate::Codegen::TIR::tir_address_lifetime(inner);
+                let address = stable_sentry_place_address(&key, lifetime);
                 let (bytes, _) = sentry_layout(&inner.ty);
                 let owner = match &inner.kind {
                     TExprKind::HandleMethod {
@@ -9430,7 +9608,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     } => sentry_allocator_owner(&self.eval_expr_child(recv, scope)?),
                     _ => None,
                 };
-                if let Some(owner) = owner {
+                if lifetime == TAddressLifetime::Stack {
+                    jet_foundation::MemSentry::jet_sentry_register_stack_allocation(address, bytes);
+                } else if let Some(owner) = owner {
                     jet_foundation::MemSentry::jet_sentry_register_owned_allocation(
                         owner, address, bytes,
                     );
@@ -9718,9 +9898,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         let check_name = format!("{type_name}::check");
                         if let Some(check) = self.funcs.get(&check_name).copied() {
                             let text = argv.remove(0);
-                            return match self
-                                .run_func(check, vec![text.clone()], &mut HashMap::new())?
-                            {
+                            return match self.run_func(
+                                check,
+                                vec![text.clone()],
+                                &mut HashMap::new(),
+                            )? {
                                 CtValue::Present(_) => Ok(CtValue::Present(Box::new(text))),
                                 CtValue::Failed(error) => Ok(CtValue::Failed(error)),
                                 other => Err(unsupported(
@@ -10152,7 +10334,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     "div" => crate::AST::BinOp::Div,
                     "rem" => crate::AST::BinOp::Rem,
                     "pow" => crate::AST::BinOp::Pow,
-                    "rotate_left" | "rotate_right" => crate::AST::BinOp::Add,
+                    "rotate" if matches!(prefix.as_str(), "rotate_left" | "rotate_right") => {
+                        crate::AST::BinOp::Add
+                    }
                     other => {
                         return Err(unsupported(
                             &format!("OverflowOpt op `{other}`"),
@@ -10182,8 +10366,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 )
             }
             TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::Spawn { group, site, .. },
-            } => self.eval_spawn(*site, group.as_deref(), scope),
+                kind:
+                    TCoreClosureKind::Spawn {
+                        group, site, label, ..
+                    },
+            } => self.eval_spawn(*site, group.as_deref(), label.as_deref(), scope),
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::OnInterrupt { callback },
             } => self.register_interrupt_callback(callback, scope),
@@ -10215,10 +10402,62 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
             TExprKind::TaskGroupAll { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
-                    return Err(unsupported("task group all list", self.span()));
-                };
-                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
+                let tasks_value = self.eval_expr_child(tasks, scope)?;
+                match tasks_value {
+                    CtValue::List(tasks) => {
+                        self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
+                    }
+                    CtValue::Struct { fields, .. } => {
+                        let source_names = fields
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>();
+                        let task_values = fields
+                            .iter()
+                            .map(|(_, value)| value.clone())
+                            .collect::<Vec<_>>();
+                        let selected = self
+                            .task_select(&task_values, crate::task_group::JetTaskSelectMode::All)?;
+                        let CtValue::Present(inner) = selected else {
+                            return Ok(selected);
+                        };
+                        let CtValue::List(values) = *inner else {
+                            return Err(unsupported("task group all tuple result", self.span()));
+                        };
+                        if values.len() != source_names.len() {
+                            return Err(unsupported("task group all tuple arity", self.span()));
+                        }
+                        let mut values_by_name = source_names
+                            .into_iter()
+                            .zip(values)
+                            .collect::<HashMap<_, _>>();
+                        let canonical_names = match tasks.ty.without_user_tags() {
+                            Type::Tuple(tuple_fields) => tuple_fields
+                                .iter()
+                                .map(|(name, _)| name.clone())
+                                .collect::<Vec<_>>(),
+                            _ => return Err(unsupported("task group all tuple type", self.span())),
+                        };
+                        let mut result_fields = Vec::with_capacity(canonical_names.len());
+                        for name in canonical_names {
+                            let value = values_by_name
+                                .remove(&name)
+                                .or_else(|| values_by_name.remove(&mangle(&name)))
+                                .ok_or_else(|| {
+                                    unsupported("task group all tuple field", self.span())
+                                })?;
+                            result_fields.push((name, value));
+                        }
+                        if !values_by_name.is_empty() {
+                            return Err(unsupported("task group all tuple fields", self.span()));
+                        }
+                        Ok(CtValue::Present(Box::new(CtValue::Struct {
+                            type_name: "tuple".to_string(),
+                            fields: result_fields,
+                        })))
+                    }
+                    _ => Err(unsupported("task group all carrier", self.span())),
+                }
             }
             TExprKind::TaskGroupRace { tasks } => {
                 let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
@@ -10329,7 +10568,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                     TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
                 };
-                self.eval_call(&target, args, scope)
+                self.eval_call(&target, args, &expr.ty, scope)
             }
             TExprKind::ExternCall { wrapper, args, .. } => {
                 // The evaluator carries CtValue values, so the ownership clone
@@ -10943,10 +11182,69 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         Ok(())
     }
 
+    /// D-FAIL-CALL1=A: normalize the evaluator's implementation carrier to
+    /// the declared TIR type at a call/return boundary. `Present` is one
+    /// success layer for each declared `Result`/`Option`; it is not a license
+    /// to preserve every incidental wrapper produced while lowering a chain.
+    ///
+    /// The recursion follows the type tree, not the value tree alone. Thus an
+    /// outer `Result<Result<T, E>, E>` keeps both `Present` layers, while
+    /// surplus layers around a plain `T` are removed. `Failed` is control flow
+    /// rather than a payload and must cross every boundary unchanged.
+    fn is_eval_carrier_type(ty: &Type) -> bool {
+        match ty {
+            Type::Result { .. } | Type::Option(_) => true,
+            Type::Tagged { inner, .. } => Self::is_eval_carrier_type(inner),
+            _ => false,
+        }
+    }
+
+    pub(super) fn normalize_eval_value(value: CtValue, ty: &Type) -> CtValue {
+        if matches!(ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_STREAM) {
+            return value;
+        }
+        if let Type::Tagged { inner, .. } = ty {
+            return Self::normalize_eval_value(value, inner);
+        }
+        match ty {
+            Type::Result { ok, .. } | Type::Option(ok) => {
+                let payload = match value {
+                    CtValue::Present(payload) => *payload,
+                    CtValue::Failed(report) => return CtValue::Failed(report),
+                    payload => payload,
+                };
+                let payload_is_carrier = Self::is_eval_carrier_type(ok);
+                match Self::normalize_eval_value(payload, ok) {
+                    // An inner carrier's stop is a value of the outer
+                    // success (`Ok(Err(_))`/`Some(None)`). Only a stop under
+                    // a non-carrier payload is an accidental wrapper around
+                    // the current boundary and should escape as control flow.
+                    CtValue::Failed(report) if !payload_is_carrier => CtValue::Failed(report),
+                    payload => CtValue::Present(Box::new(payload)),
+                }
+            }
+            _ => match value {
+                CtValue::Present(payload) => {
+                    let mut payload = *payload;
+                    loop {
+                        match payload {
+                            CtValue::Present(next) => payload = *next,
+                            CtValue::Failed(report) => break CtValue::Failed(report),
+                            payload => break payload,
+                        }
+                    }
+                }
+                CtValue::Failed(report) => CtValue::Failed(report),
+                value => value,
+            },
+        }
+    }
+
     fn eval_call(
         &mut self,
         name: &str,
         args: &'a [TCallArg],
+        caller_ty: &Type,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
@@ -10977,23 +11275,27 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
         // D-VERDICT-1321-1: variadic print — each argument on its own line.
         if name == "print" {
-            let text = argv
+            let text = args
                 .iter()
-                .map(|v| {
-                    crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show())
+                .zip(argv.iter())
+                .map(|(arg, value)| {
+                    let ty = arg.widen_to_union.as_ref().unwrap_or(&arg.value.ty);
+                    self.render_display_value(value, ty, scope)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join("\n");
             self.write_print(&text, false)?;
             return Ok(CtValue::Unit);
         }
         if name == "eprint" {
-            let text = argv
+            let text = args
                 .iter()
-                .map(|v| {
-                    crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show())
+                .zip(argv.iter())
+                .map(|(arg, value)| {
+                    let ty = arg.widen_to_union.as_ref().unwrap_or(&arg.value.ty);
+                    self.render_display_value(value, ty, scope)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join("\n");
             self.write_print(&text, true)?;
             return Ok(CtValue::Unit);
@@ -11051,12 +11353,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             );
         }
         let func = self.funcs.get(name).copied();
+        let codec_body = match func {
+            Some(func) => Self::is_canonical_serde_body(func),
+            None => false,
+        };
         // Codec-sensitive named deopts must retain the canonical migration
-        // plan. Other deopts keep ordinary cross-tier native dispatch.
-        if !self.prefer_tir_calls || func.is_none() {
+        // plan. A registered codec body is the same seam even when its caller
+        // was not marked as a canonical-call root; other deopts keep ordinary
+        // cross-tier native dispatch.
+        if (!self.prefer_tir_calls && !codec_body) || func.is_none() {
             if let Some(hook) = super::native_call_hook() {
                 if let Some(result) = hook(name, &argv) {
-                    return result;
+                    return result.map(|value| Self::normalize_eval_value(value, caller_ty));
                 }
             }
         }
@@ -11107,7 +11415,411 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 self.write_back_place(&carg.value, updated.clone(), scope)?;
             }
         }
-        Ok(result)
+        Ok(Self::normalize_eval_value(result, caller_ty))
+    }
+
+    fn text_method(
+        &mut self,
+        value: &CtValue,
+        ty: &Type,
+        method: &str,
+    ) -> Result<Option<String>, Diagnostic> {
+        let owner = match ty.without_user_tags() {
+            Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+            _ => match value {
+                CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                    Some(type_name.as_str())
+                }
+                _ => None,
+            },
+        };
+        let Some(owner) = owner else {
+            return Ok(None);
+        };
+        let canonical = crate::Codegen::nominal_leaf(owner)
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or_else(|| crate::Codegen::nominal_leaf(owner));
+        let mut keys = vec![format!("{owner}::{method}")];
+        let canonical_key = format!("{canonical}::{method}");
+        if !keys.iter().any(|key| key == &canonical_key) {
+            keys.push(canonical_key);
+        }
+        for key in keys {
+            let Some(func) = self.funcs.get(&key).copied() else {
+                continue;
+            };
+            let mut child = HashMap::new();
+            child.insert("self".to_string(), value.clone());
+            if let CtValue::Str(text) = self.run_func(func, Vec::new(), &mut child)? {
+                return Ok(Some(text));
+            }
+        }
+        Ok(None)
+    }
+
+    fn render_record_text(
+        &mut self,
+        type_name: &str,
+        fields: &[(String, CtValue)],
+        scope: &mut HashMap<String, CtValue>,
+        debug: bool,
+    ) -> Result<Option<String>, Diagnostic> {
+        let canonical = crate::Codegen::nominal_leaf(type_name)
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
+        let defs = self.struct_fields.get(canonical).cloned().or_else(|| {
+            jet_foundation::StructuralDebug::jet_debug_field_metadata(canonical).map(|fields| {
+                fields
+                    .iter()
+                    .map(|(name, redacted)| ((*name).to_string(), *redacted))
+                    .collect()
+            })
+        });
+        let Some(defs) = defs else {
+            return Ok(None);
+        };
+        let field_types = self
+            .struct_field_types
+            .get(canonical)
+            .or_else(|| self.struct_field_types.get(type_name))
+            .cloned()
+            .unwrap_or_default();
+        if field_types
+            .iter()
+            .any(|(_, ty)| matches!(ty.without_user_tags(), Type::Fn { .. }))
+            || fields
+                .iter()
+                .any(|(_, value)| matches!(value, CtValue::Closure(_)))
+        {
+            return Ok(Some(format!("{canonical} {{ ... }}")));
+        }
+        let matches_name = |left: &str, right: &str| {
+            left == right
+                || left.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(right)
+                || right.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(left)
+        };
+        let rendered = defs
+            .iter()
+            .map(|(name, redact)| {
+                if *redact {
+                    return Ok((name.clone(), "[redacted]".to_string()));
+                }
+                let value = fields
+                    .iter()
+                    .find(|(field, _)| matches_name(field, name))
+                    .map(|(_, value)| value);
+                let field_ty = field_types
+                    .iter()
+                    .find(|(field, _)| matches_name(field, name))
+                    .map(|(_, ty)| ty.clone());
+                let text = match (value, field_ty) {
+                    (Some(value), Some(field_ty)) if debug => {
+                        self.render_debug_value(value, &field_ty)?
+                    }
+                    (Some(value), Some(field_ty)) => {
+                        self.render_display_value(value, &field_ty, scope)?
+                    }
+                    (Some(value), None) if debug => self.debug_value(value),
+                    (Some(value), None) => self.show_value(value, scope)?,
+                    (None, Some(field_ty)) if debug => {
+                        self.render_debug_value(&CtValue::Unit, &field_ty)?
+                    }
+                    (None, Some(field_ty)) => {
+                        self.render_display_value(&CtValue::Unit, &field_ty, scope)?
+                    }
+                    (None, None) => String::new(),
+                };
+                Ok((name.clone(), text))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        Ok(Some(jet_foundation::StructuralDebug::jet_debug_record(
+            canonical, rendered,
+        )))
+    }
+
+    fn render_tuple_text(
+        &mut self,
+        fields: &[(String, CtValue)],
+        field_types: &[(String, Box<Type>)],
+        scope: &mut HashMap<String, CtValue>,
+        debug: bool,
+    ) -> Result<String, Diagnostic> {
+        if field_types.is_empty() {
+            return Ok("()".to_string());
+        }
+        let matches_name = |left: &str, right: &str| {
+            left == right
+                || left.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(right)
+                || right.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(left)
+        };
+        let rendered = field_types
+            .iter()
+            .map(|(name, field_ty)| {
+                let missing = CtValue::Unit;
+                let value = fields
+                    .iter()
+                    .find(|(field, _)| matches_name(field, name))
+                    .map(|(_, value)| value)
+                    .unwrap_or(&missing);
+                let text = if debug {
+                    self.render_debug_value(value, field_ty)?
+                } else {
+                    self.render_display_value(value, field_ty, scope)?
+                };
+                Ok((name.clone(), text))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let label = format!(
+            "({})",
+            field_types
+                .iter()
+                .map(|(name, _)| {
+                    name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(name)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        Ok(jet_foundation::StructuralDebug::jet_debug_record(
+            &label, rendered,
+        ))
+    }
+
+    fn render_enum_text(
+        &mut self,
+        variant: &str,
+        args: &[(Option<String>, CtValue)],
+        union_members: Option<&[Type]>,
+        scope: &mut HashMap<String, CtValue>,
+        debug: bool,
+    ) -> Result<String, Diagnostic> {
+        let variant = variant
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(variant);
+        if let Some(members) = union_members {
+            let payload_ty = members
+                .iter()
+                .find(|member| {
+                    let tag = crate::AST::union_member_tag(member);
+                    tag == variant
+                        || tag
+                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            .is_some_and(|tag| tag == variant)
+                })
+                .or_else(|| members.first());
+            let Some((_, payload)) = args.first() else {
+                return Ok(String::new());
+            };
+            let payload_ty = payload_ty.cloned().unwrap_or_else(|| payload.jet_type());
+            let rendered = if debug {
+                self.render_debug_value(payload, &payload_ty)?
+            } else {
+                self.render_display_value(payload, &payload_ty, scope)?
+            };
+            return Ok(jet_foundation::StructuralDebug::jet_debug_union(rendered));
+        }
+        if args.is_empty() {
+            return Ok(variant.to_string());
+        }
+        if args.iter().all(|(label, _)| label.is_some()) {
+            let fields = args
+                .iter()
+                .map(|(label, value)| {
+                    let value_ty = value.jet_type();
+                    let rendered = if debug {
+                        self.render_debug_value(value, &value_ty)?
+                    } else {
+                        self.render_display_value(value, &value_ty, scope)?
+                    };
+                    Ok((label.clone().unwrap_or_default(), rendered))
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            return Ok(jet_foundation::StructuralDebug::jet_debug_record(
+                variant, fields,
+            ));
+        }
+        let parts = args
+            .iter()
+            .map(|(_, value)| {
+                let value_ty = value.jet_type();
+                if debug {
+                    self.render_debug_value(value, &value_ty)
+                } else {
+                    self.render_display_value(value, &value_ty, scope)
+                }
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        Ok(jet_foundation::StructuralDebug::jet_debug_variant(
+            variant,
+            Some(parts.join(", ")),
+        ))
+    }
+
+    fn render_display_value(
+        &mut self,
+        value: &CtValue,
+        ty: &Type,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<String, Diagnostic> {
+        let ty = ty.without_user_tags();
+        if let Some(text) = prelude_error_render(value) {
+            return Ok(text);
+        }
+        if let Some(text) = self.text_method(value, ty, "display")? {
+            return Ok(text);
+        }
+        if let Some(text) = prelude_time_render(value) {
+            return Ok(text);
+        }
+        if let Some(text) = crate::Comptime::display_core_pure_value(value) {
+            return Ok(text);
+        }
+        match (value, ty) {
+            (value, Type::Tagged { inner, .. })
+            | (value, Type::Quantity { base: inner, .. })
+            | (value, Type::InlineRange { base: inner, .. }) => {
+                self.render_display_value(value, inner, scope)
+            }
+            (CtValue::Present(value), Type::Option(inner)) => {
+                self.render_display_value(value, inner, scope)
+            }
+            (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => Ok("null".to_string()),
+            (CtValue::Present(value), Type::Result { ok, .. }) => Ok(format!(
+                "Ok({})",
+                self.render_display_value(value, ok, scope)?
+            )),
+            (CtValue::Failed(CtReport::Told(value)), Type::Result { err, .. }) => Ok(format!(
+                "Err({})",
+                self.render_display_value(value, err, scope)?
+            )),
+            (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+                let parts = values
+                    .iter()
+                    .map(|value| self.render_display_value(value, inner, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("[{}]", parts.join(", ")))
+            }
+            (
+                CtValue::Map(entries),
+                Type::Map {
+                    key,
+                    value: value_ty,
+                    ..
+                },
+            ) => {
+                let entries = entries
+                    .iter()
+                    .map(|(key_value, value)| {
+                        Ok((
+                            self.render_display_value(&key_value.to_value(), key, scope)?,
+                            self.render_display_value(value, value_ty, scope)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                Ok(jet_foundation::StructuralDebug::jet_debug_map(entries))
+            }
+            (CtValue::Struct { fields, .. }, Type::Tuple(field_types)) => {
+                self.render_tuple_text(fields, field_types, scope, false)
+            }
+            (CtValue::Struct { type_name, fields }, Type::Named(_) | Type::Apply { .. }) => {
+                if let Some(text) = self.render_record_text(type_name, fields, scope, false)? {
+                    return Ok(text);
+                }
+                self.show_value(value, scope)
+            }
+            (CtValue::Enum { variant, args, .. }, Type::Union(members)) => {
+                self.render_enum_text(variant, args, Some(members), scope, false)
+            }
+            (CtValue::Enum { variant, args, .. }, _) => {
+                self.render_enum_text(variant, args, None, scope, false)
+            }
+            _ => match show_typed_value(value, ty, false) {
+                Some(text) => Ok(text),
+                None => self.show_value(value, scope),
+            },
+        }
+    }
+
+    fn render_debug_value(&mut self, value: &CtValue, ty: &Type) -> Result<String, Diagnostic> {
+        if let Some(text) = prelude_error_render(value) {
+            return Ok(text);
+        }
+        let ty = ty.without_user_tags();
+        if let Some(text) = self.text_method(value, ty, "debug")? {
+            return Ok(text);
+        }
+        if let Some(text) = prelude_time_render(value) {
+            return Ok(text);
+        }
+        match (value, ty) {
+            (value, Type::Tagged { inner, .. })
+            | (value, Type::Quantity { base: inner, .. })
+            | (value, Type::InlineRange { base: inner, .. }) => {
+                self.render_debug_value(value, inner)
+            }
+            (CtValue::Present(value), Type::Option(inner)) => {
+                Ok(jet_foundation::StructuralDebug::jet_debug_optional(Some(
+                    self.render_debug_value(value, inner)?,
+                )))
+            }
+            (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => {
+                Ok(jet_foundation::StructuralDebug::jet_debug_optional(None))
+            }
+            (CtValue::Present(value), Type::Result { ok, .. }) => {
+                Ok(format!("Ok({})", self.render_debug_value(value, ok)?))
+            }
+            (CtValue::Failed(CtReport::Told(value)), Type::Result { err, .. }) => {
+                Ok(format!("Err({})", self.render_debug_value(value, err)?))
+            }
+            (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+                let parts = values
+                    .iter()
+                    .map(|value| self.render_debug_value(value, inner))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("[{}]", parts.join(", ")))
+            }
+            (
+                CtValue::Map(entries),
+                Type::Map {
+                    key,
+                    value: value_ty,
+                    ..
+                },
+            ) => {
+                let entries = entries
+                    .iter()
+                    .map(|(key_value, value)| {
+                        Ok((
+                            self.render_debug_value(&key_value.to_value(), key)?,
+                            self.render_debug_value(value, value_ty)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                Ok(jet_foundation::StructuralDebug::jet_debug_map(entries))
+            }
+            (CtValue::Struct { fields, .. }, Type::Tuple(field_types)) => {
+                let mut empty_scope = HashMap::new();
+                self.render_tuple_text(fields, field_types, &mut empty_scope, true)
+            }
+            (CtValue::Struct { type_name, fields }, Type::Named(_) | Type::Apply { .. }) => {
+                let mut empty_scope = HashMap::new();
+                if let Some(text) =
+                    self.render_record_text(type_name, fields, &mut empty_scope, true)?
+                {
+                    return Ok(text);
+                }
+                Ok(self.debug_value(value))
+            }
+            (CtValue::Enum { variant, args, .. }, Type::Union(members)) => {
+                let mut empty_scope = HashMap::new();
+                self.render_enum_text(variant, args, Some(members), &mut empty_scope, true)
+            }
+            (CtValue::Enum { variant, args, .. }, _) => {
+                let mut empty_scope = HashMap::new();
+                self.render_enum_text(variant, args, None, &mut empty_scope, true)
+            }
+            _ => Ok(show_typed_value(value, ty, true).unwrap_or_else(|| self.debug_value(value))),
+        }
     }
 
     pub(super) fn show_value(
@@ -11141,6 +11853,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
             }
         }
+        if let Some(text) = prelude_error_render(v) {
+            return Ok(text);
+        }
         if let Some(text) = prelude_time_render(v) {
             return Ok(text);
         }
@@ -11170,7 +11885,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     .iter()
                     .map(|(key, value)| {
                         Ok((
-                            self.debug_value(&key.to_value()),
+                            self.show_value(&key.to_value(), scope)?,
                             self.show_value(value, scope)?,
                         ))
                     })
@@ -11347,6 +12062,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
+        if let Some(text) = prelude_error_render(v) {
+            return text;
+        }
         if let Some(text) = prelude_time_render(v) {
             return text;
         }
@@ -11362,10 +12080,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         );
                     }
                 }
+                let canonical = self.canonical_nominal(type_name);
                 let field_types = self
                     .struct_field_types
                     .get(ty)
-                    .or_else(|| self.struct_field_types.get(type_name));
+                    .or_else(|| self.struct_field_types.get(type_name))
+                    .or_else(|| {
+                        canonical
+                            .as_deref()
+                            .and_then(|key| self.struct_field_types.get(key))
+                    });
                 let render_field = |name: &str, value: &CtValue| {
                     field_types
                         .and_then(|types| {
@@ -11378,14 +12102,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         .map(|(_, field_ty)| self.debug_value_typed(value, field_ty))
                         .unwrap_or_else(|| self.debug_value(value))
                 };
-                let defs = self.struct_fields.get(ty).cloned().or_else(|| {
-                    jet_foundation::StructuralDebug::jet_debug_field_metadata(ty).map(|fields| {
-                        fields
-                            .iter()
-                            .map(|(name, redacted)| ((*name).to_string(), *redacted))
-                            .collect()
+                let defs = self
+                    .struct_fields
+                    .get(ty)
+                    .or_else(|| {
+                        canonical
+                            .as_deref()
+                            .and_then(|key| self.struct_fields.get(key))
                     })
-                });
+                    .cloned()
+                    .or_else(|| {
+                        jet_foundation::StructuralDebug::jet_debug_field_metadata(ty).map(
+                            |fields| {
+                                fields
+                                    .iter()
+                                    .map(|(name, redacted)| ((*name).to_string(), *redacted))
+                                    .collect()
+                            },
+                        )
+                    });
                 let Some(defs) = defs else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
                     // Adapt its fields to the same record assembler AOT uses.
@@ -11597,7 +12332,10 @@ fn eval_precise_builtin(
                 .map(|fraction| fraction.to_value())
                 .ok_or_else(|| unsupported("invalid exact quotient", span))
         }
-        ("Decimal", "add" | "sub" | "mul" | "div" | "round" | "floor" | "ceil" | "equal" | "to_string")
+        (
+            "Decimal",
+            "add" | "sub" | "mul" | "div" | "round" | "floor" | "ceil" | "equal" | "to_string",
+        )
         | (
             "Fraction",
             "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal" | "numerator"
@@ -11620,7 +12358,12 @@ fn eval_precise_builtin(
         ("Fraction", "from_float") => match args.first() {
             Some(CtValue::Float(value)) => CtFraction::from_float(value.as_f64())
                 .map(|fraction| fraction.to_value())
-                .ok_or_else(|| unsupported("`Fraction.from_float` needs an exactly representable Float", span)),
+                .ok_or_else(|| {
+                    unsupported(
+                        "`Fraction.from_float` needs an exactly representable Float",
+                        span,
+                    )
+                }),
             _ => Err(unsupported("`Fraction.from_float`", span)),
         },
         ("Fraction", "from_decimal") => match args.first() {

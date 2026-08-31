@@ -2,9 +2,9 @@
 use core.crypto as crypto
 
 fn run() {
-    key :: crypto.SigningKey.new_random() ?? return Err("signing key")
+    key :: crypto.SigningKey.new_random() ?? panic("signing key")
     message :: [U8]{0x6a, 0x65, 0x74}
-    signature :: crypto.sign(key, message) ?? return Err("sign")
-    result :: crypto.verify(key.public_key(), message, signature) ?? return Err("verify")
+    signature :: crypto.sign(key, message) ?? panic("sign")
+    result :: crypto.verify(key.public_key(), message, signature) ?? panic("verify")
     print(result)
 }

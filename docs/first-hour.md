@@ -75,8 +75,8 @@ run.jet
 The four `@*.jet` files are commented command-override homes. Ignore them for
 the beginner path; they do not change the stock commands until you opt in.
 
-The generated `run.jet` contains a small greeting, a zero-argument `fn run()`,
-and one smoke test. It prints:
+The generated `run.jet` contains a small greeting, a typed `#CLI` entry, and
+one smoke test. Its default name is `world`, so it prints:
 
 ```text
 hello, world
@@ -112,6 +112,11 @@ Open `run.jet` in your editor and replace it with this small program. It is the
 same source as the [canonical onboarding example](../examples/features/basics/onboarding/run.jet):
 
 ```jet
+#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"Jet"}
+}
+
 fn greet(name: String) String -> {
     return "hello, {name}"
 }
@@ -120,9 +125,7 @@ fn greet(name: String) String -> {
     assert_eq(greet("Jet"), "hello, Jet")
 }
 
-fn run() {
-    print(greet("Jet"))
-}
+fn run(args: GreetingArgs) { print(greet(args.name)) }
 ```
 
 Check the source without running it:
@@ -199,7 +202,7 @@ same `run.jet`.
 | State | Editor | Terminal | Expected result or recovery |
 |---|---|---|---|
 | Install ready | Open a clean folder after `jet version` succeeds. | `jet new hello` | Jet creates `package.jet` and `run.jet`; continue in the new project directory. |
-| Scaffolded | Open `run.jet`; the file contains `fn run()` and a smoke `#Test`. | `jet run` | The generated program prints `hello, world`. |
+| Scaffolded | Open `run.jet`; the file contains a typed `#CLI` entry and a smoke `#Test`. | `jet run` | The generated program prints `hello, world`. |
 | Valid edit | Save the changed `run.jet`; diagnostics are clear. | `jet check run.jet`, `jet test run.jet`, then `jet run` | Check, test, and run all use the same source. VS Code/Cursor and Zed Run/Test code lenses call these commands for the active file. |
 | Invalid edit | The diagnostic pane shows the stable code and fix. | `jet check run.jet` | Read `What`, `Why`, and `Fix`; repair the file, then rerun the check. |
 | Missing entry | Open the project directory and create or restore `run.jet`. | `jet run` | The diagnostic names `run.jet`; create it, or pass `jet run path/to/file.jet`. |

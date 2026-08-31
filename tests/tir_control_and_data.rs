@@ -149,7 +149,10 @@ fn result_handler_example_matches_all_execution_tiers() {
 
     let source = include_str!("../examples/features/errors/result_handler.jet");
     let (code, stdout, stderr) = tir_support::jit_run_traced("result_handler_example_jit", source);
-    assert_eq!(code, 0, "default `jet run` failed for result_handler: {stderr}");
+    assert_eq!(
+        code, 0,
+        "default `jet run` failed for result_handler: {stderr}"
+    );
     assert_eq!(
         stdout,
         include_str!("../examples/features/expected/errors/result_handler.out")
@@ -187,6 +190,56 @@ fn run() {
 }
 "#;
     tir_support::assert_tiers_agree("tail_return_values", src, "one\nother\nearly\nlate\n");
+}
+
+/// A terminating value branch must not make the surviving branch's value
+/// disappear from the TIR merge type. The resident JIT and the other tiers
+/// must preserve the live `Bool` branch.
+#[test]
+fn nested_return_if_keeps_live_value_branch_type() {
+    let src = r#"
+fn nested_return_if(value: DataTree, right: DataTree) Bool !Never -> {
+    return if value == {
+        .Text(left_text) -> {
+            return if right == {
+                .Text(right_text) -> left_text == right_text
+                else -> false
+            }
+        }
+        else -> true
+    }
+}
+
+fn run() {
+    print(nested_return_if(DataTree.Null, DataTree.Null))
+}
+"#;
+    let (jit_code, jit_stdout, jit_stderr) =
+        tir_support::jit_run_traced("nested_return_if_live_branch", src);
+    assert_eq!(jit_code, 0, "{jit_stderr}");
+    assert_eq!(jit_stdout, "true\n", "{jit_stderr}");
+    assert!(
+        jit_stderr
+            .lines()
+            .any(|line| line.starts_with("nested_return_if") && line.contains("tier1 native")),
+        "nested return-if deoptimized instead of running on the resident JIT: {jit_stderr}"
+    );
+    assert!(
+        !jit_stderr.contains("nested_return_if: tier0 interp"),
+        "nested return-if fell back to the interpreter: {jit_stderr}"
+    );
+
+    let (interp_code, interp_stdout, interp_stderr) =
+        tir_support::interpreter_run("nested_return_if_live_branch_interp", src);
+    assert_eq!(interp_code, 0, "{interp_stderr}");
+    assert_eq!(interp_stdout, jit_stdout);
+
+    if have_rustc() {
+        let (aot_code, aot_stdout, aot_stderr) =
+            build_and_run_full("jet_tir_test", "nested_return_if_live_branch_aot", src);
+        assert_eq!(aot_code, 0, "{aot_stderr}");
+        assert_eq!(aot_stdout, jit_stdout);
+    }
 }
 
 #[test]
@@ -263,11 +316,9 @@ fn label(value: Int) String -> {
     return "other";
 }
 "#;
-    let semicolon_output = tir_support::compile_source(
-        "redundant_tail_return_semicolons.jet",
-        semicolon_lintable,
-    )
-    .expect("semicolon-terminated direct returns should still be lintable");
+    let semicolon_output =
+        tir_support::compile_source("redundant_tail_return_semicolons.jet", semicolon_lintable)
+            .expect("semicolon-terminated direct returns should still be lintable");
     let semicolon_lint = semicolon_output
         .lints
         .iter()
@@ -278,10 +329,19 @@ fn label(value: Int) String -> {
         std::slice::from_ref(semicolon_lint.edit.as_ref().unwrap()),
     )
     .expect("the semicolon-shaped L0513 edit must apply");
-    assert!(!semicolon_fixed.contains("return"), "fixed source:\n{semicolon_fixed}");
-    assert!(!semicolon_fixed.contains(';'), "fixed source:\n{semicolon_fixed}");
-    tir_support::compile_source("redundant_tail_return_semicolons_fixed.jet", &semicolon_fixed)
-        .expect("the generated value table must compile after semicolon removal");
+    assert!(
+        !semicolon_fixed.contains("return"),
+        "fixed source:\n{semicolon_fixed}"
+    );
+    assert!(
+        !semicolon_fixed.contains(';'),
+        "fixed source:\n{semicolon_fixed}"
+    );
+    tir_support::compile_source(
+        "redundant_tail_return_semicolons_fixed.jet",
+        &semicolon_fixed,
+    )
+    .expect("the generated value table must compile after semicolon removal");
 
     let effectful = r#"
 fn label(value: Int) String -> {
@@ -610,6 +670,62 @@ fn run() {
         "3\n3\n99\n3\n5\n99\n",
     );
 }
+/// D-FAILURE-FOUNDATION1=A / #2266: a fallible callee nested inside a
+/// collection callback projects its carrier onto the callback itself. The
+/// callback must remain `Result`-returning on AOT, rather than leaving a `?`
+/// inside a raw-return closure; default, JIT, and interpreter agree.
+#[test]
+fn implicit_failure_propagation_in_map_and_filter_callbacks() {
+    let src = r#"
+fn source(value: Int) Int -> {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn source_flag(value: Int) Bool -> {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn add_one(value: Int) Int -> value + 1
+fn retain_flag(value: Bool) Bool -> value
+
+fn run() {
+    values :: [1, 2]
+    mapped :: values.map((value: Int) -> add_one(source(value))) ?? []
+    filtered :: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+    mapped_block :: values.map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_block :: values.filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    mapped_failed :: [0, 1].map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_failed :: [0, 1].filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(mapped[0])
+    print(mapped[1])
+    print(filtered.len())
+    print(mapped_block[0])
+    print(mapped_block[1])
+    print(filtered_block.len())
+    print(mapped_failed.len())
+    print(filtered_failed.len())
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "implicit_failure_propagation_collection_callbacks",
+        src,
+        "2\n3\n1\n2\n3\n1\n0\n0\n",
+    );
+}
 
 /// `?? panic(...)` must stay on the native tier and use the full shared rich
 /// stop renderer, including source and scalar-local context.
@@ -692,6 +808,29 @@ fn returned_function_call_example_matches_all_execution_tiers() {
         include_str!("../examples/features/expected/functions/returned_function_call.out"),
     );
 }
+
+/// D-CALLVALUE1=B / I9: a named function value with declaration-local
+/// parameter names keeps the same callable behavior on release AOT, default
+/// JIT, and the forced interpreter.
+#[test]
+fn named_function_value_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "functions/named_function_value",
+        include_str!("../examples/features/expected/functions/named_function_value.out"),
+    );
+}
+
+/// D-STDLIB-OPTPARAM1=A / #2310 / I9: every signed, endian, and
+/// floating-point Bytes writer has one canonical sibling spelling and one
+/// byte oracle on release AOT, default `jet run`, and the forced interpreter.
+#[test]
+fn binary_codec_writer_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "parsing/binary-codecs",
+        include_str!("../examples/features/expected/parsing/binary-codecs.out"),
+    );
+}
+
 /// D-CALLABLE-ONE1=A / D-BODY-LAST1=B / D-SIG-SHAPE1=B / D-LOOP-STMT-ARROW1=C / I9:
 /// the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the
@@ -826,6 +965,23 @@ fn channel_select_examples_match_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "concurrency/task_runtime_audit",
         include_str!("../examples/features/expected/concurrency/task_runtime_audit.out"),
+    );
+}
+
+/// D-CONC-FAIL1 / D-OBSERVE-TASK1 / I9: child failure identity and the
+/// bounded parked-task report agree across debug AOT, release AOT, default
+/// `jet run`, and the forced interpreter.
+#[test]
+fn task_observation_examples_match_all_execution_tiers() {
+    tir_support::assert_example_cli_error_tiers_agree(
+        "concurrency/task_panic",
+        70,
+        include_str!("../examples/features/expected/concurrency/task_panic.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "concurrency/task_blocked",
+        70,
+        include_str!("../examples/features/expected/concurrency/task_blocked.err.out"),
     );
 }
 
@@ -1014,6 +1170,148 @@ fn run() {
     let (code, stdout) = build_and_run("tir_ifchain", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "Fizz\nBuzz\nFizzBuzz\n7\n");
+}
+
+#[test]
+fn discarded_if_does_not_unify_mixed_tail_values() {
+    let src = r#"
+fn branch(flag: Bool) -[IO]> {
+    if {
+        flag -> { print("returned"); 7 }
+        else -> { print("value") }
+    }
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(true)
+        branch(false)
+    }
+}
+"#;
+    tir_support::assert_tiers_agree_with_application_policy(
+        "discarded_if_mixed_tails",
+        src,
+        "returned\nvalue\n",
+        RESULT_HANDLER_PACKAGE,
+    );
+}
+
+#[test]
+fn discarded_if_without_else_falls_through() {
+    let src = r#"
+fn branch(flag: Bool) -[IO]> {
+    if flag {
+        print("inside")
+    }
+    print("after")
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(false)
+        branch(true)
+    }
+}
+"#;
+    tir_support::assert_tiers_agree_with_application_policy(
+        "discarded_if_without_else",
+        src,
+        "after\ninside\nafter\n",
+        RESULT_HANDLER_PACKAGE,
+    );
+}
+
+#[test]
+fn parenthesized_discarded_if_matches_direct_form() {
+    let src = r#"
+fn branch(flag: Bool) -[IO]> {
+    (if {
+        flag -> { print("paren-returned"); 11 }
+        else -> { print("paren-value") }
+    })
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(true)
+        branch(false)
+    }
+}
+"#;
+    tir_support::assert_tiers_agree_with_application_policy(
+        "parenthesized_discarded_if",
+        src,
+        "paren-returned\nparen-value\n",
+        RESULT_HANDLER_PACKAGE,
+    );
+}
+
+#[test]
+fn discarded_result_handler_evaluates_subject_once_without_tail_unification() {
+    let src = r#"
+fn classify(ok: Bool) Int -[IO]> {
+    print("subject")
+    if ok {
+        return 5
+    }
+    return Err("bad")
+}
+
+fn handle(ok: Bool) -[IO]> {
+        classify(ok) ? _success -> { print("success") } ! _failure -> { print("failure"); 9 }
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        handle(true)
+        handle(false)
+    }
+}
+"#;
+    tir_support::assert_tiers_agree_with_application_policy(
+        "discarded_result_handler_mixed_tails",
+        src,
+        "subject\nsuccess\nsubject\nfailure\n",
+        RESULT_HANDLER_PACKAGE,
+    );
+}
+
+#[test]
+fn deep_discarded_else_if_chain_stays_iterative() {
+    let mut src = String::from("fn deep(flag: Bool) -[IO]> {\n    ");
+    for _ in 0..48 {
+        src.push_str("if { flag -> print(\"stop\") else -> ");
+    }
+    src.push_str(
+        r#"print("deep-tail")"#,
+    );
+    for _ in 0..48 {
+        src.push_str(" }");
+    }
+    src.push_str(
+        r#"
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        deep(true)
+        deep(false)
+    }
+}
+"#,
+    );
+    tir_support::assert_tiers_agree_with_application_policy(
+        "deep_discarded_else_if_chain",
+        &src,
+        "stop\ndeep-tail\n",
+        RESULT_HANDLER_PACKAGE,
+    );
 }
 
 /// D-IFGUARD1=A: statement/value guards share ordered `if` lowering. Heads run
@@ -1822,6 +2120,34 @@ fn run() {
     assert_tiers_agree("tir_enum_unit", src, "stop\ncaution\n");
 }
 
+#[test]
+fn data_tree_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn classify(tree: DataTree) String -> {
+    if tree == {
+        .Object(entries) -> { return "object:{entries.len()}" }
+        .Int(_) -> { return "int" }
+        else -> { return "other" }
+    }
+}
+fn run() {
+    print(classify(DataTree.Object(["a": DataTree.Int(7)])))
+    print(classify(DataTree.Int(3)))
+    print(classify(DataTree.Text("x")))
+}
+"#;
+    let (aot_code, aot_stdout) = build_and_run("tir_data_tree_pattern_dispatch", src);
+    assert_eq!(aot_code, 0);
+    assert_eq!(aot_stdout, "object:1\nint\nother\n");
+
+    let (default_code, default_stdout, stderr) = jit_run("tir_data_tree_pattern_dispatch", src);
+    assert_eq!(default_code, 0, "default tier failed: {stderr}");
+    assert_eq!(default_stdout, "object:1\nint\nother\n", "{stderr}");
+}
+
 /// Scalar-payload variants, an enum literal with a payload (`Conn.Active(42)`), a
 /// payload binding read in the arm body, an or-pattern sharing a binding
 /// (`Active(id) | Reconnecting(id)`), and a wildcard slot (`Idle(_)`).
@@ -1917,6 +2243,19 @@ fn run() {
     let (code, stdout) = build_and_run("tir_enum_range", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "success\nclient error\nother\nnetwork error\n");
+}
+
+#[test]
+fn datatree_array_accepts_explicit_empty_payload_on_all_tiers() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    _value := DataTree.Array([DataTree]{})
+}
+"#;
+    assert_tiers_agree("tir_datatree_empty_array_payload", src, "");
 }
 
 /// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch

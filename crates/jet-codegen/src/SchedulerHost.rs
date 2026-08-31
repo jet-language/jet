@@ -456,16 +456,20 @@ mod scheduler_host_tests {
             (
                 JetSchedulerJoin {
                     rx: slow_rx,
+                    pending: std::sync::Mutex::new(None),
                     completion_order: slow_order,
                     completion_wait: ParkSlot::new(),
+                    identity: "scheduler-host-slow".to_string(),
                 },
                 JetTaskControl::new(),
             ),
             (
                 JetSchedulerJoin {
                     rx: fast_rx,
+                    pending: std::sync::Mutex::new(None),
                     completion_order: fast_order,
                     completion_wait: ParkSlot::new(),
+                    identity: "scheduler-host-fast".to_string(),
                 },
                 JetTaskControl::new(),
             ),

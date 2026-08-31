@@ -483,10 +483,32 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .join(", ");
             format!("format!(\"{}({})\", {})", s.name, fmt_fields, show_fields)
         };
+        let display_body = struct_jet_display_body(s, has_fn_field);
         let tp_bounds = if has_view_field {
             add_view_lifetime_generic(tp_bounds)
         } else {
             tp_bounds
+        };
+        let mut display_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
+        for bounds in display_extra.values_mut() {
+            for bound in bounds {
+                if bound == "JetShow" {
+                    *bound = "JetDisplay".to_string();
+                }
+            }
+        }
+        let mut display_impl_bounds = display_extra;
+        for (k, v) in &clone_extra {
+            display_impl_bounds
+                .entry(k.clone())
+                .or_default()
+                .extend(v.iter().cloned());
+        }
+        let display_tp_bounds = Generics::rust_type_param_list(&s.type_params, &display_impl_bounds);
+        let display_tp_bounds = if has_view_field {
+            add_view_lifetime_generic(display_tp_bounds)
+        } else {
+            display_tp_bounds
         };
         if cx.auto_printable.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
@@ -525,10 +547,11 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             && !cx.display_types.contains(&s.name)
         {
             out.push_str(&format!(
-                "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
-                tp_bounds,
+                "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
+                display_tp_bounds,
                 mangle_path(&s.name),
                 tp_plain,
+                display_body,
             ));
         }
     } else {
@@ -565,8 +588,9 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             && !cx.display_types.contains(&s.name)
         {
             out.push_str(&format!(
-                "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+                "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
                 mangle_path(&s.name),
+                struct_jet_display_body(s, has_fn_field),
             ));
         }
     }
@@ -1213,17 +1237,12 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     });
     let (callable, params, entry_error, serve_app, service_target) = if let Some(output) = output {
+        let output_return_type = output.failure_contract().effective_type();
         (
             output.lowered_name.clone(),
             output.params.clone(),
-            output
-                .return_type
-                .as_ref()
-                .and_then(|ty| entry_error(cx, ty)),
-            output
-                .return_type
-                .as_ref()
-                .is_some_and(crate::AST::type_is_app),
+            entry_error(cx, &output_return_type),
+            crate::AST::type_is_app(&output_return_type),
             output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
@@ -1739,9 +1758,9 @@ pub(crate) fn jet_displayable_type(cx: &Cx, ty: &Type) -> bool {
 }
 
 /// The `jet_debug` twin of [`jet_showable_type`]: true only when codegen
-/// guarantees every nominal leaf a `JetDebug` impl. Union debug arms use this
-/// to choose `.jet_debug()` vs the always-required `.jet_show()` fallback, so
-/// the generated crate never calls a `jet_debug` nobody emitted (I2) — e.g.
+/// guarantees every nominal leaf a `JetDebug` impl. Generated union debug
+/// impls are emitted only when every arm can use the shared Debug formatter,
+/// so the generated crate never calls a `jet_debug` nobody emitted (I2) — e.g.
 /// `[FieldError]` or `NetError` payloads whose Prelude types are show-only.
 pub(crate) fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
     match ty {
@@ -1762,9 +1781,13 @@ pub(crate) fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
         Type::Map { key, value, .. } => {
             jet_debuggable_type(cx, key) && jet_debuggable_type(cx, value)
         }
-        // Every anonymous union enum gets a JetDebug impl (its arms degrade
-        // per member), so a nested union payload always resolves.
-        Type::Union(_) => true,
+        // A generated anonymous union gets JetDebug only when every arm can
+        // use the shared Debug formatter. The union emitter may retain its
+        // legacy show fallback for older diagnostic paths, but that fallback
+        // is not a Debug capability for nested user values.
+        Type::Union(members) => members
+            .iter()
+            .all(|member| jet_debuggable_type(cx, member)),
         Type::Named(name) => {
             name == "str" || cx.has_auto_debug_type(name) || cx.is_distinct_type_name(name)
         }
@@ -1810,6 +1833,16 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
             EntryError::Rust
         },
     )
+}
+
+pub(crate) fn entry_error_text_expr(cx: &Cx, ty: &Type, error: &str) -> Option<String> {
+    Some(match entry_error(cx, ty)? {
+        EntryError::DefaultJet | EntryError::Rust => {
+            format!("jet_entry_error_text(&{error})")
+        }
+        EntryError::Jet => format!("jet_entry_error_text_jet(&{error})"),
+        EntryError::JetShow => format!("jet_entry_error_text_show(&{error})"),
+    })
 }
 
 /// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous
@@ -1951,6 +1984,12 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
         }
         out.push_str("}\n\n");
+        let displayable = members
+            .iter()
+            .all(|member| jet_displayable_type(cx, member));
+        let debuggable = members
+            .iter()
+            .all(|member| jet_debuggable_type(cx, member));
         if !has_shared_guard {
             out.push_str(&format!(
                 "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
@@ -1962,33 +2001,33 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 ));
             }
             out.push_str("        }\n    }\n}\n\n");
-            out.push_str(&format!(
-                "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
-            ));
-            for m in &members {
-                let tag = crate::AST::union_member_tag(m);
-                // I2: call `.jet_debug()` only when the payload type is
-                // guaranteed a `JetDebug` impl. Otherwise fall back to
-                // `.jet_show()`, which the JetShow arm above already requires
-                // of every member. Sema never debug-renders a union whose
-                // member lacks Debug, so a fallback arm is I2 ballast, not a
-                // semantic path.
-                let method = if jet_debuggable_type(cx, m) {
-                    "jet_debug"
-                } else {
-                    "jet_show"
-                };
+            if debuggable {
                 out.push_str(&format!(
-                    "            Self::{tag}(v) => crate::jet_debug_union(v.{method}()),\n"
+                    "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
+                ));
+                for m in &members {
+                    let tag = crate::AST::union_member_tag(m);
+                    out.push_str(&format!(
+                        "            Self::{tag}(v) => crate::jet_debug_union(v.jet_debug()),\n"
+                    ));
+                }
+                out.push_str("        }\n    }\n}\n\n");
+            }
+            if displayable {
+                out.push_str(&format!(
+                    "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{\n        match self {{\n"
+                ));
+                for m in &members {
+                    let tag = crate::AST::union_member_tag(m);
+                    out.push_str(&format!(
+                        "            Self::{tag}(v) => crate::jet_debug_union(v.jet_display()),\n"
+                    ));
+                }
+                out.push_str("        }\n    }\n}\n\n");
+                out.push_str(&format!(
+                    "impl std::fmt::Display for {rust_name} {{\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        f.write_str(&self.jet_display())\n    }}\n}}\n\n"
                 ));
             }
-            out.push_str("        }\n    }\n}\n\n");
-            out.push_str(&format!(
-                "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
-            ));
-            out.push_str(&format!(
-                "impl std::fmt::Display for {rust_name} {{\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        f.write_str(&self.jet_show())\n    }}\n}}\n\n"
-            ));
         }
     }
 }
@@ -2131,7 +2170,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         && !cx.display_types.contains(&e.name)
     {
         out.push_str(&format!(
-            "impl{impl_generic} JetDisplay for {rust_name}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
+            "impl{impl_generic} JetDisplay for {rust_name}{type_arg} {{\n    fn jet_display(&self) -> String {{ {body} }}\n}}\n\n",
+            body = enum_jet_display_body(e)
         ));
     }
 }
@@ -2733,10 +2773,9 @@ pub(crate) fn emit_trait_impl(
 
 /// I2: render an enum value with Jet-source names. Rust's derived `Debug` would
 /// print the mangled `__jet_Red` / `__jet_Some(__jet_x: …)` form. Payloads render
-/// through `jet_debug` — the same rule struct bodies use, so a `String` payload
-/// keeps its quotes in both lenses.
-fn enum_jet_render_body(e: &EnumDef) -> String {
-    let method = "jet_debug";
+/// through the selected value lens, so a nested authored Display remains a
+/// Display in an automatically printable enum while Debug keeps its quotes.
+fn enum_jet_render_body_with_method(e: &EnumDef, method: &str) -> String {
     let mut arms = String::new();
     for v in &e.variants {
         let pat = mangle_path(&v.name);
@@ -2777,7 +2816,15 @@ fn enum_jet_render_body(e: &EnumDef) -> String {
     format!("match self {{\n{arms}        }}")
 }
 
-fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
+pub(crate) fn enum_jet_render_body(e: &EnumDef) -> String {
+    enum_jet_render_body_with_method(e, "jet_debug")
+}
+
+pub(crate) fn enum_jet_display_body(e: &EnumDef) -> String {
+    enum_jet_render_body_with_method(e, "jet_display")
+}
+
+fn struct_jet_text_body(s: &StructDef, has_fn_field: bool, method: &str) -> String {
     if has_fn_field {
         return format!("\"{} {{ ... }}\".to_string()", s.name);
     }
@@ -2789,7 +2836,7 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
                 format!("({:?}.to_string(), \"[redacted]\".to_string())", f.name)
             } else {
                 format!(
-                    "({:?}.to_string(), ({}).jet_debug())",
+                    "({:?}.to_string(), ({}).{method}())",
                     f.name,
                     field_self_read(f)
                 )
@@ -2801,6 +2848,14 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
         s.name,
         fields.join(", ")
     )
+}
+
+pub(crate) fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
+    struct_jet_text_body(s, has_fn_field, "jet_debug")
+}
+
+pub(crate) fn struct_jet_display_body(s: &StructDef, has_fn_field: bool) -> String {
+    struct_jet_text_body(s, has_fn_field, "jet_display")
 }
 
 pub(crate) fn emit_external_trait_impl(
@@ -3214,7 +3269,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     if let Some(label) = cx.unit_labels.get(&d.name) {
         if !cx.display_types.contains(&d.name) {
             out.push_str(&format!(
-                "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).to_string()) }}\n}}\n\n",
+                "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).jet_display()) }}\n}}\n\n",
                 symbol = label.symbol,
             ));
         }

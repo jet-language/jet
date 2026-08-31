@@ -1738,9 +1738,9 @@ pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) ->
     out
 }
 
-/// Capitalize the first ordinary prose word while preserving the case of a
-/// leading flag, identifier, ref, path, keyword, or code fragment. Runtime-
-/// built diagnostic facts use this same product rule as table rows.
+/// Keep the first ordinary prose word in sentence case while preserving the
+/// case of a leading flag, identifier, ref, path, keyword, or code fragment.
+/// Runtime-built diagnostic facts use this same product rule as table rows.
 pub fn jet_sentence_case_line(input: &str) -> String {
     let Some((start, end)) = first_diagnostic_prose_token(input) else {
         return input.to_string();
@@ -1748,11 +1748,11 @@ pub fn jet_sentence_case_line(input: &str) -> String {
     let Some(first) = input[start..end].chars().next() else {
         return input.to_string();
     };
-    if !first.is_ascii_lowercase() {
+    if !first.is_ascii_uppercase() {
         return input.to_string();
     }
     let mut output = input.to_string();
-    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_uppercase().to_string());
+    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_lowercase().to_string());
     output
 }
 
@@ -1772,8 +1772,18 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
             offset += ch.len_utf8();
             continue;
         }
-        if matches!(ch, '`' | '"' | '\'') || ch == '{' {
-            return None;
+        if matches!(ch, '`' | '"' | '\'') {
+            let after = &rest[ch.len_utf8()..];
+            if let Some(close) = after.find(ch) {
+                offset += ch.len_utf8() + close + ch.len_utf8();
+                continue;
+            }
+        }
+        if ch == '{' {
+            if let Some(close) = rest.find('}') {
+                offset += close + 1;
+                continue;
+            }
         }
         let start = offset;
         let mut end = 0;
@@ -1803,8 +1813,13 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
         }
         let end = offset + end;
         let token = &input[start..end];
-        if token.is_empty() || diagnostic_token_keeps_case(token) {
-            return None;
+        if token.is_empty() {
+            offset += ch.len_utf8();
+            continue;
+        }
+        offset = end;
+        if diagnostic_token_keeps_case(token) {
+            continue;
         }
         return Some((start, end));
     }
@@ -1943,6 +1958,20 @@ pub fn jet_missing_map_key_value(key: impl std::fmt::Display) -> String {
 pub fn jet_todo_message(file: &str, line: u32, expected_type: &str) -> String {
     format!("#Todo at {file}:{line} — expected {expected_type}")
 }
+/// Extract the payload from the legacy comptime-panic transport. `Diagnostic::error`
+/// applies sentence casing at construction, so the registered `why` starts with
+/// `While` even though the raise site uses `while`; compare the fixed prefix
+/// without making the payload part of the presentation contract. This is
+/// transport decoding only; runtime semantic policy remains at the stop site.
+pub fn jet_comptime_panic_message<'a>(why: &'a str, what: &'a str) -> &'a str {
+    const PREFIX: &str =
+        "while computing this value at compile time, the program panicked: ";
+    why.get(..PREFIX.len())
+        .filter(|head| head.eq_ignore_ascii_case(PREFIX))
+        .map(|_| &why[PREFIX.len()..])
+        .unwrap_or(what)
+}
+
 
 /// Shared wording for the guarded recursion stop.
 pub fn jet_stack_overflow_message(fn_name: &str) -> String {
@@ -1963,7 +1992,7 @@ pub const JET_RUNTIME_STACK_LIMIT: usize = 1024;
 
 /// Whether a runtime row carries the rich source context frame.
 pub fn jet_runtime_stop_has_context(code: &str) -> bool {
-    matches!(code, "E3001" | "E3012")
+    matches!(code, "E3001" | "E3012" | "E3014")
 }
 
 /// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.
@@ -2126,9 +2155,9 @@ pub fn jet_render_runtime_sentry(
             format!("Bound the raw {operation} before it reaches storage — obligation `{obligation}` was not met on this run"),
         ),
         "R0802" => (
-            format!("Use of freed storage in `{gate}`"),
-            format!("The allocation was quarantined and poisoned before this {operation} ({detail})"),
-            format!("Do not use the pointer after release — obligation `{obligation}` was not met on this run"),
+            format!("Use of storage after its lifetime ended in `{gate}`"),
+            format!("The storage was released or its owning Jet frame expired before this {operation} ({detail})"),
+            format!("Do not use the pointer after release or frame exit — obligation `{obligation}` was not met on this run"),
         ),
         "R0803" => (
             format!("Misaligned raw {operation} in `{gate}`"),

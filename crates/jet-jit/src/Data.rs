@@ -801,7 +801,8 @@ fn option_bits(opt: Option<i64>) -> u64 {
 
 /// Decode CSV `service,latency_ms` rows into Event records.
 fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
-    let csv = crate::enc_stream::jet_jit_csv_reader(file, encoding);
+    let delimiter = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(","));
+    let csv = crate::enc_stream::jet_jit_csv_reader(file, encoding, delimiter, 1, 0);
     let (ok, handle) = Concurrency::with_runtime_mut(|rt| {
         let ok = crate::runtime_host::jit_result_is_ok(rt, csv).unwrap_or(false);
         let h = crate::runtime_host::jit_result_i64(rt, csv).unwrap_or(0);
@@ -811,7 +812,6 @@ fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
         return csv;
     }
     let mut decoded = Vec::new();
-    let mut saw_header = false;
     loop {
         let next = crate::enc_stream::jet_jit_csv_reader_next(handle);
         let (ok, bits, cells) = Concurrency::with_runtime_mut(|rt| {
@@ -823,7 +823,8 @@ fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
             if bits == 0 {
                 return (true, 0, Vec::new());
             }
-            let list = (bits as u64).wrapping_sub(1) as i64;
+            let row = (bits as u64).wrapping_sub(1) as i64;
+            let list = rt.heap.record_get_record(row, 0).unwrap_or(0);
             let n = rt.heap.list_len(list).unwrap_or(0);
             let mut cells = Vec::with_capacity(n as usize);
             for i in 0..n {
@@ -837,10 +838,6 @@ fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
         }
         if bits == 0 {
             break;
-        }
-        if !saw_header {
-            saw_header = true;
-            continue;
         }
         if cells.len() < 2 {
             continue;

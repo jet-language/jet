@@ -1412,6 +1412,53 @@ fn passthrough_forwards_tokens_after_separator() {
 }
 
 #[test]
+fn passthrough_forwards_version_flag_and_value_after_separator() {
+    // The program must receive both tokens after `--`; Jet must not consume
+    // the forwarded `--version` as its own top-level flag.
+    let p = args_fixture(&line!().to_string());
+    let out = Command::new(jet())
+        .args([
+            "run",
+            "--profile=debug",
+            p.to_str().unwrap(),
+            "--",
+            "--version",
+            "1.0.0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim(),
+        "3",
+        "expected argv[0] plus --version and its value, got: {stdout}"
+    );
+
+    let version = Command::new(jet()).arg("--version").output().unwrap();
+    assert!(
+        version.status.success(),
+        "jet --version failed: {}",
+        String::from_utf8_lossy(&version.stderr)
+    );
+    let banner = String::from_utf8_lossy(&version.stdout);
+    assert!(banner.starts_with("Jet "), "version banner: {banner}");
+    assert!(
+        banner.contains("supported editions:"),
+        "version banner missing editions: {banner}"
+    );
+    assert!(
+        banner.contains("registry protocol: v"),
+        "version banner missing registry protocol: {banner}"
+    );
+}
+
+#[test]
 fn bare_separator_gives_empty_passthrough() {
     // `jet run file.jet --` — bare `--` with nothing after; program sees 1 arg.
     let p = args_fixture(&line!().to_string());

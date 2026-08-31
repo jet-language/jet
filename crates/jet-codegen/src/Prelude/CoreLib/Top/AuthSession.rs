@@ -3,12 +3,23 @@
 
 use std::sync::{Mutex as JetAuthMutex, OnceLock as JetAuthOnceLock};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct JetAuthSession {
     pub id: String,
     pub user_id: String,
     pub expires_at: i64,
     pub cookie: String,
+}
+
+impl std::fmt::Debug for JetAuthSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JetAuthSession")
+            .field("id", &"<redacted>")
+            .field("user_id", &self.user_id)
+            .field("expires_at", &self.expires_at)
+            .field("cookie", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -17,19 +28,43 @@ pub struct JetAuthApp {
     pub providers: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct JetAuthUser {
     user_id: String,
     password_hash: String,
     delivery_capability: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for JetAuthUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JetAuthUser")
+            .field("user_id", &self.user_id)
+            .field("password_hash", &"<redacted>")
+            .field(
+                "delivery_capability",
+                &self.delivery_capability.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 struct JetAuthMagicToken {
     token: String,
     user_id: String,
     expires_at: i64,
     delivery_capability: String,
+}
+
+impl std::fmt::Debug for JetAuthMagicToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JetAuthMagicToken")
+            .field("token", &"<redacted>")
+            .field("user_id", &self.user_id)
+            .field("expires_at", &self.expires_at)
+            .field("delivery_capability", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Default)]
@@ -155,7 +190,7 @@ fn jet_auth_session_show(session: &JetAuthSession) -> String {
     )
 }
 
-fn jet_auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
+pub(crate) fn jet_auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
     if !jet_auth_valid_identifier(&user_id, 512) {
         return Err("user id is invalid".to_string());
     }
@@ -256,7 +291,7 @@ fn jet_auth_magic_link_issue(
     Ok(token)
 }
 
-fn jet_auth_magic_link_consume(
+pub(crate) fn jet_auth_magic_link_consume(
     token: String,
     now_ms: i64,
     ttl_ms: i64,
@@ -370,8 +405,20 @@ fn jet_app_auth_show(auth: &JetAuthApp) -> String {
     )
 }
 
-// Resident/interpreter adapters call these wrappers so AuthSession.rs remains
-// the one policy and state seam. The wrappers expose no alternate behavior.
+// Resident/interpreter adapters use these wrappers for the remaining auth
+// calls; register/consume adapters call the canonical Prelude symbols above.
+// All paths remain in this one policy and state seam.
+pub fn auth_runtime_reset() {
+    let Some(store) = JET_AUTH_STORE.get() else {
+        return;
+    };
+    let mut store = match store.lock() {
+        Ok(store) => store,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *store = JetAuthUserStore::default();
+}
+
 pub fn auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
     jet_auth_register_user(user_id, password_hash)
 }

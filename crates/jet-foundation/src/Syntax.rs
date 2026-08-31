@@ -292,6 +292,8 @@
 // every type position. `TYPE_INLINE_RANGE` is re-exported from math_layout.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
+// D-FMT-PLAIN1=A adds `Grouped(n)` as the explicit human-grouping escape while
+// `Fixed(n)` and `core.text.fmt.decimal` remain machine-plain.
 // D-FMT-PRETTY1=A (ratified 2026-08-14, card #1966) adds `Pretty` to the same
 // rail; it expands canonical Debug output with stable two-space indentation.
 // D-FMT-INTERP3=B (ratified 2026-08-27, card #2257) adds the closed selector
@@ -329,6 +331,12 @@
 // discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
 // `#Task` are retired spellings.
 
+// D-ADOPT-GUEST1=A: the native library edge uses matching `#Import(c)` and
+// `#Export(c)` spellings. The C ABI and the sema-owned guest surface are one
+// contract in both directions.
+pub const MARKER_IMPORT: &str = "Import";
+pub const MARKER_EXPORT: &str = "Export";
+
 // Concurrency surface — thirteen ratified D-CONC-* outcomes on card #1505.
 // Rows for forms that implementation cards will make parseable belong here
 // now; parser and sema support land on those cards.
@@ -344,7 +352,9 @@ pub const KW_FREEZE: &str = "freeze";
 // D-CONC-FREEZE1=A adds no second token for consuming captures: `task ^name`
 // reuses SIGIL_MOVE (`^`, D-MEM1) as task-capture syntax on a group child.
 // The child owns the value; later use of the name is ordinary E0121.
-/// D-CONC-SPAWN1=D: qualified fan-out selector.
+/// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: `task.all` is the one fan-out
+/// selector that accepts either positional branches or uniformly named
+/// branches; named branches return the existing anonymous tuple carrier.
 pub const TASK_ALL: &str = "task.all";
 /// D-CONC-SPAWN1=D: qualified fan-out selector.
 pub const TASK_RACE: &str = "task.race";
@@ -515,6 +525,7 @@ pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
 /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
 pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[
     ("from_i8", "I8"),
+    ("from_i64", "I64"),
     ("from_i16", "I16"),
     ("from_i32", "I32"),
     ("from_int", "Int"),

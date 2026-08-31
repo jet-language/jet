@@ -2,6 +2,92 @@ use super::*;
 use crate::AST::{Expr, Func, Item, Pattern, Stmt};
 use std::collections::{HashMap, HashSet};
 
+#[test]
+fn fact_channel_prefers_exact_literal_bounds_over_carrier_range() {
+    let expr = TExpr {
+        ty: crate::AST::Type::InlineRange {
+            base: Box::new(crate::AST::Type::Int),
+            lo: 1,
+            hi: 10,
+        },
+        kind: TExprKind::IntLit(7, None),
+    };
+    assert_eq!(
+        expr.fact_channel().integer_bounds,
+        Some(TIntegerBounds::exact(7))
+    );
+}
+
+#[test]
+fn outcome_cost_facts_distinguish_carriers_and_fast_paths() {
+    let int_expr = || TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(1, None),
+    };
+    let result_ty = Type::Result {
+        ok: Box::new(Type::Int),
+        err: Box::new(Type::String),
+    };
+    let explicit = TExpr {
+        ty: result_ty.clone(),
+        kind: TExprKind::Ok(Box::new(int_expr())),
+    };
+    assert_eq!(
+        explicit.fact_channel().cost,
+        Some(TCostFact::semantic(TCostKind::OutcomeConstruction))
+    );
+
+    let call = TExpr {
+        ty: result_ty,
+        kind: TExprKind::Call {
+            name: "load".to_string(),
+            type_args: Vec::new(),
+            args: Vec::new(),
+        },
+    };
+    assert_eq!(
+        call.fact_channel().cost,
+        Some(TCostFact::semantic(TCostKind::OutcomeConstruction))
+    );
+
+    let fast = TExpr {
+        ty: Type::Option(Box::new(Type::Int)),
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(TExpr {
+                ty: Type::Named("Bytes".to_string()),
+                kind: TExprKind::Unit,
+            }),
+            op: TBuiltinOp::ByteBufferMethod {
+                method: "next".to_string(),
+            },
+            args: Vec::new(),
+        },
+    };
+    assert_eq!(
+        fast.fact_channel().cost,
+        Some(TCostFact::semantic(TCostKind::OutcomeConstruction))
+    );
+
+    let fallback = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::OrFallback {
+            value: Box::new(fast),
+            fallback: TOrFallback::Value(Box::new(int_expr())),
+        },
+    };
+    let mut sites = Vec::new();
+    collect_cost_expr(
+        &fallback,
+        "run",
+        crate::Diagnostics::Span::new(0, 0),
+        0,
+        &mut sites,
+    );
+    assert_eq!(sites.len(), 1);
+    assert_eq!(sites[0].kind, TCostKind::OutcomeConstruction);
+    assert_eq!(sites[0].state, TCostState::OptimizerRemoved);
+}
+
 /// Parse `src` (no full sema needed — `tir_covers` is structural plus
 /// program-table lookups that `build_cx` fills) and return whether the
 /// named function is covered by the Phase-1 TIR gate.
@@ -800,6 +886,39 @@ fn covers_fixed_list_param_and_field() {
 }
 
 #[test]
+fn rejects_list_of_tuple_with_unsupported_nested_option() {
+    // Tuple elements must take the same covered-value path as a bare parameter.
+    // A nested list of options remains outside that path, so its owning list is
+    // rejected instead of being admitted through the tuple wrapper.
+    let mk = |src: &str| {
+        let (toks, _) = crate::Lexer::lex(src);
+        let prog = crate::Parser::parse(&toks).expect("parse");
+        build_cx(&prog, src, "test.jet")
+    };
+    let good_tuple = Type::Tuple(vec![
+        ("x".to_string(), Box::new(Type::Int)),
+        ("y".to_string(), Box::new(Type::Float)),
+    ]);
+    let good_list = Type::List(Box::new(good_tuple));
+    let cx = mk("fn f(){}");
+    assert!(is_covered_collection_ty(&good_list, &cx));
+
+    let tuple = Type::Tuple(vec![
+        ("ok".to_string(), Box::new(Type::Int)),
+        (
+            "bad".to_string(),
+            Box::new(Type::List(Box::new(Type::Option(Box::new(Type::Int))))),
+        ),
+    ]);
+    let list = Type::List(Box::new(tuple));
+    let Type::List(inner) = &list else {
+        unreachable!("test list is constructed as Type::List");
+    };
+    assert!(!collection_elem_covered(inner, &cx));
+    assert!(!is_covered_collection_ty(&list, &cx));
+}
+
+#[test]
 fn covers_option_param() {
     // c109 Phase 8: an optional-typed param (`?Int`) is now inside the subset
     // (was excluded through Phase 7). The payload is a covered value type.
@@ -1428,6 +1547,38 @@ fn covers_is_empty_builtin() {
 }
 
 #[test]
+fn covers_full_byte_buffer_write_matrix() {
+    for name in [
+        "write_u8",
+        "write_byte",
+        "write_i8",
+        "write_u16_le",
+        "write_u16_be",
+        "write_i16_le",
+        "write_i16_be",
+        "write_u32_le",
+        "write_u32_be",
+        "write_i32_le",
+        "write_i32_be",
+        "write_u64_le",
+        "write_u64_be",
+        "write_i64_le",
+        "write_i64_be",
+        "write_f32_le",
+        "write_f32_be",
+        "write_f64_le",
+        "write_f64_be",
+        "write_bytes",
+        "write",
+    ] {
+        assert!(
+            is_covered_builtin_name(name, 1),
+            "{name} must remain in the covered Bytes write matrix"
+        );
+    }
+}
+
+#[test]
 fn source_owned_numeric_aliases_are_not_builtins() {
     for name in ["to_i32", "to_u8", "to_f64"] {
         assert!(
@@ -1469,6 +1620,45 @@ fn covers_fn_name_value_arg() {
     // `Box::new(move |…| …) as <fn-type>` wrapper.
     let src = "fn callit(f: fn(Int) => Int) => Int {\n return f(1)\n}\nfn dbl(x: Int) => Int {\n return (x * 2)\n}\nfn use_it() => Int {\n return callit(dbl)\n}\n";
     assert!(covers(src, "use_it"));
+}
+
+#[test]
+fn named_fn_value_uses_source_return_abi() {
+    // Sema gives nested callable parameters the effective Result carrier, but
+    // a named function value must expose the declaration's source callback ABI.
+    // Exercise both scalar and aggregate payloads so the thunk is not an Int
+    // special case.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "\
+fn add_one(x: Int) Int -> { return x }\n\
+fn make_text(x: Int) String -> { return \"ok\" }\n\
+fn run() {}\n";
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let cx = build_cx(&prog, src, "test.jet");
+
+        for name in ["add_one", "make_text"] {
+            let declared = cx
+                .fn_types
+                .get(name)
+                .expect("test declaration must have a function type");
+            let contextual = declared.with_effective_fn_returns();
+            let rendered = crate::Codegen::emit_named_fn_value(&cx, name, &contextual);
+            assert!(
+                rendered.contains(&format!("match __jet_{name}(")),
+                "default-return thunk must unwrap the executable carrier: {rendered}"
+            );
+            assert!(
+                rendered.contains("Ok(value) => value"),
+                "default-return thunk must preserve the success payload: {rendered}"
+            );
+            assert!(
+                rendered.contains("Err(error) => jet_entry_error_exit_jet(error)"),
+                "default-return thunk must route failures through Jet's boundary: {rendered}"
+            );
+        }
+    });
 }
 
 #[test]
@@ -2497,4 +2687,820 @@ fn run() {
         covers(src, "run"),
         "wildcard enum-payload if-let not covered"
     );
+}
+
+fn auto_facts_after_sema(src: &str, fn_name: &str) -> Option<crate::AST::AutoVectorizationFacts> {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle(src);
+        let module = &bundle.modules[bundle.entry];
+        let function = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == fn_name => Some(function),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        function.body.iter().find_map(|stmt| match stmt {
+            Stmt::For {
+                auto_vectorization, ..
+            } => auto_vectorization.clone(),
+            _ => None,
+        })
+    })
+}
+
+fn lower_and_emit_after_sema(src: &str, fn_name: &str) -> (TFunc, String) {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle(src);
+        let module = &bundle.modules[bundle.entry];
+        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let function = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == fn_name => Some(function),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        let tir = lower_func(function, &cx);
+        let mut generated = String::new();
+        crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
+        (tir, generated)
+    })
+}
+
+#[test]
+fn reader_fixed_width_capability_table_covers_all_reads() {
+    let cases = [
+        (THandleOp::ReaderReadU8, TReaderFixedWidth::U8),
+        (THandleOp::ReaderReadI8, TReaderFixedWidth::I8),
+        (THandleOp::ReaderReadU16Le, TReaderFixedWidth::U16Le),
+        (THandleOp::ReaderReadU16Be, TReaderFixedWidth::U16Be),
+        (THandleOp::ReaderReadI16Le, TReaderFixedWidth::I16Le),
+        (THandleOp::ReaderReadI16Be, TReaderFixedWidth::I16Be),
+        (THandleOp::ReaderReadU32Le, TReaderFixedWidth::U32Le),
+        (THandleOp::ReaderReadU32Be, TReaderFixedWidth::U32Be),
+        (THandleOp::ReaderReadI32Le, TReaderFixedWidth::I32Le),
+        (THandleOp::ReaderReadI32Be, TReaderFixedWidth::I32Be),
+        (THandleOp::ReaderReadU64Le, TReaderFixedWidth::U64Le),
+        (THandleOp::ReaderReadU64Be, TReaderFixedWidth::U64Be),
+        (THandleOp::ReaderReadI64Le, TReaderFixedWidth::I64Le),
+        (THandleOp::ReaderReadI64Be, TReaderFixedWidth::I64Be),
+        (THandleOp::ReaderReadF32Le, TReaderFixedWidth::F32Le),
+        (THandleOp::ReaderReadF32Be, TReaderFixedWidth::F32Be),
+        (THandleOp::ReaderReadF64Le, TReaderFixedWidth::F64Le),
+        (THandleOp::ReaderReadF64Be, TReaderFixedWidth::F64Be),
+    ];
+    for (op, expected) in cases {
+        assert_eq!(op.reader_fixed_width(), Some(expected));
+        let TOutcomeFastPath::FixedRead {
+            buffer: TOutcomeFastBuffer::Reader,
+            width,
+            ..
+        } = op
+            .outcome_fast_path()
+            .expect("every fixed-width Reader read needs an outcome fast path")
+        else {
+            panic!("fixed-width Reader read lost its Reader fast-path buffer");
+        };
+        assert_eq!(width, expected.width());
+    }
+}
+
+/// Removal-sensitive shape contract for the one-million-read witness: a
+/// proven U8 region must retain one bounds check, direct slice iteration, and
+/// one cursor commit after the loop, with no per-read helper or cursor update.
+#[test]
+fn reader_region_uses_bounds_and_direct_slice_for_unused_index() {
+    let source = r#"
+fn run() {
+    data :: [U8]{1, 2, 3}
+    reader :: Reader.over(data)
+    total := Int{0}
+    loop _ in 0..<1_000_000 {
+        marker :: "before_read"
+        byte :: reader.read_u8() ?? return Err("short reader")
+        total += Int.from_u8(byte)
+    }
+    print(total)
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    let fast = generated
+        .split("jet_reader_region_bounds")
+        .nth(1)
+        .expect("Reader range must carry the bounds-only fast path")
+        .split("} else {")
+        .next()
+        .expect("Reader fast path must retain its ordinary fallback");
+    assert!(
+        fast.contains(".buf["),
+        "fast path must read the proven slice"
+    );
+    assert!(
+        fast.contains(".iter().copied()"),
+        "unused Reader index must use direct fixed-width iteration"
+    );
+    assert!(
+        !fast.contains(".zip("),
+        "unused Reader index must not use zip"
+    );
+    assert!(
+        !fast.contains("jet_reader_read_u8_fast"),
+        "the proven region must not retain a per-item Reader helper call"
+    );
+    assert!(
+        !fast.contains("jet_reader_bounds_error"),
+        "the proven region must not retain a per-item bounds error path"
+    );
+    assert!(
+        !fast.contains("saturating_sub"),
+        "the proven region must not retain a per-item bounds calculation"
+    );
+    assert!(
+        !fast.contains(".pos +="),
+        "the proven region must not update the cursor per iteration"
+    );
+    assert_eq!(
+        fast.matches(".pos =").count(),
+        1,
+        "the proven region must commit the cursor exactly once"
+    );
+    let marker = fast
+        .find("before_read")
+        .expect("fast path must retain the pre-read statement");
+    let loop_start = fast
+        .find(".iter().copied()")
+        .expect("fast path must retain the direct loop");
+    let chunk_use = marker
+        + fast[marker..]
+            .find("reader_region_chunk")
+            .expect("fast path must retain the direct read binding");
+    let commit = fast
+        .rfind(".pos =")
+        .expect("cursor must commit after the rewritten read region");
+    assert!(loop_start < marker, "pre-read statement must stay inside the loop");
+    assert!(marker < chunk_use, "pre-read statement must precede the read");
+    assert!(chunk_use < commit, "read consumers must precede cursor commit");
+    assert!(loop_start < commit, "cursor must commit after normal region completion");
+    assert!(!generated.contains("jet_reader_take_region"));
+}
+
+#[test]
+fn reader_region_supports_all_fixed_width_reader_capabilities() {
+    let source = r#"
+fn run() {
+    data :: [U8]{0}
+    reader :: Reader.over(data)
+    loop _ in 0..<1 {
+        u8_value :: reader.read_u8() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i8_value :: reader.read_i8() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u16_le_value :: reader.read_u16_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u16_be_value :: reader.read_u16_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i16_le_value :: reader.read_i16_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i16_be_value :: reader.read_i16_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u32_le_value :: reader.read_u32_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u32_be_value :: reader.read_u32_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i32_le_value :: reader.read_i32_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i32_be_value :: reader.read_i32_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u64_le_value :: reader.read_u64_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        u64_be_value :: reader.read_u64_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i64_le_value :: reader.read_i64_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        i64_be_value :: reader.read_i64_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        f32_le_value :: reader.read_f32_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        f32_be_value :: reader.read_f32_be() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        f64_le_value :: reader.read_f64_le() ?? return Err("short reader")
+    }
+    loop _ in 0..<1 {
+        f64_be_value :: reader.read_f64_be() ?? return Err("short reader")
+    }
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    for needle in [
+        "as i8",
+        ".chunks_exact(2)",
+        ".chunks_exact(4)",
+        ".chunks_exact(8)",
+        "u16::from_le_bytes",
+        "u16::from_be_bytes",
+        "i16::from_le_bytes",
+        "i16::from_be_bytes",
+        "u32::from_le_bytes",
+        "u32::from_be_bytes",
+        "i32::from_le_bytes",
+        "i32::from_be_bytes",
+        "u64::from_le_bytes",
+        "u64::from_be_bytes",
+        "i64::from_le_bytes",
+        "i64::from_be_bytes",
+        "f32::from_le_bytes",
+        "f32::from_be_bytes",
+        "f64::from_le_bytes",
+        "f64::from_be_bytes",
+    ] {
+        assert!(
+            generated.contains(needle),
+            "fixed-width Reader region lost its typed load: {needle}"
+        );
+    }
+    assert!(
+        generated.contains("jet_reader_bounds_error(\"read_i8\", 1"),
+        "the ordinary fallback must retain the signed-read bounds error"
+    );
+}
+
+/// D-CONC-ALLNAMED1=A: named branch construction is a side-effect boundary.
+/// The tuple carrier must retain authored field order so spawn registration and
+/// any parent-side construction effects cannot be reordered by type
+/// canonicalization. The output type itself remains canonical and is checked by
+/// the runtime parity witness in `tir_unsafe_and_runtime.rs`.
+#[test]
+fn named_task_all_preserves_authored_spawn_order() {
+    let source = r#"
+fn first() Int -> {
+    print("z")
+    return 1
+}
+fn second() Int -> {
+    print("a")
+    return 2
+}
+fn run() {
+    values :: (task.all {
+        z: first(),
+        a: second()
+    }) ?? panic("named task.all failed")
+    print(values.z, values.a)
+}
+"#;
+    let (tir, _) = lower_and_emit_after_sema(source, "run");
+    let tasks = tir
+        .body
+        .iter()
+        .find_map(|stmt| {
+            let TStmt::Let { init, .. } = stmt else {
+                return None;
+            };
+            let TExprKind::OrFallback { value, .. } = &init.kind else {
+                return None;
+            };
+            let TExprKind::TaskGroupAll { tasks } = &value.kind else {
+                return None;
+            };
+            Some(tasks.as_ref())
+        })
+        .expect("named task.all must lower through its existing group node");
+    let TExprKind::TupleLit { fields, .. } = &tasks.kind else {
+        panic!("named task.all must keep its tuple carrier");
+    };
+    let names = fields
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    let expected = [
+        crate::Codegen::mangle_generated("z"),
+        crate::Codegen::mangle_generated("a"),
+    ];
+    assert_eq!(
+        names,
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn d_simd3_default_fact_reaches_native_emission() {
+    let source = r#"
+fn auto(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = values[i] * 2.0 + 1.0
+    }
+    return output
+}
+"#;
+    let (tir, generated) = lower_and_emit_after_sema(source, "auto");
+    let facts = tir.body.iter().find_map(|stmt| match stmt {
+        TStmt::Range {
+            auto_vectorization, ..
+        } => auto_vectorization.as_ref(),
+        _ => None,
+    });
+    let facts = facts.expect("sema must attach the default loop proof");
+    assert!(facts.no_cross_iteration_deps);
+    assert!(facts.no_aliasing);
+    assert!(facts.no_early_exit);
+    assert!(facts.effect_free_body);
+    assert!(
+        generated.contains("jet-auto-vectorize"),
+        "the complete sema fact must reach native emission"
+    );
+    assert!(
+        generated.contains("#[inline(always)]"),
+        "the native loop boundary must be inlined so rustc can emit vector instructions"
+    );
+    assert!(
+        generated.contains("jet_simd_f64x4_mul_array")
+            && generated.contains("jet_simd_f64x4_add_array"),
+        "the proven loop must call the shared native-capable Prelude kernels"
+    );
+    assert!(
+        generated.contains("backend=prelude-runtime-dispatch"),
+        "the emitted artifact must identify the actual native lowering"
+    );
+}
+
+#[test]
+fn d_simd3_wide_float_loop_selects_wide_native_kernel() {
+    let source = r#"
+fn auto(values: [Float#8]) [Float#8] -> {
+    output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<8 {
+        output[i] = values[i] * 2.0
+    }
+    return output
+}
+"#;
+    let (tir, generated) = lower_and_emit_after_sema(source, "auto");
+    assert!(tir.body.iter().any(|stmt| matches!(
+        stmt,
+        TStmt::Range {
+            auto_vectorization: Some(_),
+            ..
+        }
+    )));
+    assert!(generated.contains("jet_simd_f64x4_mul_array"));
+    assert!(generated.contains("element=Float width=4 extent=8"));
+}
+
+#[test]
+fn d_simd3_accepts_loop_invariant_scalar_captures() {
+    let scalar_capture = r#"
+fn auto(values: [Float#4], scale: Float) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    mirror := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = values[i] * scale
+        mirror[i] = values[i] + scale
+    }
+    return output
+}
+"#;
+    assert!(
+        auto_facts_after_sema(scalar_capture, "auto").is_some(),
+        "independent stores may use loop-invariant scalar captures"
+    );
+}
+
+#[test]
+fn d_simd3_rejects_output_alias_and_cross_iteration_reads() {
+    let output_alias = r#"
+fn auto(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = output[i] + values[i]
+    }
+    return output
+}
+"#;
+    assert!(
+        auto_facts_after_sema(output_alias, "auto").is_none(),
+        "an output read must not be marked independent"
+    );
+
+    let cross_iteration = r#"
+fn auto(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = values[i - 1]
+    }
+    return output
+}
+"#;
+    assert!(
+        auto_facts_after_sema(cross_iteration, "auto").is_none(),
+        "a non-lane-index read must not be marked independent"
+    );
+}
+
+#[test]
+fn d_simd3_rejects_impure_and_early_exit_bodies() {
+    let impure = r#"
+fn noisy(value: Float) Float -> {
+    print(value)
+    return value
+}
+fn auto(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = noisy(values[i])
+    }
+    return output
+}
+"#;
+    assert!(
+        auto_facts_after_sema(impure, "auto").is_none(),
+        "an impure call must remain scalar"
+    );
+
+    let early_exit = r#"
+fn auto(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        if values[i] > 0.0 {
+            break
+        }
+        output[i] = values[i]
+    }
+    return output
+}
+"#;
+    assert!(
+        auto_facts_after_sema(early_exit, "auto").is_none(),
+        "an early exit must remain scalar"
+    );
+}
+
+#[test]
+fn d_simd3_scalar_marker_suppresses_native_hint() {
+    let source = r#"
+#Scalar fn scalar(values: [Float#4]) [Float#4] -> {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<4 {
+        output[i] = values[i] * 2.0 + 1.0
+    }
+    return output
+}
+"#;
+    let (tir, generated) = lower_and_emit_after_sema(source, "scalar");
+    assert!(tir.is_scalar, "#Scalar must survive sema-to-TIR lowering");
+    assert!(
+        tir.body.iter().any(|stmt| matches!(
+            stmt,
+            TStmt::Range {
+                auto_vectorization: Some(_),
+                ..
+            }
+        )),
+        "#Scalar changes codegen policy, not the sema proof"
+    );
+    assert!(
+        !generated.contains("jet-auto-vectorize"),
+        "#Scalar must suppress the native auto-vectorization hint"
+    );
+    assert!(
+        generated.contains("jet_scalar_loop_barrier"),
+        "#Scalar must retain the shared Prelude scalar-loop boundary"
+    );
+}
+
+#[test]
+fn d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path() {
+    let prelude = include_str!("../../Prelude/Core/SimdLanes.rs");
+    let lane_ops = include_str!("../../Prelude/CoreLib/JetStd/MathTaskMem.rs");
+    let linalg = include_str!("../../Prelude/CoreLib/Top/LinalgFns.rs");
+    for lane in crate::Syntax::SIMD_LANE_TYPE_NAMES {
+        assert!(
+            lane_ops.contains(format!("jet_lane_type!({lane},").as_str()),
+            "MathTaskMem is missing the registered lane type {lane}"
+        );
+        assert!(
+            linalg.contains(format!("jet_math_{lane}_new").as_str()),
+            "LinalgFns is missing the registered lane surface {lane}"
+        );
+    }
+    for (width, feature) in [
+        ("f32x4", "sse"),
+        ("f64x2", "sse2"),
+        ("f32x8", "avx"),
+        ("f64x4", "avx"),
+    ] {
+        let kernel = format!("fn {width}_binary");
+        assert!(
+            prelude.contains(kernel.as_str()),
+            "native Prelude is missing the {width} kernel"
+        );
+        let feature_probe = format!("is_x86_feature_detected!(\"{feature}\")");
+        assert!(
+            prelude.contains(feature_probe.as_str()),
+            "{width} must fall back when {feature} is unavailable"
+        );
+        let lane_entry = if width == "f64x4" {
+            "crate::jet_simd_f64x4_add_value".to_string()
+        } else {
+            format!("crate::jet_simd_{width}_add_array")
+        };
+        assert!(
+            lane_ops.contains(lane_entry.as_str()),
+            "lane operators must use the expected native-capable Prelude entry point"
+        );
+    }
+    assert!(
+        prelude.contains("mod jet_simd_f64x4_avx"),
+        "F64x4 must have a dedicated host-native value backend"
+    );
+    assert!(
+        prelude.contains("target_feature = \"avx\""),
+        "the F64x4 value backend must be compile-time AVX gated"
+    );
+    for op in ["add", "sub", "mul", "div"] {
+        let value_entry = format!(
+            "fn jet_simd_f64x4_{op}_value(left: [f64; 4], right: [f64; 4])"
+        );
+        assert!(
+            prelude.contains(value_entry.as_str()),
+            "F64x4 {op} must expose a by-value native entry point"
+        );
+    }
+    for needle in [
+        "#[target_feature(enable = \"sse\")]",
+        "#[target_feature(enable = \"sse2\")]",
+        "#[target_feature(enable = \"avx\")]",
+        "_mm_add_ps",
+        "_mm_add_pd",
+        "_mm256_add_ps",
+        "_mm256_add_pd",
+        "_mm_mul_ps",
+        "_mm_mul_pd",
+        "_mm256_mul_ps",
+        "_mm256_mul_pd",
+        "jet_simd_f32x4_splat_array",
+        "jet_simd_f64x4_splat_array",
+    ] {
+        assert!(
+            prelude.contains(needle),
+            "native Prelude artifact is missing authoritative instruction path: {needle}"
+        );
+    }
+    assert!(
+        prelude.contains("fn jet_scalar_loop_barrier"),
+        "scalar opt-out must use the shared Prelude boundary"
+    );
+    assert!(
+        prelude.contains("fn jet_simd_f32_binary_slice")
+            && prelude.contains("fn jet_simd_f64_binary_slice"),
+        "resident float carriers must use the shared native-capable slice kernels"
+    );
+}
+
+fn optimizer_fact_test_cx() -> Cx {
+    build_cx_items(&[], "", "test.jet", None, &HashMap::new())
+}
+
+#[test]
+fn optimizer_fact_channel_type_reaches_literal_consumer() {
+    let cx = optimizer_fact_test_cx();
+    let narrow = TExpr {
+        ty: Type::Float32,
+        kind: TExprKind::FloatLit(f64::NAN),
+    };
+    let wide = TExpr {
+        ty: Type::Float,
+        kind: TExprKind::FloatLit(f64::NAN),
+    };
+
+    assert!(matches!(narrow.fact_channel().ty, Some(Type::Float32)));
+    assert!(matches!(wide.fact_channel().ty, Some(Type::Float)));
+    assert_eq!(emit_tir_expr(&narrow, &cx), "f32::NAN");
+    assert_eq!(emit_tir_expr(&wide, &cx), "f64::NAN");
+}
+
+#[test]
+fn optimizer_fact_channel_integer_bounds_reach_range_consumer() {
+    let cx = optimizer_fact_test_cx();
+    let expr = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::NumericMethod {
+            recv: Box::new(TExpr {
+                ty: Type::Int,
+                kind: TExprKind::IntLit(4, None),
+            }),
+            op: TNumericOp::InlineRange {
+                lo: 2,
+                hi: 8,
+                fallible: true,
+            },
+        },
+    };
+
+    assert_eq!(
+        expr.fact_channel().integer_bounds,
+        Some(TIntegerBounds { lo: 2, hi: 8 })
+    );
+    let rendered = emit_tir_expr(&expr, &cx);
+    assert!(
+        rendered.contains("2, 8"),
+        "range consumer lost sema bounds: {rendered}"
+    );
+}
+
+#[test]
+fn optimizer_fact_channel_exclusivity_reaches_argument_consumer() {
+    let cx = optimizer_fact_test_cx();
+    let arg = |borrow, mut_borrow| TCallArg {
+        value: TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(7, None),
+        },
+        template_items: None,
+        borrow,
+        mut_borrow,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    };
+
+    for (borrow, mut_borrow, expected_access, expected_rendered) in [
+        (true, false, TExclusivity::Shared, "&(7i64)"),
+        (false, true, TExclusivity::Exclusive, "&mut (7i64)"),
+        (false, false, TExclusivity::Unknown, "7i64"),
+    ] {
+        let arg = arg(borrow, mut_borrow);
+        assert_eq!(arg.fact_channel().exclusivity, expected_access);
+        assert_eq!(
+            emit_tir_call_args(&[arg], &cx),
+            expected_rendered,
+            "argument consumer changed access semantics"
+        );
+    }
+}
+
+fn optimizer_fact_test_range(
+    auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
+) -> TStmt {
+    let int = |value| TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(value, None),
+    };
+    let output_ty = Type::FixedList {
+        elem: Box::new(Type::Float),
+        len: crate::AST::Measure::literal("length", 4),
+    };
+    TStmt::Range {
+        label: None,
+        var: "i".to_string(),
+        source: None,
+        start: int(0),
+        end: int(4),
+        step: None,
+        exclusive: true,
+        auto_vectorization,
+        body: vec![TStmt::IndexAssign {
+            uninit: false,
+            base: TExpr {
+                ty: output_ty,
+                kind: TExprKind::Local(TLocal::user("output").as_mutable()),
+            },
+            index: TExpr {
+                ty: Type::Int,
+                kind: TExprKind::Local(TLocal::user("i")),
+            },
+            is_map: false,
+            value: TExpr {
+                ty: Type::Float,
+                kind: TExprKind::FloatLit(1.0),
+            },
+        }],
+    }
+}
+
+fn optimizer_fact_test_func(body: Vec<TStmt>, is_scalar: bool) -> TFunc {
+    TFunc {
+        name: "optimizer_fact_probe".to_string(),
+        source_span: crate::Diagnostics::Span::new(0, 0),
+        params: Vec::new(),
+        web_param_reconstructions: Vec::new(),
+        ret: None,
+        gc_return: false,
+        return_view_provenance: None,
+        generics: String::new(),
+        clone_types: Vec::new(),
+        is_main: false,
+        line: 1,
+        synthetic: false,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        is_reactive: false,
+        reactive_upgrades: Vec::new(),
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar,
+        kernel_proof: None,
+        memo_field: None,
+        uses_stack_sentry: false,
+        body,
+        kind: TFuncKind::TopLevel,
+    }
+}
+
+#[test]
+fn optimizer_fact_channel_purity_reaches_vectorization_consumer() {
+    let cx = optimizer_fact_test_cx();
+    let proven = crate::AST::AutoVectorizationFacts {
+        element_type: Type::Float,
+        no_aliasing: true,
+        no_early_exit: true,
+        effect_free_body: true,
+        no_cross_iteration_deps: true,
+    };
+    let vectorized =
+        optimizer_fact_test_func(vec![optimizer_fact_test_range(Some(proven.clone()))], false);
+    let vectorized_facts = vectorized.body[0].fact_channel();
+    assert_eq!(vectorized_facts.purity, TPurity::Pure);
+    assert!(vectorized_facts.no_cross_iteration_deps);
+    let mut generated = String::new();
+    emit_tir_func(&vectorized, &cx, &mut generated);
+    assert!(
+        generated.contains("jet-auto-vectorize:"),
+        "pure loop proof did not reach native consumer: {generated}"
+    );
+
+    let conservative = optimizer_fact_test_func(vec![optimizer_fact_test_range(None)], false);
+    assert_eq!(conservative.body[0].fact_channel().purity, TPurity::Unknown);
+    let mut fallback = String::new();
+    emit_tir_func(&conservative, &cx, &mut fallback);
+    assert!(
+        !fallback.contains("jet-auto-vectorize:"),
+        "missing purity proof enabled vectorization: {fallback}"
+    );
+
+    let incomplete = crate::AST::AutoVectorizationFacts {
+        no_aliasing: false,
+        ..proven
+    };
+    let incomplete =
+        optimizer_fact_test_func(vec![optimizer_fact_test_range(Some(incomplete))], false);
+    let mut incomplete_generated = String::new();
+    emit_tir_func(&incomplete, &cx, &mut incomplete_generated);
+    assert!(
+        !incomplete_generated.contains("jet-auto-vectorize:"),
+        "an incomplete proof must not enable native vectorization: {incomplete_generated}"
+    );
+}
+
+#[test]
+fn optimizer_fact_channel_comptime_value_reaches_literal_consumer() {
+    let cx = optimizer_fact_test_cx();
+    let value = CtValue::Int(7);
+    let expr = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::CtLit(value.clone()),
+    };
+
+    assert!(matches!(
+        expr.fact_channel().comptime_value,
+        Some(CtValue::Int(7))
+    ));
+    assert_eq!(emit_tir_expr(&expr, &cx), value.serialize());
+}
+
+#[test]
+fn optimizer_fact_channel_absence_keeps_conservative_defaults() {
+    let facts = TFactChannel::unknown();
+
+    assert!(facts.ty.is_none());
+    assert!(facts.integer_bounds.is_none());
+    assert_eq!(facts.exclusivity, TExclusivity::Unknown);
+    assert_eq!(facts.purity, TPurity::Unknown);
+    assert!(!facts.no_cross_iteration_deps);
+    assert!(facts.comptime_value.is_none());
+    assert!(facts.cost.is_none());
 }

@@ -43,6 +43,8 @@ static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason
 static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] =
     &[("requested_bytes", false), ("allocator", false)];
 
+static CSV_ROW_FIELD_METADATA: &[(&str, bool)] = &[("fields", false), ("line", false)];
+
 /// The one Core structural-type metadata table. `jet_debug_field_metadata`
 /// is its keyed view and `jet_debug_field_metadata_rows` its enumeration, so
 /// an engine that needs every row (the resident JIT builds its Core struct
@@ -56,6 +58,7 @@ static CORE_FIELD_METADATA: &[(&str, &[(&str, bool)])] = &[
     ("XMLError", XML_ERROR_FIELD_METADATA),
     ("FieldError", FIELD_ERROR_FIELD_METADATA),
     ("AllocError", ALLOC_ERROR_FIELD_METADATA),
+    ("CSVRow", CSV_ROW_FIELD_METADATA),
 ];
 
 /// Return shared field metadata for a core structural type.

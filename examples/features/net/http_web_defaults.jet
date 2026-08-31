@@ -42,7 +42,7 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure) {
         http_server.serve_once_listener(listener, mux)
     }
     post :: http_client.request("POST", "http://{addr}/readings")
-    sent :: post.header("origin", "https://app.example").body("{{\"city\":\"Reno\",\"degrees\":31}}")
+    sent :: post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})
     answer :: sent.send()
     print(answer.status())
     print(answer.header("content-type") ?? "missing")

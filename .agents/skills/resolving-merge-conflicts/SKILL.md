@@ -9,6 +9,11 @@ description: "Use when you need to resolve an in-progress git merge/rebase confl
 
 3. **Resolve each hunk.** Preserve both intents where possible. Where incompatible, pick the one matching the merge's stated goal and note the trade-off. Do **not** invent new behaviour. Always resolve; never `--abort`.
 
-4. Discover the project's **automated checks** and run them — typically typecheck, then tests, then format. Fix anything the merge broke.
+4. Run only the smallest checks authorized by the current brief and
+   `docs/agents/owner-guidance.md`. A worker runs the lane check; the
+   orchestrator owns broader tests and formatting. Fix anything the merge
+   broke within the owned slice.
 
-5. **Finish the merge/rebase.** Stage everything and commit. If rebasing, continue the rebase process until all commits are rebased.
+5. **Finish the merge/rebase.** Leave staging, commits, and board updates to
+   the owning orchestrator unless the current brief explicitly assigns them.
+   If rebasing, continue the rebase process until all commits are rebased.

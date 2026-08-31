@@ -1,8 +1,8 @@
 Error [E1101]: `particles` cannot be moved while `left` is lent to a task in `g`
-  --> tests/ui/taskgroup_lent_owner_moved.jet:10:19
+  --> tests/ui/taskgroup_lent_owner_moved.jet:16:19
     |
- 10 |         n :: eat(^particles)
+ 16 |         n :: eat(^particles)
     |                   ^^^^^^^^^
- Why: a task.group joins its children at the end of the block, so `left` stays borrowed until `g` joins — changing `particles` now would race a running task or free memory it still reads
- Fix: do this after the `g` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`
+ Why: A task.group joins its children at the end of the block, so `left` stays borrowed until `g` joins — changing `particles` now would race a running task or free memory it still reads
+ Fix: Do this after the `g` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`
 More: jet-lang.dev/e/E1101

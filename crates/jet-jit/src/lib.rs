@@ -154,8 +154,8 @@ macro_rules! host_fns {
         }
 
         #[allow(unused_mut)]
-        pub(crate) fn $declare_fn(
-            $module: &mut cranelift_jit::JITModule,
+        pub(crate) fn $declare_fn<M: cranelift_module::Module>(
+            $module: &mut M,
             $( $( $extra_field: $extra_ty, )* )?
         ) -> Result<$StructName, String> {
             $($sigs)*
@@ -317,6 +317,16 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
     jet_codegen::Comptime::with_runtime_argv(args, run)
 }
 
+/// Reset process-local Core state before a one-shot JIT or interpreter run.
+///
+/// AOT gets a fresh process. In-process tiers call this shared boundary so a
+/// prior run cannot become observable. Resident hot-swap/restart skip it.
+#[doc(hidden)]
+pub fn reset_one_shot_core_state() {
+    Crypto::runtime::auth_runtime_reset();
+    jet_codegen::Comptime::AuthLite::auth_runtime_reset();
+}
+
 /// Install the runtime ambient adapters around an explicitly forced
 /// interpreter run, matching whole-program deopt.
 pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
@@ -336,6 +346,13 @@ pub fn bind_interpreter_ffi(
     bundle: &jet_foundation::AST::ProgramBundle,
 ) -> Result<(), Vec<jet_foundation::Diagnostics::Diagnostic>> {
     Ffi::bind_bundle_ffi_for_interpreter(bundle)
+}
+
+/// Clear native `Mod` loads created by the current interpreter invocation.
+/// The engine exposes no second lifecycle policy: `JetMod::Drop` in the shared
+/// Prelude closes the OS handle and removes its staged payload.
+pub fn clear_loaded_modules() {
+    Mod::clear();
 }
 
 /// Run JIT work on Jet's canonical compiler worker.
@@ -489,7 +506,8 @@ pub use api_debug::{
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
     jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
     resident_jit_safe_bundle, resident_jit_safe_bundle_detail, run_resident_strict_for_test,
-    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle, ResidentJitSafety,
+    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle, try_compile_debug_aot,
+    DebugAotObject, ResidentJitSafety,
 };
 pub use backend::plan_bundle_tiers;
 pub use backend::CraneliftBackend;

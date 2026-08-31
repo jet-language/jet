@@ -144,6 +144,7 @@ pub(crate) mod text_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Ascii.rs");
     use crate::fault_injection::jet_fault_should_fail;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -154,6 +155,12 @@ pub(crate) mod text_rt {
     }
     pub(crate) fn upper(s: &str) -> String {
         jet_text_upper(&s.to_string())
+    }
+    pub(crate) fn ascii_lower(s: &str) -> String {
+        jet_text_ascii_lower(&s.to_string())
+    }
+    pub(crate) fn ascii_upper(s: &str) -> String {
+        jet_text_ascii_upper(&s.to_string())
     }
     pub(crate) fn graphemes(s: &str) -> Vec<String> {
         jet_text_graphemes(&s.to_string())
@@ -634,39 +641,29 @@ fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
         .unwrap_or_default()
 }
 
-fn jet_jit_regex_replace_all(pat: i64, repl: i64, text: i64) -> i64 {
-    let t = clone_string(text);
-    let r = clone_string(repl);
+fn jet_jit_regex_replace_impl(pat: i64, repl: i64, text: i64, first: bool) -> i64 {
+    let text = clone_string(text);
+    let replacement = clone_string(repl);
     clone_compiled_regex(pat)
         .map(|regex| {
-            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(regex.replace_all(&t, &r)))
+            let replaced = if first {
+                regex.replace_first(&text, &replacement)
+            } else {
+                regex.replace(&text, &replacement)
+            };
+            Concurrency::with_runtime_mut(|rt| {
+                rt.heap.alloc_string(replaced)
+            })
         })
         .unwrap_or_default()
 }
 
 fn jet_jit_regex_replace(pat: i64, repl: i64, text: i64) -> i64 {
-    let text = clone_string(text);
-    let replacement = clone_string(repl);
-    clone_compiled_regex(pat)
-        .map(|regex| {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.heap.alloc_string(regex.replace(&text, &replacement))
-            })
-        })
-        .unwrap_or_default()
+    jet_jit_regex_replace_impl(pat, repl, text, false)
 }
 
 fn jet_jit_regex_replace_first(pat: i64, repl: i64, text: i64) -> i64 {
-    let text = clone_string(text);
-    let replacement = clone_string(repl);
-    clone_compiled_regex(pat)
-        .map(|regex| {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.heap
-                    .alloc_string(regex.replace_first(&text, &replacement))
-            })
-        })
-        .unwrap_or_default()
+    jet_jit_regex_replace_impl(pat, repl, text, true)
 }
 
 fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
@@ -730,20 +727,14 @@ fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
         (RegexValue::Regex(rx), "split_limit") => {
             list_strings(rx.split_limit(&clone_string(arg0), arg1))
         }
-        (RegexValue::Regex(rx), "replace" | "replace_first" | "replace_all") => {
+        (RegexValue::Regex(rx), "replace" | "replace_first") => {
             let text = clone_string(arg0);
             let replacement = clone_string(arg1);
-            let s = match method.as_str() {
-                "replace_first" => rx.replace_first(&text, &replacement),
-                "replace_all" => rx.replace_all(&text, &replacement),
-                _ => rx.replace(&text, &replacement),
+            let s = if method == "replace" {
+                rx.replace(&text, &replacement)
+            } else {
+                rx.replace_first(&text, &replacement)
             };
-            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-        }
-        (RegexValue::Regex(rx), "replace_all_with") => {
-            // arg1 unused — constant "hit" path not general; use empty callback substitute via replace_all with empty.
-            // Real callback dispatch is wired from lower_ctx via FuncId; this host path is for string-only.
-            let s = rx.replace_all_with(&clone_string(arg0), |_m| "hit".to_string());
             Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
         }
         (RegexValue::Regex(rx), "pattern" | "source") => {
@@ -803,8 +794,6 @@ host_fns! {
             ternary.params.push(AbiParam::new(types::I64));
         }
         ternary.returns.push(AbiParam::new(types::I64));
-
-
     }
     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
@@ -847,7 +836,6 @@ host_fns! {
     regex_match: "jet_jit_regex_match" => jet_jit_regex_match: binary;
     regex_replace: "jet_jit_regex_replace" => jet_jit_regex_replace: ternary;
     regex_replace_first: "jet_jit_regex_replace_first" => jet_jit_regex_replace_first: ternary;
-    regex_replace_all: "jet_jit_regex_replace_all" => jet_jit_regex_replace_all: ternary;
     regex_split: "jet_jit_regex_split" => jet_jit_regex_split: binary;
     regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;
     regex_compile: "jet_jit_regex_compile" => jet_jit_regex_compile: unary;

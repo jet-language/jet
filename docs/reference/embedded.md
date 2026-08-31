@@ -22,6 +22,62 @@ rustup target add aarch64-unknown-linux-gnu
 Run `jet self doctor --target=aarch64-unknown-linux-gnu` to check whether the
 toolchain component is present before building.
 
+## Native Library embedding
+
+`Library` is the native guest output. Its export surface is the marked top-level
+`#Export(c)` function surface. Each exported function must use one homogeneous
+`Int`, `Float`, `Bool`, or `Text` scalar for every parameter and its return
+value. The matching import form is `#Import(c)`, which declares the foreign
+symbol after `=`.
+
+```jet
+#Export(c) pub fn on_tick(dt: Int) Int -> dt + 1
+#Export(c) pub fn greet(name: String) String -> "hello, {name}!"
+```
+
+Build the checked native projection with:
+
+```sh
+jet build --lib examples/features/packages/library_loadable/library.jet
+```
+
+The build emits a static library, a shared library, a C header, and only the
+requested named C, Python, and Swift projections. A loadable output also emits
+`.jetlib`. Its versioned header pins the compiler identity, native target, ABI
+version, Library name, exact `#Export(c)` names and C symbols,
+scalar shapes, parameter counts, declared effects, and payload length before
+the payload is mapped. A native `Library` cannot select `--target=<triple>`;
+`E1341` is reported before native artifacts are published and also rejects a
+loadable artifact whose header does not match the current native loader.
+
+### Host lifecycle contract
+
+Native Library linkage has zero Jet process-lifecycle hooks. There are no
+`jet_init` or `jet_shutdown` calls. The host loads the shared library, calls
+exports while it remains loaded, and unloads it only after all calls, host
+threads, and returned values finish.
+
+Calls are synchronous and may be nested. The host may enter from ordinary
+threads; Jet keeps any thread-local runtime state on the calling thread. Do
+not call an export from an asynchronous signal handler. The host owns signal
+handlers and process shutdown.
+
+`Text` results are library-owned `JetText` values. Release each result with
+`jet_text_free` from the same loaded library before unloading it. Never free a
+Jet-owned buffer with the host allocator or retain it after `dlclose`.
+
+The Jet `Mod` value owns both the native handle and the staged payload. Dropping
+it closes the handle first, then removes the staged file. `jet run` and
+interpreter invocations clear their loaded-module table at teardown, so failed
+calls do not retain mapped libraries or staged payloads.
+
+Jet panic cannot cross the C ABI as a C++ exception. It terminates the calling
+process. Hosts must treat a panicking export as process failure, not recover it
+with C++ exception handling. The checked-in `foreign.cpp` host exercises thread
+entry, nested calls, allocator ownership, thread-local entry, signal
+preservation, and repeated load/unload cycles; `tests/library_outputs.rs` also
+invokes a panic-only Library through that host in a child process.
+
 ## Freestanding machine
 
 The `--freestanding` flag rejects OS-dependent APIs at compile time (E3301)

@@ -2,8 +2,8 @@
 use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient")
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
     message :: [U8]{0x61, 0x62, 0x63}
-    result :: crypto.seal([recipient.public_key()], message, []) ?? return Err("seal")
+    result :: crypto.seal([recipient.public_key()], message, []) ?? panic("seal")
     print(result.bytes().len() == 185)
 }

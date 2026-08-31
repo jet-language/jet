@@ -7,8 +7,10 @@ use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_lambda_str_unboxed;
+use crate::Codegen::TIR::render_lowered_lambda_body;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::spawn_body_result_ty;
+use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TCoreClosureKind;
@@ -177,6 +179,7 @@ pub(crate) fn lower_core_closure_call(
         let lam = lam_at(0)?;
         let body_ty = spawn_body_result_ty(lam, cx, env);
         let site = jit_spawn_site(lam, cx, env);
+        let label = spawn_label(lam, cx, env);
         let spawn_closure = render_spawn_lambda(lam, cx, env);
         let executable = Box::new(lower_lambda(lam, cx, env));
         return Some(TExpr {
@@ -185,6 +188,7 @@ pub(crate) fn lower_core_closure_call(
                 kind: TCoreClosureKind::Spawn {
                     group: None,
                     site,
+                    label,
                     spawn_closure,
                     executable,
                 },
@@ -239,7 +243,11 @@ pub(crate) fn lower_core_closure_call(
             // does not implement `FnOnce`) — mirrors `on_commit`/`on_rollback`'s
             // identical FnOnce hook rendering above (#1592).
             let tl = lower_lambda(lam, cx, env);
-            let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+            let inner = format!(
+                "move |{}| {}",
+                tl.params.join(", "),
+                render_lowered_lambda_body(&tl)
+            );
             let closure = if tl.prep.is_empty() {
                 inner
             } else {

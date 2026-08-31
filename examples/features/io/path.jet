@@ -20,4 +20,11 @@ fn run() {
     // build outputs and agent worktrees, so runtime depends on ambient state.
     paths :: Path.from("examples/features/io").walk()
     print("walk non-empty: {paths.len() > 0}")
+
+    // `is_within` is lexical. Use `canonicalize` when symlink identity matters.
+    inside :: Path.from("/srv/root/a/../file").is_within(Path.from("/srv/root"))
+    partial_name :: Path.from("/srv/rooted/file").is_within(Path.from("/srv/root"))
+    escaped :: Path.from("/srv/root/../outside").is_within(Path.from("/srv/root"))
+    mixed_separators :: Path.from("srv\\root\\file").is_within(Path.from("srv/root"))
+    print("within: {inside} {partial_name} {escaped} {mixed_separators}")
 }

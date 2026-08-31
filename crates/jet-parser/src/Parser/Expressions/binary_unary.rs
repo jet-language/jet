@@ -510,7 +510,9 @@ impl<'a> Parser<'a> {
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
         let mut lhs = self.expr_bitxor(allow_struct_lit)?;
-        while matches!(self.peek().kind, TokKind::Pipe) {
+        while matches!(self.peek().kind, TokKind::Pipe)
+            && !matches!(self.peek2().kind, TokKind::Gt)
+        {
             let op_span = self.bump().span;
             let rhs = self.expr_bitxor(allow_struct_lit)?;
             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));

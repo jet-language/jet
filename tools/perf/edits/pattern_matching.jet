@@ -11,11 +11,10 @@ fn describe_conn(c: Conn) String -> {
         .Active(id) | .Reconnecting(id) -> {
             return "live:{id}"
         }
-        .Idle(_) -> { return "idle" }
-        .Closed -> { return "closed" }
+        .Idle(_) -> return "idle"
+        .Closed -> return "closed"
+        else -> return "unknown"
     }
-
-    return "unknown"
 }
 
 enum HTTP {
@@ -25,15 +24,14 @@ enum HTTP {
 
 fn classify(r: HTTP) String -> {
     if r == {
-        .Good(200..299) -> { return "success" }
-        .Good(300..399) -> { return "redirect" }
-        .Good(400..499) -> { return "client error" }
-        .Good(500..599) -> { return "server error" }
-        .Good(_) -> { return "other" }
-        .Fail(_) -> { return "network error" }
+        .Good(200..299) -> return "success"
+        .Good(300..399) -> return "redirect"
+        .Good(400..499) -> return "client error"
+        .Good(500..599) -> return "server error"
+        .Good(_) -> return "other"
+        .Fail(_) -> return "network error"
+        else -> return "unknown"
     }
-
-    return "unknown"
 }
 
 fn score_grade(score: Int) String -> {

@@ -166,6 +166,9 @@ pub struct NameLedger {
     /// Import uses keyed by the defining alias span. Source spellings and
     /// target module text must not decide liveness.
     alias_uses: HashSet<(usize, Span)>,
+    /// Loader-owned roots, such as package manifest Output references, must
+    /// survive sema's declaration/reference refresh.
+    loader_alias_uses: HashSet<(usize, Span)>,
     references: HashMap<(String, usize, usize), NameReference>,
     structure_facts: Vec<StructureFact>,
 }
@@ -577,6 +580,12 @@ impl NameLedger {
         self.alias_uses.insert((module, span));
     }
 
+    pub fn record_loader_alias_use(&mut self, module: usize, span: Span) {
+        let key = (module, span);
+        self.loader_alias_uses.insert(key);
+        self.alias_uses.insert(key);
+    }
+
     pub fn alias_used(&self, module: usize, alias: &NameAlias) -> bool {
         self.alias_uses.contains(&(module, alias.span))
     }
@@ -695,7 +704,7 @@ impl NameLedger {
     /// body references into the cache entry.
     pub fn body_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
-        snapshot.alias_uses.clear();
+        snapshot.alias_uses = snapshot.loader_alias_uses.clone();
         snapshot.references.clear();
         snapshot.structure_facts.clear();
         snapshot
@@ -708,7 +717,7 @@ impl NameLedger {
         self.display_paths.clear();
         self.aliases.clear();
         self.alias_names.clear();
-        self.alias_uses.clear();
+        self.alias_uses = self.loader_alias_uses.clone();
         self.references.clear();
         // The loader owns import-edge observations and sema must not erase
         // them when it refreshes its declaration/reference facts. Liveness

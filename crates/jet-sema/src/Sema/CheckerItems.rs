@@ -67,6 +67,153 @@ impl<'a> Checker<'a> {
 
         visit(self, ty, &mut HashSet::new())
     }
+    /// D-SET-HASH1: resolve the `Hash + Eq` capability needed by `Set<T>`.
+    /// The foundation predicate covers structural carriers and scalar leaves;
+    /// nominal values are admitted only after this checker walks their
+    /// resolved fields. A cycle is not hashable until a concrete field path
+    /// proves the capability.
+    pub(crate) fn hashable_type_eligible(&self, ty: &Type) -> bool {
+        fn visit(checker: &Checker<'_>, ty: &Type, active: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => {
+                    crate::Collections::is_hashable_type(ty)
+                }
+                Type::List(inner)
+                | Type::Option(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Tagged { inner, .. }
+                | Type::InlineRange { base: inner, .. }
+                | Type::Quantity { base: inner, .. } => visit(checker, inner, active),
+                Type::Result { ok, err } => {
+                    visit(checker, ok, active) && visit(checker, err, active)
+                }
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .all(|(_, field)| visit(checker, field, active)),
+                Type::Union(members) => members.iter().all(|member| visit(checker, member, active)),
+                Type::Map { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Shared(_)
+                | Type::TraitObject(_)
+                | Type::Fn { .. }
+                | Type::Measure(_) => false,
+                Type::Named(name) => {
+                    if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
+                        return matches!(numeric, Type::Int | Type::IntN { .. });
+                    }
+                    let (import_ns, leaf) = Checker::split_type_name(name);
+                    let Some(owner) = checker.struct_owner_module(leaf, import_ns) else {
+                        return false;
+                    };
+                    let Some(registry) = (if owner == checker.module_idx {
+                        Some(checker.registry)
+                    } else {
+                        checker
+                            .modules
+                            .and_then(|modules| modules.get(owner))
+                            .map(|module| &module.registry)
+                    }) else {
+                        return false;
+                    };
+                    let key = format!("{owner}::{leaf}");
+                    if !active.insert(key.clone()) {
+                        return false;
+                    }
+                    let eligible = if let Some(base) = registry.distinct_base(leaf) {
+                        checker.is_equatable_type(ty) && visit(checker, base, active)
+                    } else if let Some((params, target)) = registry.type_alias(leaf) {
+                        if params.is_empty() {
+                            visit(checker, target, active)
+                        } else {
+                            false
+                        }
+                    } else if let Some(fields) = registry.struct_fields(leaf) {
+                        checker.is_equatable_type(ty)
+                            && fields
+                                .iter()
+                                .all(|(_, _, field)| visit(checker, field, active))
+                    } else if let Some(variants) = registry.enum_variants(leaf) {
+                        checker.is_equatable_type(ty)
+                            && variants.values().all(|(_, payload)| match payload {
+                                VariantPayload::Unit => true,
+                                VariantPayload::Single(field, _) => visit(checker, field, active),
+                                VariantPayload::Named(fields) => {
+                                    fields.iter().all(|field| visit(checker, &field.ty, active))
+                                }
+                            })
+                    } else {
+                        false
+                    };
+                    active.remove(&key);
+                    eligible
+                }
+                Type::Apply { name, args } => {
+                    if name == "Id" {
+                        return checker.is_equatable_type(ty);
+                    }
+                    if matches!(
+                        name.as_str(),
+                        "Task" | "Sender" | "Receiver" | "SharedGuard" | "Pool" | "Set"
+                    ) {
+                        return false;
+                    }
+                    let (import_ns, leaf) = Checker::split_type_name(name);
+                    let Some(owner) = checker.struct_owner_module(leaf, import_ns) else {
+                        return false;
+                    };
+                    let Some(registry) = (if owner == checker.module_idx {
+                        Some(checker.registry)
+                    } else {
+                        checker
+                            .modules
+                            .and_then(|modules| modules.get(owner))
+                            .map(|module| &module.registry)
+                    }) else {
+                        return false;
+                    };
+                    let key = format!("{owner}::{leaf}");
+                    if !active.insert(key.clone()) {
+                        return false;
+                    }
+                    let subst = checker.struct_subst_for_owner(owner, leaf, args);
+                    let eligible = if let Some((params, target)) = registry.type_alias(leaf) {
+                        if params.len() == args.len() {
+                            let target = crate::Generics::substitute_type(target, &subst);
+                            visit(checker, &target, active)
+                        } else {
+                            false
+                        }
+                    } else if let Some(fields) = registry.struct_fields(leaf) {
+                        checker.is_equatable_type(ty)
+                            && fields.iter().all(|(_, _, field)| {
+                                let field = crate::Generics::substitute_type(field, &subst);
+                                visit(checker, &field, active)
+                            })
+                    } else if let Some(variants) = registry.enum_variants(leaf) {
+                        checker.is_equatable_type(ty)
+                            && variants.values().all(|(_, payload)| match payload {
+                                VariantPayload::Unit => true,
+                                VariantPayload::Single(field, _) => {
+                                    let field = crate::Generics::substitute_type(field, &subst);
+                                    visit(checker, &field, active)
+                                }
+                                VariantPayload::Named(fields) => fields.iter().all(|field| {
+                                    let field = crate::Generics::substitute_type(&field.ty, &subst);
+                                    visit(checker, &field, active)
+                                }),
+                            })
+                    } else {
+                        false
+                    };
+                    active.remove(&key);
+                    eligible
+                }
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
 
     fn qualify_method_type(
         &self,
@@ -319,7 +466,7 @@ impl<'a> Checker<'a> {
             self.insert_implicit_copy(expr, ty, ty);
             return false;
         }
-        self.diags.push(Diagnostic::error(
+        let diagnostic = Diagnostic::error(
             "E0120",
             format!("`{root}` was not moved here, so this part cannot {destination}"),
             "the function can access this parameter, but it does not own any part of it"
@@ -329,6 +476,11 @@ impl<'a> Checker<'a> {
                 Syntax::SIGIL_COPY
             ),
             Some(expr.span()),
+        );
+        self.diags.push(self.with_ownership_copy_edit(
+            diagnostic,
+            expr.span(),
+            ty,
         ));
         true
     }
@@ -354,11 +506,8 @@ impl<'a> Checker<'a> {
                     if args.len() != 1 {
                         self.diags.push(Diagnostic::error(
                             "E0103",
-                            format!(
-                                "`{display_type_name}.{method}` takes exactly one String"
-                            ),
-                            "a checked text boundary receives one complete text value"
-                                .to_string(),
+                            format!("`{display_type_name}.{method}` takes exactly one String"),
+                            "a checked text boundary receives one complete text value".to_string(),
                             format!("write `{display_type_name}.{method}(text)`"),
                             Some(span),
                         ));
@@ -375,7 +524,8 @@ impl<'a> Checker<'a> {
                     }
                     if method == "raw" {
                         if !self.in_unsafe {
-                            self.diags.push(Diagnostic::from_row("E0387", &[], Some(span)));
+                            self.diags
+                                .push(Diagnostic::from_row("E0387", &[], Some(span)));
                         }
                         return Some(nominal);
                     }
@@ -386,17 +536,12 @@ impl<'a> Checker<'a> {
                 }
                 "encode_hole" => {
                     if !method_type_args.is_empty() && method_type_args.len() != 1 {
-                        self.diags.push(crate::Generics::e0904(
-                            span,
-                            "T",
-                        ));
+                        self.diags.push(crate::Generics::e0904(span, "T"));
                     }
                     if args.len() != 1 {
                         self.diags.push(Diagnostic::error(
                             "E0103",
-                            format!(
-                                "`{display_type_name}.encode_hole` takes exactly one value"
-                            ),
+                            format!("`{display_type_name}.encode_hole` takes exactly one value"),
                             "each interpolation hole passes through the declared generic encoder"
                                 .to_string(),
                             format!("write `{display_type_name}.encode_hole(value)`"),
@@ -805,7 +950,7 @@ impl<'a> Checker<'a> {
                 let display_type_name = self.display_type_name(type_name, None);
                 self.diags.push(Diagnostic::error(
                     "E0119",
-                    format!("{display_type_name}.{method} is not generic"),
+                    format!("`{display_type_name}.{method}` is not generic"),
                     "only methods declared with type parameters accept call-site type arguments"
                         .to_string(),
                     format!("call {display_type_name}.{method}(...) without type arguments"),
@@ -821,7 +966,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!(
-                        "{display_type_name}.{method} expects {} type argument{}, got {}",
+                        "`{display_type_name}.{method}` expects {} type argument{}, got {}",
                         sig.type_params.len(),
                         if sig.type_params.len() == 1 { "" } else { "s" },
                         type_args.len()
@@ -1354,9 +1499,220 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_callable_argument_ownership(method, index, param.convention, &param_ty, arg);
+
         }
         self.activate_call_reservations(&call_access, span);
         Some(sig.effective_return_type())
+    }
+    fn public_failure_visibility_edit(
+        &self,
+        owner: usize,
+        span: Span,
+        kind: &str,
+        visibility: jet_foundation::Names::NameVisibility,
+    ) -> TextEdit {
+        let source = if owner == self.module_idx {
+            Some(self.source)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .map(|module| module.source.as_str())
+        };
+        let Some(source) = source else {
+            return TextEdit {
+                span: Span::new(span.start, span.start),
+                new_text: "pub ".to_string(),
+            };
+        };
+        let line_start = source[..span.start.min(source.len())]
+            .rfind('\n')
+            .map_or(0, |n| n + 1);
+        let prefix = &source[line_start..span.start.min(source.len())];
+        if visibility == jet_foundation::Names::NameVisibility::Package {
+            if let Some(relative) = prefix.rfind("pub(package)") {
+                let start = line_start + relative;
+                return TextEdit {
+                    span: Span::new(start, start + "pub(package)".len()),
+                    new_text: "pub".to_string(),
+                };
+            }
+        }
+        let insertion = if kind == "type" {
+            ["struct ", "enum ", "alias ", "distinct "]
+                .iter()
+                .filter_map(|keyword| prefix.rfind(keyword).map(|relative| (relative, *keyword)))
+                .max_by_key(|(relative, _)| *relative)
+                .map(|(relative, _)| line_start + relative)
+                .unwrap_or(span.start)
+        } else {
+            span.start
+        };
+        TextEdit {
+            span: Span::new(insertion, insertion),
+            new_text: "pub ".to_string(),
+        }
+    }
+
+    pub(crate) fn validate_public_failure_carrier(&mut self, function: &crate::AST::Func) {
+        if !function.is_pub {
+            return;
+        }
+        let Some(return_type) = function.return_type.as_ref() else {
+            return;
+        };
+        let Some((_, error_type)) = return_type.unwrap_result() else {
+            return;
+        };
+
+        fn collect_named(ty: &Type, out: &mut Vec<String>) {
+            match ty {
+                Type::Named(name) => out.push(name.clone()),
+                Type::Apply { name, args } => {
+                    out.push(name.clone());
+                    for arg in args {
+                        collect_named(arg, out);
+                    }
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Tagged { inner, .. }
+                | Type::InlineRange { base: inner, .. }
+                | Type::Quantity { base: inner, .. } => collect_named(inner, out),
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => {
+                    collect_named(key, out);
+                    collect_named(value, out);
+                }
+                Type::Tuple(fields) => {
+                    for (_, field) in fields {
+                        collect_named(field, out);
+                    }
+                }
+                Type::Fn { params, ret, .. } => {
+                    for param in params {
+                        collect_named(param, out);
+                    }
+                    if let Some(ret) = ret {
+                        collect_named(ret, out);
+                    }
+                }
+                Type::Int
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::String
+                | Type::Char
+                | Type::TraitObject(_)
+                | Type::IntN { .. }
+                | Type::Measure(_) => {}
+                Type::Union(members) => {
+                    for member in members {
+                        collect_named(member, out);
+                    }
+                }
+            }
+        }
+
+        let mut pending = Vec::new();
+        collect_named(error_type, &mut pending);
+        let mut checked_carriers = HashSet::new();
+        let mut reported_members = HashSet::new();
+        while let Some(carrier) = pending.pop() {
+            let (import_ns, leaf) = Self::split_type_name(&carrier);
+            let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+                continue;
+            };
+            if !checked_carriers.insert((owner, leaf.to_string())) {
+                continue;
+            }
+            let Some(declaration) = self.name_ledger.declaration(owner, leaf) else {
+                continue;
+            };
+            let declaration_span = declaration.span;
+            let declaration_visibility = declaration.visibility;
+            let declaration_kind = declaration.kind.clone();
+            if declaration_visibility != jet_foundation::Names::NameVisibility::Public {
+                let member = leaf.to_string();
+                if reported_members.insert(member.clone()) {
+                    let diagnostic = Diagnostic::from_row(
+                        "E2421",
+                        &[
+                            ("function", function.name.as_str()),
+                            ("member", member.as_str()),
+                        ],
+                        Some(declaration_span),
+                    );
+                    let edit = self.public_failure_visibility_edit(
+                        owner,
+                        declaration_span,
+                        &declaration_kind,
+                        declaration_visibility,
+                    );
+                    self.diags.push(diagnostic.with_edit_grade(
+                        edit,
+                        crate::Diagnostics::FixApplicability::Suggested,
+                        crate::Diagnostics::FixSafety::ApiChanging,
+                    ));
+                }
+                continue;
+            }
+            let fields = if owner == self.module_idx {
+                self.registry.struct_fields(leaf)
+            } else {
+                self.modules
+                    .and_then(|modules| modules.get(owner))
+                    .and_then(|module| module.registry.struct_fields(leaf))
+            }
+            .map(|fields| fields.to_vec());
+            let Some(fields) = fields else {
+                continue;
+            };
+            for (field, _, field_type) in fields {
+                pending.extend({
+                    let mut nested = Vec::new();
+                    collect_named(&field_type, &mut nested);
+                    nested
+                });
+                let member_key = format!("{leaf}.{field}");
+                let Some(field_declaration) =
+                    self.name_ledger.declaration(owner, &member_key)
+                else {
+                    continue;
+                };
+                if field_declaration.visibility
+                    == jet_foundation::Names::NameVisibility::Public
+                    || !reported_members.insert(member_key.clone())
+                {
+                    continue;
+                }
+                let field_span = field_declaration.span;
+                let field_visibility = field_declaration.visibility;
+                let diagnostic = Diagnostic::from_row(
+                    "E2421",
+                    &[
+                        ("function", function.name.as_str()),
+                        ("member", member_key.as_str()),
+                    ],
+                    Some(field_span),
+                );
+                let edit = self.public_failure_visibility_edit(
+                    owner,
+                    field_span,
+                    "field",
+                    field_visibility,
+                );
+                self.diags.push(diagnostic.with_edit_grade(
+                    edit,
+                    crate::Diagnostics::FixApplicability::Suggested,
+                    crate::Diagnostics::FixSafety::ApiChanging,
+                ));
+            }
+        }
     }
 
     pub(crate) fn struct_owner_module(
@@ -1405,15 +1761,27 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+
+        // The fallback is the only branch that scans every module. Cache its
+        // exact source spelling for this body checker, including misses and
+        // ambiguities, so repeated expression nodes do not repeat the scan.
+        let cache_key = type_name.to_owned();
+        if let Some(owner) = self.nominal_owner_cache.borrow().get(&cache_key) {
+            return *owner;
+        }
         let mut found = None;
         for (idx, st) in mods.iter().enumerate() {
             if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
                 if found.is_some_and(|previous| previous != idx) {
-                    return None;
+                    found = None;
+                    break;
                 }
                 found = Some(idx);
             }
         }
+        self.nominal_owner_cache
+            .borrow_mut()
+            .insert(cache_key, found);
         found
     }
 
@@ -2390,15 +2758,20 @@ impl<'a> Checker<'a> {
             }
             if borrowed {
                 let (name, span) = match &*expr {
-                    Expr::Ident(name, span) => (name.clone(), *span),
-                    _ => unreachable!("borrowed same-name field must be an identifier"),
+                    Expr::Ident(name, span) => (name, *span),
+                    _ => return,
                 };
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0120",
                     format!("`{name}` was not moved here, so it cannot fill an owned field"),
                     "this function has read access only and does not own the value".to_string(),
                     format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
                     Some(span),
+                );
+                self.diags.push(self.with_ownership_copy_edit(
+                    diagnostic,
+                    span,
+                    ty,
                 ));
                 return;
             }
@@ -2877,32 +3250,67 @@ impl<'a> Checker<'a> {
     ) -> (Option<Type>, HashMap<String, Type>) {
         // A Result pattern consumes the carrier itself. Keep a direct
         // fallible call as `T !E` here; ordinary value positions unwrap the
-        // same call through the existing automatic propagation rule.
-        let preserve_result_carrier = matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. });
+        // same call through the existing automatic propagation rule. This
+        // includes contextual `.Ok` / `.Err` syntax before normalization.
+        let preserve_result_carrier = super::CheckerCore::pattern_consumes_result_carrier(pattern);
+        // Source spans are the diagnostic anchor, not an AST identity. Compiler
+        // generated codec/derive bodies intentionally stamp every synthetic
+        // node with one declaration span, so a span-only cache would let one
+        // `Result<Int, E>` subject answer a later `Result<String, E>` subject.
+        // Those bodies are fully typed by their explicit generated signatures;
+        // infer each carrier subject directly instead of reusing that ambiguous
+        // key. User source keeps the cache for the existing single-inference
+        // behavior.
+        let use_subject_cache = preserve_result_carrier && !self.compiler_generated;
         let subject_key = subject.span().start;
-        let cached_subject_ty = preserve_result_carrier
+        let cached_subject_ty = use_subject_cache
             .then(|| self.result_handler_subject_types.get(&subject_key).cloned())
             .flatten();
-        if preserve_result_carrier {
-            if cached_subject_ty.is_none() {
-                self.failure_auto_depth += 1;
-            }
+        if preserve_result_carrier && cached_subject_ty.is_none() {
+            self.failure_auto_depth += 1;
         }
-        let subj_ty = cached_subject_ty.clone().or_else(|| {
+        // A value pattern tests the success value, even when the surrounding
+        // value expression is itself checked against a Result return carrier.
+        // Do not let that outer carrier expectation keep a direct call wrapped
+        // as `Result<T, E>` here; ordinary call inference must insert the one
+        // shared Try and validate the pattern against `T`. Explicit `.Ok` /
+        // `.Err` patterns are the carrier-owned exception above.
+        let saved_subject_expected = self.expected_type.clone();
+        if !preserve_result_carrier
+            && matches!(saved_subject_expected, Some(Type::Result { .. }))
+        {
+            self.expected_type = None;
+        }
+        let mut subj_ty = cached_subject_ty.clone().or_else(|| {
             let inferred = if preserve_result_carrier {
                 self.infer_without_auto_propagation(subject)
             } else {
                 self.infer(subject)
             };
-            if preserve_result_carrier {
+            if use_subject_cache {
                 if let Some(ty) = inferred.clone() {
                     self.result_handler_subject_types.insert(subject_key, ty);
                 }
             }
             inferred
         });
+        self.expected_type = saved_subject_expected;
         if preserve_result_carrier && cached_subject_ty.is_none() {
             self.failure_auto_depth -= 1;
+        }
+        // An invalid explicit `!` domain is diagnosed at its declaration and
+        // does not make a call a usable Result carrier. Let the ordinary call
+        // inference consume that invalid carrier before validating `.Ok`/`.Err`,
+        // preserving the independent pattern mismatch (E0305).
+        if preserve_result_carrier
+            && subj_ty.as_ref().is_some_and(|ty| {
+                matches!(
+                    ty,
+                    Type::Result { err, .. } if !self.is_error_domain(err)
+                )
+            })
+        {
+            subj_ty = self.infer(subject);
         }
         let Some(st) = subj_ty else {
             return (None, HashMap::new());
@@ -2939,11 +3347,12 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
-                let ty = self
-                    .lookup(name)
-                    .map(|info| info.ty.show().trim_matches('`').to_string())
+                let source_ty = self.lookup(name).map(|info| info.ty.clone());
+                let ty = source_ty
+                    .as_ref()
+                    .map(|ty| ty.show().trim_matches('`').to_string())
                     .unwrap_or_else(|| "value".to_string());
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0120",
                     format!("`{name}` was not moved here, so its contents cannot be taken apart"),
                     format!(
@@ -2954,6 +3363,11 @@ impl<'a> Checker<'a> {
                         Syntax::SIGIL_MOVE
                     ),
                     Some(*name_span),
+                );
+                self.diags.push(self.with_ownership_copy_edit(
+                    diagnostic,
+                    *name_span,
+                    source_ty.as_ref(),
                 ));
                 return;
             }

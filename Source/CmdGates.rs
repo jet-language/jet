@@ -403,7 +403,11 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
 }
 
 fn effect_names(primary: &[String], fallback: &[String]) -> String {
-    let effects = if primary.is_empty() { fallback } else { primary };
+    let effects = if primary.is_empty() {
+        fallback
+    } else {
+        primary
+    };
     if effects.is_empty() {
         "none".to_string()
     } else {

@@ -15,6 +15,59 @@ use crate::AST::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+/// Source bounds for a semantic edit whose AST node stores only its method
+/// token. The checker uses these helpers only after a typed shape has been
+/// proved; they never participate in recognizing a lint.
+pub(crate) fn source_expr_start(expr: &Expr) -> usize {
+    match expr {
+        Expr::Paren(_, span) => span.start,
+        Expr::Field(base, _, _) => source_expr_start(base),
+        Expr::OptField { base, .. } => source_expr_start(base),
+        Expr::MethodCall { receiver, .. } => source_expr_start(receiver),
+        _ => expr.span().start,
+    }
+}
+
+pub(crate) fn source_call_end(source: &str, method_span: Span) -> Option<usize> {
+    let open = method_span.end + source.get(method_span.end..)?.find('(')?;
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, ch) in source.get(open..)?.char_indices() {
+        let index = open + offset;
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(crate) fn source_expr_end(source: &str, expr: &Expr) -> Option<usize> {
+    match expr {
+        Expr::MethodCall { method_span, .. } => source_call_end(source, *method_span),
+        Expr::Paren(_, span) => Some(span.end),
+        _ => Some(expr.span().end),
+    }
+}
+
 mod Casing;
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
@@ -1572,6 +1625,11 @@ pub(crate) struct Checker<'a> {
     effect_facts: &'a jet_foundation::Facts::FactRegistry,
     consts: &'a HashMap<String, Type>,
     modules: Option<&'a [ModuleState]>,
+    /// D-COMPILE-SPEED1: unqualified nominal lookup may otherwise scan every
+    /// module for each expression. This cache belongs to one body checker and
+    /// is rebuilt after registration, so immutable module states cannot make a
+    /// cached owner stale while the checker is alive.
+    nominal_owner_cache: std::cell::RefCell<HashMap<String, Option<usize>>>,
     items: &'a [crate::AST::Item],
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
@@ -1607,6 +1665,10 @@ pub(crate) struct Checker<'a> {
     /// D-SUBJECT-COHERE1=A: statement-local `#allow(lint)` facts collected
     /// while checking the following expression statement.
     statement_lint_allows: Vec<String>,
+    /// D-STDLIB-SMALL1: complete replacement idioms are discovered at block
+    /// entry and emitted while their first statement is checked, so a local
+    /// `#allow` marker can suppress exactly that diagnostic.
+    stdlib_lint_candidates: HashMap<usize, (Span, crate::Diagnostics::TextEdit)>,
     /// D-LINT-UNUSED1: source declarations whose successful body check found
     /// no read or write. The declaration identity is the sema `def_span`, so
     /// shadowed names never share a liveness fact.
@@ -1772,6 +1834,7 @@ pub(crate) struct Checker<'a> {
     /// Source-declared return type. The checker keeps `ret` as the effective
     /// failure carrier, while generator checks use this declaration directly.
     declared_return_type: Option<Type>,
+    current_return_type_span: Option<Span>,
     /// Canonical caller-visible parameter order; excludes `self`.
     current_param_names: Vec<String>,
     /// Compiler-private names in inserted defaults resolve to their declaration
@@ -2497,6 +2560,7 @@ mod Edition;
 mod BudgetSpecs;
 pub mod Effects;
 mod FFI;
+mod Guest;
 mod FlowFacts;
 pub mod GateLedger;
 pub mod HotSwap;
@@ -2563,6 +2627,7 @@ pub use Registration::*;
 pub(crate) use Taint::check_func_taint;
 pub use TargetSurface::check_target_surface;
 pub(crate) use FFI::*;
+pub(crate) use Guest::{check_guest_export_surface, check_guest_import_surface};
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{checked_state_graphs, check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
@@ -2603,13 +2668,20 @@ pub(crate) use CheckerMarkers::{
 pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
     authority_delegations, builtin_effect, core_effect, effect_covers, effect_root, effect_row_var,
-    effect_set_has_root,
-    memory_allocation_bound, parse_effect_name, reject_positive_deny_only_effect,
-    resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,
+    effect_set_has_root, memory_allocation_bound, package_effect_policy_diagnostics,
+    package_policy_path_covers, package_policy_source_path,
+    parse_effect_name, reject_positive_deny_only_effect, resolve_effect_name, show_set,
+    undeclared_effect, Effect, EffectSet,
 };
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::effect_key;
 pub use FFI::{e3202, e3301, e3302, e3303};
+pub use Guest::{
+    guest_export_signature, guest_export_surface, guest_import_function_signature,
+    guest_import_signature, guest_import_surface, guest_import_symbol, guest_surface,
+    is_guest_export, is_guest_export_marker, is_guest_import, is_guest_import_marker,
+    GuestDirection, GuestFunction, GuestScalar,
+};
 // D-MIGRATE2C: `jet inspect schema status` reuses the schema-migration diff.
 pub use SchemaMigration::{check_schema_migrations, desugar_migrations};
 

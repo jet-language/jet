@@ -1,23 +1,32 @@
-use core.files as fs
-use core.process as process
-struct Match { display: String, count: Int }
-fn scan(path: String, root: String, needle: String) Match -> {
-    text :: fs.read(~path) ?? ""
-    count :: text.lines().map((line: String) -> line.count(needle)).sum()
-    return Match{display: "{root}/{Path.from(path).stem()}.txt", count}
+use core.files as files
+
+#CLI
+struct Args {
+    root: String
+    needle: String
 }
-fn run() {
-    root :: process.argv().get(1) ?? "files"
-    needle :: process.argv().get(2) ?? "needle-7f"
-    entries :: fs.list_dir(root) ?? panic("list failed")
-    paths := [String]{}
-    loop entry in entries {
-        if !entry.is_dir && entry.name.ends_with(".txt") -> paths.push(entry.path)
+
+fn count_file(path: String, needle: String) Int -> {
+    text :: files.read(path) ?? ""
+    text.lines().map(line -> line.count(needle)).sum()
+}
+
+fn run(args: Args) {
+    root :: ~args.root
+    needle :: ~args.needle
+    paths := (files.list_dir(root) ?? panic("list failed")).filter(entry -> !entry.is_dir && entry.name.ends_with(".txt")).map(entry -> entry.path)
+    paths.sort()
+    counts := paths.para_map((path: String) -> count_file(path, needle), limit: 32)
+    normalized := counts.map(count -> Int{count})
+    zero :: Int{0}
+    matched := 0
+    loop index in 0..<paths.len() {
+        count :: normalized[index]
+        if count > zero {
+            path :: paths.get(index) ?? ""
+            print("{path}:{count}")
+            matched += 1
+        }
     }
-    results := paths.para_map((path: String) -> scan(path, root, needle), limit: 32)
-    results.sort_by(result -> result.display)
-    positive :: results.filter((result: Match) -> result.count > 0)
-    total :: positive.map((result: Match) -> result.count).sum()
-    loop result in positive -> print("{result.display}:{result.count}")
-    print("files {positive.len()}/{paths.len()} total {total}")
+    print("files {matched}/{paths.len()} total {normalized.sum()}")
 }

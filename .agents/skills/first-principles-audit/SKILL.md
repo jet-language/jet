@@ -113,8 +113,10 @@ more demanding of the two and wins.
 
 ## Phase 1 — research fan-out (parallel, read-only)
 
-Launch parallel read-only research passes; each returns compact evidence with
-file:line references, real syntax, and decision IDs — raw data over polish.
+Submit genuinely independent read-only OMP tasks; each returns compact evidence
+with file:line references, real syntax, and decision IDs — raw data over polish.
+Use the owner guide's adaptive concurrency and adapter rules; do not select a
+model or fixed worker count here.
 Cover at least:
 
 1. **Current mechanisms** — spec, sema/compiler code, prelude, examples,

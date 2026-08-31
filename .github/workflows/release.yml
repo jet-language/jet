@@ -1,9 +1,9 @@
 name: Release
 
-# Tagged releases (v*.*.*) publish prebuilt `jet`/`jetpack` binaries for
-# common platforms, per docs/reference/versioning.md. `meta.platforms` on
-# the `jet` flake package is `unix`, so this covers Linux + macOS only —
-# no Windows artifact until that platform is supported by the nix build.
+# Tagged releases (v*.*.*) publish prebuilt `jet`/`jetpack`/`jet-cc`/`jet-c++` binaries for the
+# three native release hosts covered by the strict parity matrix. The channel
+# bundle is unsigned signing input only; production signing and dl deployment
+# remain owner-controlled operations outside this workflow.
 # c730: tagged publication requires the same strict JIT/AOT parity gate on
 # the tagged commit (x86_64 native hosts where Cranelift JIT is supported).
 on:
@@ -48,7 +48,7 @@ jobs:
           if-no-files-found: error
 
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.label }})
     needs: jit-aot-parity
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -58,35 +58,109 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: jet-linux-x86_64
-          - os: macos-latest
+            label: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            build: nix
+          - os: macos-13
             artifact: jet-macos-x86_64
+            label: macos-x86_64
+            target: x86_64-apple-darwin
+            build: nix
+          - os: windows-latest
+            artifact: jet-windows-x86_64
+            label: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            build: native
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Nix
+        if: matrix.build == 'nix'
         uses: cachix/install-nix-action@v27
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Build jet
+        if: matrix.build == 'nix'
         run: nix build .#jet
 
+      - name: Build jet on Windows
+        if: matrix.build == 'native'
+        shell: bash
+        run: cargo build --release --locked --bin jet --bin jetpack --bin jet-cc --bin jet-cxx
+
       - name: Package artifact
+        shell: bash
         run: |
-          mkdir -p dist
-          tar -C result/bin -czf "dist/${{ matrix.artifact }}.tar.gz" jet jetpack
+          version="${GITHUB_REF_NAME#v}"
+          if [ "${{ matrix.build }}" = native ]; then
+            mv target/release/jet-cxx.exe target/release/jet-c++.exe
+          fi
+          mkdir -p dist/package
+          if [ "${{ matrix.build }}" = nix ]; then
+            binary="result/bin/jet"
+            cp result/bin/jet result/bin/jetpack result/bin/jet-cc result/bin/jet-c++ dist/package/
+          else
+            binary="target/release/jet.exe"
+            cp target/release/jet.exe target/release/jetpack.exe target/release/jet-cc.exe target/release/jet-c++.exe dist/package/
+          fi
+          capsule_bytes="$(wc -c < tools/agent-eval/jet-context-capsule.md)"
+          test "$capsule_bytes" -le 32768
+          cp tools/agent-eval/jet-context-capsule.md dist/package/
+          tar -C dist/package -czf "dist/${{ matrix.artifact }}.tar.gz" .
+          mkdir -p dist/toolchain
+          cp "$binary" "dist/toolchain/jet-${version}-${{ matrix.target }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}.tar.gz
+          path: dist/
+          if-no-files-found: error
+
+  prepare-channel:
+    name: Prepare unsigned toolchain channel
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download native toolchain inputs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: jet-*
+          merge-multiple: true
+
+      - name: Stage manifest and signing requests
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node tools/jetpack-infra/stage-toolchain.mjs \
+            --version "$version" \
+            --sequence "$GITHUB_RUN_NUMBER" \
+            --channel stable \
+            --min-version 1.0.0 \
+            --output channel-staging \
+            --artifact x86_64-unknown-linux-gnu="dist/toolchain/jet-${version}-x86_64-unknown-linux-gnu" \
+            --artifact x86_64-apple-darwin="dist/toolchain/jet-${version}-x86_64-apple-darwin" \
+            --artifact x86_64-pc-windows-msvc="dist/toolchain/jet-${version}-x86_64-pc-windows-msvc"
+          mkdir -p dist/channel
+          tar -C channel-staging -czf "dist/channel/toolchain-channel-requests-${version}.tar.gz" .
+
+      - name: Upload unsigned channel requests
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-channel-requests
+          path: dist/channel/toolchain-channel-requests-*.tar.gz
 
   release:
     name: Publish GitHub release
-    needs: [jit-aot-parity, build]
+    needs: [jit-aot-parity, build, prepare-channel]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -100,14 +174,19 @@ jobs:
         with:
           path: dist
           pattern: jet-*
-          merge-multiple: false
+          merge-multiple: true
+
+      - name: Download unsigned channel requests
+        uses: actions/download-artifact@v4
+        with:
+          name: toolchain-channel-requests
+          path: dist/channel
 
       - name: Attach artifacts to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only attach build tarballs (parity reports are separate artifacts).
-          gh release create "${{ github.ref_name }}" dist/jet-*/*.tar.gz \
+          gh release create "${{ github.ref_name }}" dist/*.tar.gz dist/channel/*.tar.gz \
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --repo "${{ github.repository }}"

@@ -90,6 +90,233 @@ fn inspect_guarantees_reports_mixed_components_and_json() {
 }
 
 #[test]
+fn inspect_guarantees_projects_normalized_team_policy() {
+    let dir = isolated_cwd("inspect_guarantees_team_policy");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{ zlib: c@system }\npolicy: .{ effects: .{ \"src\": -[IO, IO]> }, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: .{ deny: [float_money] } }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+
+    let human = Command::new(jet())
+        .args(["inspect", "guarantees", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human = String::from_utf8(human.stdout).unwrap();
+    for row in [
+        "policy.effects:\n  src: -[IO]>",
+        "policy.unsafe: .Paths([\"src\"])",
+        "policy.expert: .Deny",
+        "policy.deps: .List([\"zlib\"])",
+        "policy.lints.deny: [\"float_money\"]",
+    ] {
+        assert!(human.contains(row), "normalized policy row missing `{row}`:\n{human}");
+    }
+
+    let json = Command::new(jet())
+        .args(["inspect", "guarantees", "main.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json = String::from_utf8(json.stdout).unwrap();
+    assert!(parse_json(&json).is_ok(), "guarantee policy JSON must parse: {json}");
+    for row in [
+        "\"path\":\"src\",\"ceiling\":[\"IO\"]",
+        "\"unsafe\":{\"mode\":\"paths\",\"paths\":[\"src\"]}",
+        "\"expert\":false",
+        "\"deps\":[\"zlib\"]",
+        "\"lints\":{\"deny\":[\"float_money\"]}",
+    ] {
+        assert!(json.contains(row), "normalized policy JSON row missing `{row}`:\n{json}");
+    }
+}
+
+#[test]
+fn inspect_guarantees_projects_inherited_package_policy_and_grants() {
+    let dir = isolated_cwd("inspect_guarantees_inherited_policy");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"guarantees\"\nversion: \"0.1.0\"\n\
+         deps: .{ dep: c@system }\n\
+         authority: .{ holds: { allow: [IO] }, grants: .{ \"dep\": [FS.Read] } }\n\
+         policy: .{ effects: .{ \"src\": -[IO]> }, unsafe: .Paths([\"src/ffi\"]), \
+         expert: .Deny, deps: .List([\"dep\"]), lints: .{ deny: [] })\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/main.jet"), "fn run() {}\n").unwrap();
+
+    let human = Command::new(jet())
+        .args(["inspect", "guarantees", "src/main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human = String::from_utf8(human.stdout).unwrap();
+    for row in [
+        "policy.effects:\n  src: -[IO]>",
+        "policy.unsafe: .Paths([\"src/ffi\"])",
+        "policy.expert: .Deny",
+        "policy.deps: .List([\"dep\"])",
+        "policy.lints.deny: []",
+        "authority.holds.allow",
+        "authority.grants.dep",
+        "granted effects: FS.Read",
+    ] {
+        assert!(human.contains(row), "inherited policy row missing `{row}`:\n{human}");
+    }
+
+    let json = Command::new(jet())
+        .args(["inspect", "guarantees", "src/main.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json = String::from_utf8(json.stdout).unwrap();
+    assert!(parse_json(&json).is_ok(), "guarantee JSON must parse: {json}");
+    for row in [
+        "\"path\":\"src\",\"ceiling\":[\"IO\"]",
+        "\"unsafe\":{\"mode\":\"paths\",\"paths\":[\"src/ffi\"]}",
+        "\"expert\":false",
+        "\"deps\":[\"dep\"]",
+        "\"lints\":{\"deny\":[]}",
+        "\"component\":\"authority.holds.allow\"",
+        "\"component\":\"authority.grants.dep\"",
+    ] {
+        assert!(json.contains(row), "inherited policy JSON row missing `{row}`:\n{json}");
+    }
+}
+
+#[test]
+fn inspect_guarantees_reports_source_less_dependencies_once_and_sorted() {
+    let dir = isolated_cwd("inspect_guarantees_dependency_facts");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"guarantees\"\nversion: \"0.1.0\"\n\
+         deps: .{ a_dep: c@system, m_dep: c@system, z_dep: js@\"widget#version=1@npm\" }\n\
+         policy: .{ deps: .List([\"a_dep\", \"m_dep\", \"z_dep\"]) }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "guarantees", "main.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).unwrap();
+    assert!(parse_json(&json).is_ok(), "guarantee JSON must parse: {json}");
+    for dependency in ["a_dep", "m_dep", "z_dep"] {
+        let component = format!("\"component\":\"{dependency}\"");
+        assert_eq!(
+            json.matches(component.as_str()).count(),
+            1,
+            "dependency component must appear once: {dependency}: {json}"
+        );
+    }
+    let a = json.find("\"component\":\"a_dep\"").unwrap();
+    let m = json.find("\"component\":\"m_dep\"").unwrap();
+    let z = json.find("\"component\":\"z_dep\"").unwrap();
+    assert!(a < m && m < z, "dependency components must be sorted: {json}");
+}
+
+#[test]
+fn package_team_policy_rejects_effect_unsafe_expert_and_dependency_violations() {
+    for (tag, policy, source, expected_rule) in [
+        (
+            "team_policy_effect",
+            "effects: .{ \"main.jet\": -[]> }",
+            "fn run() { print(\"outside the ceiling\") }\n",
+            "policy.effects",
+        ),
+        (
+            "team_policy_unsafe",
+            "unsafe: .Paths([\"src\"])",
+            "fn run() {\n    #Unsafe(\"audit\") {}\n}\n",
+            "policy.unsafe",
+        ),
+        (
+            "team_policy_expert",
+            "expert: .Deny",
+            "fn run() {\n    #Shield {}\n}\n",
+            "policy.expert",
+        ),
+        (
+            "team_policy_dependency",
+            "deps: .List([\"allowed\"])",
+            "fn run() {}\n",
+            "policy.deps",
+        ),
+    ] {
+        let dir = isolated_cwd(tag);
+        fs::write(
+            dir.join("package.jet"),
+            format!(
+                "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{{ zlib: c@system }}\npolicy: .{{ {policy} }}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join("main.jet"), source).unwrap();
+        let output = Command::new(jet())
+            .args(["check", "main.jet"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{tag} unexpectedly passed:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Error [E2960]") && stderr.contains(expected_rule),
+            "{tag} did not report {expected_rule}:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("Package policy") && stderr.contains("package.jet"),
+            "{tag} lacks actionable policy text:\n{stderr}"
+        );
+    }
+}
+
+#[test]
 fn inspect_guarantees_harden_contains_every_dependency() {
     let dir = isolated_cwd("inspect_guarantees_harden");
     fs::write(

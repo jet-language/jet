@@ -9,7 +9,7 @@ use jet_driver::Diagnostics::Diagnostic;
 use jet_semindex::SourceSpan;
 
 use super::schema_api::DEBUG_SCHEMA_VERSION;
-use super::source_model::source_revision;
+use super::source_model::{read_source_without_symlinks, source_revision};
 use super::validation_json::{
     json_str, json_string_field, json_usize_field, parse_json_string, span_json,
 };
@@ -428,7 +428,7 @@ fn validate_debug_command(command: &str) -> Result<(), String> {
 
 impl NativeDebugArtifact {
     fn build(path: &Path, id: &str) -> Result<Self, String> {
-        let jet_source = fs::read_to_string(path)
+        let jet_source = read_source_without_symlinks(path)
             .map_err(|error| debug_error("io", &format!("couldn't read debug source: {error}")))?;
         let output = jet_driver::run_compiler_work(|| {
             jet_driver::Driver::compile_bundle_path_opts_dbg(
@@ -487,7 +487,8 @@ impl NativeDebugArtifact {
             }
         }
         rustc.args(&output.clinks);
-        let compiled = rustc.output().map_err(|error| {
+        let compiled = crate::command_output_bounded(&mut rustc, crate::MAX_CHILD_OUTPUT_BYTES)
+            .map_err(|error| {
             debug_error(
                 "diagnostic",
                 &format!("native Canvas debugger is unavailable: couldn't run the native compiler ({error})"),
@@ -1051,12 +1052,12 @@ pub(super) fn canonical_path(path: &Path) -> PathBuf {
 
 pub(super) fn git_root(path: &Path) -> Option<PathBuf> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let out = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["-C"])
         .arg(dir)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
+        .args(["rev-parse", "--show-toplevel"]);
+    let out = crate::command_output_bounded(&mut command, crate::MAX_CHILD_OUTPUT_BYTES).ok()?;
     if !out.status.success() {
         return None;
     }
@@ -1078,12 +1079,9 @@ pub(super) fn git_relative_path(root: &Path, path: &Path) -> String {
 }
 
 pub(super) fn git_output(root: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(args);
+    let out = crate::command_output_bounded(&mut command, crate::MAX_CHILD_OUTPUT_BYTES).ok()?;
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).to_string())
     } else {

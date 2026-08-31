@@ -1,17 +1,20 @@
 //! Resident `jet dev` session state shared by Canvas and application views.
 //!
 //! The session is deliberately transport-neutral.  The default web host
-//! exposes one workbench listener for Canvas, preview, and diagnostics; the
-//! listener facets below keep route ownership inspectable in the payload.
+//! exposes separate Canvas and application listeners; the listener facets
+//! below keep route ownership inspectable in the payload.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
-const MAX_CLIENT_ID: usize = 128;
+pub(crate) const MAX_CLIENT_ID: usize = 128;
+pub(crate) const MAX_CLIENTS: usize = 256;
+pub(crate) const CLIENT_TTL_MS: u64 = 160;
+pub(crate) const CLIENT_TTL: Duration = Duration::from_millis(CLIENT_TTL_MS);
 const MAX_RECEIPTS: usize = 128;
 const MAX_RETAINED_VIEW_BYTES: usize = 2 * 1024 * 1024;
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -52,6 +55,7 @@ pub struct ResidentDevSession {
     entry: String,
     canvas_host: String,
     canvas_port: u16,
+    application_host: String,
     application_port: u16,
     current_revision: Mutex<String>,
     accepted_revision: Mutex<String>,
@@ -82,6 +86,22 @@ impl ResidentDevSession {
         canvas_port: u16,
         application_port: u16,
     ) -> Self {
+        Self::new_with_hosts(
+            entry,
+            canvas_host,
+            canvas_port,
+            "127.0.0.1",
+            application_port,
+        )
+    }
+
+    pub(crate) fn new_with_hosts(
+        entry: &str,
+        canvas_host: &str,
+        canvas_port: u16,
+        application_host: &str,
+        application_port: u16,
+    ) -> Self {
         let serial = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             source_transactions: crate::WatchService::SessionBroker::default(),
@@ -89,6 +109,7 @@ impl ResidentDevSession {
             entry: entry.to_string(),
             canvas_host: canvas_host.to_string(),
             canvas_port,
+            application_host: application_host.to_string(),
             application_port,
             current_revision: Mutex::new(String::new()),
             accepted_revision: Mutex::new(String::new()),
@@ -116,17 +137,26 @@ impl ResidentDevSession {
     }
 
     pub fn note_client(&self, client: &str) {
-        if client.is_empty() || client.len() > MAX_CLIENT_ID {
+        if !client_id_is_valid(client) {
             return;
         }
-        self.clients
-            .lock()
-            .unwrap()
-            .insert(client.to_string(), Instant::now());
+        let now = Instant::now();
+        let mut clients = self.clients.lock().unwrap();
+        expire_clients(&mut clients, now);
+        if !clients.contains_key(client) && clients.len() >= MAX_CLIENTS {
+            return;
+        }
+        clients.insert(client.to_string(), now);
     }
 
     pub fn drop_client(&self, client: &str) {
-        self.clients.lock().unwrap().remove(client);
+        if !client_id_is_valid(client) {
+            return;
+        }
+        let now = Instant::now();
+        let mut clients = self.clients.lock().unwrap();
+        expire_clients(&mut clients, now);
+        clients.remove(client);
     }
 
     pub fn observe_source(&self, revision: &str) {
@@ -367,6 +397,14 @@ impl ResidentDevSession {
         self.application_port
     }
 
+    pub fn canvas_port(&self) -> u16 {
+        self.canvas_port
+    }
+
+    pub fn application_host(&self) -> &str {
+        &self.application_host
+    }
+
     pub fn json(&self) -> String {
         let current = self.current_revision.lock().unwrap().clone();
         let accepted = self.accepted_revision.lock().unwrap().clone();
@@ -382,44 +420,31 @@ impl ResidentDevSession {
         let debugger = self.debugger.lock().unwrap().clone();
         let tests = self.test_state.lock().unwrap().clone();
         let views = self.last_good_views.lock().unwrap().clone();
-        let clients = self.clients.lock().unwrap().len();
-        let shared_listener = self.canvas_port != 0
-            && self.application_port != 0
-            && self.canvas_port == self.application_port;
-        let workbench_port = if self.canvas_port != 0 {
-            self.canvas_port
+        let now = Instant::now();
+        let mut client_state = self.clients.lock().unwrap();
+        expire_clients(&mut client_state, now);
+        let clients = client_state.len();
+        let mut listener_entries = Vec::new();
+        if self.canvas_port != 0 {
+            listener_entries.push(format!(
+                "\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}",
+                json_value(&self.canvas_host),
+                self.canvas_port,
+            ));
+        }
+        if self.application_port != 0 {
+            listener_entries.push(format!(
+                "\"application\":{{\"host\":{},\"port\":{},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}",
+                json_value(&self.application_host),
+                self.application_port,
+            ));
+        }
+        let listeners = format!("{{{}}}", listener_entries.join(","));
+        let custom_server_listener = if self.application_port != 0 {
+            "\"application\""
         } else {
-            self.application_port
+            "null"
         };
-        let workbench_routes = if shared_listener {
-            "[\"canvas\",\"preview\",\"diagnostics\"]"
-        } else if self.canvas_port != 0 {
-            "[\"canvas\",\"diagnostics\"]"
-        } else {
-            "[\"preview\"]"
-        };
-        let listener_name = if shared_listener {
-            "workbench"
-        } else if self.canvas_port != 0 {
-            "canvas"
-        } else {
-            "application"
-        };
-        let listeners = format!(
-            "{{\"workbench\":{{\"host\":{},\"port\":{},\"transport\":\"workbench\",\"routes\":{},\"shared\":{}}},\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\",\"listener\":{},\"shared\":{}}},\"application\":{{\"host\":{},\"port\":{},\"transport\":\"application\",\"listener\":{},\"routes\":\"application-owned\",\"shared\":{}}}}}",
-            json_value(&self.canvas_host),
-            workbench_port,
-            workbench_routes,
-            shared_listener,
-            json_value(&self.canvas_host),
-            self.canvas_port,
-            json_value(listener_name),
-            shared_listener,
-            json_value(&self.canvas_host),
-            self.application_port,
-            json_value(listener_name),
-            shared_listener,
-        );
         let receipts = self
             .receipts
             .lock()
@@ -466,7 +491,7 @@ impl ResidentDevSession {
             self.receipts.lock().unwrap().len(),
             receipts,
             listeners,
-            json_value(listener_name)
+            custom_server_listener
         )
     }
 
@@ -477,6 +502,14 @@ impl ResidentDevSession {
             receipts.remove(0);
         }
     }
+}
+
+fn expire_clients(clients: &mut HashMap<String, Instant>, now: Instant) {
+    clients.retain(|_, seen| now.saturating_duration_since(*seen) <= CLIENT_TTL);
+}
+
+pub(crate) fn client_id_is_valid(client: &str) -> bool {
+    !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any(char::is_control)
 }
 
 fn retained_view_json(view: Option<&RetainedView>) -> String {
@@ -590,7 +623,8 @@ fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::ResidentDevSession;
+    use super::{ResidentDevSession, CLIENT_TTL, MAX_CLIENTS};
+    use std::time::Instant;
 
     #[test]
     fn one_session_keeps_history_last_good_and_listener_boundaries() {
@@ -606,12 +640,28 @@ mod tests {
         let json = session.json();
         assert!(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":8080"));
         assert!(json.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":49152"));
+        assert!(json.contains("\"listener\":\"canvas\""));
+        assert!(json.contains("\"listener\":\"application\""));
+        assert!(!json.contains("\"shared\":true"));
         assert!(json.contains("\"accepted_revision\":\"new\""));
         assert!(json.contains("\"last_good_program\":\"web-build-2\""));
         assert!(json.contains("\"clients\":2"));
         assert!(json.contains("\"run\":{\"output\":\"web\",\"target\":\"browser\"}"));
         assert!(json.contains("\"count\":1"));
         assert!(json.contains("\"status\":\"accepted\""));
+    }
+
+    #[test]
+    fn session_json_lists_only_bound_listeners() {
+        let app = ResidentDevSession::new("app.jet", 0, 49152).json();
+        assert!(app.contains("\"listeners\":{\"application\""));
+        assert!(!app.contains("\"listeners\":{\"canvas\""));
+        assert!(!app.contains("\"workbench\""));
+
+        let canvas = ResidentDevSession::new("app.jet", 4567, 0).json();
+        assert!(canvas.contains("\"listeners\":{\"canvas\""));
+        assert!(!canvas.contains("\"listeners\":{\"application\""));
+        assert!(!canvas.contains("\"workbench\""));
     }
 
     #[test]
@@ -696,5 +746,22 @@ mod tests {
             r#"{"schema_version":1,"revision":"accepted-revision","source_id":"helper.jet","session_id":"canvas-debug-1","stop":true}"#,
         );
         assert!(session.json().contains("\"debugger\":{\"state\":\"idle\",\"session_id\":null"));
+    }
+
+    #[test]
+    fn client_registry_is_bounded_and_expires_before_admission() {
+        let session = ResidentDevSession::new("app.jet", 4567, 49152);
+        for index in 0..MAX_CLIENTS {
+            session.note_client(&format!("client-{index}"));
+        }
+        session.note_client("overflow");
+        assert!(session.json().contains(&format!("\"clients\":{MAX_CLIENTS}")));
+
+        let expired = Instant::now()
+            .checked_sub(CLIENT_TTL + std::time::Duration::from_millis(1))
+            .expect("test instant must have a past value");
+        session.clients.lock().unwrap().insert("expired".into(), expired);
+        session.note_client("replacement");
+        assert!(session.json().contains("\"clients\":256"));
     }
 }

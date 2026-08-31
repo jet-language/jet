@@ -2220,9 +2220,72 @@ fn jet_csv_io_error(error: std::io::Error, offset: i64, line: i64, column: i64, 
 
 fn jet_csv_path(record: i64, field: usize) -> String { format!("$[{record}][{field}]") }
 
-fn jet_enc_csv_reader(input: JetFileReader, limits: jet_std::EncodingLimits) -> Result<jet_std::CSVReader, jet_std::EncodingError> {
-    jet_encoding_validate_limits(&limits).map_err(|mut error| { error.format = jet_std::EncodingFormat::CSV; error })?;
-    Ok(jet_std::CSVReader { input, limits, total: 0, offset: 0, line: 1, column: 1, terminal: None, eof: false, record_index: 0 })
+// D-ROWS1=A: `core.encoding.csv.parse(text, delimiter:, header:, skip_blank:)`
+// and `core.encoding.csv.reader(source, limits, delimiter:, header:, skip_blank:)`
+// share this option contract and the one `jet_csv_kernel::CsvParser` engine.
+fn jet_csv_options(
+    delimiter: &str,
+    header: bool,
+    skip_blank: bool,
+) -> Result<jet_csv_kernel::CsvOptions, String> {
+    Ok(jet_csv_kernel::CsvOptions {
+        delimiter: jet_csv_kernel::delimiter(delimiter)?,
+        header,
+        skip_blank,
+    })
+}
+
+fn jet_enc_csv_reader(
+    input: JetFileReader,
+    limits: jet_std::EncodingLimits,
+    delimiter: String,
+    header: bool,
+    skip_blank: bool,
+) -> Result<jet_std::CSVReader, jet_std::EncodingError> {
+    jet_encoding_validate_limits(&limits).map_err(|mut error| {
+        error.format = jet_std::EncodingFormat::CSV;
+        error
+    })?;
+    let options = jet_csv_options(&delimiter, header, skip_blank).map_err(|reason| {
+        jet_csv_error(
+            jet_std::EncodingErrorKind::Syntax,
+            0,
+            1,
+            1,
+            String::new(),
+            reason,
+        )
+    })?;
+    let delimiter = options.delimiter;
+    let parser = jet_csv_kernel::CsvParser::new(options).map_err(|reason| {
+        jet_csv_error(
+            jet_std::EncodingErrorKind::Syntax,
+            0,
+            1,
+            1,
+            String::new(),
+            reason,
+        )
+    })?;
+    let allocation = JetEncodingAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits));
+    Ok(jet_std::CSVReader {
+        input,
+        limits,
+        delimiter,
+        header,
+        skip_blank,
+        parser,
+        allocation,
+        utf8: [0; 4],
+        utf8_len: 0,
+        total: 0,
+        offset: 0,
+        line: 1,
+        column: 1,
+        terminal: None,
+        eof: false,
+        record_index: 0,
+    })
 }
 
 impl jet_std::CSVReader {
@@ -2241,109 +2304,230 @@ impl jet_std::CSVReader {
                     self.line,
                     self.column,
                     jet_csv_path(self.record_index, field),
-                    format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap()),
+                    format!(
+                        "max_total_bytes {} exceeded",
+                        self.limits.max_total_bytes.unwrap()
+                    ),
                 ))
             }
             Ok(_) => {
                 self.total += 1;
                 self.offset += 1;
-                if one[0] == b'\n' { self.line += 1; self.column = 1; } else { self.column += 1; }
+                if one[0] == b'\n' {
+                    self.line += 1;
+                    self.column = 1;
+                } else {
+                    self.column += 1;
+                }
                 Ok(Some(one[0]))
             }
-            Err(error) => Err(jet_csv_io_error(error, self.offset, self.line, self.column, jet_csv_path(self.record_index, field))),
+            Err(error) => Err(jet_csv_io_error(
+                error,
+                self.offset,
+                self.line,
+                self.column,
+                jet_csv_path(self.record_index, field),
+            )),
         }
     }
 
-    fn next_record(&mut self) -> Result<Option<Vec<String>>, jet_std::EncodingError> {
-        if let Some(error) = &self.terminal { return Err(error.clone()); }
-        if self.eof { return Ok(None); }
-        let budget = JetEncodingAllocationBudget::new(jet_encoding_codec_heap_ceiling(&self.limits));
-        let mut row: Vec<String> = Vec::new();
-        let mut field: Vec<u8> = Vec::new();
-        let mut decoded = 0usize;
-        let mut quoted = false;
-        let mut after_quote = false;
-        let mut saw_any = false;
-        loop {
-            let field_index = row.len();
-            let byte = match self.byte(field_index) { Ok(v) => v, Err(e) => return self.fail(e) };
-            match byte {
-                None if !saw_any && row.is_empty() && field.is_empty() => { self.eof = true; return Ok(None); }
-                None if quoted && !after_quote => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated,
-                    self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "quoted CSV field ended before its closing quote")),
+    fn next_char(&mut self, field: usize) -> Result<Option<char>, jet_std::EncodingError> {
+        self.utf8_len = 0;
+        let first = match self.byte(field)? {
+            Some(byte) => byte,
+            None => return Ok(None),
+        };
+        self.utf8[0] = first;
+        self.utf8_len = 1;
+        let expected = match first {
+            0x00..=0x7f => 1,
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => {
+                return Err(jet_csv_error(
+                    jet_std::EncodingErrorKind::Syntax,
+                    self.offset.saturating_sub(1),
+                    self.line,
+                    self.column,
+                    jet_csv_path(self.record_index, field),
+                    "CSV input is not valid UTF-8",
+                ));
+            }
+        };
+        while self.utf8_len < expected {
+            let byte = match self.byte(field)? {
+                Some(byte) => byte,
                 None => {
+                    return Err(jet_csv_error(
+                        jet_std::EncodingErrorKind::Syntax,
+                        self.offset,
+                        self.line,
+                        self.column,
+                        jet_csv_path(self.record_index, field),
+                        "CSV input is not valid UTF-8",
+                    ));
+                }
+            };
+            self.utf8[self.utf8_len] = byte;
+            self.utf8_len += 1;
+        }
+        let text = match std::str::from_utf8(&self.utf8[..self.utf8_len]) {
+            Ok(text) => text,
+            Err(_) => {
+                return Err(jet_csv_error(
+                    jet_std::EncodingErrorKind::Syntax,
+                    self.offset.saturating_sub(self.utf8_len as i64),
+                    self.line,
+                    self.column,
+                    jet_csv_path(self.record_index, field),
+                    "CSV input is not valid UTF-8",
+                ));
+            }
+        };
+        Ok(text.chars().next())
+    }
+
+    fn parser_error(&self, error: jet_csv_kernel::CsvError) -> jet_std::EncodingError {
+        let record = i64::try_from(error.record.saturating_sub(1)).unwrap_or(i64::MAX);
+        jet_csv_error(
+            match error.kind {
+                jet_csv_kernel::CsvErrorKind::Syntax => jet_std::EncodingErrorKind::Syntax,
+                jet_csv_kernel::CsvErrorKind::Truncated => {
+                    jet_std::EncodingErrorKind::Truncated
+                }
+            },
+            self.offset.saturating_sub(1),
+            error.line,
+            error.column,
+            jet_csv_path(record, error.field),
+            error.reason,
+        )
+    }
+
+    fn parser_capacity_error(&self, field: usize) -> jet_std::EncodingError {
+        jet_csv_error(
+            jet_std::EncodingErrorKind::Limit,
+            self.offset,
+            self.parser.line(),
+            self.parser.column(),
+            jet_csv_path(self.record_index, field),
+            "CSV record heap exceeded the bounded codec heap ceiling",
+        )
+    }
+
+    fn reconcile_parser_capacity(
+        &self,
+        before: usize,
+        field: usize,
+    ) -> Result<(), jet_std::EncodingError> {
+        let after = self.parser.capacity_bytes();
+        if after < before {
+            self.allocation.release(before - after);
+        } else if after > before && !self.allocation.charge(after - before) {
+            return Err(self.parser_capacity_error(field));
+        }
+        Ok(())
+    }
+
+    fn release_finished_capacity(&self, before: usize) {
+        let after = self.parser.capacity_bytes();
+        if before > after {
+            self.allocation.release(before - after);
+        }
+    }
+
+    fn item_limit(
+        &self,
+        field: usize,
+        character: char,
+    ) -> Result<(), jet_std::EncodingError> {
+        let appended = self.parser.append_len_bytes(character);
+        if self
+            .parser
+            .field_len_bytes()
+            .saturating_add(appended)
+            > self.limits.max_item_bytes as usize
+        {
+            return Err(jet_csv_error(
+                jet_std::EncodingErrorKind::Limit,
+                self.offset.saturating_sub(1),
+                self.parser.line(),
+                self.parser.column(),
+                jet_csv_path(self.record_index, field),
+                format!("max_item_bytes {} exceeded", self.limits.max_item_bytes),
+            ));
+        }
+        Ok(())
+    }
+
+    fn next_record(
+        &mut self,
+    ) -> Result<Option<jet_std::CSVRow>, jet_std::EncodingError> {
+        if let Some(error) = &self.terminal {
+            return Err(error.clone());
+        }
+        if self.eof {
+            return Ok(None);
+        }
+        loop {
+            let field = self.parser.current_field();
+            self.record_index =
+                i64::try_from(self.parser.current_record().saturating_sub(1))
+                    .unwrap_or(i64::MAX);
+            let character = match self.next_char(field) {
+                Ok(Some(character)) => character,
+                Ok(None) => {
                     self.eof = true;
-                    if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset, self.line, self.column) { return self.fail(e); }
-                    self.record_index += 1;
-                    return Ok(Some(row));
+                    let before = self.parser.capacity_bytes();
+                    let result = self.parser.finish();
+                    match result {
+                        Ok(Some(record)) => {
+                            self.release_finished_capacity(before);
+                            return Ok(Some(jet_std::CSVRow {
+                                fields: record.fields,
+                                line: record.line,
+                            }));
+                        }
+                        Ok(None) => {
+                            self.release_finished_capacity(before);
+                            return Ok(None);
+                        }
+                        Err(error) => return self.fail(self.parser_error(error)),
+                    }
                 }
-                Some(b) => {
-                    saw_any = true;
-                    if quoted {
-                        if after_quote {
-                            if b == b'"' { after_quote = false; if let Err(e) = jet_csv_push_byte(&budget, &mut field, b'"', &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); } }
-                            else if b == b',' { quoted = false; after_quote = false; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line, self.column.saturating_sub(1)) { return self.fail(e); } }
-                            else if b == b'\r' { match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
-                            else if b == b'\n' { if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
-                            else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "only quote, comma, CRLF, LF, or EOF may follow a closing CSV quote")); }
-                        } else if b == b'"' { after_quote = true; }
-                        else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
-                    } else if b == b'"' {
-                        if field.is_empty() { quoted = true; } else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "quote inside an unquoted CSV field")); }
-                    } else if b == b',' {
-                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line, self.column.saturating_sub(1)) { return self.fail(e); }
-                    } else if b == b'\r' {
-                        match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }
-                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); }
-                        self.record_index += 1;
-                        return Ok(Some(row));
-                    } else if b == b'\n' {
-                        // D-DATAFLOW1=A / EncodingLite parity: accept LF as well as CRLF.
-                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); }
-                        self.record_index += 1;
-                        return Ok(Some(row));
-                    } else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
+                Err(error) => return self.fail(error),
+            };
+            if let Err(error) = self.item_limit(field, character) {
+                return self.fail(error);
+            }
+            let before = self.parser.capacity_bytes();
+            let result = self.parser.push(character);
+            if let Err(error) = self.reconcile_parser_capacity(before, field) {
+                return self.fail(error);
+            }
+            match result {
+                Ok(Some(record)) => {
+                    self.record_index =
+                        i64::try_from(self.parser.current_record().saturating_sub(1))
+                            .unwrap_or(i64::MAX);
+                    return Ok(Some(jet_std::CSVRow {
+                        fields: record.fields,
+                        line: record.line,
+                    }));
                 }
+                Ok(None) => {}
+                Err(error) => return self.fail(self.parser_error(error)),
             }
         }
     }
 }
 
-fn jet_csv_push_byte(budget: &JetEncodingAllocationBudget, field: &mut Vec<u8>, byte: u8, decoded: &mut usize, limits: &jet_std::EncodingLimits, record: i64, index: usize, offset: i64, line: i64, column: i64) -> Result<(), jet_std::EncodingError> {
-    if *decoded >= limits.max_item_bytes as usize { return Err(jet_csv_error(jet_std::EncodingErrorKind::Limit, offset.saturating_sub(1), line, column, jet_csv_path(record, index), format!("max_item_bytes {} exceeded", limits.max_item_bytes))); }
-    if field.len() == field.capacity() {
-        let old = field.capacity();
-        let next = if old == 0 { 8 } else { old.saturating_mul(2) };
-        let additional = next.saturating_sub(field.len());
-        if !jet_encoding_reserve_vec(Some(budget), field, additional) {
-            return Err(jet_csv_error(jet_std::EncodingErrorKind::Limit, offset, line, column, jet_csv_path(record, index), "CSV record heap exceeded the bounded codec heap ceiling"));
-        }
-    }
-    field.push(byte); *decoded += 1; Ok(())
+fn jet_enc_csv_reader_next(
+    reader: &mut jet_std::CSVReader,
+) -> Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError> {
+    reader.next_record().map(jet_outcome_of)
 }
-
-fn jet_csv_finish_field(budget: &JetEncodingAllocationBudget, row: &mut Vec<String>, field: &mut Vec<u8>, _decoded: &mut usize, _limits: &jet_std::EncodingLimits, record: i64, offset: i64, line: i64, column: i64) -> Result<(), jet_std::EncodingError> {
-    let index = row.len();
-    if row.len() == row.capacity() {
-        let old = row.capacity(); let next = if old == 0 { 4 } else { old.saturating_mul(2) };
-        let additional = next.saturating_sub(row.len());
-        if !jet_encoding_reserve_vec(Some(budget), row, additional) {
-            return Err(jet_csv_error(jet_std::EncodingErrorKind::Limit, offset, line, column, jet_csv_path(record, index), "CSV record heap exceeded the bounded codec heap ceiling"));
-        }
-    }
-    let bytes = std::mem::take(field);
-    match String::from_utf8(bytes) {
-        Ok(value) => row.push(value),
-        Err(error) => {
-            let bytes = error.into_bytes();
-            budget.release(bytes.capacity());
-            return Err(jet_csv_error(jet_std::EncodingErrorKind::Syntax, offset, line, column, jet_csv_path(record, index), "CSV field is not valid UTF-8"));
-        }
-    }
-    Ok(())
-}
-
-fn jet_enc_csv_reader_next(reader: &mut jet_std::CSVReader) -> Result<JetOutcome<Vec<String>, JetAbsent>, jet_std::EncodingError> { reader.next_record().map(jet_outcome_of) }
 
 fn jet_enc_csv_writer(output: JetFileWriter, limits: jet_std::EncodingLimits) -> Result<jet_std::CSVWriter, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut error| { error.format = jet_std::EncodingFormat::CSV; error })?;

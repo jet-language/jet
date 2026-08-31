@@ -3,6 +3,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit::emit_panic_locals;
 use crate::Codegen::TIR::emit::emit_panic_message_expr;
+use crate::Codegen::TIR::emit::is_test_harness_fn;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::TExpr;
@@ -20,12 +21,17 @@ pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String
         TOrFallback::Return(None) => "return".to_string(),
         TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
         TOrFallback::Panic { msg, loc } => {
-            if cx.test_mode {
+            // A `#Test` body returns `Result<(), String>`, so a caught assertion
+            // failure there is an early `Err(String)`. An imported helper keeps
+            // its own declared error family — `cx.test_mode` is build-wide, not a
+            // fact about the function being emitted (#2350).
+            if cx.test_mode && is_test_harness_fn(cx) {
                 return format!("{{ return Err({}); }}", emit_panic_message_expr(msg, cx));
             }
             format!(
-                "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+                "{{ {cleanup} {root}jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
+                root = cx.root_prefix,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,
                 fn_name_esc = escape_rust_str(&loc.fn_name),

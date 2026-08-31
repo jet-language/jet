@@ -884,6 +884,16 @@ impl JetArena {
         }
     }
 
+    /// A nested record or list handle stored in a record cell. Unlike
+    /// `record_get_int`, a plain integer payload is not a handle, so a cell
+    /// holding `Int` is rejected instead of being read as an arena index.
+    pub fn record_get_record(&self, record: i64, index: i64) -> Option<i64> {
+        match self.record_get(record, index) {
+            Some(JetVal::RecordRef(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
     pub fn record_get_float(&self, record: i64, index: i64) -> Option<f64> {
         match self.record_get(record, index) {
             Some(JetVal::Float(value)) => Some(*value),

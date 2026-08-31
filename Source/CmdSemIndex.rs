@@ -222,11 +222,12 @@ pub(crate) fn run_find(args: &[String], json: bool) {
     let entry = match target.as_deref() {
         Some(raw) if Path::new(raw).is_dir() => {
             crate::resolve_bare_entry("find", Path::new(raw), member.as_deref())
+                .map(|entry| entry.path)
         }
         Some(raw) => Some(PathBuf::from(crate::resolve_source_path(raw))),
         None => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            crate::resolve_bare_entry("find", &cwd, member.as_deref())
+            crate::resolve_bare_entry("find", &cwd, member.as_deref()).map(|entry| entry.path)
         }
     };
 

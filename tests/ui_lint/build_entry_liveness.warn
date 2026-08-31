@@ -1,0 +1,17 @@
+Warning [L0520] (display_migration): `MissingDisplay` has no `Display` impl — bare `{}` will require one soon
+  --> tests/ui_lint/build_entry_liveness.jet:13:13
+    |
+ 13 |     print("{value}")
+    |             ^^^^^
+ Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`
+ Fix: add `impl MissingDisplay.Display { fn display(self) String -> { … } }`
+More: jet-lang.dev/e/L0520
+
+Warning [L0104] (unused_private_fn): private function `unused_private` is never called or used as a value.
+  --> tests/ui_lint/build_entry_liveness.jet:9:4
+    |
+  9 | fn unused_private() {}
+    |    ^^^^^^^^^^^^^^
+ Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: remove the function, or rename `unused_private` to `_unused_private` when it is intentional.
+More: jet-lang.dev/e/L0104

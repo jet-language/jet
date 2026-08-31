@@ -1,0 +1,61 @@
+// #1414 service workload: a bounded loopback HTTP exchange for each frozen
+// request. The service accepts no network other than the loopback listener.
+use core.files as fs
+use core.http.client as http
+use core.http.server as http_server
+use core.net as net
+use core.tasks as tasks
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn handle_sum(req: HTTPRequest) HTTPResponse !HTTPError -> {
+    body :: req.body().text(1024) ?? "invalid body"
+    if body == "1,2,3" -> return Ok(http_server.response(200, "sum=6"))
+    if body == "1,2,3,4,5,6,7,8" -> return Ok(http_server.response(200, "sum=36"))
+    return Ok(http_server.response(400, "reject=bad-number"))
+}
+
+fn run(args: WorkloadArgs) !(HTTPError | NetError | TaskFailure) {
+    raw :: fs.read(args.input) ?? panic("read input")
+    normal :: raw.contains("GET|/ready|")
+    listener :: net.tcp_listen("127.0.0.1:0")
+    address :: listener.local_addr()
+    mux :: http_server.mux()
+    mux.get("/health", () -> Ok(http_server.response(200, "health")))
+    mux.get("/ready", () -> Ok(http_server.response(200, "ready")))
+    mux.post("/sum", (req: HTTPRequest) -> handle_sum(req))
+    serving :: task {
+        if normal {
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+        } else {
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+            http_server.serve_once_listener(listener, mux)
+        }
+    }
+    health :: http.get("http://{address}/health")
+    print("health={health.status()}")
+    if normal {
+        ready :: http.get("http://{address}/ready")
+        print("ready={ready.status()}")
+        total :: http.post("http://{address}/sum", "1,2,3")
+        print(total.body().text(1024) ?? "invalid body")
+    } else {
+        total :: http.post("http://{address}/sum", "1,2,3,4,5,6,7,8")
+        print(total.body().text(1024) ?? "invalid body")
+    }
+    bad :: http.post("http://{address}/sum", "1,2,bad")
+    print(bad.body().text(1024) ?? "invalid body")
+    missing :: http.get("http://{address}/missing")
+    print("missing={missing.status()}")
+    if normal -> print("requests=5") else -> print("requests=4")
+    serving.join()
+}

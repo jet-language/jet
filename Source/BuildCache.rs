@@ -61,12 +61,9 @@ fn debug_cache_event(event: impl AsRef<str>) {
     let Ok(path) = std::env::var("JET_DEBUG_NATIVE_CACHE_LOG") else {
         return;
     };
-    if let Ok(mut log) = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = std::io::Write::write_all(&mut log, format!("cache {}\n", event.as_ref()).as_bytes());
+    if let Ok(mut log) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ =
+            std::io::Write::write_all(&mut log, format!("cache {}\n", event.as_ref()).as_bytes());
     }
 }
 
@@ -158,7 +155,11 @@ fn verified_cached_bytes(key: &str) -> Option<(Vec<u8>, fs::Permissions)> {
         return None;
     }
     if sha256_hex(&bytes) != expected {
-        debug_cache_event(format!("verify-digest-mismatch key={} bytes={}", key, bytes.len()));
+        debug_cache_event(format!(
+            "verify-digest-mismatch key={} bytes={}",
+            key,
+            bytes.len()
+        ));
         return None;
     }
     debug_cache_event(format!("verify-ok key={} bytes={}", key, bytes.len()));
@@ -207,7 +208,11 @@ fn publish_bytes(
 /// Copy a cached binary to `dest` when present. Returns `true` on cache hit.
 pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
     let Some(dir) = cache_entry_dir(key) else {
-        debug_cache_event(format!("copy-invalid-key key={} dest={}", key, dest.display()));
+        debug_cache_event(format!(
+            "copy-invalid-key key={} dest={}",
+            key,
+            dest.display()
+        ));
         return false;
     };
     if safe_cache_dir(&dir).is_err() {
@@ -215,12 +220,20 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
         return false;
     }
     let Some((bytes, permissions)) = verified_cached_bytes(key) else {
-        debug_cache_event(format!("copy-unverified key={} dest={}", key, dest.display()));
+        debug_cache_event(format!(
+            "copy-unverified key={} dest={}",
+            key,
+            dest.display()
+        ));
         return false;
     };
     if let Some(parent) = dest.parent() {
         if fs::create_dir_all(parent).is_err() {
-            debug_cache_event(format!("copy-parent-failed key={} dest={}", key, dest.display()));
+            debug_cache_event(format!(
+                "copy-parent-failed key={} dest={}",
+                key,
+                dest.display()
+            ));
             return false;
         }
     }

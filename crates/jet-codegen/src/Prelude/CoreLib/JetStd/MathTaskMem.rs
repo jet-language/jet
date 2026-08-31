@@ -1,12 +1,15 @@
     // ── D-SIMD2 / D-SIMD3 / D-LINALG1: built-in math value types ────────────────
     // The pinned stable rustc has no `std::simd`, so the portable lane family is
-    // represented by fixed arrays. Native AOT builds enable the host CPU and LLVM
-    // can vectorize these fixed-width, inlined loops without target intrinsics.
-    // The representation is safe and portable (I1); the surface does not depend
-    // on a target feature. A future std::simd backend can replace these newtypes
-    // behind the same functions.
+    // represented by fixed arrays. F64x4 has a private host-native carrier
+    // behind the same value API; the shared Prelude owns both representations,
+    // and the public surface does not depend on a target feature.
 
     macro_rules! jet_lane_type {
+        (F64x4, $E:ty, $N:literal) => {
+            #[repr(transparent)]
+            #[derive(Clone, Copy)]
+            pub struct F64x4(pub(crate) crate::JetF64x4);
+        };
         ($T:ident, $E:ty, $N:literal) => {
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,6 +49,15 @@
     #[derive(Clone, Copy, PartialEq)]
     pub struct Mat4(pub [f64; 16]);
 
+    macro_rules! jet_lane_call {
+        (ref, $op:path, $left:expr, $right:expr) => {
+            $op(&$left, &$right)
+        };
+        (value, $op:path, $left:expr, $right:expr) => {
+            $op($left, $right)
+        };
+    }
+
     macro_rules! jet_lane_ops {
         ($T:ident, $E:ty, $N:literal) => {
             jet_lane_ops!(
@@ -55,36 +67,37 @@
                 crate::jet_simd_add_array,
                 crate::jet_simd_sub_array,
                 crate::jet_simd_mul_array,
-                crate::jet_simd_div_array
+                crate::jet_simd_div_array,
+                ref
             );
         };
-        ($T:ident, $E:ty, $N:literal, $add:path, $sub:path, $mul:path, $div:path) => {
+        ($T:ident, $E:ty, $N:literal, $add:path, $sub:path, $mul:path, $div:path, $mode:ident) => {
             impl std::ops::Add for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn add(self, o: $T) -> $T {
-                    $T($add(&self.0, &o.0))
+                    $T(jet_lane_call!($mode, $add, self.0, o.0))
                 }
             }
             impl std::ops::Sub for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn sub(self, o: $T) -> $T {
-                    $T($sub(&self.0, &o.0))
+                    $T(jet_lane_call!($mode, $sub, self.0, o.0))
                 }
             }
             impl std::ops::Mul for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn mul(self, o: $T) -> $T {
-                    $T($mul(&self.0, &o.0))
+                    $T(jet_lane_call!($mode, $mul, self.0, o.0))
                 }
             }
             impl std::ops::Div for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn div(self, o: $T) -> $T {
-                    $T($div(&self.0, &o.0))
+                    $T(jet_lane_call!($mode, $div, self.0, o.0))
                 }
             }
             impl std::ops::AddAssign for $T {
@@ -113,18 +126,49 @@
             }
         };
     }
-    jet_lane_ops!(F32x4, f32, 4);
-    jet_lane_ops!(F64x2, f64, 2);
-    jet_lane_ops!(F32x8, f32, 8);
+    jet_lane_ops!(
+        F32x4,
+        f32,
+        4,
+        crate::jet_simd_f32x4_add_array,
+        crate::jet_simd_f32x4_sub_array,
+        crate::jet_simd_f32x4_mul_array,
+        crate::jet_simd_f32x4_div_array,
+        ref
+    );
+    jet_lane_ops!(
+        F64x2,
+        f64,
+        2,
+        crate::jet_simd_f64x2_add_array,
+        crate::jet_simd_f64x2_sub_array,
+        crate::jet_simd_f64x2_mul_array,
+        crate::jet_simd_f64x2_div_array,
+        ref
+    );
+    jet_lane_ops!(
+        F32x8,
+        f32,
+        8,
+        crate::jet_simd_f32x8_add_array,
+        crate::jet_simd_f32x8_sub_array,
+        crate::jet_simd_f32x8_mul_array,
+        crate::jet_simd_f32x8_div_array,
+        ref
+    );
     jet_lane_ops!(
         F64x4,
         f64,
         4,
-        crate::jet_simd_f64x4_add_array,
-        crate::jet_simd_f64x4_sub_array,
-        crate::jet_simd_f64x4_mul_array,
-        crate::jet_simd_f64x4_div_array
+        crate::jet_simd_f64x4_add_native,
+        crate::jet_simd_f64x4_sub_native,
+        crate::jet_simd_f64x4_mul_native,
+        crate::jet_simd_f64x4_div_native,
+        value
     );
+    // The array entry points remain available to portable marshaling adapters
+    // (`crate::jet_simd_f64x4_add_value`, and its sibling operators); the
+    // generated F64x4 value itself stays on the native carrier above.
     jet_lane_ops!(I8x16, i8, 16);
     jet_lane_ops!(I16x8, i16, 8);
     jet_lane_ops!(I32x4, i32, 4);
@@ -272,7 +316,29 @@ macro_rules! jet_lane_show {
     jet_lane_show!(F32x4);
     jet_lane_show!(F64x2);
     jet_lane_show!(F32x8);
-    jet_lane_show!(F64x4);
+    impl std::fmt::Debug for F64x4 {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("F64x4")
+                .field(&crate::jet_simd_f64x4_to_array_native(self.0))
+                .finish()
+        }
+    }
+    impl PartialEq for F64x4 {
+        fn eq(&self, other: &Self) -> bool {
+            crate::jet_simd_f64x4_to_array_native(self.0)
+                == crate::jet_simd_f64x4_to_array_native(other.0)
+        }
+    }
+    impl super::JetShow for F64x4 {
+        fn jet_show(&self) -> String {
+            format!("{self:?}")
+        }
+    }
+    impl super::JetDebug for F64x4 {
+        fn jet_debug(&self) -> String {
+            format!("{self:?}")
+        }
+    }
     jet_lane_show!(I8x16);
     jet_lane_show!(I16x8);
     jet_lane_show!(I32x4);
@@ -397,10 +463,15 @@ macro_rules! jet_lane_show {
             F: FnOnce() -> T + Send + 'env,
             T: Send + 'static,
         {
-            self.spawn_at(0, f)
+            self.spawn_at(0, "", f)
         }
 
-        pub fn spawn_at<'env, F, T>(&self, spawn_site: usize, f: F) -> JetTask<T>
+        pub fn spawn_at<'env, F, T>(
+            &self,
+            spawn_site: usize,
+            label: &str,
+            f: F,
+        ) -> JetTask<T>
         where
             F: FnOnce() -> T + Send + 'env,
             T: Send + 'static,
@@ -418,7 +489,7 @@ macro_rules! jet_lane_show {
                     Ok::<(), ()>(())
                 })
                 .expect("task-group admission wait cannot fail");
-            let task = JetTask::spawn_at(spawn_site, move || {
+            let task = JetTask::spawn_at(spawn_site, label, move || {
                 let _permit = permit;
                 erased()
             });
@@ -461,11 +532,12 @@ macro_rules! jet_lane_show {
     }
     impl<T: Send + 'static> JetTask<T> {
         pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
-            Self::spawn_at(0, f)
+            Self::spawn_at(0, "", f)
         }
 
         pub fn spawn_at<F: FnOnce() -> T + Send + 'static>(
             spawn_site: usize,
+            label: &str,
             f: F,
         ) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
@@ -475,6 +547,7 @@ macro_rules! jet_lane_show {
                     handle: std::sync::Mutex::new(Some(
                         super::jet_scheduler_spawn_blocking_with_control_at(
                             spawn_site,
+                            label,
                             move || {
                                 let _deadline_guard =
                                     inherited_deadline.map(super::jet_ctx_push_deadline);
@@ -492,11 +565,12 @@ macro_rules! jet_lane_show {
             f: F,
             control: std::sync::Arc<super::JetTaskControl>,
         ) -> JetTask<T> {
-            Self::spawn_typed_deadline_at(0, f, control)
+            Self::spawn_typed_deadline_at(0, "", f, control)
         }
 
         pub(crate) fn spawn_typed_deadline_at<F: FnOnce() -> T + Send + 'static>(
             spawn_site: usize,
+            label: &str,
             f: F,
             control: std::sync::Arc<super::JetTaskControl>,
         ) -> JetTask<T> {
@@ -506,6 +580,7 @@ macro_rules! jet_lane_show {
                     handle: std::sync::Mutex::new(Some(
                         super::jet_scheduler_spawn_blocking_with_control_at(
                             spawn_site,
+                            label,
                             move || {
                                 let _deadline_guard =
                                     inherited_deadline.map(super::jet_ctx_push_deadline);
@@ -536,6 +611,18 @@ macro_rules! jet_lane_show {
         pub fn cancel(&self) {
             self.state.control.cancel();
         }
+        /// Status-only probe for heterogeneous `task.all`. The probe caches
+        /// the typed completion in the scheduler join; `join()` still owns and
+        /// returns that concrete value later.
+        pub fn poll(&self) -> super::JetSchedulerTaskPoll {
+            self.state
+                .handle
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("task already joined")
+                .poll()
+        }
         /// D-CONC-FAIL1=A: child cancellation, deadline, and panic are values
         /// in the one TaskFailure rail; the scheduler owns only the wait-point
         /// adapter for cancellation of the joining parent.
@@ -558,6 +645,17 @@ macro_rules! jet_lane_show {
                 super::jet_task_join_deadline_check();
             }
             result
+        }
+        /// Drain a completed or cancelled child without observing the parent
+        /// wait policy. The heterogeneous `task.all` adapter uses this after
+        /// fail-fast cancellation so cleanup cannot re-raise the parent's
+        /// cancellation while consuming child completions.
+        pub fn drain(self) {
+            let state = self.state;
+            let handle = { state.handle.lock().unwrap().take() };
+            if let Some(handle) = handle {
+                handle.drain();
+            }
         }
         pub fn detach(self) {
             let _ = self.state.handle.lock().unwrap().take();

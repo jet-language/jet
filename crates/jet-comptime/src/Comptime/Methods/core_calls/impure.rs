@@ -1,5 +1,9 @@
-use super::super::repl_process::run_repl_process;
+use super::super::repl_process::{run_repl_process, REPL_PROCESS_OUTPUT_LIMIT_BYTES};
 use super::*;
+
+mod process_args_kernel {
+    include!("../../../../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
+}
 
 /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
 /// Only called when `impure_depth > 0` and `gates` (comptime) or from the
@@ -54,8 +58,7 @@ pub fn apply_impure_core_call_with_type(
     // boundary; pure and typed-intrinsic rows stay on their shared evaluator
     // paths. Unknown rows retain the legacy ambient hook.
     let mut sink = sink;
-    let route = jet_foundation::Syntax::core_call(module, method)
-        .map(|row| row.interpreter_route);
+    let route = jet_foundation::Syntax::core_call(module, method).map(|row| row.interpreter_route);
     if route.is_none()
         || matches!(
             route,
@@ -92,28 +95,34 @@ pub fn apply_impure_core_call_with_type(
     };
     match (module, method) {
         // ── D-I9 `core.files`: marshal to the ONE Prelude kernel ───────────
-        // `Prelude/CoreLib/Top/Text.rs` owns every operation below — fault
+        // The filesystem Prelude fragments own every operation below — fault
         // injection, the recursive/non-recursive split, and the `IOError`
         // shape — through the same `jet_std_fs_*` symbols AOT emits and the
-        // resident Cranelift host calls. This arm resolves the path against
-        // `base_dir` and projects the kernel's result; it spells no `std::fs`
-        // call of its own. The hand-written per-member arms it replaces are
-        // why `create_dir_all` and `remove_all` had no arm at all: a shipped
-        // example (`io/watcher`) passed sema and then died at run time on
-        // E0956 while AOT ran the same source.
+        // resident Cranelift host calls. Pass the marshalled path through
+        // unchanged: the shared kernel and native tiers resolve relative paths
+        // from the process working directory. The hand-written per-member arms
+        // it replaces are why `create_dir_all` and `remove_all` had no arm at
+        // all: a shipped example (`io/watcher`) passed sema and then died at
+        // run time on E0956 while AOT ran the same source.
+        ("core.files", "absolute") => {
+            let path = as_string(one(0)?, span)?;
+            use crate::Comptime::TextLite as files_kernel;
+            Ok(match files_kernel::fs_absolute(path) {
+                Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
+                Err(error) => CtValue::failed(Box::new(error)),
+            })
+        }
         (
             "core.files",
             "read" | "read_bytes" | "write" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy" | "copy_dir" | "rename" | "glob" | "walk" | "walk_parallel",
+            | "list_dir" | "copy" | "copy_dir" | "rename" | "glob" | "walk" | "walk_parallel"
+            | "walk_files" | "stat",
         ) => {
-            let resolve = |value: &CtValue| -> Result<String, Diagnostic> {
-                Ok(base_dir
-                    .join(as_string(value, span)?)
-                    .to_string_lossy()
-                    .into_owned())
+            let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
+                Ok(as_string(value, span)?.to_string())
             };
-            let path = resolve(one(0)?)?;
+            let path = path_arg(one(0)?)?;
             let unit = |result: Result<(), CtValue>| match result {
                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                 Err(error) => CtValue::failed(Box::new(error)),
@@ -132,14 +141,15 @@ pub fn apply_impure_core_call_with_type(
                 "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
                 "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
                 "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
+                "stat" => present(files_kernel::fs_stat(&path)),
                 "create_dir" => unit(files_kernel::fs_create_dir(&path)),
                 "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
                 "remove" => unit(files_kernel::fs_remove(&path)),
                 "remove_dir" => unit(files_kernel::fs_remove_dir(&path)),
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
-                "copy" => unit(files_kernel::fs_copy(&path, &resolve(one(1)?)?)),
-                "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &resolve(one(1)?)?)),
-                "rename" => unit(files_kernel::fs_rename(&path, &resolve(one(1)?)?)),
+                "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
+                "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
+                "rename" => unit(files_kernel::fs_rename(&path, &path_arg(one(1)?)?)),
                 "glob" => present(files_kernel::fs_glob(&path).map(|paths| {
                     CtValue::List(paths.into_iter().map(CtValue::Str).collect())
                 })),
@@ -160,6 +170,22 @@ pub fn apply_impure_core_call_with_type(
                     )
                 })),
                 "walk_parallel" => present(files_kernel::fs_walk_parallel(&path).map(|entries| {
+                    CtValue::List(
+                        entries
+                            .into_iter()
+                            .map(|(path, relative, is_dir, depth)| CtValue::Struct {
+                                type_name: "WalkEntry".to_string(),
+                                fields: vec![
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("relative".to_string(), CtValue::Str(relative)),
+                                    ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                                    ("depth".to_string(), CtValue::Int(depth)),
+                                ],
+                            })
+                            .collect(),
+                    )
+                })),
+                "walk_files" => present(files_kernel::fs_walk_files_parallel(&path).map(|entries| {
                     CtValue::List(
                         entries
                             .into_iter()
@@ -231,6 +257,18 @@ pub fn apply_impure_core_call_with_type(
             let argv = super::super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
+        }
+        ("core.process", "args") => {
+            // Keep the projection in the shared Prelude. The returned list is
+            // newly allocated on every call, just like the native adapters.
+            let argv = super::super::super::Interpreter::runtime_argv()
+                .unwrap_or_else(|| vec!["jet".to_string()]);
+            Ok(CtValue::List(
+                process_args_kernel::jet_process_args_view(argv)
+                    .into_iter()
+                    .map(CtValue::Str)
+                    .collect(),
+            ))
         }
         ("core.term", "progress") => {
             let Some(source) = args.first() else {
@@ -444,7 +482,9 @@ pub fn apply_impure_core_call_with_type(
                             "limits".to_string(),
                             CtValue::List(vec![
                                 CtValue::Str("timeout-ms=30000".to_string()),
-                                CtValue::Str("output-limit=none".to_string()),
+                                CtValue::Str(format!(
+                                    "output-limit={REPL_PROCESS_OUTPUT_LIMIT_BYTES}"
+                                )),
                             ]),
                         ),
                         (

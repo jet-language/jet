@@ -1,7 +1,7 @@
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, JitSpawnCapture, ListSpreadPart, TBuiltinOp, TCallArg, TCoreClosureKind,
-    TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, THostCall, TIfCond, TJitSpawnBody,
-    TJitSpawnLambda, TModuleCallForm, TNumericOp, TOrFallback, TStmt, TStrPart,
+    TEnumPayload, TExpr, TExprKind, TForInMethod, TFunc, TFuncKind, THandleOp, THostCall, TIfCond,
+    TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TNumericOp, TOrFallback, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, Pattern, Type, UnOp};
 use std::collections::HashSet;
@@ -412,6 +412,15 @@ fn jit_scalar_type(ty: &Type) -> bool {
     jit_value_type(ty)
 }
 
+fn jit_math_value_type(ty: &Type) -> bool {
+    matches!(
+        erase_runtime_qualifiers(ty),
+        Type::Named(name)
+            if jet_foundation::Syntax::is_simd_lane_type(name)
+                || matches!(name.as_str(), "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
+    )
+}
+
 fn erase_runtime_qualifiers(mut ty: &Type) -> &Type {
     while let Type::Tagged { inner, .. } = ty {
         ty = inner;
@@ -745,13 +754,13 @@ mod gate_follows_lowering {
         ]
     }
 
-    /// D-CAP9 / D-MEM-SENTRY1: the gate admits a raw pointer exactly when
-    /// `LowerCtx`'s `TExprKind::RawOf` arm can mint one — a `Ptr<_>` operand it
-    /// passes through, or a bare local place with a machine-sized payload. The
-    /// arm answered a flat `false` for every operand while the lowering had
-    /// covered the bare-local slot all along, and the non-place branch minted a
-    /// pointer to a COPY, which is the shape that would answer 7 instead of
-    /// R0802 for `*arena.alloc(7)` after `arena.reset()`.
+    /// D-CAP9 / D-MEM-SENTRY1: this helper mirrors the raw-pointer shapes that
+    /// `LowerCtx` can mint — a `Ptr<_>` operand it passes through, or a bare
+    /// local place with a machine-sized payload. The caller separately refuses
+    /// a proven stack place: its sentry token is owned by the canonical
+    /// evaluator, not by this resident tier. The non-place branch must remain
+    /// refused because a pointer to a COPY would answer 7 instead of R0802 for
+    /// `*arena.alloc(7)` after `arena.reset()`.
     #[test]
     fn raw_of_admits_exactly_the_operands_the_lowering_can_mint() {
         // Transcribed from `LowerCtx`'s `TExprKind::RawOf` arm, in its order:
@@ -846,15 +855,18 @@ mod gate_follows_lowering {
     #[test]
     fn the_crypto_gate_admits_every_pair_the_lowering_has_a_host_for() {
         for (module, method, arity) in [
+            ("core.crypto", "hmac_sha256", 2),
             ("core.crypto", "hkdf_sha256", 4usize),
             ("core.crypto", "constant_time_equal", 2),
             ("core.crypto", "constant_time_equal_bytes", 2),
             ("core.crypto", "__secret_from_bytes", 1),
             ("core.crypto", "__password_text", 1),
             ("core.crypto", "x25519_public", 1),
+            ("core.crypto", "x25519", 2),
             ("core.crypto", "x25519_shared", 2),
             ("core.crypto", "file_seal", 3),
             ("core.crypto.expert", "hkdf_sha256_raw", 4),
+            ("core.crypto.expert", "shared_secret_bytes", 1),
         ] {
             assert_eq!(
                 crate::lower_ctx::LowerCtx::crypto_core_arity(module, method),
@@ -890,6 +902,89 @@ mod gate_follows_lowering {
             tally.total(),
             4,
             "a cursor-derived callback consumes a fresh slot per occurrence"
+        );
+    }
+
+    #[test]
+    fn flatten_gate_uses_materialized_result_carriers() {
+        let cases = [
+            (
+                Type::List(Box::new(Type::List(Box::new(Type::Int)))),
+                true,
+            ),
+            (
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                true,
+            ),
+            (Type::List(Box::new(Type::Int)), false),
+            (Type::List(Box::new(Type::String)), false),
+            (
+                Type::List(Box::new(Type::List(Box::new(Type::Float)))),
+                false,
+            ),
+            (
+                Type::Apply {
+                    name: jet_foundation::Syntax::TYPE_ITER.to_string(),
+                    args: vec![Type::List(Box::new(Type::String))],
+                },
+                true,
+            ),
+            (
+                Type::Apply {
+                    name: jet_foundation::Syntax::TYPE_ITER.to_string(),
+                    args: vec![Type::List(Box::new(Type::Float))],
+                },
+                false,
+            ),
+        ];
+        for (ty, want) in cases {
+            let recv = TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Local(TIR::TLocal::user("rows")),
+            };
+            assert_eq!(
+                resident_safe_builtin_op(
+                    &TBuiltinOp::Flatten,
+                    &recv,
+                    &[],
+                    &std::collections::HashSet::new(),
+                ),
+                want,
+                "flatten carrier {ty:?}: expected residency={want}"
+            );
+        }
+    }
+
+    #[test]
+    fn for_in_detail_drills_into_first_unsafe_body_statement() {
+        let collection = || TExpr {
+            ty: Type::List(Box::new(Type::Int)),
+            kind: TExprKind::Local(TIR::TLocal::user("items")),
+        };
+        let body = TStmt::ExprStmt(TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Call {
+                name: "missing".to_string(),
+                args: Vec::new(),
+                type_args: Vec::new(),
+            },
+        });
+        let stmt = TStmt::ForIn {
+            label: None,
+            var: "item".to_string(),
+            var2: None,
+            source: collection(),
+            collection: collection(),
+            step: None,
+            method_kind: None,
+            columnar: false,
+            by_value: false,
+            body: vec![body],
+        };
+        let callees = HashSet::new();
+        assert_eq!(
+            first_unsafe_stmt_detail(&[stmt], &callees).as_deref(),
+            Some("ForIn[0] body>ExprStmt[0] init=Call:missing ty=Int")
         );
     }
 }
@@ -996,6 +1091,68 @@ pub(crate) fn jit_list_of_int_list_type(ty: &Type) -> bool {
                     && args.len() == 1
                     && jit_list_int_type(&args[0])
         )
+}
+
+/// Nested `List[Int]` / `List[String]` source receivers for `flatten`.
+///
+/// `jet_jit_list_flatten` walks the outer list as i64 handles and clones each
+/// inner list from the same dense integer carrier. String elements are string
+/// ids in that carrier; float rows use a distinct `List<Float>` representation
+/// and must stay on the interpreter rather than flattening to an empty row.
+///
+/// Keep this separate from `jit_list_of_int_list_type`: that predicate is also
+/// used by the flat_map identity path, whose callback ABI is Int-only.
+pub(crate) fn jit_list_of_flattenable_list_type(ty: &Type) -> bool {
+    let nested = match ty {
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => inner.as_ref(),
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_ITER && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return false,
+    };
+    jit_list_int_type(nested) || jit_list_string_type(nested)
+}
+
+/// A concrete `List.map` may have lost its nested result in `TExpr.ty` when
+/// sema's open callback return is carried only by the lambda body. The emitter
+/// still lowers that callback's actual list value, so recover the carrier from
+/// the checked body before refusing `flatten`.
+fn jit_flatten_source_expr(recv: &TExpr) -> bool {
+    if jit_list_of_flattenable_list_type(&recv.ty) {
+        return true;
+    }
+    // A closure-map result may retain only its flat output carrier in
+    // `TExpr.ty`; recover a nested callback result when that detail survives.
+    let TExprKind::ClosureMethod { op, args, .. } = &recv.kind else {
+        return false;
+    };
+    if !matches!(
+        op,
+        TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::ViewMap
+    ) {
+        return false;
+    }
+    let Some(TExpr {
+        kind: TExprKind::Lambda(lambda),
+        ..
+    }) = args.first()
+    else {
+        return false;
+    };
+    let result_ty = match &lambda.executable {
+        TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+        TIR::TLambdaBody::Block(stmts) => stmts.last().and_then(|stmt| match stmt {
+            TStmt::Return(Some(body)) | TStmt::ExprStmt(body) => Some(&body.ty),
+            _ => None,
+        }),
+        TIR::TLambdaBody::SharedBlock(stmts) => stmts.last().and_then(|stmt| match stmt {
+            TStmt::Return(Some(body)) | TStmt::ExprStmt(body) => Some(&body.ty),
+            _ => None,
+        }),
+    };
+    result_ty.is_some_and(|ty| jit_list_int_type(ty) || jit_list_string_type(ty))
 }
 
 pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
@@ -1332,6 +1489,7 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                             | Type::String
                             | Type::Option(_)
                             | Type::Named(_)
+                            | Type::Apply { .. }
                             | Type::Tuple(_)
                             | Type::List(_)
                         )
@@ -1519,23 +1677,27 @@ pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
 /// I1: an `#Unsafe` region is audited USER code, not a licence for the compiler
 /// to give up, so `RawOf` and `Deref` are not refused for being raw. They are
 /// refused for naming storage this tier does not own. `LowerCtx`'s
-/// `TExprKind::RawOf` arm mints an address from a bare local's own Cranelift
-/// stack slot — live for the whole frame, sized by the pointee's ABI — and
-/// declines every other operand, because a non-place operand has no storage of
-/// its own and a pointer to a copy is a wrong answer (that is what made
-/// `*arena.alloc(7)` outlive `arena.reset()` instead of reporting R0802).
+/// `TExprKind::RawOf` arm can mint an address from a bare local's own Cranelift
+/// stack slot, but stack-shaped raw operations stay off the resident tier so
+/// the canonical evaluator can install and expire the shared frame token.
+/// The lowering declines every other operand because a non-place operand has no
+/// storage of its own and a pointer to a copy is a wrong answer (that is what
+/// made `*arena.alloc(7)` outlive `arena.reset()` instead of reporting R0802).
 ///
 /// The `Ptr<_>` operand is the no-op cast a `*T.{*x}` literal wraps around its
 /// `*x`; the lowering passes it through, and the walk gates the inner `*x` on
 /// its own, so the answer here is unconditional.
 ///
-/// D-MEM-SENTRY1 is why this admitted set is exactly the safe one: the Prelude
-/// sentry kernel owns provenance, quarantine and R08xx, and this tier pushes no
-/// `jet_sentry_scope`, so it can report nothing. Inside the admitted set there
-/// is nothing to report — a frame-lived slot cannot be quarantined by an arena
-/// reset and cannot be shorter than its own pointee — and every shape whose
-/// answer the kernel does own (`from_addr(<literal>)`, `*<non-place>`) leaves
-/// the set at the pointer instead of at the region.
+/// D-MEM-SENTRY1 is why the remaining admitted set is exactly the safe one: the
+/// Prelude sentry kernel owns provenance, quarantine and R08xx, and this tier
+/// pushes no `jet_sentry_scope`, so it can report nothing. Stack places are
+/// intentionally handled by evaluator deopt; persistent/heap/borrowed/foreign
+/// shapes retain their existing resident lowering where the lifetime is not a
+/// current-frame fact. Every shape whose answer the kernel owns (`from_addr(...)`,
+/// `*<non-place>`) leaves the set at the pointer instead of at the region.
+/// `PtrFromAddr` is always canonical: an integer address has no resident
+/// provenance, and an address returned across a call can carry a stack lifetime
+/// that only the evaluator's shared frame token can represent.
 fn resident_safe_raw_of(operand: &TExpr) -> bool {
     if matches!(&operand.ty, Type::Apply { name, args }
         if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1)
@@ -1553,6 +1715,45 @@ fn resident_safe_raw_of(operand: &TExpr) -> bool {
 /// deopt and never a wrong answer.
 fn resident_safe_raw_deref(result: &Type) -> bool {
     super::types_meta::clif_ty(result).is_some()
+}
+
+/// Native provenance exists only for a raw address minted in the current
+/// lowering.  A pointer returned by a call, copied through a local, or rebuilt
+/// from an integer is not in `LowerCtx::real_address_values`; admitting its
+/// dereference would either fail native compilation or bypass the canonical
+/// sentry path.  Keep the two direct minting shapes that `LowerCtx` marks and
+/// let every carried pointer deopt to canonical TIR.
+fn resident_safe_deref_source(operand: &TExpr) -> bool {
+    match &operand.kind {
+        TExprKind::RawOf(place)
+            if matches!(&place.ty, Type::Apply { name, args }
+                if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1) =>
+        {
+            resident_safe_deref_source(place)
+        }
+        TExprKind::RawOf(place) => {
+            !matches!(
+                TIR::tir_address_lifetime(place),
+                TIR::TAddressLifetime::Stack
+            ) && resident_safe_raw_of(place)
+        }
+        TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.mem" && method == "address_of" => {
+            let [place] = args.as_slice() else {
+                return false;
+            };
+            !matches!(
+                TIR::tir_address_lifetime(place),
+                TIR::TAddressLifetime::Stack
+            ) && crate::lower_ctx::LowerCtx::raw_place_local(place).is_some()
+                && super::types_meta::clif_ty(&place.ty).is_some()
+        }
+        _ => false,
+    }
 }
 
 enum ResidentSafeExprTask<'a> {
@@ -1641,7 +1842,18 @@ fn resident_safe_expr_work_item<'a>(
             method,
             args,
             ..
-        } => resident_safe_crypto_work_item(module, method, args),
+        } => {
+            if module == "core.mem"
+                && method == "address_of"
+                && args.first().is_some_and(|arg| {
+                    matches!(TIR::tir_address_lifetime(arg), TIR::TAddressLifetime::Stack)
+                })
+            {
+                Some((false, Vec::new()))
+            } else {
+                resident_safe_crypto_work_item(module, method, args)
+            }
+        }
         TExprKind::OrFallback { value, fallback } => {
             Some((true, or_fallback_children(value, fallback)))
         }
@@ -1688,7 +1900,7 @@ fn resident_safe_expr_work_item<'a>(
                 TIR::TTryConvert::None
                     | TIR::TTryConvert::Never
                     | TIR::TTryConvert::DefaultErr
-                    | TIR::TTryConvert::Typed(_)
+                    | TIR::TTryConvert::Typed { .. }
                     | TIR::TTryConvert::WidenUnion { .. }
             ),
             vec![inner],
@@ -1717,8 +1929,15 @@ fn resident_safe_expr_work_item<'a>(
             relative_uncertainty,
             ..
         } => Some((relative_uncertainty.is_none(), vec![arg])),
-        TExprKind::RawOf(arg) => Some((resident_safe_raw_of(arg), vec![arg])),
-        TExprKind::Deref(arg) => Some((resident_safe_raw_deref(&expr.ty), vec![arg])),
+        TExprKind::RawOf(arg) => Some((
+            !matches!(TIR::tir_address_lifetime(arg), TIR::TAddressLifetime::Stack)
+                && resident_safe_raw_of(arg),
+            vec![arg],
+        )),
+        TExprKind::Deref(arg) => Some((
+            resident_safe_raw_deref(&expr.ty) && resident_safe_deref_source(arg),
+            vec![arg],
+        )),
         TExprKind::Borrow { place, .. } => Some((true, vec![place])),
         TExprKind::Unary { op, operand } => Some((
             jit_value_type(&expr.ty) && matches!(op, UnOp::Neg | UnOp::Not),
@@ -1964,6 +2183,17 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             args,
             ..
         } => {
+            if module == "core.mem"
+                && method == "address_of"
+                && args.first().is_some_and(|arg| {
+                    matches!(
+                        TIR::tir_address_lifetime(arg),
+                        TIR::TAddressLifetime::Stack
+                    )
+                })
+            {
+                return false;
+            }
             // `core.crypto`, `core.crypto.expert` and `core.crypto.random` are
             // answered by `resident_safe_crypto_work_item`, which
             // `resident_safe_expr` consults BEFORE reaching this predicate. The
@@ -2169,30 +2399,33 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 // ANSWERS off this tier — not a reason to refuse raw memory as
                 // a category (I1: an audited region is audited user code).
                 //
-                // `RawOf`, `Deref`, and `address_of` on a bare local have
-                // resident lowerings for values whose storage is owned by the
-                // current frame. Volatile access is different: its answer is
-                // owned by the shared sentry Prelude, including gate state and
-                // R08xx reporting. Keep those calls on canonical TIR so the
-                // resident engine cannot grow a second memory policy.
+                // `RawOf` and `address_of` on a bare local have resident
+                // lowerings, but a current-frame address needs the shared
+                // evaluator token and therefore stays on canonical TIR.
+                // Volatile access is different: its answer is owned by the
+                // shared sentry Prelude, including gate state and R08xx
+                // reporting. Keep those calls on canonical TIR so the resident
+                // engine cannot grow a second memory policy.
                 //
                 // Every raw shape whose answer the kernel DOES own leaves the
-                // admitted set at the pointer instead: `from_addr(<literal>)`
-                // records no provenance and `*<non-place>` is refused by
+                // admitted set at the pointer instead: `from_addr(...)` records
+                // no resident provenance and `*<non-place>` is refused by
                 // `resident_safe_raw_of`, which is what keeps R0801 on
                 // `examples/features/memory/unsafe_sentries_provenance.jet` and
                 // R0802 on `examples/features/memory/unsafe_sentries.jet`.
                 return match (method.as_str(), args.as_slice()) {
-                    // Bare local only. That branch mints the local's own
-                    // Cranelift stack slot, which is a real machine address like
-                    // AOT's. The other branch mints the synthetic identity
-                    // `TIR::stable_place_address` gives a place with no stable
-                    // address — the interpreter agrees with it, AOT does not, so
-                    // admitting it would put an I9 divergence on this tier
-                    // instead of leaving it where it already is
-                    // (`examples/features/memory/pin.jet`, a field projection).
+                    // Non-stack places only. A bare local mints the local's own
+                    // Cranelift stack slot, which needs the evaluator's frame
+                    // token. Persistent/heap/borrowed places keep the existing
+                    // resident path; the other branch mints the synthetic
+                    // identity `TIR::stable_place_address` gives a place with
+                    // no stable address, so it remains refused for I9 parity.
                     ("address_of", [place]) => {
-                        crate::lower_ctx::LowerCtx::raw_place_local(place).is_some()
+                        !matches!(
+                            TIR::tir_address_lifetime(place),
+                            TIR::TAddressLifetime::Stack
+                        )
+                            && crate::lower_ctx::LowerCtx::raw_place_local(place).is_some()
                             && super::types_meta::clif_ty(&place.ty).is_some()
                             && resident_safe_expr(place, callees)
                     }
@@ -2313,7 +2546,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 executable,
                 ..
             } => {
-                resident_safe_expr(label, callees)
+                !executable.uses_stack_sentry
+                    && resident_safe_expr(label, callees)
                     && match &executable.executable {
                         TIR::TLambdaBody::Expr(e) => {
                             if resident_safe_expr(e, callees) {
@@ -2334,7 +2568,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             TCoreClosureKind::ReactiveDerived { executable, .. }
             | TCoreClosureKind::ReactiveEffect { executable, .. }
             | TCoreClosureKind::UiReactiveRender { executable, .. } => {
-                match &executable.executable {
+                !executable.uses_stack_sentry && match &executable.executable {
                     TIR::TLambdaBody::Expr(e) => {
                         if resident_safe_expr(e, callees) {
                             true
@@ -2355,7 +2589,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             TCoreClosureKind::Guard { executable, .. }
             | TCoreClosureKind::OnCommit { executable, .. }
             | TCoreClosureKind::OnRollback { executable, .. } => {
-                match &executable.executable {
+                !executable.uses_stack_sentry && match &executable.executable {
                     TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
@@ -2375,7 +2609,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 THandleOp::UiBackendMethod { method } if method == "on_click" => {
                     args.len() == 2
                         && resident_safe_expr(&args[0], callees)
-                        && matches!(&args[1].kind, TExprKind::Lambda(_))
+                        && matches!(
+                            &args[1].kind,
+                            TExprKind::Lambda(lam) if !lam.uses_stack_sentry
+                        )
                 }
                 _ => args.iter().all(|a| resident_safe_expr(a, callees)),
             };
@@ -2597,10 +2834,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 || (type_name == "Fraction"
                     && matches!(
                         (func.as_str(), args.len()),
-                        (
+                        ("from_parts", 2)
+                            | (
                             "to_string" | "numerator" | "denominator" | "to_float" | "is_zero",
                             1
-                        ) | ("add" | "sub" | "mul" | "div" | "equal", 2)
+                            )
+                            | ("add" | "sub" | "mul" | "div" | "equal", 2)
                     ))
                 || (type_name == jet_foundation::Syntax::TYPE_COMPLEX
                     && matches!(
@@ -2695,9 +2934,17 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         // cannot disagree. This arm answered a flat `false`, which refused every
         // audited pointer in the corpus although the lowering had covered a bare
         // local's own stack slot all along.
-        TExprKind::RawOf(arg) => resident_safe_raw_of(arg) && resident_safe_expr(arg, callees),
+        TExprKind::RawOf(arg) => {
+            !matches!(
+                TIR::tir_address_lifetime(arg),
+                TIR::TAddressLifetime::Stack
+            ) && resident_safe_raw_of(arg)
+                && resident_safe_expr(arg, callees)
+        }
         TExprKind::Deref(arg) => {
-            resident_safe_raw_deref(&expr.ty) && resident_safe_expr(arg, callees)
+            resident_safe_raw_deref(&expr.ty)
+                && resident_safe_deref_source(arg)
+                && resident_safe_expr(arg, callees)
         }
         TExprKind::EnumLit { payload, .. } => {
             jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
@@ -2711,7 +2958,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 TIR::TTryConvert::None
                     | TIR::TTryConvert::Never
                     | TIR::TTryConvert::DefaultErr
-                    | TIR::TTryConvert::Typed(_)
+                    | TIR::TTryConvert::Typed { .. }
                     | TIR::TTryConvert::WidenUnion { .. }
             ) && resident_safe_expr(inner, callees)
         }
@@ -2882,7 +3129,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 && stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
         }
         TExprKind::Lambda(lam) => {
-            lam.param_types.iter().all(jit_value_type)
+            !lam.uses_stack_sentry
+                && lam.param_types.iter().all(jit_value_type)
                 && lam.ret.as_ref().is_none_or(jit_value_type)
                 && lam
                     .captures
@@ -2907,7 +3155,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 lambda: Some(lambda),
                 ..
             } => {
-                lambda.param_types.iter().all(jit_value_type)
+                !lambda.uses_stack_sentry
+                    && lambda.param_types.iter().all(jit_value_type)
                     && lambda.ret.as_ref().is_none_or(jit_value_type)
                     && lambda
                         .captures
@@ -2944,7 +3193,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::OptionLift2 { f, a, b } => {
             let f_safe = match &f.kind {
                 TExprKind::Lambda(lam) => {
-                    lam.source_params.len() == 2
+                    !lam.uses_stack_sentry
+                        && lam.source_params.len() == 2
                         && lam.captures.iter().all(|(_, _, ty)| jit_value_type(ty))
                         && matches!(
                             &lam.executable,
@@ -3065,7 +3315,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } | THostCall::SwitchSubjectValue => true,
             THostCall::StrMatchScan { subject, .. } => resident_safe_expr(subject, callees),
-            THostCall::BinMatchScan { .. } => true,
+            THostCall::BinMatchScan { subject, .. } => resident_safe_expr(subject, callees),
             // Sema emits this node only after proving the receiver is a live
             // Cell guard and every projected path is valid and disjoint.
             THostCall::CellGuardProject { .. } => true,
@@ -3197,22 +3447,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         }
         TExprKind::MathSwizzleRead { recv, .. } => resident_safe_expr(recv, callees),
         // S58 / D-MEM-SENTRY1: `mem.Ptr<T>.from_addr(addr)` IS the address it is
-        // given. An integer literal is the one operand with no live allocation
-        // behind it — naming an address out of nothing is the whole point of
-        // `examples/features/memory/unsafe_sentries_provenance.jet`, and the
-        // shared Prelude sentry kernel owns its R0801. This tier pushes no
-        // `jet_sentry_scope` and so can report nothing, so the shape stays off
-        // it; `LowerCtx`'s `TExprKind::PtrFromAddr` arm still records the word as
-        // a real address, because that is what a whole-program compile needs and
-        // this refusal is what keeps any deref of it on the tier that answers.
-        //
-        // Every other operand keeps the provenance it already carried:
-        // `from_addr(mem.address_of(local))` is real because `address_of`
-        // recorded that very SSA value (`examples/features/lowlevel/mmio_board_write.jet`,
-        // `examples/features/lowlevel/pointer_cast_deref.jet`).
-        TExprKind::PtrFromAddr { addr, .. } => {
-            !matches!(&addr.kind, TExprKind::IntLit(..)) && resident_safe_expr(addr, callees)
-        }
+        // given. The resident engine has no sentry provenance for that integer
+        // boundary: a literal needs the shared kernel to report R0801, while a
+        // value returned from another function may be a stack address whose
+        // frame token exists only in the canonical evaluator. Keep every
+        // `PtrFromAddr` on that one path so an outer native caller cannot turn a
+        // deopted stack producer into an untracked dereference.
+        TExprKind::PtrFromAddr { .. } => false,
         TExprKind::ExternCall { args, .. } => {
             args.iter().all(|a| resident_safe_expr(&a.value, callees))
         }
@@ -3349,6 +3590,27 @@ fn resident_safe_expr_callback<'a>(
         return None;
     };
     resident_safe_expr(body, callees).then_some(body.as_ref())
+}
+
+fn resident_safe_sort_key_type<'a>(
+    args: &'a [TExpr],
+    fallible: bool,
+    callees: &HashSet<String>,
+) -> Option<&'a Type> {
+    let body = resident_safe_expr_callback(args, 1, callees)?;
+    if !fallible {
+        return Some(&body.ty);
+    }
+    match (&body.kind, &body.ty) {
+        (TExprKind::Ok(inner), _) => Some(&inner.ty),
+        (
+            _,
+            Type::Result { ok, err },
+        ) if matches!(err.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER) => {
+            Some(ok.as_ref())
+        }
+        _ => None,
+    }
 }
 
 fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
@@ -3517,9 +3779,10 @@ fn resident_safe_closure_method(
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
-        // The shared Prelude evaluator owns Result traversal for fallible
-        // callbacks; resident JIT deopts until its callback ABI can carry the
-        // same row without a second implementation.
+        // TryMap/TryFilter still carry a fallible collection result. TrySortBy
+        // is resident only for the compiler-generated `Ok(key)` wrapper: the
+        // lowering already has the same key collection and O(n log n) host sort
+        // as the non-fallible operation, and this admits no callback failure.
         TIR::TClosureOp::TryMap | TIR::TClosureOp::TryFilter => false,
         TIR::TClosureOp::ParaMap => {
             jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
@@ -3575,19 +3838,34 @@ fn resident_safe_closure_method(
         TIR::TClosureOp::SortBy => {
             jit_closure_elem_type(&recv.ty)
                 .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
-                && resident_safe_expr_callback(args, 1, callees)
-                    .is_some_and(|body| matches!(&body.ty, Type::Int))
+                && resident_safe_sort_key_type(args, false, callees)
+                    .is_some_and(|ty| matches!(ty, Type::Int))
         }
         TIR::TClosureOp::SortByDesc => {
             jit_closure_elem_type(&recv.ty)
                 .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
-                && resident_safe_expr_callback(args, 1, callees)
-                    .is_some_and(|body| matches!(&body.ty, Type::Int | Type::String))
+                && resident_safe_sort_key_type(args, false, callees)
+                    .is_some_and(|ty| matches!(ty, Type::Int | Type::String))
+        }
+        TIR::TClosureOp::TrySortBy => {
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
+                && resident_safe_sort_key_type(args, true, callees)
+                    .is_some_and(|ty| matches!(ty, Type::Int))
+        }
+        TIR::TClosureOp::TrySortByDesc => {
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
+                && resident_safe_sort_key_type(args, true, callees)
+                    .is_some_and(|ty| matches!(ty, Type::Int | Type::String))
         }
         TIR::TClosureOp::SortByCompare => {
-            jit_closure_elem_type(&recv.ty)
-                .is_some_and(|elem| matches!(elem, Type::Int | Type::String | Type::Named(_)))
-                && resident_safe_expr_callback(args, 2, callees).is_some_and(|body| {
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(
+                    elem,
+                    Type::Int | Type::Float | Type::Float32 | Type::String | Type::Named(_)
+                )
+            }) && resident_safe_expr_callback(args, 2, callees).is_some_and(|body| {
                     matches!(&body.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ORDERING)
                 })
         }
@@ -3765,6 +4043,19 @@ fn resident_safe_builtin_op(
     args: &[TExpr],
     callees: &HashSet<String>,
 ) -> bool {
+    if matches!(op, TBuiltinOp::Flatten) {
+        if !args.is_empty() || !jit_flatten_source_expr(recv) {
+            return false;
+        }
+        return match &recv.kind {
+            TExprKind::ClosureMethod {
+                recv: source,
+                op,
+                args,
+            } => resident_safe_closure_method(source, op, args, callees),
+            _ => resident_safe_expr(recv, callees),
+        };
+    }
     // D-ZIPPAD1: zero columns is an empty `Iter<Unit>`, so the shape has no
     // receiver column at all. `lower_empty_zip_family` parks a `Unit`
     // placeholder in the receiver slot to keep `BuiltinMethod` well formed;
@@ -3791,7 +4082,11 @@ fn resident_safe_builtin_op(
         // only two, so `child.output.replace(…)` never became resident at all —
         // used to admit the field structurally.
         TBuiltinOp::LenString => matches!(recv_ty, Type::String) && args.is_empty(),
-        TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
+        TBuiltinOp::Trim
+        | TBuiltinOp::ToUpper
+        | TBuiltinOp::ToLower
+        | TBuiltinOp::ToAsciiUpper
+        | TBuiltinOp::ToAsciiLower => {
             matches!(recv_ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::Replace => {
@@ -3843,10 +4138,16 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Keys | TBuiltinOp::Values => jit_map_resident_type(recv_ty) && args.is_empty(),
         TBuiltinOp::Sort => {
-            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
+            (jit_list_int_type(recv_ty)
+                || jit_list_float_type(recv_ty)
+                || jit_list_string_type(recv_ty))
+                && args.is_empty()
         }
         TBuiltinOp::SortDesc => {
-            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
+            (jit_list_int_type(recv_ty)
+                || jit_list_float_type(recv_ty)
+                || jit_list_string_type(recv_ty))
+                && args.is_empty()
         }
         TBuiltinOp::LenList => {
             (matches!(recv_ty, Type::String)
@@ -3975,7 +4276,8 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::IsEmpty => {
-            (jit_list_native_type(recv_ty)
+            (matches!(recv_ty, Type::String)
+                || jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_float_view_type(recv_ty)
                 || jit_list_record_type(recv_ty)
@@ -4061,7 +4363,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::Max { float: false } => {
             matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int)) && args.is_empty()
         }
-        TBuiltinOp::Flatten => jit_list_of_int_list_type(recv_ty) && args.is_empty(),
+        TBuiltinOp::Flatten => unreachable!("flatten returns before the common receiver gate"),
         TBuiltinOp::Intersperse => {
             jit_list_iter_elem_type(recv_ty).is_some()
                 && args.len() == 1
@@ -4345,10 +4647,26 @@ fn resident_safe_builtin_op(
                 && args.len() == 2
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        TBuiltinOp::LruGet | TBuiltinOp::ContainsKey => {
+        TBuiltinOp::LruGet => {
             matches!(recv_ty, Type::Apply { name, .. } if name == "Cache")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ContainsKey => {
+            if matches!(recv_ty, Type::Apply { name, .. } if name == "Cache") {
+                args.len() == 1 && resident_safe_expr(&args[0], callees)
+            } else {
+                jit_map_resident_type(recv_ty)
+                    && args.len() == 1
+                    && (if jit_map_composite_key_type(recv_ty) {
+                        jit_map_composite_key_expr(&args[0])
+                    } else if jit_map_int_type(recv_ty) {
+                        jit_map_int_key_type(&args[0].ty)
+                    } else {
+                        matches!(&args[0].ty, Type::String)
+                    })
+                    && resident_safe_expr(&args[0], callees)
+            }
         }
         TBuiltinOp::BitSetAdd | TBuiltinOp::BitSetRemove => {
             matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS)
@@ -4437,7 +4755,10 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::IterRepeat | TBuiltinOp::IterCycle | TBuiltinOp::IterDropLast => {
-            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+            matches!(
+                jit_list_iter_elem_type(recv_ty),
+                Some(Type::Int | Type::IntN { .. })
+            )
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
@@ -4476,7 +4797,17 @@ fn resident_safe_builtin_op(
                 && matches!(&args[1].ty, Type::Int)
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        TBuiltinOp::ListCopy => jit_list_int_type(recv_ty) && args.is_empty(),
+        // `LowerCtx::list_copy_host` names one host per carrier — dense i64,
+        // boxed float, and string text — so every carrier that table can name
+        // is resident. Gating on `jit_list_int_type` alone deopted the whole
+        // enclosing function for a `[Float]` or `[String]` receiver, which is
+        // how a `sorted := values.copy()` line took a summary out of tier1.
+        TBuiltinOp::ListCopy => {
+            (jit_list_int_type(recv_ty)
+                || jit_list_float_type(recv_ty)
+                || jit_list_string_type(recv_ty))
+                && args.is_empty()
+        }
         TBuiltinOp::ListEqual => {
             let list_eq_type = |ty: &Type| {
                 jit_list_int_type(ty)
@@ -4648,9 +4979,7 @@ fn resident_safe_builtin_op(
 
 fn resident_safe_if_cond_leaf(cond: &TIfCond, callees: &HashSet<String>) -> bool {
     match cond {
-        TIfCond::Plain(expr) => {
-            matches!(&expr.ty, Type::Bool) && resident_safe_expr(expr, callees)
-        }
+        TIfCond::Plain(expr) => matches!(&expr.ty, Type::Bool) && resident_safe_expr(expr, callees),
         TIfCond::IfLet { pattern, subj } => {
             matches!(
                 &pattern.pattern,
@@ -4668,7 +4997,9 @@ fn resident_safe_if_cond_leaf(cond: &TIfCond, callees: &HashSet<String>) -> bool
             prelude.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                 && resident_safe_if_cond_leaf(cond, callees)
         }
-        TIfCond::And { .. } => false,
+        TIfCond::And { left, right } => {
+            resident_safe_if_cond_leaf(left, callees) && resident_safe_if_cond_leaf(right, callees)
+        }
     }
 }
 
@@ -4796,6 +5127,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 }
                 Type::Named(name) if name == "Decimal" => {
                     matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
+                }
+                ty if jit_math_value_type(ty) => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
                 }
                 Type::String => matches!(op, BinOp::Add),
                 _ => false,
@@ -4966,11 +5300,12 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(value, callees)
             } else {
                 (jit_list_native_type(&base.ty)
+                    || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some()
                     || jit_float_view_mut_type(&base.ty))
                     && matches!(&index.ty, Type::Int)
-                    && matches!(
+                    && (matches!(
                         &value.ty,
                         Type::Int
                             | Type::IntN { .. }
@@ -4979,7 +5314,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             | Type::String
                             | Type::Char
                             | Type::Bool
-                    )
+                    ) || jit_struct_type(&value.ty)
+                        || jit_tuple_type(&value.ty))
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
                     && resident_safe_expr(value, callees)
@@ -5286,6 +5622,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     ) {
         return Some("not top-level".into());
     }
+    if tir.uses_stack_sentry {
+        return Some("stack-address sentry requires the canonical evaluator".into());
+    }
     if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {
         return Some("func attrs unsupported".into());
     }
@@ -5560,7 +5899,26 @@ fn refusal_operand_chain(expr: &TExpr, callees: &HashSet<String>) -> String {
 /// condition is then named by shape — this states no rule of its own.
 fn if_cond_tag(cond: &TIfCond) -> String {
     match cond {
-        TIfCond::Plain(e) => format!("Plain:{} ty={:?}", expr_kind_tag(e), e.ty),
+        TIfCond::Plain(e) => {
+            if let TExprKind::Unary { op, operand } = &e.kind {
+                let operand_detail = match &operand.kind {
+                    TExprKind::BuiltinMethod { recv, args, op } => format!(
+                        " operand_recv_ty={:?} operand_op={op:?} operand_arg_tys={:?}",
+                        recv.ty,
+                        args.iter().map(|arg| &arg.ty).collect::<Vec<_>>()
+                    ),
+                    _ => String::new(),
+                };
+                format!(
+                    "Plain:Unary op={op:?} ty={:?} operand={} operand_ty={:?}{operand_detail}",
+                    e.ty,
+                    expr_kind_tag(operand),
+                    operand.ty
+                )
+            } else {
+                format!("Plain:{} ty={:?}", expr_kind_tag(e), e.ty)
+            }
+        }
         TIfCond::IfLet { pattern, subj } => format!(
             "IfLet:{} subj={} ty={:?}",
             pattern_kind_tag(&pattern.pattern),
@@ -5580,6 +5938,93 @@ fn if_cond_tag(cond: &TIfCond) -> String {
             format!("WithPrelude({})", if_cond_tag(cond))
         }
     }
+}
+
+fn for_in_method_tag(method: &TForInMethod) -> String {
+    match method {
+        TForInMethod::Chars => "Chars".to_string(),
+        TForInMethod::LinesFile => "LinesFile".to_string(),
+        TForInMethod::LinesStdin => "LinesStdin".to_string(),
+        TForInMethod::LinesProcessStream => "LinesProcessStream".to_string(),
+        TForInMethod::ChannelReceiver => "ChannelReceiver".to_string(),
+        TForInMethod::EncodingReader { reader_type } => {
+            format!("EncodingReader:{reader_type}")
+        }
+        TForInMethod::Iterable {
+            coll_type,
+            iter_type,
+        } => format!("Iterable:{coll_type}::{iter_type}"),
+    }
+}
+
+fn for_in_method_shape_supported(
+    method_kind: Option<&TForInMethod>,
+    var2: Option<&String>,
+    source: &TExpr,
+    collection: &TExpr,
+    columnar: bool,
+    callees: &HashSet<String>,
+) -> bool {
+    match method_kind {
+        None => true,
+        Some(TForInMethod::Chars) => matches!(&source.ty, Type::String),
+        Some(TForInMethod::ChannelReceiver) => {
+            var2.is_none()
+                && matches!(&collection.ty, Type::Apply { name, args } if name == "Receiver" && args.len() == 1)
+                && jit_concurrency_type(&collection.ty)
+        }
+        Some(TForInMethod::Iterable {
+            coll_type,
+            iter_type,
+        }) => {
+            record_type_key(&source.ty).is_some_and(|name| name == *coll_type)
+                && callees.contains(&format!("{coll_type}::iter"))
+                && callees.contains(&format!("{iter_type}::next"))
+        }
+        Some(TForInMethod::LinesProcessStream) => {
+            var2.is_none()
+                && matches!(
+                    &source.kind,
+                    TExprKind::Field { recv, field, boxed: false }
+                        if matches!(&recv.ty, Type::Named(n) if n == "ProcessChild")
+                            && (field == "stdout" || field == "stderr")
+                )
+        }
+        Some(TForInMethod::LinesFile) | Some(TForInMethod::LinesStdin) => var2.is_none(),
+        Some(TForInMethod::EncodingReader { reader_type }) => {
+            !columnar
+                && var2.is_none()
+                && matches!(&collection.ty, Type::Named(name) if name == reader_type)
+                && matches!(
+                    reader_type.as_str(),
+                    "JSONReader" | "JSONLReader" | "CSVReader" | "XMLReader" | "CBORReader"
+                )
+        }
+    }
+}
+
+fn for_in_collection_shape_supported(
+    var2: Option<&String>,
+    collection: &TExpr,
+    by_value: bool,
+) -> bool {
+    let list_ok = var2.is_none()
+        && (jit_list_iter_elem_type(&collection.ty).is_some()
+            || jit_closure_elem_type(&collection.ty).is_some()
+            || jit_list_record_type(&collection.ty));
+    let stream_ok = var2.is_none()
+        && matches!(&collection.ty, Type::Apply { name, args }
+            if name == "Stream" && args.len() == 1 && jit_value_type(&args[0]));
+    let list_pair_ok = var2.is_some()
+        && (jit_list_iter_elem_type(&collection.ty).is_some()
+            || jit_closure_elem_type(&collection.ty).is_some()
+            || jit_list_record_type(&collection.ty));
+    let map_ok = var2.is_some() && jit_map_string_type(&collection.ty);
+    let by_value_ok = !by_value
+        || jet_foundation::Collections::is_iter_type(&collection.ty)
+        || matches!(&collection.ty, Type::List(_) | Type::FixedList { .. })
+        || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
+    (list_ok || stream_ok || list_pair_ok || map_ok) && by_value_ok
 }
 
 fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Option<String> {
@@ -5700,6 +6145,84 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                     detail.push_str(&format!(" else>{inner}"));
                 } else {
                     detail.push_str(&format!(" cond={}", if_cond_tag(cond)));
+                }
+                return Some(detail);
+            }
+            TStmt::ForIn {
+                var2,
+                source,
+                collection,
+                method_kind,
+                columnar,
+                by_value,
+                step,
+                body,
+                ..
+            } => {
+                let mut detail = format!("{}[{i}]", stmt_kind_tag(s));
+                let collection_checked = method_kind.is_none()
+                    || matches!(
+                        method_kind,
+                        Some(TForInMethod::EncodingReader { .. } | TForInMethod::Iterable { .. })
+                    );
+                if method_kind.is_some() && !resident_safe_expr(source, callees) {
+                    detail.push_str(&format!(
+                        " source={} ty={:?}",
+                        expr_kind_tag(source),
+                        source.ty
+                    ));
+                    detail.push_str(&refusal_operand_chain(source, callees));
+                } else if collection_checked && !resident_safe_expr(collection, callees) {
+                    detail.push_str(&format!(
+                        " collection={} ty={:?}",
+                        expr_kind_tag(collection),
+                        collection.ty
+                    ));
+                    detail.push_str(&refusal_operand_chain(collection, callees));
+                } else if let Some(step) = step {
+                    if !resident_safe_expr(step, callees) {
+                        detail.push_str(&format!(" step={} ty={:?}", expr_kind_tag(step), step.ty));
+                        detail.push_str(&refusal_operand_chain(step, callees));
+                    }
+                }
+                if detail == format!("{}[{i}]", stmt_kind_tag(s)) {
+                    if let Some(method) = method_kind {
+                        if !for_in_method_shape_supported(
+                            Some(method),
+                            var2.as_ref(),
+                            source,
+                            collection,
+                            *columnar,
+                            callees,
+                        ) {
+                            detail.push_str(&format!(" method={}", for_in_method_tag(method)));
+                        }
+                    } else if !for_in_collection_shape_supported(
+                        var2.as_ref(),
+                        collection,
+                        *by_value,
+                    ) {
+                        detail.push_str(&format!(
+                            " collection={} ty={:?}",
+                            expr_kind_tag(collection),
+                            collection.ty
+                        ));
+                    } else {
+                        let body_ok = body.iter().all(|stmt| {
+                            if matches!(method_kind, Some(TForInMethod::LinesProcessStream)) {
+                                resident_safe_process_lines_body(stmt, callees)
+                            } else {
+                                resident_safe_stmt(stmt, callees)
+                            }
+                        });
+                        if !body_ok {
+                            if let Some(inner) = first_unsafe_stmt_detail(body, callees) {
+                                detail.push_str(&format!(" body>{inner}"));
+                            } else {
+                                detail.push_str(" body=unsupported");
+                            }
+                        }
+                    }
                 }
                 return Some(detail);
             }
@@ -6216,6 +6739,9 @@ pub(crate) fn collect_select_arms_jit<'a>(
 }
 
 pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> bool {
+    if lam.uses_stack_sentry {
+        return false;
+    }
     if lam.captures.len() > 4 {
         return false;
     }
@@ -6395,7 +6921,11 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
                 TExprKind::BuiltinMethod { op, recv, args }
                     if matches!(
                         op,
-                        TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower
+                        TBuiltinOp::Trim
+                            | TBuiltinOp::ToUpper
+                            | TBuiltinOp::ToLower
+                            | TBuiltinOp::ToAsciiUpper
+                            | TBuiltinOp::ToAsciiLower
                     ) && args.is_empty()
                         && matches!(&recv.kind, TExprKind::Local(_)) =>
                 {
@@ -6413,7 +6943,11 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
                     TExprKind::BuiltinMethod { op, recv, args: a }
                         if matches!(
                             op,
-                            TBuiltinOp::ToUpper | TBuiltinOp::ToLower | TBuiltinOp::Trim
+                            TBuiltinOp::ToUpper
+                                | TBuiltinOp::ToLower
+                                | TBuiltinOp::ToAsciiUpper
+                                | TBuiltinOp::ToAsciiLower
+                                | TBuiltinOp::Trim
                         ) && a.is_empty()
                             && matches!(&recv.kind, TExprKind::Local(_)) =>
                     {
@@ -6432,7 +6966,11 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
                 TExprKind::BuiltinMethod { op, recv, args: a }
                     if matches!(
                         op,
-                        TBuiltinOp::ToUpper | TBuiltinOp::ToLower | TBuiltinOp::Trim
+                        TBuiltinOp::ToUpper
+                            | TBuiltinOp::ToLower
+                            | TBuiltinOp::ToAsciiUpper
+                            | TBuiltinOp::ToAsciiLower
+                            | TBuiltinOp::Trim
                     ) && a.is_empty()
                         && matches!(&recv.kind, TExprKind::Local(_)) =>
                 {
@@ -6551,7 +7089,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             // (#2030). It also refused `Zone.name`, which the host does marshal,
             // and carried three names (`timestamp`, `add_years`, `with_time`) no
             // receiver ever offers.
-            matches!(args.len(), 0..=6)
+            matches!(args.len(), 0..=7)
                 && TIR::is_civil_time_method_name(Some(kind.as_str()), method)
         }
         THandleOp::RegexMethod { method, .. } => {
@@ -6576,11 +7114,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "count",
                     0..=1
                 ) | ("group" | "name", 1)
-                    | (
-                        "replace" | "replace_first" | "replace_all" | "split_limit"
-                        | "replace_all_with",
-                        2,
-                    )
+                    | ("replace" | "replace_first" | "split_limit", 2)
+                    | ("replace_all_with", 2)
             )
         }
         THandleOp::FileReaderReadLine if args.is_empty() => true,
@@ -6633,6 +7168,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIn { .. } => args.len() <= 1,
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
+        THandleOp::DurationAbs | THandleOp::DurationNegated | THandleOp::DurationSign => {
+            args.is_empty()
+        }
+        THandleOp::DurationTotalIn => args.len() == 1,
+        THandleOp::DurationRound => (1..=3).contains(&args.len()),
         THandleOp::DurationSecondsValue => args.is_empty(),
         THandleOp::DurationScale | THandleOp::DurationDivide => args.len() == 1,
         THandleOp::AllocAlloc | THandleOp::AllocTryAlloc => args.len() == 1,
@@ -6703,13 +7243,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         // Keep residency aligned with the actual LowerCtx HTTP arms below.
         // The evaluator has a separate ambient bridge for the subset field
-        // forms; those stay deopt-only until LowerCtx grows matching ABI arms.
+        // forms, and both paths call the shared Prelude adapters.
         THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HTTPResponse", "text") if args.len() <= 1 => true,
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,
             ("HTTPResponse", "json") if args.len() <= 1 => true,
             ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
             ("HTTPBody", "copy_to") if args.len() == 2 => true,
+            ("HTTPRequest", "json") if args.len() == 1 => true,
             ("HTTPRequest", "body") if args.len() == 1 => true,
             ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
             ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
@@ -6736,10 +7278,12 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             {
                 true
             }
+            ("HTTPRequest", "text") if args.len() <= 1 => true,
             ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
             ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
             ("HTTPBody", "copy_to") if args.len() == 2 => true,
             ("HTTPResponse", "status" | "body") if args.is_empty() => true,
+            ("HTTPResponse", "text") if args.len() <= 1 => true,
             ("HTTPResponse", "trailers") if args.len() == 1 => true,
             ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,
             ("HTTPServer", "shutdown") if args.len() == 1 => true,
@@ -6810,7 +7354,10 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::DataTreeBool
         | THandleOp::JSONBool
         | THandleOp::DataTreeFloat
-        | THandleOp::JSONFloat => args.is_empty(),
+        | THandleOp::JSONFloat
+        | THandleOp::DataTreeToText
+        | THandleOp::JSONToText => args.is_empty(),
+        THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => args.len() == 1,
         THandleOp::SerdeEncode => args.is_empty(),
         THandleOp::DataTreeDecode(_) => args.is_empty(),
         THandleOp::JSONReaderNext
@@ -6843,6 +7390,9 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::PathNormalize
         | THandleOp::PathToString
         | THandleOp::PathWalk => args.is_empty(),
+        THandleOp::PathIsWithin => {
+            args.len() == 1 && matches!(&args[0].ty, Type::Named(name) if name == "Path")
+        }
         THandleOp::PathWriteAtomic => args.len() == 1,
         THandleOp::GameSceneNew => args.is_empty() && matches!(&recv.ty, Type::String),
         THandleOp::GameReplayRecord => args.is_empty() && matches!(&recv.ty, Type::String),

@@ -81,6 +81,17 @@ for ((shard = 0; shard < SHARD_COUNT; shard++)); do
       2>&1 | tee "$shard_dir/gate.log" | tee -a "$REPORT_DIR/gate.log"
   shard_status=${PIPESTATUS[0]}
   if [[ "$shard_status" -ne 0 ]]; then GATE_STATUS=1; fi
+
+  # Exercise every registry-driven Core conformance program through the same
+  # three-tier gate. The test owns denominator validation and consumes this
+  # shard assignment so the full corpus is covered across the suite.
+  JET_CORE_CONFORMANCE_SHARD_INDEX="$shard" \
+  JET_CORE_CONFORMANCE_SHARD_COUNT="$SHARD_COUNT" \
+    cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture \
+      2>&1 | tee "$shard_dir/core-gate.log" | tee -a "$REPORT_DIR/gate.log"
+  core_shard_status=${PIPESTATUS[0]}
+  if [[ "$core_shard_status" -ne 0 ]]; then GATE_STATUS=1; fi
+
   shard_finished="$(date +%s%N 2>/dev/null || echo 0)"
   if [[ "$shard_started" != "0" && "$shard_finished" != "0" ]]; then
     # Keep wrapper timing separate: the Rust report owns timing.txt, and an

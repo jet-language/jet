@@ -3,10 +3,10 @@
 
 use std::collections::HashMap;
 
+use crate::AST::{CtValue, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::apply_core_call;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtValue, Type};
 
 use super::{EvalCallable, EvalCtx};
 
@@ -168,7 +168,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             Type::Fn { params, .. } => params.len(),
             _ => 0,
         };
-        let result_shape = compute_result_shape(base_ret);
+        let base_return_ty = (**base_ret).clone();
+        let result_shape = compute_result_shape(&base_return_ty);
         let tuple_fields = match base_ret.as_ref() {
             Type::Tuple(fields)
                 if matches!(
@@ -200,6 +201,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             error.what.clone(),
                         )
                     })?;
+                // Callable evaluation may retain its transport carrier even
+                // when the declared result is a bare Tensor or tensor tuple.
+                // ComputeLite consumes the canonical bare value.
+                let output = EvalCtx::normalize_eval_value(output, &base_return_ty);
                 match &result_shape {
                     crate::Comptime::ComputeLite::JetComputeResultShape::Tensor => {
                         let tensor = crate::Comptime::ComputeLite::autodiff_tensor_from_ct(

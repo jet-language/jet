@@ -477,18 +477,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     return Err(unsupported("fallible map receiver", self.span()));
                 };
                 let mut callback_error = None;
-                let mapped = collection_failure_semantics::jet_collection_try_map(
-                    items,
-                    |item| match calln(self, vec![item]) {
-                        Ok(CtValue::Present(value)) => Ok(*value),
-                        Ok(CtValue::Failed(report)) => Err(CtValue::Failed(report)),
-                        Ok(value) => Ok(value),
-                        Err(error) => {
-                            callback_error = Some(error);
-                            Err(CtValue::Unit)
-                        }
-                    },
-                );
+                let mapped =
+                    collection_failure_semantics::jet_collection_try_map(
+                        items,
+                        |item| match calln(self, vec![item]) {
+                            Ok(CtValue::Present(value)) => Ok(*value),
+                            Ok(CtValue::Failed(report)) => Err(CtValue::Failed(report)),
+                            Ok(value) => Ok(value),
+                            Err(error) => {
+                                callback_error = Some(error);
+                                Err(CtValue::Unit)
+                            }
+                        },
+                    );
                 if let Some(error) = callback_error {
                     return Err(error);
                 }
@@ -717,6 +718,49 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     return Err(e);
                 }
                 let sorted = CtValue::List(keyed.into_iter().map(|(_, v)| v).collect());
+                self.write_back_place(recv, sorted, scope)?;
+                Ok(CtValue::Unit)
+            }
+            TClosureOp::TrySortBy | TClosureOp::TrySortByDesc => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("fallible sort_by receiver", self.span()));
+                };
+                let mut callback_error = None;
+                let keys =
+                    collection_failure_semantics::jet_collection_try_map(items.iter(), |item| {
+                        match calln(self, vec![(*item).clone()]) {
+                            Ok(CtValue::Present(value)) => Ok(*value),
+                            Ok(CtValue::Failed(report)) => Err(CtValue::Failed(report)),
+                            Ok(value) => Ok(value),
+                            Err(error) => {
+                                callback_error = Some(error);
+                                Err(CtValue::Unit)
+                            }
+                        }
+                    });
+                if let Some(error) = callback_error {
+                    return Err(error);
+                }
+                let keys = match keys {
+                    Ok(keys) => keys,
+                    Err(failure) => return Ok(failure),
+                };
+                let span = self.span();
+                let mut keyed: Vec<_> = items.into_iter().zip(keys).collect();
+                let descending = matches!(op, TClosureOp::TrySortByDesc);
+                let mut sort_err = None;
+                keyed.sort_by(|a, b| match cmp(a.1.clone(), b.1.clone(), span) {
+                    Ok(order) if descending => order.reverse(),
+                    Ok(order) => order,
+                    Err(error) => {
+                        sort_err.get_or_insert(error);
+                        std::cmp::Ordering::Equal
+                    }
+                });
+                if let Some(error) = sort_err {
+                    return Err(error);
+                }
+                let sorted = CtValue::List(keyed.into_iter().map(|(item, _)| item).collect());
                 self.write_back_place(recv, sorted, scope)?;
                 Ok(CtValue::Unit)
             }
@@ -1280,6 +1324,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         for (i, name) in lam.source_params.iter().enumerate() {
             child.insert(name.clone(), argv.get(i).cloned().unwrap_or(CtValue::Unit));
         }
+        let _sentry_frame = lam
+            .uses_stack_sentry
+            .then(jet_foundation::MemSentry::jet_sentry_frame);
         let result = match &lam.executable {
             TLambdaBody::Expr(e) => self.eval_expr(e, &mut child)?,
             TLambdaBody::Block(stmts) => match self.exec_lambda_body(stmts, &mut child)? {
@@ -1325,6 +1372,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 outer.insert(k, v);
             }
         }
+        let result = if let Some(ret) = lam.ret.as_ref() {
+            Self::normalize_eval_value(result, ret)
+        } else {
+            result
+        };
         Ok(result)
     }
 
@@ -1359,6 +1411,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
             }
         }
+        let _sentry_frame = lam
+            .uses_stack_sentry
+            .then(jet_foundation::MemSentry::jet_sentry_frame);
         let result = match &lam.executable {
             TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
             TLambdaBody::Block(stmts) => match self.exec_lambda_body(stmts, &mut child)? {

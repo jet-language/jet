@@ -729,13 +729,14 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K:V]` the subset can lower. The
 /// element/key/value types must themselves be covered *value* types — scalar,
-/// Char, String, a covered distinct/struct/enum, or a nested covered collection — so the
-/// literal/index/iteration lowerings reproduce the AST path without any clone/box
-/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`, D-FIXARR1) is
-/// covered exactly like a `List`: indexing reads the element type off the base, and a fan-out
-/// expression already produces a `[T#N]` value (Rust `[E; N]`). Widening to `[T]` (Vec)
-/// when passed to a List slot is handled by `TCallArg.widen_to_vec` — so a `[E#N]`
-/// param/return/element is covered once its element type is covered.
+/// Char, String, a covered tuple/struct/enum, or a nested covered collection —
+/// so the literal/index/iteration lowerings reproduce the AST path without any
+/// clone/box decision the subset can't make from total facts. A `FixedList`
+/// (`[E#N]`, D-FIXARR1) is covered exactly like a `List`: indexing reads the
+/// element type off the base, and a fan-out expression already produces a
+/// `[T#N]` value (Rust `[E; N]`). Widening to `[T]` (Vec) when passed to a List
+/// slot is handled by `TCallArg.widen_to_vec` — so a `[E#N]` param/return/element
+/// is covered once its element type is covered.
 pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::List(inner) => collection_elem_covered(inner, cx),
@@ -748,8 +749,8 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 /// A list/map element, key, or value type the subset can lower: a scalar, Char,
-/// String, a sema-proved view, a covered distinct/struct/enum, or a nested
-/// covered collection. Anything else excludes the owning collection.
+/// String, a covered tuple/struct/enum, a sema-proved view, or a nested covered
+/// collection. Anything else excludes the owning collection.
 pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
@@ -759,6 +760,7 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
         // c148: pass cx so multi-char params are recognized.
         || is_type_var_param_ty(ty, cx)
+        || is_covered_tuple_ty(ty, cx)
         || is_covered_distinct_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
@@ -773,8 +775,8 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // closure op, already built — `list_carries_trait`). The element renders via
         // `cx.rust_type` to `Box<dyn __jet_<Trait>>`, byte-identical to the AST path.
         || is_covered_trait_object_ty(ty, cx)
-        // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
-        // `[String:JSON]`) OR a cross-module imported user struct/enum (`[String:Note]`
+        // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum
+        // (`[JSON]` / `[String:JSON]`) OR a cross-module imported user struct/enum (`[String:Note]`
         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
         // own Rust head ({root}jet_std::JSON / {root}{mod}::__jet_<Name>), and a foreign
         // element is moved/cloned by its own sub-expression (a construction or a bound

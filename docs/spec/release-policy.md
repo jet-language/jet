@@ -47,14 +47,37 @@ fix bugs, and publish new editions under this policy.
 Adopters can expect feature releases on a regular, predictable cadence. Feature
 releases follow normal SemVer forever (D-REL1); epoch names tell the story of a
 project era but never change the compiler version (D-REL2). Breaking syntax
-changes use opt-in editions (D-REL3). Once #1349 lands, LTS releases follow the
-cadence in D-ADOPT-LTS1. Jet does not offer an LTS branch before GA; the LTS
-window is set at GA (D-REL4). Only an explicit `jet fix` or edition upgrade
-rewrites source (D-REL5).
+changes use opt-in editions (D-REL3). LTS releases follow D-ADOPT-LTS1. Jet
+does not offer an LTS branch before GA; the LTS window is set at GA (D-REL4).
+Only an explicit `jet fix` or edition upgrade rewrites source (D-REL5).
 
 A quiet period between releases means that the project is stable or that work
 is taking time to meet its quality bar. It does not mean that the project is
 abandoned. Low release volume signals stability, not abandonment.
+
+### Enterprise LTS calendar (D-ADOPT-LTS1=A)
+
+D-ADOPT-LTS1 was ratified on 2026-08-01. Jet starts one LTS line each year.
+Each line has twelve months of active support and twenty-four months of
+maintenance support, for thirty-six months total. At most three LTS lines may
+overlap.
+
+Active support covers security, critical compiler and runtime correctness,
+supported-host and toolchain breakage, and severe performance regressions. It
+does not add language behavior. Maintenance support covers security and
+critical data-loss, memory-safety, type-safety, and miscompilation fixes.
+
+The public calendar must give six months' notice for a calendar change and
+must not shorten a live LTS line. An LTS line keeps the editions and hosts it
+advertised. Dropping either before EOL needs the existing security or safety
+exception process and a migration notice. The latest stable release and every
+live LTS line receive applicable security fixes.
+
+The enterprise adoption pack carries the calendar in
+[`adoption/release/calendar.json`](../../adoption/release/calendar.json). Its
+policy fields contain the ratified values. Its first GA date, replacement
+line, and edition/host matrix remain pending until the GA schedule is fixed;
+the pack does not invent those dates or support claims.
 
 ### Environment safety correction (D-ENV-MUTATE1)
 

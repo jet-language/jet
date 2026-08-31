@@ -43,11 +43,14 @@ pub fn jet_reader_bounds_error(method: &str, need: usize, r: &JetReader) -> Stri
 }
 
 pub fn jet_reader_take_fixed(r: &mut JetReader, n: usize, method: &str) -> Result<Vec<u8>, String> {
-    if r.pos + n > r.buf.len() {
+    let Some(end) = r.pos.checked_add(n) else {
+        return Err(jet_reader_bounds_error(method, n, r));
+    };
+    if end > r.buf.len() {
         return Err(jet_reader_bounds_error(method, n, r));
     }
-    let out = r.buf[r.pos..r.pos + n].to_vec();
-    r.pos += n;
+    let out = r.buf[r.pos..end].to_vec();
+    r.pos = end;
     Ok(out)
 }
 
@@ -446,7 +449,13 @@ pub fn jet_reader_take(r: &mut JetReader, n: i64) -> Result<Vec<u8>, String> {
             n
         ));
     }
-    jet_reader_take_fixed(r, n as usize, "take")
+    let n = usize::try_from(n).map_err(|_| {
+        format!(
+            "Reader.take: length {} is outside the addressable buffer",
+            n
+        )
+    })?;
+    jet_reader_take_fixed(r, n, "take")
 }
 
 pub fn jet_reader_remaining(r: &JetReader) -> i64 {
@@ -550,6 +559,17 @@ mod stream_cursor_tests {
         assert_eq!(r.pos, 3);
         assert_eq!(jet_reader_read_u8_fast(&mut r), None);
         assert_eq!(r.pos, 3);
+    }
+
+    #[test]
+    fn region_bounds_checks_without_advancing() {
+        let r = jet_reader_over(&vec![1, 2, 3]);
+        assert_eq!(jet_reader_region_bounds(&r, 2), Some((0, 2)));
+        assert_eq!(r.pos, 0);
+        assert_eq!(jet_reader_region_bounds(&r, 4), None);
+        assert_eq!(r.pos, 0);
+        assert_eq!(jet_reader_region_bounds(&r, -1), None);
+        assert_eq!(r.pos, 0);
     }
 
     #[test]

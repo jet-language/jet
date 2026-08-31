@@ -2,7 +2,7 @@
 
 use super::Diagnostics::unsupported;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtValue, Type};
+use crate::AST::{CtKey, CtValue, Type};
 
 // `Sync.rs` is shared verbatim with the AOT Prelude.  The comptime tier
 // supplies the same small host boundary that the emitted module gets from
@@ -35,6 +35,131 @@ trait __jet_Decode: Sized {
 
 #[path = "SyncJetStd.rs"]
 mod jet_std;
+
+fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
+    fn object_pairs(
+        fields: impl IntoIterator<Item = (String, CtValue)>,
+    ) -> Option<Vec<(String, jet_std::DataTree)>> {
+        fields
+            .into_iter()
+            .map(|(key, value)| Some((key, datatree_from_ct(&value)?)))
+            .collect()
+    }
+
+    fn map_pairs(fields: &std::collections::BTreeMap<CtKey, CtValue>) -> Option<Vec<(String, CtValue)>> {
+        let mut pairs = Vec::with_capacity(fields.len());
+        for (key, value) in fields {
+            let CtKey::Str(key) = key else {
+                return None;
+            };
+            pairs.push((key.clone(), value.clone()));
+        }
+        Some(pairs)
+    }
+
+    match value {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+            let payload = args.first().map(|(_, value)| value);
+            match variant.as_str() {
+                "Null" => Some(jet_std::DataTree::Null),
+                "Bool" => match payload {
+                    Some(CtValue::Bool(value)) => Some(jet_std::DataTree::Bool(*value)),
+                    _ => None,
+                },
+                "Int" => match payload {
+                    Some(CtValue::Int(value)) => Some(jet_std::DataTree::Int(*value)),
+                    Some(CtValue::BigInt(value)) => value
+                        .try_i64()
+                        .map(jet_std::DataTree::Int)
+                        .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
+                    _ => None,
+                },
+                "Float" => match payload {
+                    Some(CtValue::Float(value)) => {
+                        Some(jet_std::DataTree::Float(value.as_f64()))
+                    }
+                    _ => None,
+                },
+                "Number" => match payload {
+                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::Number(value.clone())),
+                    _ => None,
+                },
+                "TypedText" => match payload {
+                    Some(CtValue::Str(value)) => {
+                        Some(jet_std::DataTree::TypedText(value.clone()))
+                    }
+                    _ => None,
+                },
+                "Text" => match payload {
+                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::Text(value.clone())),
+                    _ => None,
+                },
+                "Bytes" => match payload {
+                    Some(CtValue::Bytes(value)) => Some(jet_std::DataTree::Bytes(value.clone())),
+                    _ => None,
+                },
+                "Array" => match payload {
+                    Some(CtValue::List(values)) => values
+                        .iter()
+                        .map(datatree_from_ct)
+                        .collect::<Option<Vec<_>>>()
+                        .map(jet_std::DataTree::Array),
+                    _ => None,
+                },
+                "Object" => match payload {
+                    Some(CtValue::Map(fields)) => map_pairs(fields)
+                        .and_then(object_pairs)
+                        .map(jet_std::DataTree::Object),
+                    Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
+                        object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        CtValue::Int(value) => Some(jet_std::DataTree::Int(*value)),
+        CtValue::BigInt(value) => value
+            .try_i64()
+            .map(jet_std::DataTree::Int)
+            .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
+        CtValue::Float(value) => Some(jet_std::DataTree::Float(value.as_f64())),
+        CtValue::Bool(value) => Some(jet_std::DataTree::Bool(*value)),
+        CtValue::Str(value) => Some(jet_std::DataTree::Text(value.clone())),
+        CtValue::Bytes(value) => Some(jet_std::DataTree::Bytes(value.clone())),
+        CtValue::List(values) => values
+            .iter()
+            .map(datatree_from_ct)
+            .collect::<Option<Vec<_>>>()
+            .map(jet_std::DataTree::Array),
+        CtValue::Map(fields) => map_pairs(fields)
+            .and_then(object_pairs)
+            .map(jet_std::DataTree::Object),
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+            object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+        }
+        _ => None,
+    }
+}
+
+/// D-DATATREE-ERGO1=A: the comptime value carrier only marshals into the
+/// Prelude tree; scalar projection policy stays on `DataTree::to_text`.
+pub fn datatree_to_text(value: &CtValue) -> Option<String> {
+    datatree_from_ct(value).and_then(|tree| tree.to_text())
+}
+
+/// D-DATATREE-ERGO1=A: the comptime value carrier only marshals into the
+/// Prelude tree; recursive comparison policy stays on `DataTree`.
+pub fn datatree_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
+    match (datatree_from_ct(left), datatree_from_ct(right)) {
+        (Some(left), Some(right)) => left.equal_unordered(&right),
+        _ => false,
+    }
+}
 
 impl __jet_Encode for String {
     fn jet_encode(&self) -> jet_std::DataTree {

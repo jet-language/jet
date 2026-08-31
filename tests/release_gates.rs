@@ -1,8 +1,8 @@
 //! Milestone gate checks, one lane: canon.jet golden run, `--small` binary
-//! size gates, the Epoch 2 GA checklist, and release/edition/deprecation
-//! policy. Distinct from `tests/golden.rs` (per-example front-end + rustc
-//! matrix) — these are one-off milestone exit-criteria checks, not part of
-//! the example discovery loop.
+//! size gates, the compiled-workload contract, the Epoch 2 GA checklist, and
+//! release/edition/deprecation policy. Distinct from `tests/golden.rs`
+//! (per-example front-end + rustc matrix) — these are one-off milestone
+//! exit-criteria checks, not part of the example discovery loop.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -420,6 +420,81 @@ fn later_breaking_milestones_name_their_gate() {
     assert!(
         checked >= 1,
         "expected at least one non-m2 epoch-2 plan to scan"
+    );
+}
+
+// ============================================================================
+// Section: #1414 compiled workload contract and report gate
+// ============================================================================
+
+#[test]
+fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
+    let root = root();
+    let gate = fs::read_to_string(root.join("tools/ci/compiled-workload-gate.sh"))
+        .expect("read compiled workload gate");
+    for field in [
+        "--contract",
+        "--check",
+        "outcomes.tsv",
+        "measurements.tsv",
+        "tiers.tsv",
+        "jet_tool_version",
+        "peer_tool_version",
+        "review_status",
+        "review_evidence",
+        "loss_owner",
+        "applicable_targets",
+        "peer_applies",
+        "not-applicable",
+        "tower.mjs",
+        "card show \"$owner\" --json",
+        "fresh review evidence",
+        "candidate=",
+        "reviewer=",
+        "fairness=",
+        "measurements=",
+    ] {
+        assert!(gate.contains(field), "compiled workload gate lost {field}");
+    }
+
+    let self_check = fs::read_to_string(root.join("tools/ci/test-compiled-workload-gate.sh"))
+        .expect("read compiled workload gate self-check");
+    let canaries = fs::read_to_string(root.join("tests/compiled_workloads/canaries.tsv"))
+        .expect("read compiled workload canaries");
+    for line in canaries.lines().skip(1).filter(|line| !line.is_empty()) {
+        let name = line.split('\t').nth(1).unwrap();
+        assert!(
+            self_check.contains(&format!("expect_reject {name}")),
+            "removal canary is not exercised: {name}"
+        );
+    }
+
+    let suites = fs::read_to_string(root.join("tests/suites.txt")).expect("read test suites");
+    assert!(
+        suites.lines().any(|line| line.trim() == "tests/compiled_workloads"),
+        "compiled workload self-check must stay in the named test suites"
+    );
+
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read CI workflow");
+    assert!(
+        workflow.contains("name: Compiled workload gate (Unix)")
+            && workflow.contains("name: Compiled workload gate (Windows)")
+            && workflow.contains("tools/ci/compiled-workload-gate.sh --contract")
+            && workflow.contains("tools/ci/test-compiled-workload-gate.sh"),
+        "CI must invoke the compiled workload contract and seven-canary self-check"
+    );
+
+    let output = Command::new("bash")
+        .arg(root.join("tools/ci/compiled-workload-gate.sh"))
+        .arg("--contract")
+        .current_dir(&root)
+        .output()
+        .expect("run compiled workload contract gate");
+    assert!(
+        output.status.success(),
+        "compiled workload contract gate failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

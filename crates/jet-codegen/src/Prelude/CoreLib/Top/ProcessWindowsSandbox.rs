@@ -21,6 +21,8 @@ mod jet_process_windows_sandbox {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    use super::ReadOnlyMount;
+
     const MECHANISM: &str = "windows-appcontainer";
     const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
     const PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 0x0002_0009;
@@ -528,6 +530,7 @@ mod jet_process_windows_sandbox {
             executable: &Path,
             source_readable: bool,
             source_writable: bool,
+            mounts: &[PathBuf],
         ) -> io::Result<Self> {
             let mut projection = Self {
                 grants: Vec::new(),
@@ -582,6 +585,23 @@ mod jet_process_windows_sandbox {
                         &mut seen,
                     )?;
                 }
+            }
+            for mount in mounts {
+                projection.add_parent(mount, &mut seen)?;
+                projection.add_with_inheritance(
+                    mount,
+                    GENERIC_WRITE | DELETE | WRITE_DAC | WRITE_OWNER,
+                    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                    DENY_ACCESS,
+                    &mut seen,
+                )?;
+                projection.add_with_inheritance(
+                    mount,
+                    GENERIC_READ | GENERIC_EXECUTE,
+                    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                    SET_ACCESS,
+                    &mut seen,
+                )?;
             }
             Ok(projection)
         }
@@ -1142,6 +1162,34 @@ mod jet_process_windows_sandbox {
         timeout_ms: Option<i64>,
         output_limit: Option<i64>,
     ) -> Result<BackendOutput, WindowsSandboxError> {
+        run_with_read_only_mounts(
+            executable,
+            args,
+            source_dir,
+            output_dir,
+            env,
+            share_network,
+            source_readable,
+            source_writable,
+            &[],
+            timeout_ms,
+            output_limit,
+        )
+    }
+
+    pub(crate) fn run_with_read_only_mounts(
+        executable: &Path,
+        args: &[String],
+        source_dir: &Path,
+        output_dir: Option<&Path>,
+        env: &BTreeMap<String, String>,
+        share_network: bool,
+        source_readable: bool,
+        source_writable: bool,
+        mounts: &[ReadOnlyMount],
+        timeout_ms: Option<i64>,
+        output_limit: Option<i64>,
+    ) -> Result<BackendOutput, WindowsSandboxError> {
         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
             return Err(WindowsSandboxError::Unsupported(
                 "test sandbox override prevents child execution".to_string(),
@@ -1150,6 +1198,25 @@ mod jet_process_windows_sandbox {
         let executable = real_executable(executable)?;
         let source_dir = real_directory(source_dir)?;
         let output_dir = output_dir.map(real_directory).transpose()?;
+        let mounts = mounts
+            .iter()
+            .map(|mount| {
+                if !mount.destination.is_absolute()
+                    || mount.destination.components().any(|component| {
+                        matches!(
+                            component,
+                            std::path::Component::CurDir | std::path::Component::ParentDir
+                        )
+                    })
+                {
+                    return Err(WindowsSandboxError::Unsupported(format!(
+                        "sandbox mount destination `{}` is not an absolute, normalized path",
+                        mount.destination.display()
+                    )));
+                }
+                real_directory(&mount.source)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let network_capability = if share_network {
             Some(CapabilitySid::internet_client().map_err(io_error)?)
         } else {
@@ -1167,6 +1234,7 @@ mod jet_process_windows_sandbox {
             &executable,
             source_readable,
             source_writable,
+            &mounts,
         )
         .map_err(io_error)?;
         let security = SecurityCapabilities {
@@ -1502,6 +1570,7 @@ mod jet_process_windows_sandbox {
 
 #[cfg(target_os = "windows")]
 pub(crate) use jet_process_windows_sandbox::{
-    run as windows_output, status as windows_status, BackendOutput as WindowsSandboxOutput,
+    run as windows_output, run_with_read_only_mounts as windows_output_with_read_only_mounts,
+    status as windows_status, BackendOutput as WindowsSandboxOutput,
     BackendStatus as WindowsSandboxStatus, WindowsSandboxError,
 };

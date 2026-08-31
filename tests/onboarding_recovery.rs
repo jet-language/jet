@@ -56,7 +56,11 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
         "scaffold must grant the effects used by its generated run.jet:\n{manifest}"
     );
     let source = fs::read_to_string(project.join("run.jet")).unwrap();
-    assert!(source.contains("process.argv()"), "native scaffold must read argv");
+    assert!(source.contains("#CLI"), "native scaffold must teach typed CLI input");
+    assert!(
+        source.contains("fn run(args: GreetingArgs)"),
+        "native scaffold must use the typed entry"
+    );
 
     let first_run = jet(&["run"], &project);
     assert!(
@@ -74,7 +78,10 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     );
     assert_eq!(stdout(&explicit_run), "hello, world\n");
 
-    let argv_run = jet(&["run", "run.jet", "--", "from-argv"], &project);
+    let argv_run = jet(
+        &["run", "run.jet", "--", "--name", "from-argv"],
+        &project,
+    );
     assert!(
         argv_run.status.success(),
         "argv scaffold run failed:\n{}",

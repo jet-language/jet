@@ -269,6 +269,34 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
 }
 
 #[test]
+fn expand_callable_signature_shows_default_and_explicit_failure_routes() {
+    let scratch = common::Scratch::new("expand_failure_contracts");
+    let path = scratch.join("main.jet");
+    fs::write(
+        &path,
+        "#Error\nenum Problem { Bad }\nfn default_helper() Int { return 1 }\nfn explicit_helper() Int !Problem -> { return Ok(1) }\nfn run() {}\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "callable-signature"])
+        .arg(&path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("default_helper"), "{text}");
+    assert!(text.contains("implicit default !Err"), "{text}");
+    assert!(text.contains("explicit_helper"), "{text}");
+    assert!(text.contains("explicit !Problem"), "{text}");
+}
+
+#[test]
 fn expand_origin_projects_the_folded_origin_info_fact() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/tooling/provenance_track.jet");

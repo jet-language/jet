@@ -621,9 +621,10 @@ fn aot_scratch_dir(tag: &str, stem: &str) -> PathBuf {
 /// Build the optimized AOT oracle for one example, or reuse the run-scoped
 /// artifact for the same inputs (#2076).
 ///
-/// The ONE place a dev battery turns generated Rust into an oracle binary. Both
-/// callers below route through it, so the cache cannot be half-applied and the
-/// two `rustc` invocations they used to carry cannot drift apart (AGENTS.md I8).
+/// The shared path where dev batteries turn generated Rust into an oracle
+/// binary. Both source and checked-bundle callers route through it, so the
+/// cache cannot be half-applied and their `rustc` invocations cannot drift
+/// apart (AGENTS.md I8).
 fn build_oracle_binary(
     dir: &std::path::Path,
     tag: &str,
@@ -636,6 +637,48 @@ fn build_oracle_binary(
     let src = fs::read_to_string(file).map_err(OracleBuildFailure::Io)?;
     let compiled = jet::compile_with_path(&src, file).map_err(OracleBuildFailure::FrontEnd)?;
     let clinks = jet::resolve_c_links(file).map_err(OracleBuildFailure::CLinks)?;
+    build_oracle_binary_from_parts(
+        dir,
+        tag,
+        i,
+        stem,
+        file,
+        compiled.rust,
+        compiled.ffi,
+        clinks,
+    )
+}
+
+/// Build an AOT oracle from the bundle already checked by the strict
+/// three-tier harness. This keeps conformance policy and build facts identical
+/// across interpreter, resident JIT, and AOT.
+fn build_oracle_binary_from_bundle(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+    bundle: &jet::AST::ProgramBundle,
+) -> Result<std::path::PathBuf, OracleBuildFailure> {
+    common::assert_test_environment_is_safe();
+    common::assert_test_path_on_disk(dir, "AOT scratch");
+    let ffi = jet::FFI::prepare(bundle).map_err(OracleBuildFailure::FrontEnd)?;
+    let rust = jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, ffi.as_ref());
+    let clinks =
+        jet::resolve_c_links_for_bundle(bundle, None).map_err(OracleBuildFailure::CLinks)?;
+    build_oracle_binary_from_parts(dir, tag, i, stem, file, rust, ffi, clinks)
+}
+
+fn build_oracle_binary_from_parts(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+    rust: String,
+    ffi: Option<jet::FFI::FfiLink>,
+    clinks: Vec<String>,
+) -> Result<std::path::PathBuf, OracleBuildFailure> {
     // I8: `compiled_binary_path` is the ONE oracle-binary naming rule, and it
     // exists precisely so argv[0] is the program's own name (see its doc). The
     // corpus gate's own build site used to keep the old `jet_<tag>_<i>` name, so
@@ -644,7 +687,7 @@ fn build_oracle_binary(
     let bin = compiled_binary_path(dir, tag, i, file);
     fs::create_dir_all(bin.parent().expect("oracle binary has a parent"))
         .map_err(OracleBuildFailure::Io)?;
-    let entry = oracle_cache_entry(&compiled.rust, compiled.ffi.as_ref(), &clinks);
+    let entry = oracle_cache_entry(&rust, ffi.as_ref(), &clinks);
     if let Some(entry) = &entry {
         if reuse_cached_oracle(entry, &bin) {
             return Ok(bin);
@@ -676,15 +719,15 @@ fn build_oracle_binary(
     // Match default optimized AOT behavior. `add_generated_rust` caches the
     // runtime dependency; the entry above is what keeps the USER program from
     // being compiled and linked again for every battery that walks this stem.
-    add_generated_rust(
+    let _runtime_lease = add_generated_rust(
         &mut rustc_cmd,
         &rs,
-        &compiled.rust,
-        compiled.ffi.is_some(),
+        &rust,
+        ffi.is_some(),
         ORACLE_RUSTC_FLAGS,
     );
     rustc_cmd.arg("-o").arg(&bin);
-    if let Some(link) = &compiled.ffi {
+    if let Some(link) = &ffi {
         rustc_cmd
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
@@ -727,6 +770,29 @@ fn compiled_binary_output(
     file: &str,
 ) -> ProgramOutput {
     compiled_binary_output_with_stdin(dir, tag, i, stem, file, None)
+}
+
+fn compiled_binary_output_from_bundle(
+    _dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+    bundle: &jet::AST::ProgramBundle,
+) -> ProgramOutput {
+    let dir = aot_scratch_dir(tag, stem);
+    let bin = build_oracle_binary_from_bundle(&dir, tag, i, stem, file, bundle)
+        .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
+    let run = command_output_with_timeout(
+        Command::new(&bin),
+        *DEV_DIFF_TIMEOUT,
+        &format!("compiled binary run for `{stem}`"),
+    );
+    ProgramOutput::ran(
+        String::from_utf8_lossy(&run.stdout).to_string(),
+        String::from_utf8_lossy(&run.stderr).to_string(),
+        run.status.code().unwrap_or(1),
+    )
 }
 
 /// #2017: every harness states the ANSWERS, never a path. The three suites that
@@ -1066,9 +1132,14 @@ fn core_conformance_corpus_entries() -> Vec<(String, String)> {
             panic!("Core conformance corpus directory `{}` unreadable: {error}", dir.display())
         }) {
             let path = entry.expect("Core conformance corpus entry").path();
+            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
             if path.is_dir() {
-                walk(&path, files);
-            } else if path.extension().and_then(|value| value.to_str()) == Some("jet") {
+                if !name.starts_with('.') {
+                    walk(&path, files);
+                }
+            } else if name != "package.jet"
+                && path.extension().and_then(|value| value.to_str()) == Some("jet")
+            {
                 files.push(path);
             }
         }
@@ -2581,13 +2652,37 @@ fn golden_stdout(stem: &str) -> String {
         .unwrap_or_else(|e| panic!("missing golden for `{stem}`: {e}"))
 }
 
+fn conformance_application_authority() -> jet_foundation::Authority::ApplicationAuthority {
+    let mut allow = jet_foundation::Authority::Effect::all();
+    allow.extend(
+        jet_foundation::Authority::ApplicationAuthority::AMBIENT_BASIC_EFFECTS
+            .iter()
+            .map(|effect| (*effect).to_string()),
+    );
+    let allow = allow.into_iter().collect::<Vec<_>>();
+    jet_foundation::Authority::ApplicationAuthority::from_policy(
+        Some(&allow),
+        None,
+        "core conformance harness",
+    )
+}
+
 fn assert_cranelift_three_way(file: &str, stem: &str) {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let is_core_conformance = stem.starts_with("conformance/");
+    if is_core_conformance {
+        // The corpus proves I9 tier parity for Core surfaces, not application
+        // policy. Authority/E1803 suites prove that policy separately; leaving
+        // the ambient default here would make effect-carrying Core surfaces
+        // untestable.
+        bundle.package_guarantees.application_authority = conformance_application_authority();
+    }
     // Same single build-fact snapshot the corpus gate seeds before sema (see
-    // `corpus_gate_record`) and that `compile_with_path` gives the AOT oracle.
+    // `corpus_gate_record`). The conformance AOT path consumes this checked
+    // bundle directly; ordinary feature oracles retain `compile_with_path`.
     // Without it this harness builds a DIFFERENT bundle from the gate, so the
     // two differential oracles disagree on every `@build.*` read and the
     // weaker one silently passes (I9: engines marshal one snapshot).
@@ -2607,7 +2702,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    assert!(errors.is_empty(), "`{stem}` must type-check");
+    assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
     let safety_detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
     let compile = jet_jit::try_compile_bundle(&bundle);
     assert!(
@@ -2615,30 +2710,42 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
     );
 
-    // Honest pre-scan / TIR boundaries (typed CLI, env, etc.) skip the
-    // interpreter leg — same contract as assert_ui_and_web_three_way. JIT and
-    // AOT must still agree with no deopt/fallback.
-    let interpreted = match dev_iteration(file, false, true) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-        RunOutcome::Problems(diags)
-            if diags
-                .iter()
-                .any(|d| d.code == "E2201" || d.code == "E0956" || d.code == "E1265") =>
-        {
-            None
-        }
-        RunOutcome::Problems(ds) => {
-            panic!("interpreter baseline must run `{stem}` or stop at E2201/E0956/E1265, got: {ds:?}")
+    // Run the interpreter against the exact checked bundle above. Reloading
+    // through `dev_iteration` re-applies the repository application's
+    // authority manifest, which is unrelated to these standalone generated
+    // witnesses and can reject otherwise valid Core calls before interpretation.
+    let interpreted = {
+        use jet::JitBackend::{InterpreterBackend, JitBackend as _};
+        let mut backend = InterpreterBackend::new();
+        match jet_jit::with_program_args(&[], || backend.run(&bundle, false)) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
+            RunOutcome::Problems(diags)
+                if diags
+                    .iter()
+                    .any(|d| d.code == "E2201" || d.code == "E0956" || d.code == "E1265") =>
+            {
+                if is_core_conformance {
+                    panic!(
+                        "Core conformance witness must run in the forced interpreter `{stem}`, got: {diags:?}"
+                    );
+                }
+                None
+            }
+            RunOutcome::Problems(ds) => {
+                panic!(
+                    "interpreter baseline must run `{stem}` or stop at E2201/E0956/E1265, got: {ds:?}"
+                )
+            }
         }
     };
 
     jet_jit::reset_jit_trace_for_test();
     let mut backend = CraneliftBackend::new();
-    let jit = jet_jit::with_program_args(&[file.to_string()], || {
+    let jit = jet_jit::with_program_args(&[], || {
         match backend.run(&bundle, false) {
             RunOutcome::Ran {
                 stdout,
@@ -2668,7 +2775,18 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     let dir = aot_scratch_dir("jit_3way", stem);
     let aot = normalize_for_parity(
         stem,
-        compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file),
+        if is_core_conformance {
+            compiled_binary_output_from_bundle(
+                &dir,
+                "jit_3way",
+                next_oracle_index(),
+                stem,
+                file,
+                &bundle,
+            )
+        } else {
+            compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file)
+        },
     );
     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
 }
@@ -4295,6 +4413,10 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
         handles.push(
             std::thread::Builder::new()
                 .name(format!("corpus-gate-{worker}"))
+                // Corpus classification runs the full front end, TIR, and AOT
+                // oracle on this worker. Match the compiler's sized-stack seam
+                // instead of inheriting Rust's 2 MiB spawned-thread default.
+                .stack_size(32 * 1024 * 1024)
                 .spawn(move || loop {
                     let Some(stem) = lock_recovered(&jobs, "corpus gate work queue").pop_front()
                     else {

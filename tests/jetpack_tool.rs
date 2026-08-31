@@ -103,6 +103,75 @@ fn lifecycle_wire(root: &Path) -> String {
         .collect()
 }
 
+#[cfg(unix)]
+fn metadata_mode(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+    metadata.permissions().mode()
+}
+
+#[cfg(not(unix))]
+fn metadata_mode(metadata: &fs::Metadata) -> u32 {
+    if metadata.permissions().readonly() {
+        1
+    } else {
+        0
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct FilesystemEntry {
+    path: std::path::PathBuf,
+    kind: u8,
+    length: u64,
+    mode: u32,
+    modified: Option<std::time::SystemTime>,
+    bytes: Vec<u8>,
+}
+
+fn filesystem_snapshot(root: &Path) -> Vec<FilesystemEntry> {
+    fn visit(root: &Path, path: &Path, entries: &mut Vec<FilesystemEntry>) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        let file_type = metadata.file_type();
+        let kind = if file_type.is_symlink() {
+            3
+        } else if file_type.is_dir() {
+            1
+        } else if file_type.is_file() {
+            2
+        } else {
+            4
+        };
+        let bytes = if file_type.is_file() {
+            fs::read(path).unwrap()
+        } else {
+            Vec::new()
+        };
+        entries.push(FilesystemEntry {
+            path: path.strip_prefix(root).unwrap().to_path_buf(),
+            kind,
+            length: metadata.len(),
+            mode: metadata_mode(&metadata),
+            modified: metadata.modified().ok(),
+            bytes,
+        });
+        if !file_type.is_dir() {
+            return;
+        }
+        let mut children = fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        children.sort();
+        for child in children {
+            visit(root, &child, entries);
+        }
+    }
+
+    let mut entries = Vec::new();
+    visit(root, root, &mut entries);
+    entries
+}
+
 fn ascii_hex(value: &str) -> String {
     value.bytes().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -671,6 +740,43 @@ fn tool_profile_reports_drift_without_prompt_and_yes_moves_pin() {
         ),
     )
     .unwrap();
+
+    let root_before = filesystem_snapshot(&root.path);
+    let home_before = filesystem_snapshot(&home.path);
+    let listed = jetpack()
+        .args([
+            "hangar",
+            "list",
+            "--json",
+            "--offline",
+            "--no-color",
+            "--yes",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        listed.status.success(),
+        "hangar list failed: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        listed.stderr.is_empty(),
+        "read-only hangar list emitted unexpected stderr: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(
+        filesystem_snapshot(&root.path),
+        root_before,
+        "hangar list changed Hangar bytes, metadata, or tree"
+    );
+    assert_eq!(
+        filesystem_snapshot(&home.path),
+        home_before,
+        "hangar list changed user profile bytes, metadata, or tree"
+    );
 
     let report = || {
         jetpack()

@@ -79,6 +79,7 @@ fn options(policy: BuildPolicy) -> BuildRunOptions {
         remote: None,
         package_scope: true,
         build_override: true,
+        entry_fn: None,
     }
 }
 

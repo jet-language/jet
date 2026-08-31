@@ -464,6 +464,24 @@ fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/agent_workloads")
 }
 
+fn compiled_workload_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/compiled_workloads")
+}
+
+fn read_compiled_workload_tsv(relative: &str, header: &str, width: usize) -> Vec<Vec<String>> {
+    let text = fs::read_to_string(compiled_workload_root().join(relative)).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some(header), "compiled workload schema drifted");
+    lines
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
+            assert_eq!(fields.len(), width, "bad compiled workload row: {line}");
+            fields
+        })
+        .collect()
+}
+
 fn policy_field(name: &str) -> &'static str {
     POLICY_CONTRACT
         .lines()
@@ -876,6 +894,25 @@ fn adapter_command(
         }
         other => panic!("unknown adapter {other}"),
     };
+    command
+        .arg(input)
+        .env("JET_CORPUS_JET", jet_cli)
+        .env("JET_CORPUS_JETPACK", common::jetpack_bin())
+        .env("JET_CORPUS_TASK", task_id)
+        .current_dir(scratch);
+    command
+}
+
+fn jet_tier_command(
+    jet_cli: &Path,
+    source: &Path,
+    input: &Path,
+    scratch: &Path,
+    task_id: &str,
+    tier_args: &[&str],
+) -> Command {
+    let mut command = Command::new(jet_cli);
+    command.args(["run"]).args(tier_args).arg(source).arg("--");
     command
         .arg(input)
         .env("JET_CORPUS_JET", jet_cli)
@@ -1485,6 +1522,183 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 }
 
 #[test]
+fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
+    let manifest = read_compiled_workload_tsv("manifest.tsv", HEADER, 13);
+    let task_ids = manifest
+        .iter()
+        .map(|row| row[1].as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(manifest.len(), task_ids.len());
+    assert_eq!(
+        task_ids,
+        BTreeSet::from([
+            "systems-file-index",
+            "service-json-http",
+            "cli-archive-filter",
+            "library-json-roundtrip",
+            "compute-mandelbrot",
+            "embedded-sensor-ring",
+            "cross-platform-notes",
+        ])
+    );
+    for row in &manifest {
+        assert_eq!(row[0], "1");
+        assert_eq!(row[11], "#1414");
+        assert_eq!(row[12], "#1414");
+        validate_corpus_relative_path(&row[5]).unwrap();
+        validate_corpus_relative_path(&row[6]).unwrap();
+        assert!(compiled_workload_root().join(&row[5]).is_file());
+        assert!(compiled_workload_root().join(&row[6]).is_file());
+    }
+
+    let peers = read_compiled_workload_tsv(
+        "peer_ledger.tsv",
+        "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner",
+        13,
+    );
+    let selected = peers
+        .iter()
+        .filter(|row| row[2] == "best-applicable")
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), manifest.len());
+    assert_eq!(
+        selected
+            .iter()
+            .map(|row| row[1].as_str())
+            .collect::<BTreeSet<_>>(),
+        task_ids
+    );
+    let selected_cross_platform = selected
+        .iter()
+        .find(|row| row[1] == "cross-platform-notes")
+        .expect("cross-platform task needs a selected peer");
+    assert_eq!(selected_cross_platform[3], "domain");
+    assert_eq!(selected_cross_platform[4], "TypeScript/ECMAScript browser notes task");
+    assert_eq!(selected_cross_platform[11], "linux,macos,windows,web");
+    assert!(
+        selected_cross_platform[11]
+            .split(',')
+            .any(|target| target == "web"),
+        "browser peer must claim web applicability"
+    );
+    for row in &selected {
+        assert!(task_ids.contains(row[1].as_str()));
+        assert!(row[5].starts_with("https://"));
+        assert!(row[6].starts_with("tag:") || row[6].len() == 40);
+        assert!(row[7..12].iter().all(|field| !field.is_empty()));
+        assert!(row[12].starts_with('#'));
+    }
+
+    let metrics = read_compiled_workload_tsv(
+        "metric_contract.tsv",
+        "version\tmetric\tunit\tcomparison\tmissing_policy",
+        5,
+    );
+    assert_eq!(metrics.len(), 10);
+    assert_eq!(
+        metrics.iter().map(|row| row[1].as_str()).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "source_effort",
+            "build_time",
+            "edit_time",
+            "runtime",
+            "memory",
+            "artifact_size",
+            "diagnostics",
+            "debugging",
+            "deployment",
+            "unsafe_burden",
+        ])
+    );
+    assert!(metrics
+        .iter()
+        .all(|row| {
+            row[0] == "1" && !row[2].is_empty() && row[3] == "lower" && row[4] == "fail"
+        }));
+
+    let tiers = read_compiled_workload_tsv(
+        "tier_matrix.tsv",
+        "version\ttask_id\tplatform\ttarget\ttier\trequirement\trationale",
+        7,
+    );
+    assert_eq!(tiers.len(), 39);
+    let hosted_targets = [
+        ("systems-file-index", "aarch64-unknown-linux-gnu"),
+        ("service-json-http", "aarch64-unknown-linux-gnu"),
+        ("cli-archive-filter", "aarch64-unknown-linux-gnu"),
+        ("library-json-roundtrip", "aarch64-unknown-linux-gnu"),
+        ("compute-mandelbrot", "aarch64-unknown-linux-gnu"),
+        ("cross-platform-notes", "web"),
+    ];
+    for (task_id, cross_target) in hosted_targets {
+        let required = tiers
+            .iter()
+            .filter(|row| row[1] == task_id && row[5] == "required")
+            .map(|row| format!("{}|{}|{}|{}", row[1], row[2], row[3], row[4]))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            required,
+            BTreeSet::from([
+                format!("{task_id}|linux|x86_64-unknown-linux-gnu|aot"),
+                format!("{task_id}|macos|x86_64-apple-darwin|aot"),
+                format!("{task_id}|windows|x86_64-pc-windows-msvc|aot"),
+                format!("{task_id}|cross-target|{cross_target}|aot"),
+                format!("{task_id}|linux|x86_64-unknown-linux-gnu|jit"),
+            ])
+        );
+    }
+    let cross_platform_web = tiers
+        .iter()
+        .find(|row| {
+            row[1] == "cross-platform-notes"
+                && row[2] == "cross-target"
+                && row[3] == "web"
+                && row[4] == "aot"
+        })
+        .expect("cross-platform web tier must stay declared");
+    assert_eq!(cross_platform_web[5], "required");
+
+    let embedded = tiers
+        .iter()
+        .filter(|row| row[1] == "embedded-sensor-ring")
+        .collect::<Vec<_>>();
+    assert_eq!(embedded.len(), 5, "embedded rows must stay visible");
+    assert!(embedded.iter().all(|row| {
+        row[5] == "excluded" && row[6].contains("#2046") && row[6].contains("#2300")
+    }));
+
+    let canaries = read_compiled_workload_tsv(
+        "canaries.tsv",
+        "version\tcanary\tmutation\trequired_failure",
+        4,
+    );
+    assert_eq!(canaries.len(), 7, "all seven removal canaries must stay present");
+    assert_eq!(
+        canaries
+            .iter()
+            .map(|row| row[1].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "missing-outcome",
+            "unowned-loss",
+            "missing-metric",
+            "missing-tier",
+            "changed-input",
+            "unreviewed",
+            "stale-candidate",
+        ])
+    );
+    assert!(canaries
+        .iter()
+        .all(|row| {
+            row[0] == "1"
+                && !row[1].is_empty()
+                && !row[2].is_empty()
+                && !row[3].is_empty()
+        }));
+}
+
+#[test]
 fn repository_and_git_jet_adapters_use_production_paths() {
     let checks = [
         (
@@ -1678,6 +1892,64 @@ fn structured_data_database_http_production_paths_handle_success_and_hostile_inp
     }
 
     assert_eq!(checked, task_ids.len(), "#1167 task set drifted");
+}
+
+#[test]
+fn delimited_workload_adapters_match_aot_default_run_and_interpreter() {
+    let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+    let cases = [
+        ("browser-automation-preflight", "browser/preflight.tsv"),
+        ("database-access", "database/records.tsv"),
+        ("desktop-interaction-focus", "desktop/focus.tsv"),
+        ("incident-report-success", "incidents/success.tsv"),
+        ("process-batch-success", "processes/success.tsv"),
+    ];
+    let tiers: [(&str, &[&str]); 3] = [
+        ("aot", &["--release"]),
+        ("default-run", &[]),
+        ("interpreter", &["--interpret"]),
+    ];
+    for (task_id, input_relative) in cases {
+        let source = corpus_root()
+            .join("adapters")
+            .join(format!("{}.jet", adapter_stem(task_id)));
+        let input = corpus_root().join("inputs").join(input_relative);
+        let expected = fs::read(
+            corpus_root()
+                .join("expected")
+                .join(format!("{task_id}.out")),
+        )
+        .unwrap();
+        for (tier, tier_args) in tiers {
+            let scratch = Scratch::new("jet_delimited_tier");
+            let run = run_bounded(
+                jet_tier_command(
+                    &jet_cli,
+                    &source,
+                    &input,
+                    &scratch.path,
+                    task_id,
+                    tier_args,
+                ),
+                tier,
+                PROCESS_DEADLINE,
+            );
+            assert!(!run.timed_out, "{task_id} {tier} tier timed out");
+            assert!(!run.limit_exceeded, "{task_id} {tier} tier hit output limit");
+            assert_eq!(
+                run.output.status.code(),
+                Some(0),
+                "{task_id} {tier} failed: {}",
+                stderr_receipt(&run.output)
+            );
+            assert_eq!(run.output.stdout, expected, "{task_id} {tier} output drifted");
+            assert!(
+                run.output.stderr.is_empty(),
+                "{task_id} {tier} wrote stderr: {}",
+                stderr_receipt(&run.output)
+            );
+        }
+    }
 }
 
 #[test]
@@ -2280,4 +2552,12 @@ fn llm_digest_first_program() {
         bounded.output.stdout, expected,
         "first-program transcript drifted"
     );
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_agent_workloads() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("workload")
+        .expect("agent workload corpus semantic policy");
 }

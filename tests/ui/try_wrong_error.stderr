@@ -1,8 +1,8 @@
-Error [E2404]: `?` can't turn a `E1` into a `E2` here
-  --> tests/ui/try_wrong_error.jet:11:10
+Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
+  --> tests/ui/try_wrong_error.jet:12:13
     |
- 11 |     x :: f()?
-    |          ^^^^
- Why: `?` only changes an error's type when you've declared how; there's no declared way to turn `E1` into `E2`
- Fix: add `impl E1 => E2 { … }` before this function
-More: jet-lang.dev/e/E2404
+ 12 |     x :: f()?
+    |             ^
+ Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

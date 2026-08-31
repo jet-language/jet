@@ -668,6 +668,36 @@ impl AuthorityResolver {
         self.complete_checked_package(member)
     }
 
+    /// Compose only the package rooted at this resolver. Unlike
+    /// [`Self::checked_package`], this deliberately does not walk `members:`
+    /// or inspect any sibling package. Compiler/tool views use this boundary:
+    /// their authority is the pinned package root, not the workspace graph.
+    pub fn checked_root_package(&self) -> Result<CheckedPackage, AuthorityError> {
+        let member = self.checked_member(Path::new("."))?;
+        let package_resolver = Self::from_checked_directory(&member.directory);
+        let mut facts = member.manifest.facts.clone();
+        facts
+            .compose_configs_checked(&package_resolver)
+            .map_err(|error| AuthorityError::Invalid {
+                path: member.manifest.file.path.clone(),
+                detail: error.to_string(),
+            })?;
+        facts
+            .validate_guarantees()
+            .map_err(|error| AuthorityError::Invalid {
+                path: member.manifest.file.path.clone(),
+                detail: error.to_string(),
+            })?;
+        facts
+            .validate_defaults()
+            .map_err(|error| AuthorityError::Invalid {
+                path: member.manifest.file.path.clone(),
+                detail: error.to_string(),
+            })?;
+        self.revalidate_member(&member)?;
+        Ok(CheckedPackage { member, facts })
+    }
+
     /// Complete a member from an already-open checked directory and manifest.
     /// The caller transfers the snapshot; this method composes Config files and
     /// validates the resulting facts without reopening the manifest path.

@@ -134,6 +134,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         | Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
+        | Expr::Unit(_)
         | Expr::Char(_, _)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)

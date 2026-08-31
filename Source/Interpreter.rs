@@ -34,6 +34,14 @@ pub struct RunWithLints {
     pub lints: Vec<Diagnostic>,
 }
 
+struct LoadedModCleanup;
+
+impl Drop for LoadedModCleanup {
+    fn drop(&mut self) {
+        jet_jit::clear_loaded_modules();
+    }
+}
+
 struct CheckedBundle {
     bundle: ProgramBundle,
     lints: Vec<Diagnostic>,
@@ -164,6 +172,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     if let Err(diagnostics) = jet_jit::bind_interpreter_ffi(bundle) {
         return RunOutcome::Problems(diagnostics);
     }
+    let _loaded_mod_cleanup = LoadedModCleanup;
     let (scheduled_stdout, scheduled_stderr) = if bundle_has_service_output(bundle) {
         match run_scheduled_jobs_once(bundle, try_anyway) {
             Ok(output) => output,
@@ -191,9 +200,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
                 let rendered = error
                     .to_jet_err()
-                    .map(|error| {
-                        jet_foundation::Outcome::jet_error_report(&error).render()
-                    })
+                    .map(|error| jet_foundation::Outcome::jet_error_report(&error).render())
                     .unwrap_or_else(|| {
                         crate::Comptime::display_core_pure_value(&error)
                             .unwrap_or_else(|| error.jet_show())
@@ -240,15 +247,11 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
 }
 
 fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) -> RunOutcome {
-    // Same extraction `EvalCtx::route_runtime_panic` performs: a comptime
-    // E0953 carries the panic message in `why` behind this prefix, and every
-    // other E0953 carries it in `what`. Falling back to `why` here published
-    // the registered row's explanation ("a child task panicked") as if it
-    // were the program's own panic message.
-    let msg = d
-        .why
-        .strip_prefix("while computing this value at compile time, the program panicked: ")
-        .unwrap_or(d.what.as_str());
+    // E0953 is legacy transport. The shared evaluator puts a comptime panic's
+    // payload in `why`, and Diagnostic::error sentence-cases its prefix; keep
+    // decoding allocation-free here. Other E0953 diagnostics fall back to the
+    // registered title because they have no program-side payload.
+    let msg = jet_foundation::Outcome::jet_comptime_panic_message(&d.why, &d.what);
     let _ = crate::development_receipt::jet_production_failure_receipt_write("E3001", "", 0, "");
     let report =
         jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "");
@@ -269,6 +272,7 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
     crate::scheduler::jet_observe_runtime_start();
+    let _loaded_mod_cleanup = LoadedModCleanup;
     if let Some(diagnostic) = bundle
         .package_guarantees
         .application_authority
@@ -373,9 +377,7 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
             Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
                 let rendered = error
                     .to_jet_err()
-                    .map(|error| {
-                        jet_foundation::Outcome::jet_error_report(&error).render()
-                    })
+                    .map(|error| jet_foundation::Outcome::jet_error_report(&error).render())
                     .unwrap_or_else(|| {
                         crate::Comptime::display_core_pure_value(&error)
                             .unwrap_or_else(|| error.jet_show())
@@ -580,9 +582,27 @@ fn checked_bundle_with_application_authority(
     entry_fn: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<
-        &jet_foundation::Authority::ApplicationAuthority,
-    >,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<CheckedBundle, Vec<Diagnostic>> {
+    checked_bundle_with_application_authority_and_entry(
+        file,
+        gates,
+        entry_fn,
+        None,
+        profile,
+        setting_overrides,
+        application_authority,
+    )
+}
+
+fn checked_bundle_with_application_authority_and_entry(
+    file: &str,
+    gates: jet_foundation::Policy::GateSet,
+    job_fn: Option<&str>,
+    entry_fn: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Result<CheckedBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         if let Some(Err(diags)) =
@@ -598,15 +618,19 @@ fn checked_bundle_with_application_authority(
                 {
                     return Err(diags);
                 }
-                if let Some(entry_fn) = entry_fn {
+                let mut selected_job = false;
+                if let Some(job_fn) = job_fn {
                     let specs = job_specs(&bundle);
                     if jet_jit::Job::jet_job_has_visible(&specs) {
-                        let argv = vec![String::new(), entry_fn.to_string()];
+                        let argv = vec![String::new(), job_fn.to_string()];
                         let selection = jet_jit::Job::jet_job_select(&argv, &specs);
-                        if !matches!(selection, jet_jit::Job::JetJobSelection::Job(_)) {
+                        if matches!(selection, jet_jit::Job::JetJobSelection::Job(_)) {
+                            jet_driver::Driver::swap_entry_point(&mut bundle, job_fn);
+                            selected_job = true;
+                        } else if entry_fn.is_none() {
                             return Err(vec![Diagnostic::error(
                                 "E1294",
-                                jet_jit::Job::jet_job_unknown_what(entry_fn),
+                                jet_jit::Job::jet_job_unknown_what(job_fn),
                                 jet_jit::Job::JET_JOB_UNKNOWN_WHY.to_string(),
                                 jet_jit::Job::JET_JOB_UNKNOWN_FIX.to_string(),
                                 None,
@@ -618,6 +642,10 @@ fn checked_bundle_with_application_authority(
                                 )
                             ))]);
                         }
+                    }
+                }
+                if !selected_job {
+                    if let Some(entry_fn) = entry_fn {
                         jet_driver::Driver::swap_entry_point(&mut bundle, entry_fn);
                     }
                 }
@@ -803,6 +831,7 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings(
             setting_overrides,
             false,
             None,
+            None,
         )
     })
     .outcome
@@ -837,9 +866,27 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
     json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<
-        &jet_foundation::Authority::ApplicationAuthority,
-    >,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> RunWithLints {
+    run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
+        file,
+        program_args,
+        json,
+        gates,
+        setting_overrides,
+        application_authority,
+        None,
+    )
+}
+
+pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
 ) -> RunWithLints {
     on_compiler_stack(|| {
         run_jit_once_on_compiler_stack(
@@ -850,6 +897,7 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
             setting_overrides,
             true,
             application_authority,
+            entry_fn,
         )
     })
 }
@@ -861,9 +909,8 @@ fn run_jit_once_on_compiler_stack(
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     surface_lints: bool,
-    application_authority: Option<
-        &jet_foundation::Authority::ApplicationAuthority,
-    >,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
@@ -878,11 +925,12 @@ fn run_jit_once_on_compiler_stack(
     // pass through entry selection first, so never let a warm artifact skip
     // the shared job selector.
     if application_authority.is_none()
+        && entry_fn.is_none()
         && !surface_lints
         && requested.is_none()
         && setting_overrides.is_empty()
     {
-        if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+        if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args, None) {
             if timing {
                 timer.metric("cache_hit", 1);
                 timer.lap("jit_cache_hit");
@@ -894,10 +942,11 @@ fn run_jit_once_on_compiler_stack(
             };
         }
     }
-    match checked_bundle_with_application_authority(
+    match checked_bundle_with_application_authority_and_entry(
         file,
         gates,
         requested,
+        entry_fn,
         "dev",
         setting_overrides,
         application_authority,
@@ -908,12 +957,14 @@ fn run_jit_once_on_compiler_stack(
             }
             let lints = checked.lints;
             let bundle = checked.bundle;
+            let selected = selected_job(&bundle, requested);
             if application_authority.is_none()
+                && entry_fn.is_none()
                 && surface_lints
-                && requested.is_none()
                 && setting_overrides.is_empty()
             {
-                if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+                if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args, selected)
+                {
                     if timing {
                         timer.metric("cache_hit", 1);
                         timer.lap("jit_cache_hit");
@@ -924,7 +975,6 @@ fn run_jit_once_on_compiler_stack(
             }
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
-            let selected = selected_job(&bundle, requested);
             let runtime_args = if selected.is_some() {
                 &program_args[1..]
             } else {
@@ -1007,7 +1057,7 @@ fn run_jit_once_on_compiler_stack(
             if timing {
                 timer.lap("jit");
             }
-            if selected.is_none()
+            if entry_fn.is_none()
                 && setting_overrides.is_empty()
                 && matches!(outcome, RunOutcome::Ran { .. })
             {
@@ -1137,9 +1187,27 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-    application_authority: Option<
-        &jet_foundation::Authority::ApplicationAuthority,
-    >,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> RunWithLints {
+    run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority_and_entry(
+        file,
+        program_args,
+        gates,
+        profile,
+        setting_overrides,
+        application_authority,
+        None,
+    )
+}
+
+pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority_and_entry(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
@@ -1147,10 +1215,11 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_
     }
     on_compiler_stack(|| {
         let requested = requested_job(program_args);
-        match checked_bundle_with_application_authority(
+        match checked_bundle_with_application_authority_and_entry(
             file,
             gates,
             requested,
+            entry_fn,
             profile,
             setting_overrides,
             application_authority,
@@ -1176,8 +1245,8 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_
                     lints,
                 }
             }
-            Err(diags) => RunWithLints {
-                outcome: RunOutcome::Problems(diags),
+            Err(diagnostics) => RunWithLints {
+                outcome: RunOutcome::Problems(diagnostics),
                 lints: Vec::new(),
             },
         }
@@ -1270,14 +1339,65 @@ pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunWithLints {
+    dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
+        file,
+        &[],
+        try_anyway,
+        use_interpreter,
+        gates,
+        profile,
+        setting_overrides,
+        None,
+    )
+}
+
+/// Run one dev iteration with the same program argv and named-job selection
+/// used by `jet run`. The CLI adapter owns argv marshalling; this shared
+/// Prelude-backed path owns selection before the chosen dev backend runs.
+pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
+    file: &str,
+    program_args: &[&str],
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
+) -> RunWithLints {
     on_compiler_stack(|| {
-        match checked_bundle_with_entry(file, gates, None, profile, setting_overrides) {
-            Ok(checked) => RunWithLints {
-                outcome: dev_run_bundle(&checked.bundle, try_anyway, use_interpreter),
-                lints: checked.lints,
-            },
-            Err(diags) => RunWithLints {
-                outcome: RunOutcome::Problems(diags),
+        let requested = requested_job(program_args);
+        match checked_bundle_with_application_authority_and_entry(
+            file,
+            gates,
+            requested,
+            entry_fn,
+            profile,
+            setting_overrides,
+            None,
+        ) {
+            Ok(checked) => {
+                let lints = checked.lints;
+                let bundle = checked.bundle;
+                let selected = selected_job(&bundle, requested);
+                let runtime_args = if selected.is_some() {
+                    &program_args[1..]
+                } else {
+                    program_args
+                };
+                let mut args = Vec::with_capacity(runtime_args.len() + 1);
+                args.push(
+                    selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")),
+                );
+                args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
+                RunWithLints {
+                    outcome: jet_jit::with_program_args(&args, || {
+                        dev_run_bundle(&bundle, try_anyway, use_interpreter)
+                    }),
+                    lints,
+                }
+            }
+            Err(diagnostics) => RunWithLints {
+                outcome: RunOutcome::Problems(diagnostics),
                 lints: Vec::new(),
             },
         }
@@ -1436,11 +1556,6 @@ mod tests {
                     let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
                     if !detail.is_empty() {
                         eprintln!("{file}: {detail}");
-                        if file.contains("160") {
-                            for line in jet_jit::jit_dump_main_stmts(&bundle) {
-                                eprintln!("  {line}");
-                            }
-                        }
                     }
                     assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
                 }
@@ -1448,5 +1563,128 @@ mod tests {
             .expect("spawn resident_jit_safe_job_examples thread")
             .join()
             .expect("resident_jit_safe_job_examples thread panicked");
+    }
+    /// The direct harness and the CLI must hand the JIT the same checked
+    /// callable surface. Compare before selecting a backend so a tier trace
+    /// cannot hide a front-end divergence behind whole-program fallback.
+    #[test]
+    fn direct_and_cli_bundle_paths_have_identical_lowering_coverage() {
+        let src = r#"
+fn flatten_words(contents: String) [String] -> {
+    return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
+}
+fn first(values: [Float]) Float -> values.first() ?? 0.0
+fn run() {
+    words :: flatten_words("one two\nthree four")
+    values :: [Float]{1.0, 2.0}
+    print(words.len())
+    print(first(values))
+}
+"#;
+        let file = std::env::temp_dir().join("jet_devmode_bundle_diff.jet");
+        std::fs::write(&file, src).unwrap();
+        let shown = file.to_string_lossy().into_owned();
+
+        let mut direct = crate::Loader::load_entry(&shown).expect("direct bundle should load");
+        let direct_diags = crate::Sema::check_bundle(&mut direct, crate::Sema::CompileMode::Run);
+        assert!(
+            direct_diags
+                .iter()
+                .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
+            "direct bundle diagnostics: {direct_diags:#?}"
+        );
+
+        let cli = checked_bundle_with_application_authority_and_entry(
+            &shown,
+            jet_foundation::Policy::GateSet::default(),
+            None,
+            None,
+            "dev",
+            &BTreeMap::new(),
+            None,
+        )
+        .expect("CLI bundle should check")
+        .bundle;
+
+        fn assert_sequence(label: &str, direct: &[String], cli: &[String]) {
+            let shared = direct.len().min(cli.len());
+            for index in 0..shared {
+                if direct[index] != cli[index] {
+                    panic!(
+                        "first bundle divergence at {label}[{index}]: direct={:?}, cli={:?}",
+                        direct[index], cli[index]
+                    );
+                }
+            }
+            assert_eq!(
+                direct.len(),
+                cli.len(),
+                "first bundle divergence at {label}.len(): direct={}, cli={}",
+                direct.len(),
+                cli.len()
+            );
+        }
+
+        fn callable_shape(bundle: &ProgramBundle) -> Vec<String> {
+            bundle.modules[bundle.entry]
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let Item::Func(function) = item else {
+                        return None;
+                    };
+                    let params = function
+                        .params
+                        .iter()
+                        .map(|param| format!("{:?}:{:?}", param.convention, param.ty))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    Some(format!(
+                        "{}({params})->{:?}",
+                        function.name, function.return_type
+                    ))
+                })
+                .collect()
+        }
+
+        fn lowering_shape(bundle: &ProgramBundle) -> (Vec<String>, Vec<String>, bool, Vec<String>) {
+            let names = jet_jit::jit_program_func_names(bundle);
+            let plan = jet_jit::plan_bundle_tiers(bundle);
+            let mut native = plan.native.into_iter().collect::<Vec<_>>();
+            native.sort();
+            let rows = plan
+                .rows
+                .iter()
+                .map(|row| format!("{}:{:?}:{}", row.function, row.tier, row.reason))
+                .collect();
+            (names, native, plan.whole_interp, rows)
+        }
+
+        assert_eq!(
+            direct.entry, cli.entry,
+            "first bundle divergence: entry module direct={}, cli={}",
+            direct.entry,
+            cli.entry
+        );
+        assert_eq!(
+            direct.modules.len(),
+            cli.modules.len(),
+            "first bundle divergence: module count direct={}, cli={}",
+            direct.modules.len(),
+            cli.modules.len()
+        );
+        let direct_callables = callable_shape(&direct);
+        let cli_callables = callable_shape(&cli);
+        assert_sequence("callable signatures", &direct_callables, &cli_callables);
+        let (direct_names, direct_native, direct_whole, direct_rows) = lowering_shape(&direct);
+        let (cli_names, cli_native, cli_whole, cli_rows) = lowering_shape(&cli);
+        assert_sequence("lowered function names", &direct_names, &cli_names);
+        assert_sequence("native coverage", &direct_native, &cli_native);
+        assert_eq!(
+            direct_whole, cli_whole,
+            "first bundle divergence: whole-program coverage direct={}, cli={}",
+            direct_whole, cli_whole
+        );
+        assert_sequence("tier rows", &direct_rows, &cli_rows);
     }
 }

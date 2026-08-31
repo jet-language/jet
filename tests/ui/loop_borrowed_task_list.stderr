@@ -3,8 +3,8 @@ Error [E0120]: `hs` was not moved here, so this loop can't take its handles
     |
   3 |     loop h in hs -> total += h.join() ?? 0
     |               ^^
- Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
- Fix: take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
+ Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
+ Fix: Take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/E0120
 
 Error [E0142]: `handles` can't be shared — it must be used exactly once
@@ -12,17 +12,8 @@ Error [E0142]: `handles` can't be shared — it must be used exactly once
     |
   9 |     print(drain(handles))
     |                 ^^^^^^^
- Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
- Fix: move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
-More: jet-lang.dev/e/E0142
-
-Error [E0142]: `handles` can't be shared — it must be used exactly once
-  --> tests/ui/loop_borrowed_task_list.jet:9:17
-    |
-  9 |     print(drain(handles))
-    |                 ^^^^^^^
- Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
- Fix: move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
+ Why: This value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
+ Fix: Move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
 More: jet-lang.dev/e/E0142
 
 Error [E0140]: `handles` still owes `consume`
@@ -30,6 +21,6 @@ Error [E0140]: `handles` still owes `consume`
     |
   8 |     handles :: [task 1, task 2]
     |     ^^^^^^^
- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(handles) }` to discard it deliberately
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(handles) }` to discard it deliberately
 More: jet-lang.dev/e/E0140

@@ -2,8 +2,7 @@
 //!
 //! `apply_transaction_json` is the only sibling-facing seam.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use jet_driver::FixEngine;
@@ -20,7 +19,10 @@ use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::{trait_method_signature, GraphEditAnchor, Projection};
 use super::project_scan::project_file;
 use super::query_actions::default_arg_for_type;
-use super::source_model::{source_revision, write_source_if_unchanged, SourceWriteError};
+use super::source_model::{
+    read_source_without_symlinks, source_revision, write_new_file_without_symlinks,
+    write_source_if_unchanged, SourceWriteError,
+};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
     json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call,
@@ -37,7 +39,8 @@ pub(super) fn apply_transaction_json(path: &Path, request: &str) -> Result<Strin
 }
 
 fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {
-    let src = fs::read_to_string(path).map_err(|e| edit_error("io", &e.to_string()))?;
+    let src = read_source_without_symlinks(path)
+        .map_err(|e| edit_error("io", &e.to_string()))?;
     let revision = required_string(request, "revision")?;
     let current_revision = source_revision(&src);
     if revision != current_revision {
@@ -409,7 +412,7 @@ fn record_canvas_rename(
 ) -> Result<(), String> {
     let project = path.parent().unwrap_or_else(|| Path::new("."));
     let directory = project.join(".jet/codemods");
-    fs::create_dir_all(&directory)
+    super::source_model::ensure_no_symlink_directory(&directory)
         .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))?;
     let before_hash = jet_driver::SHA256::sha256_hex(before.as_bytes());
     let after_hash = jet_driver::SHA256::sha256_hex(after.as_bytes());
@@ -445,10 +448,6 @@ fn record_canvas_rename(
     let base = format!("CanvasRename-{}", &after_hash[..12]);
     let mut receipt = directory.join(format!("{base}.log.json"));
     let mut suffix = 0;
-    while receipt.exists() {
-        suffix += 1;
-        receipt = directory.join(format!("{base}-{suffix}.log.json"));
-    }
     let log = format!(
         "{{\"schema\":2,\"name\":{},\"project\":{},\"semantic_ops\":[{}],\"files\":[{}]}}\n",
         json_str(&base),
@@ -456,8 +455,21 @@ fn record_canvas_rename(
         op,
         file,
     );
-    fs::write(receipt, log)
-        .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))
+    loop {
+        match write_new_file_without_symlinks(&receipt, log.as_bytes()) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                suffix += 1;
+                receipt = directory.join(format!("{base}-{suffix}.log.json"));
+            }
+            Err(error) => {
+                return Err(edit_error(
+                    "io",
+                    &format!("could not record semantic rename: {error}"),
+                ))
+            }
+        }
+    }
 }
 
 fn apply_create_function(
@@ -1245,6 +1257,11 @@ fn core_call_is_fallible(module: &str, member: &str) -> bool {
     jet_driver::Sema::core_call_is_fallible(module, member)
 }
 
+fn check_canvas_candidate(path: &Path, overlay_path: &Path, source: &str) -> Vec<Diagnostic> {
+    let path_str = path.to_string_lossy();
+    jet_driver::Driver::check_file(&path_str, Some((overlay_path, source)), true).0
+}
+
 fn canvas_action_candidate(
     path: &Path,
     src: &str,
@@ -1253,6 +1270,7 @@ fn canvas_action_candidate(
     callee: &str,
     args: &[String],
 ) -> Result<String, String> {
+    let overlay_path = canonical_path(path);
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let Some(anchor) = projection
         .graph_anchors
@@ -1293,10 +1311,9 @@ fn canvas_action_candidate(
     .map_err(|_| edit_error("overlap", "Canvas action edit overlapped"))?;
     let formatted = jet_driver::Formatter::format_source(&changed)
         .map_err(|diags| diagnostics_error(path, src, &diags))?;
-    let tmp = write_canvas_check_file(path, &formatted)
-        .map_err(|e| edit_error("io", &e.to_string()))?;
-    let (check, _) = jet_driver::Driver::check_file(&tmp.display().to_string(), None, true);
-    let _ = fs::remove_file(&tmp);
+    // Check the staged source through Driver's in-memory overlay. A pathname
+    // scratch can be swapped after creation and before Driver reopens it.
+    let check = check_canvas_candidate(path, &overlay_path, &formatted);
     let errors = check
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -1306,33 +1323,6 @@ fn canvas_action_candidate(
         return Err(diagnostics_error(path, &formatted, &errors));
     }
     Ok(formatted)
-}
-
-fn temp_canvas_check_path(path: &Path) -> PathBuf {
-    let mut tmp = path.to_path_buf();
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("canvas_action");
-    tmp.set_file_name(format!("{stem}.canvas-action-check.jet"));
-    tmp
-}
-
-fn write_canvas_check_file(path: &Path, source: &str) -> std::io::Result<PathBuf> {
-    let tmp = temp_canvas_check_path(path);
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(0o400000);
-    }
-    let mut file = options.open(&tmp)?;
-    if let Err(error) = std::io::Write::write_all(&mut file, source.as_bytes()) {
-        let _ = fs::remove_file(&tmp);
-        return Err(error);
-    }
-    Ok(tmp)
 }
 
 fn apply_insert_structural(
@@ -4208,7 +4198,7 @@ fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result
     if changed {
         write_source_if_unchanged(path, before, candidate).map_err(|error| match error {
             SourceWriteError::Conflict => {
-                let current_revision = fs::read_to_string(path)
+                let current_revision = read_source_without_symlinks(path)
                     .map(|source| source_revision(&source))
                     .unwrap_or_else(|_| "missing".to_string());
                 edit_conflict(
@@ -4224,31 +4214,76 @@ fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{temp_canvas_check_path, write_canvas_check_file};
+    use super::check_canvas_candidate;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "jet-canvas-action-overlay-{label}-{}-{}",
+            std::process::id(),
+            TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     #[cfg(unix)]
     #[test]
-    fn canvas_action_check_writer_rejects_existing_symlink() {
+    fn canvas_action_check_ignores_final_swap_in_legacy_temp_name() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-canvas-action-check-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = test_root("final");
         std::fs::create_dir_all(&root).unwrap();
         let source = root.join("main.jet");
+        std::fs::write(&source, "fn run() {}\n").unwrap();
         let outside = root.join("outside.jet");
         std::fs::write(&outside, "must survive\n").unwrap();
-        let temp = temp_canvas_check_path(&source);
-        symlink(&outside, &temp).unwrap();
+        let legacy_temp = root.join("main.canvas-action-check.jet");
+        let overlay_path = std::fs::canonicalize(&source).unwrap();
+        symlink(&outside, &legacy_temp).unwrap();
 
-        assert!(
-            write_canvas_check_file(&source, "attacker\n").is_err(),
-            "Canvas action validation must not follow a pre-existing temp symlink"
-        );
+        let _ = check_canvas_candidate(&source, &overlay_path, "fn run() {}\n");
+
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive\n");
+        assert!(
+            std::fs::symlink_metadata(&legacy_temp)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
-        let _ = std::fs::remove_dir_all(&root);
+    #[cfg(unix)]
+    #[test]
+    fn canvas_action_check_ignores_ancestor_swap_in_legacy_temp_name() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_root("ancestor");
+        let real = root.join("real");
+        let held = root.join("held");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let source = real.join("main.jet");
+        std::fs::write(&source, "fn run() {}\n").unwrap();
+        let outside_temp = outside.join("main.canvas-action-check.jet");
+        std::fs::write(&outside_temp, "must survive\n").unwrap();
+        let overlay_path = std::fs::canonicalize(&source).unwrap();
+
+        std::fs::rename(&real, &held).unwrap();
+        symlink(&outside, &real).unwrap();
+        let _ = check_canvas_candidate(&source, &overlay_path, "fn run() {}\n");
+
+        assert_eq!(std::fs::read_to_string(&outside_temp).unwrap(), "must survive\n");
+        assert!(
+            std::fs::symlink_metadata(&real)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        std::fs::remove_file(real).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

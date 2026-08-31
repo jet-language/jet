@@ -10,7 +10,8 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
-The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
+Read `docs/agents/issue-tracker.md` if issue references need tracker lookup; do
+not run a generic tracker installer.
 
 ## Process
 
@@ -57,7 +58,9 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 ### 4. Spawn both sub-agents in parallel
 
-Send a single message with two `Agent` tool calls. Use the `general-purpose` subagent for both.
+Send one OMP `task` batch with two `reviewer` agents. OMP's **Full review** role
+from `docs/agents/owner-guidance.md` selects the owner-approved profile; stop if
+that role is unavailable or resolves to another model or reasoning level.
 
 **Standards sub-agent prompt** — include:
 

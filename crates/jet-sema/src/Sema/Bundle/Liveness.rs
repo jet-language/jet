@@ -399,6 +399,9 @@ fn function_is_root(
     else {
         return false;
     };
+    if super::is_build_entry(function) {
+        return true;
+    }
     if function.is_job
         || matches!(
             function.web_marker,

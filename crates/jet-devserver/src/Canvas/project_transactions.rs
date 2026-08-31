@@ -15,7 +15,8 @@ use super::project_scan::{
     ProjectFileRec, TouchedProjectFile,
 };
 use super::source_model::{
-    replace_source_if_unchanged_locked, source_revision, with_source_transaction, SourceWriteError,
+    ensure_no_symlink_directory, read_source_without_symlinks, replace_source_if_unchanged_locked,
+    source_revision, with_source_transaction, write_new_file_without_symlinks, SourceWriteError,
 };
 use super::validation_json::{
     json_array_body, json_bool_field, json_object_bodies, json_str, json_string_array,
@@ -236,7 +237,7 @@ fn project_rename_sources(
         if !ctx.parts.should_index(&path) {
             continue;
         }
-        let source = fs::read_to_string(&path).map_err(|error| {
+        let source = read_source_without_symlinks(&path).map_err(|error| {
             ProjectRenameError::new(
                 "stale",
                 format!("Canvas project source moved or unreadable: {error}"),
@@ -363,7 +364,7 @@ pub(super) fn apply_project_add_dependency(
     request: &str,
     touched: &[TouchedProjectFile],
 ) -> Result<String, String> {
-    let manifest_rel = project_manifest_rel(ctx, request);
+    let manifest_rel = project_manifest_rel(ctx, request)?;
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
             "bad_request",
@@ -376,8 +377,8 @@ pub(super) fn apply_project_add_dependency(
     let spec = project_dep_spec(&spec_text)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
-    let before =
-        fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let before = read_source_without_symlinks(&manifest_path)
+        .map_err(|e| project_edit_error("io", &e.to_string()))?;
     apply_canonical_dependency(
         ctx,
         request,
@@ -393,7 +394,7 @@ pub(super) fn apply_project_remove_dependency(
     request: &str,
     touched: &[TouchedProjectFile],
 ) -> Result<String, String> {
-    let manifest_rel = project_manifest_rel(ctx, request);
+    let manifest_rel = project_manifest_rel(ctx, request)?;
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
             "bad_request",
@@ -403,8 +404,9 @@ pub(super) fn apply_project_remove_dependency(
     let name = required_project_string(request, "name")?;
     validate_ident_for_project(&name)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
-    let before =
-        fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
+    let before = read_source_without_symlinks(&manifest_path)
+        .map_err(|e| project_edit_error("io", &e.to_string()))?;
     apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, None)
 }
 
@@ -413,7 +415,7 @@ pub(super) fn apply_project_edit_pkg_field(
     request: &str,
     touched: &[TouchedProjectFile],
 ) -> Result<String, String> {
-    let manifest_rel = project_manifest_rel(ctx, request);
+    let manifest_rel = project_manifest_rel(ctx, request)?;
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
             "bad_request",
@@ -425,8 +427,8 @@ pub(super) fn apply_project_edit_pkg_field(
     validate_payload_field(&field, &value)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
-    let before =
-        fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let before = read_source_without_symlinks(&manifest_path)
+        .map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after =
         replace_top_level_field(&before, &field, &format!("\"{}\"", manifest_string(&value)));
     jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
@@ -450,7 +452,7 @@ pub(super) fn apply_project_add_target(
     request: &str,
     touched: &[TouchedProjectFile],
 ) -> Result<String, String> {
-    let manifest_rel = project_manifest_rel(ctx, request);
+    let manifest_rel = project_manifest_rel(ctx, request)?;
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
             "bad_request",
@@ -464,8 +466,8 @@ pub(super) fn apply_project_add_target(
     )?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
-    let before =
-        fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let before = read_source_without_symlinks(&manifest_path)
+        .map_err(|e| project_edit_error("io", &e.to_string()))?;
     let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.clone())
         .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
     if facts.outputs.contains_key(&name) {
@@ -506,8 +508,8 @@ pub(super) fn apply_project_add_target(
     )
 }
 
-fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> String {
-    json_string_field(request, "manifest").unwrap_or_else(|| {
+fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> Result<String, String> {
+    let relative = json_string_field(request, "manifest").unwrap_or_else(|| {
         if let Some(root) = ctx.manifest_root.as_deref() {
             return rel_path(
                 &ctx.project_root,
@@ -521,7 +523,8 @@ fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> String {
             );
         }
         jet_driver::Syntax::PAYLOAD_FILE.to_string()
-    })
+    });
+    clean_project_rel_path(&relative)
 }
 
 pub(super) fn apply_project_create_package(
@@ -659,7 +662,7 @@ pub(super) fn apply_project_add_workspace_member(
     }
     let workspace_path = ctx.project_root.join(&workspace_rel);
     validate_project_path(&ctx.project_root, &workspace_path, &workspace_rel)?;
-    let before = fs::read_to_string(&workspace_path).unwrap_or_default();
+    let before = read_source_without_symlinks(&workspace_path).unwrap_or_default();
     let existed = workspace_path.is_file();
     require_touched_revision(
         touched,
@@ -722,7 +725,7 @@ pub(super) fn apply_project_add_env_service(
     let name = required_project_string(request, "name")?;
     validate_ident_for_project(&name)?;
     let service = env_service_source(request, &name)?;
-    let before = fs::read_to_string(&env_path).unwrap_or_default();
+    let before = read_source_without_symlinks(&env_path).unwrap_or_default();
     let after = if existed {
         add_env_service_to_source(&before, &name, &service)?
     } else {
@@ -1115,7 +1118,11 @@ pub(super) fn clean_project_rel_path(path: &str) -> Result<String, String> {
 /// read, create, replace, or remove it. Missing final components are allowed,
 /// but every existing component must be a real directory or file below the
 /// canonical project root.
-fn validate_project_path(root: &Path, path: &Path, relative: &str) -> Result<(), String> {
+pub(super) fn validate_project_path(
+    root: &Path,
+    path: &Path,
+    relative: &str,
+) -> Result<(), String> {
     let root_metadata = fs::symlink_metadata(root).map_err(|error| {
         project_edit_error("io", &format!("could not inspect the Canvas project root: {error}"))
     })?;
@@ -1179,30 +1186,6 @@ fn validate_project_path(root: &Path, path: &Path, relative: &str) -> Result<(),
         }
     }
     Ok(())
-}
-
-fn ensure_project_directory(path: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "Canvas project directory must not be a symlink",
-        )),
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "Canvas project path is not a directory",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                ensure_project_directory(parent)?;
-            }
-            fs::create_dir(path)
-        }
-        Err(error) => Err(error),
-    }
 }
 
 fn is_reserved_project_path_part(part: &str) -> bool {
@@ -1435,7 +1418,7 @@ fn write_project_changes_with_rollback(
                     ))
                 })?;
             if let Some(parent) = change.path.parent() {
-                if let Err(error) = ensure_project_directory(parent) {
+                if let Err(error) = ensure_no_symlink_directory(parent) {
                     rollback_project_writes(&written);
                     return Err(SourceWriteError::Io(error));
                 }
@@ -1537,7 +1520,7 @@ fn record_project_rename(
         files,
     );
     let directory = ctx.project_root.join(".jet/codemods");
-    fs::create_dir_all(&directory).map_err(|error| {
+    ensure_no_symlink_directory(&directory).map_err(|error| {
         project_edit_error("io", &format!("could not record project rename: {error}"))
     })?;
     let digest = jet_driver::SHA256::sha256_hex(
@@ -1550,10 +1533,6 @@ fn record_project_rename(
     let base = format!("CanvasProjectRename-{}", &digest[..12]);
     let mut receipt = directory.join(format!("{base}.log.json"));
     let mut suffix = 0;
-    while receipt.exists() {
-        suffix += 1;
-        receipt = directory.join(format!("{base}-{suffix}.log.json"));
-    }
     let log = format!(
         "{{\"schema\":2,\"name\":{},\"project\":{},\"semantic_ops\":[{}],\"files\":[{}]}}\n",
         json_str(&base),
@@ -1561,9 +1540,21 @@ fn record_project_rename(
         op,
         files,
     );
-    fs::write(receipt, log).map_err(|error| {
-        project_edit_error("io", &format!("could not record project rename: {error}"))
-    })
+    loop {
+        match write_new_file_without_symlinks(&receipt, log.as_bytes()) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                suffix += 1;
+                receipt = directory.join(format!("{base}-{suffix}.log.json"));
+            }
+            Err(error) => {
+                return Err(project_edit_error(
+                    "io",
+                    &format!("could not record project rename: {error}"),
+                ))
+            }
+        }
+    }
 }
 
 pub(super) fn project_revision_after_changes(

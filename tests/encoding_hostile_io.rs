@@ -293,7 +293,7 @@ fn run() {{
     input :: files.open("{input_path}") ?? panic("open")
     reader :: csv.reader(^input) ?? panic("reader")
     first :: reader.next() ?? panic("first")
-    if first == {{ Val(row) -> {{ print(row[0]); print(row[1]) }} None -> print("none") }}
+    if first == {{ Val(row) -> {{ print(row.fields[0]); print(row.fields[1]) }} None -> print("none") }}
     eof :: reader.next() ?? panic("eof")
     if eof == None {{ print("eof") }} else {{ print("bad") }}
 }}

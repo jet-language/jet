@@ -323,6 +323,22 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                 .collect::<HashMap<_, _>>()
         })
         .collect::<Vec<_>>();
+    for declaration in &declarations {
+        let crate::AST::UnitDimensionDecl::Derived(expression) = &declaration.claim else {
+            continue;
+        };
+        let mut aliases = HashSet::new();
+        dimension_aliases(expression, &mut aliases);
+        for alias in aliases {
+            let span = bundle
+                .name_ledger
+                .alias(declaration.module, &alias)
+                .map(|binding| binding.span);
+            if let Some(span) = span {
+                bundle.name_ledger.record_alias_use(declaration.module, span);
+            }
+        }
+    }
     let mut known = HashMap::<(usize, String), crate::AST::Dimension>::new();
     for declaration in &declarations {
         if let Some(dimension) = declaration.preset.clone() {
@@ -495,6 +511,22 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
         }
     }
     diagnostics
+}
+
+fn dimension_aliases(expression: &crate::AST::Expr, aliases: &mut HashSet<String>) {
+    match expression {
+        crate::AST::Expr::Field(base, _, _) => {
+            if let crate::AST::Expr::Ident(alias, _) = base.as_ref() {
+                aliases.insert(alias.clone());
+            }
+            dimension_aliases(base, aliases);
+        }
+        crate::AST::Expr::Binary(_, left, right, _) => {
+            dimension_aliases(left, aliases);
+            dimension_aliases(right, aliases);
+        }
+        _ => {}
+    }
 }
 
 enum DimensionLookup {

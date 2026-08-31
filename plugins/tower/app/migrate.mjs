@@ -15,7 +15,11 @@ export function migrate(old, { project = 'Project' } = {}) {
       rev: 0,
       ui: { toggled: meta.ui?.toggled || meta.ui?.open || [] },
     },
-    epochs: src.epochs || [],
+    epochs: (src.epochs || []).map(e => (
+      typeof e === 'string'
+        ? { id: e, name: e, goal: '', status: 'open' }
+        : { status: 'open', goal: '', ...e, name: e.name || e.label || e.id }
+    )),
     milestones: src.milestones || [],
     cards: (src.cards || []).map(c => ({ milestoneId: null, assignee: null, ...c })),
     decisions: src.decisions || [],
@@ -23,7 +27,5 @@ export function migrate(old, { project = 'Project' } = {}) {
     ideas: src.ideas || src.binder || [],
     events: src.events || [],
   });
-  // Epochs may be plain strings in very old files.
-  s.epochs = s.epochs.map(e => (typeof e === 'string' ? { id: e, name: e, goal: '', status: 'open' } : { status: 'open', goal: '', ...e, name: e.name || e.label || e.id }));
   return s;
 }

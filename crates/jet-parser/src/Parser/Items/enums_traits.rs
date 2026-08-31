@@ -544,7 +544,7 @@ impl<'a> Parser<'a> {
                 | Syntax::MARKER_PUBLISHED_SCHEMA
                 | Syntax::MARKER_SINGLE_USE
                 | Syntax::MARKER_MUST_USE
-                | Syntax::MARKER_EXTERN_MODULE
+                | Syntax::MARKER_IMPORT
                 | Syntax::MARKER_BINDGEN
                 | Syntax::MARKER_TARGET
                 | Syntax::MARKER_WASM_EXPORT

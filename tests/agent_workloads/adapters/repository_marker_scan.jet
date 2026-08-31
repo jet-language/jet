@@ -1,15 +1,17 @@
 use core.files as fs
-use core.process as process
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: repository_marker_scan INPUT_ROOT")
-    root :: args.get(1) ?? panic("missing input root")
+#CLI
+struct WorkloadArgs {
+    root: String
+}
+
+fn run(args: WorkloadArgs) {
+    root :: args.root
     paths :: fs.walk(~root) ?? panic("cannot walk input root")
     rows := [String]{}
     loop file in paths {
         if !file.is_dir {
-            text :: fs.read(~file.path) ?? panic("cannot read input")
+            text :: fs.read(file.path) ?? panic("cannot read input")
             count := 0
             loop line in text.split("\n") {
                 if line.contains("agent_workload:") -> count += 1

@@ -4,10 +4,22 @@ use core.files as files
 use core.testing as testing
 
 fn run() {
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("fixture")
     root :: testing.temp_dir("csv-reader")
     path :: Path.from(root).join("rows.csv")
-    files.write(path, "name,score\nada,9\n") ?? panic("fixture")
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    files.write(path, raw) ?? panic("fixture")
     input :: files.open(path) ?? panic("open")
-    reader :: csv.reader(^input) ?? panic("reader")
-    print(reader.next() ?? panic("next"))
+    reader :: csv.reader(
+        ^input, delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(row) -> {
+            print(row.line)
+            print(row.fields[0])
+            print(row.fields[1].replace(crlf, "|"))
+        }
+        .None -> panic("next")
+    }
 }

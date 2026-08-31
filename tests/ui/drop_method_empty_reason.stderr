@@ -1,26 +1,17 @@
-Error [E2417]: explicit failure domain ``E`` is not an Error type
+Error [E2417]: Explicit failure domain ``E`` is not an Error type
   --> tests/ui/drop_method_empty_reason.jet:5:8
     |
   5 | fn f() Int !E -> Ok(1)
     |        ^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
-
-Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
-  --> tests/ui/drop_method_empty_reason.jet:7:12
-    |
-  7 | fn run() { f().drop("") }
-    |            ^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E -> Err`
- Fix: add `impl E -> Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
 
 Error [E0407]: `.drop()` reason must not be empty
   --> tests/ui/drop_method_empty_reason.jet:7:16
     |
   7 | fn run() { f().drop("") }
     |                ^^^^
- Why: the reason documents why this result is intentionally discarded
- Fix: write `.drop("why this is fine to ignore")` with a real explanation
+ Why: The reason documents why this result is intentionally discarded
+ Fix: Write `.drop("why this is fine to ignore")` with a real explanation
 More: jet-lang.dev/e/E0407

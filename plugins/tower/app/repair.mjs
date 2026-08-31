@@ -1,13 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
-  existsSync, readFileSync, renameSync, unlinkSync,
+  closeSync, constants, fstatSync, fsyncSync, openSync, renameSync, writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { withLock } from './lock.mjs';
 import {
-  backupRequired, now, syncDir, writeJSON, writeTextAtomic,
+  MAX_JSON_BYTES, backupRequiredAt, now, syncDir, withDirectoryAuthority,
 } from './paths.mjs';
-import { TowerError } from './store.mjs';
+import { TowerError, validateStoredHistory, validateStoredState } from './store.mjs';
 import {
   beginRepairTransaction, finishRepairTransaction, recoverPendingRepairLocked,
 } from './repair-journal.mjs';
@@ -94,6 +94,8 @@ function validateManifest(manifest) {
     if (PROTECTED_ROOTS[patch.collection].has(segments[0])
       || PROTECTED_LEAVES.has(leaf) || /(?:Id|At)$/u.test(leaf))
       fail('E_MANIFEST', `${label} cannot repair protected identity, key, timestamp, or ordering leaf ${JSON.stringify(leaf)}`);
+    if (patch.collection === 'decisions' && leaf === 'status' && patch.replacement === 'ratified')
+      fail('E_MANIFEST', `${label} cannot ratify a decision through repair; use the owner decision flow`);
     if (typeof patch.current !== 'string' || typeof patch.replacement !== 'string'
       || !Number.isInteger(patch.substitutions) || patch.substitutions < 1)
       fail('E_MANIFEST', `${label} must carry string current/replacement leaves and a positive substitution count`);
@@ -164,6 +166,8 @@ function stagePatches(stores, patches) {
   for (const [index, patch] of patches.entries()) {
     const label = `patch ${index + 1} (${patch.store}#/${patch.collection}${patch.path})`;
     const target = findTarget(stores[patch.store], patch, label);
+    if (patch.collection === 'decisions' && target.status === 'ratified')
+      fail('E_MANIFEST', `${label}: ratified decisions are immutable; record a superseding decision`);
     const { parent, leaf } = resolveLeaf(target, patch.path, label);
     if (typeof parent[leaf] !== 'string' || parent[leaf] !== patch.current)
       fail('E_REPAIR_DRIFT', `${label}: current leaf does not match manifest`);
@@ -171,47 +175,147 @@ function stagePatches(stores, patches) {
   }
 }
 
-function restoreText(file, text) {
-  writeTextAtomic(file, text);
+const STAGE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
+  | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
+
+function safeStage(stat) {
+  return !!stat?.isFile() && stat.nlink === 1;
+}
+
+function sameIdentity(left, right) {
+  return !!left && !!right && left.dev === right.dev && left.ino === right.ino;
+}
+
+function removeStageIfIdentity(authority, name, expected) {
+  try { authority.remove(name, expected); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+
+function writeStage(authority, name, value) {
+  const file = join(authority.expectedPath, name);
+  const contents = JSON.stringify(value, null, 2) + '\n';
+  let fd;
+  let stat;
+  try {
+    fd = openSync(authority.path(name), STAGE_FLAGS, 0o600);
+    writeFileSync(fd, contents);
+    stat = fstatSync(fd);
+    if (!safeStage(stat)) fail('E_REPAIR_IO', `repair stage is unsafe: ${file}`);
+    fsyncSync(fd);
+    return { fd, stat };
+  } catch (error) {
+    if (fd !== undefined) {
+      if (!stat) try { stat = fstatSync(fd); } catch { /* best effort */ }
+      try { closeSync(fd); } catch { /* best effort */ }
+    }
+    if (stat) try { removeStageIfIdentity(authority, name, stat); } catch { /* best effort */ }
+    throw error;
+  }
+}
+
+function removeUnexpectedStageDestination(authority, name, expected) {
+  try { authority.removeUnexpected(name, expected); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+
+function verifyStageDestination(authority, name, expected) {
+  const file = join(authority.expectedPath, name);
+  let current;
+  try { current = authority.stat(name); }
+  catch (error) { fail('E_REPAIR_IO', `repair destination disappeared: ${file}: ${error.message}`); }
+  if (sameIdentity(current, expected) && safeStage(current)) return;
+  try { removeUnexpectedStageDestination(authority, name, expected); } catch { /* preserve the repair failure */ }
+  fail('E_REPAIR_IO', `repair destination changed during replacement: ${file}`);
 }
 
 export function commitRepairPair({
   dataDir, liveFile, historyFile, live, history, originalLive, originalHistory,
   liveBackup, historyBackup, manifestHash, rename = renameSync,
   syncParent = syncDir, finishTransaction = finishRepairTransaction,
+  heldRoot = null, heldBackups = null,
 }) {
-  const liveStage = `${liveFile}.repair-stage-${process.pid}`;
-  const historyStage = `${historyFile}.repair-stage-${process.pid}`;
-  let liveCommitted = false;
-  let historyCommitted = false;
-  let journalBegun = false;
-  try {
-    writeJSON(liveStage, live);
-    writeJSON(historyStage, history);
-    beginRepairTransaction(dataDir, { liveBackup, historyBackup, manifestHash });
-    journalBegun = true;
-    rename(liveStage, liveFile);
-    liveCommitted = true;
-    rename(historyStage, historyFile);
-    historyCommitted = true;
-  } catch (error) {
+  const stageSuffix = randomBytes(16).toString('hex');
+  const liveName = 'tower.json';
+  const historyName = 'history.json';
+  const liveStageName = `${liveName}.repair-stage-${stageSuffix}`;
+  const historyStageName = `${historyName}.repair-stage-${stageSuffix}`;
+  const liveStage = join(dataDir, liveStageName);
+  const historyStage = join(dataDir, historyStageName);
+  const commit = root => {
+    let backupAuthority = heldBackups;
+    const ownsBackupAuthority = !backupAuthority;
     try {
-      if (liveCommitted) restoreText(liveFile, originalLive);
-      if (historyCommitted) restoreText(historyFile, originalHistory);
-      if (journalBegun) finishTransaction(dataDir);
-    } catch (rollbackError) {
-      fail('E_REPAIR_IO', `repair commit failed and rollback failed: ${error.message}; ${rollbackError.message}`);
-    } finally {
-      for (const stage of [liveStage, historyStage]) {
-        if (existsSync(stage)) try { unlinkSync(stage); } catch { /* best effort after rollback */ }
+      // Keep the backup directory pinned through staging, journal creation,
+      // both renames, rollback, and journal removal.
+      if (!backupAuthority) backupAuthority = root.child('backups');
+      root.guard('repair transaction');
+      backupAuthority.guard('repair transaction');
+
+      let liveHandle;
+      let historyHandle;
+      let liveStageStat;
+      let historyStageStat;
+      let liveCommitted = false;
+      let historyCommitted = false;
+      let journalBegun = false;
+      const descriptorRename = rename === renameSync;
+      try {
+        // Capture each identity before close. The post-rename check therefore
+        // detects a fresh regular file as well as symlink/hardlink/special swaps.
+        liveHandle = writeStage(root, liveStageName, live);
+        liveStageStat = liveHandle.stat;
+        historyHandle = writeStage(root, historyStageName, history);
+        historyStageStat = historyHandle.stat;
+        beginRepairTransaction(dataDir, { liveBackup, historyBackup, manifestHash }, root, backupAuthority);
+        journalBegun = true;
+        closeSync(liveHandle.fd);
+        liveHandle = null;
+        closeSync(historyHandle.fd);
+        historyHandle = null;
+        // A descriptor-relative rename can fail after replacing the destination
+        // (for example when the source is swapped between the precheck and the
+        // rename). Mark it committed before the call so rollback restores the
+        // original even when the helper reports that post-rename validation saw
+        // an attacker entry.
+        liveCommitted = true;
+        if (descriptorRename) root.rename(liveStageName, liveName, liveStageStat);
+        else rename(liveStage, liveFile);
+        verifyStageDestination(root, liveName, liveStageStat);
+        historyCommitted = true;
+        if (descriptorRename) root.rename(historyStageName, historyName, historyStageStat);
+        else rename(historyStage, historyFile);
+        verifyStageDestination(root, historyName, historyStageStat);
+      } catch (error) {
+        try {
+          if (liveHandle) closeSync(liveHandle.fd);
+          if (historyHandle) closeSync(historyHandle.fd);
+          if (liveCommitted) root.writeAtomic(liveName, originalLive);
+          if (historyCommitted) root.writeAtomic(historyName, originalHistory);
+          if (journalBegun) finishTransaction(dataDir, root, backupAuthority);
+        } catch (rollbackError) {
+          fail('E_REPAIR_IO', `repair commit failed and rollback failed: ${error.message}; ${rollbackError.message}`);
+        } finally {
+          for (const [stage, handle, expected] of [
+            [liveStageName, liveHandle, liveStageStat],
+            [historyStageName, historyHandle, historyStageStat],
+          ]) {
+            const identity = handle?.stat || expected;
+            if (identity) try { removeStageIfIdentity(root, stage, identity); } catch { /* best effort after rollback */ }
+          }
+        }
+        fail('E_REPAIR_IO', `repair commit failed; both stores rolled back: ${error.message}`);
       }
+
+      // Both file contents and directory entries must reach disk before deleting
+      // the durable rollback marker. Journal removal is the commit point.
+      if (syncParent === syncDir) root.sync();
+      else syncParent(dataDir);
+      finishTransaction(dataDir, root, backupAuthority);
+    } finally {
+      if (ownsBackupAuthority) backupAuthority?.close();
     }
-    fail('E_REPAIR_IO', `repair commit failed; both stores rolled back: ${error.message}`);
-  }
-  // Both file contents and directory entries must reach disk before deleting
-  // the durable rollback marker. Journal removal is the commit point.
-  syncParent(dataDir);
-  finishTransaction(dataDir);
+  };
+  return heldRoot ? commit(heldRoot) : withDirectoryAuthority(dataDir, commit);
 }
 
 export function applyRepairManifest(dataDir, manifest, {
@@ -229,49 +333,63 @@ export function applyRepairManifest(dataDir, manifest, {
   const liveFile = join(dataDir, 'tower.json');
   const historyFile = join(dataDir, 'history.json');
   return withLock(liveFile, () => {
-    recoverPendingRepairLocked(dataDir);
-    const originalLive = readFileSync(liveFile, 'utf8');
-    const originalHistory = readFileSync(historyFile, 'utf8');
-    const live = JSON.parse(originalLive);
-    const history = JSON.parse(originalHistory);
-    if (live.meta?.rev !== expected)
-      fail('E_CONFLICT', `stale rev: expected ${expected}, store is at ${live.meta?.rev} — re-read state and retry`);
-
-    stagePatches({ 'tower.json': live, 'history.json': history }, checked.patches);
-    const result = {
-      dryRun: !!dryRun,
-      manifestHash: checked.hash,
-      fields: checked.counts.fields,
-      substitutions: checked.counts.substitutions,
-      previousRev: expected,
-      rev: dryRun ? expected : expected + 1,
-    };
-    if (dryRun) return result;
-
-    live.meta.rev = expected + 1;
-    live.events.unshift({
-      at: now(),
-      by: by.trim(),
-      action: 'repair.apply',
-      ref: checked.hash,
-      note: `${checked.counts.fields} fields; ${checked.counts.substitutions} substitutions`,
-      manifestHash: checked.hash,
-      fields: checked.counts.fields,
-      substitutions: checked.counts.substitutions,
-    });
-    let liveBackup;
-    let historyBackup;
     try {
-      const keep = Math.max(1, Number(backups) || 20);
-      liveBackup = backupRequired(liveFile, keep);
-      historyBackup = backupRequired(historyFile, keep);
+      recoverPendingRepairLocked(dataDir);
     } catch (error) {
-      fail('E_REPAIR_IO', `repair backup failed; stores unchanged: ${error.message}`);
+      fail('E_REPAIR_IO', `repair recovery failed: ${error.message}`);
     }
-    commitRepairPair({
-      dataDir, liveFile, historyFile, live, history, originalLive, originalHistory,
-      liveBackup, historyBackup, manifestHash: checked.hash,
+    return withDirectoryAuthority(dataDir, root => {
+      const originalLive = root.read('tower.json', MAX_JSON_BYTES, `repair source is unsafe: ${liveFile}`).toString('utf8');
+      const originalHistory = root.read('history.json', MAX_JSON_BYTES, `repair source is unsafe: ${historyFile}`).toString('utf8');
+      const live = JSON.parse(originalLive);
+      const history = JSON.parse(originalHistory);
+      if (live.meta?.rev !== expected)
+        fail('E_CONFLICT', `stale rev: expected ${expected}, store is at ${live.meta?.rev} — re-read state and retry`);
+
+      stagePatches({ 'tower.json': live, 'history.json': history }, checked.patches);
+      validateStoredState(live, 'live store');
+      validateStoredHistory(history, 'history store');
+      const result = {
+        dryRun: !!dryRun,
+        manifestHash: checked.hash,
+        fields: checked.counts.fields,
+        substitutions: checked.counts.substitutions,
+        previousRev: expected,
+        rev: dryRun ? expected : expected + 1,
+      };
+      if (dryRun) return result;
+
+      live.meta.rev = expected + 1;
+      live.events.unshift({
+        at: now(),
+        by: by.trim(),
+        action: 'repair.apply',
+        ref: checked.hash,
+        note: `${checked.counts.fields} fields; ${checked.counts.substitutions} substitutions`,
+        manifestHash: checked.hash,
+        fields: checked.counts.fields,
+        substitutions: checked.counts.substitutions,
+      });
+      const backupAuthority = root.ensureDirectory('backups');
+      try {
+        const keep = Math.max(1, Number(backups) || 20);
+        let liveBackup;
+        let historyBackup;
+        try {
+          liveBackup = backupRequiredAt(root, liveFile, keep, backupAuthority);
+          historyBackup = backupRequiredAt(root, historyFile, keep, backupAuthority);
+        } catch (error) {
+          fail('E_REPAIR_IO', `repair backup failed; stores unchanged: ${error.message}`);
+        }
+        commitRepairPair({
+          dataDir, liveFile, historyFile, live, history, originalLive, originalHistory,
+          liveBackup, historyBackup, manifestHash: checked.hash,
+          heldRoot: root, heldBackups: backupAuthority,
+        });
+        return result;
+      } finally {
+        backupAuthority.close();
+      }
     });
-    return result;
   });
 }

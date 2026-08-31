@@ -16,6 +16,61 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+impl<'a> Checker<'a> {
+    fn normalized_path_string_source(&self, expr: &Expr) -> Option<String> {
+        let Expr::MethodCall {
+            receiver: normalized,
+            method,
+            args,
+            ..
+        } = expr.without_parens()
+        else {
+            return None;
+        };
+        if method != "to_string" || !args.is_empty() {
+            return None;
+        }
+        let Expr::MethodCall {
+            receiver: path,
+            method,
+            args,
+            recv_type,
+            ..
+        } = normalized.without_parens()
+        else {
+            return None;
+        };
+        if method != "normalize" || !args.is_empty() {
+            return None;
+        }
+        if self.registry.contains("Path") {
+            return None;
+        }
+        // `recv_type` is the normal proof.  The built-in `Path.from` shape is
+        // the same typed proof when the static constructor has not carried its
+        // receiver marker through a nested chain; a user-defined `Path` keeps
+        // the existing registry guard and remains quiet.
+        let direct_path_constructor = matches!(
+            path.without_parens(),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if method == "from"
+                && args.len() == 1
+                && matches!(receiver.without_parens(), Expr::Ident(name, _) if name == "Path")
+                && !self.registry.contains("Path")
+        );
+        if recv_type.as_deref() != Some("Path") && !direct_path_constructor {
+            return None;
+        }
+        let start = crate::Sema::source_expr_start(path);
+        let end = crate::Sema::source_expr_end(self.source, normalized)?;
+        self.source.get(start..end).map(str::to_string)
+    }
+}
+
 fn interrupt_callback_name(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Ident(name, _) => Some(name),
@@ -579,24 +634,33 @@ impl<'a> Checker<'a> {
                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
                         )
                     {
-                        self.diags.push(Diagnostic::error(
-                                "E0120",
-                                format!("`{}` was not moved here, so it cannot be taken with the move marker `^`", n),
-                                "this function has read access only and does not own the value"
-                                    .to_string(),
-                                format!(
-                                    "copy it instead: `{} {} {}{}`",
-                                    b.name,
-                                    if b.mutable {
-                                        Syntax::SIGIL_BIND_MUT
-                                    } else {
-                                        Syntax::SIGIL_BIND_IMMUT
-                                    },
-                                    Syntax::SIGIL_COPY,
-                                    n
-                                ),
-                                Some(*nspan),
-                            ));
+                        let source_ty = info.ty.clone();
+                        let diagnostic = Diagnostic::error(
+                            "E0120",
+                            format!(
+                                "`{}` was not moved here, so it cannot be taken with the move marker `^`",
+                                n
+                            ),
+                            "this function has read access only and does not own the value"
+                                .to_string(),
+                            format!(
+                                "copy it instead: `{} {} {}{}`",
+                                b.name,
+                                if b.mutable {
+                                    Syntax::SIGIL_BIND_MUT
+                                } else {
+                                    Syntax::SIGIL_BIND_IMMUT
+                                },
+                                Syntax::SIGIL_COPY,
+                                n
+                            ),
+                            Some(*nspan),
+                        );
+                        self.diags.push(self.with_ownership_copy_edit(
+                            diagnostic,
+                            *nspan,
+                            Some(&source_ty),
+                        ));
                     }
                 }
             }
@@ -710,7 +774,28 @@ impl<'a> Checker<'a> {
         if implicit_field_read {
             self.borrow_ctx = true;
         }
-        let mut it = if b.mutable {
+        // A distinct-range constructor's Result must stay visible until the
+        // binding-level admission below can distinguish a runtime value from
+        // a compile-time literal; ordinary call propagation would rewrite it
+        // to `Try` first.
+        let distinct_range_constructor = matches!(
+            &b.init,
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if args.len() == 1
+                && Syntax::numeric_conversion_source(method).is_some()
+                && matches!(
+                    receiver.as_ref(),
+                    Expr::Ident(type_name, _)
+                        if self.registry.distinct_range(type_name).is_some()
+                )
+        );
+        let mut it = if distinct_range_constructor {
+            self.infer_without_auto_propagation(&mut b.init)
+        } else if b.mutable {
             self.infer_owning_value(&mut b.init)
         } else {
             self.infer(&mut b.init)
@@ -987,7 +1072,7 @@ impl<'a> Checker<'a> {
         } else if b.is_comptime {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
-            let globals = self.current_ct_globals();
+            let globals = self.current_ct_globals().into_owned();
             // D-META-EFFECT1: pass core_imports so the interpreter can
             // resolve effect-approved Core calls (e.g. `math.sqrt(x)`).
             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
@@ -1038,7 +1123,7 @@ impl<'a> Checker<'a> {
             // evaluate_constant, and any Expr::Paren-wrapped spelling —
             // one guard where the value is minted, not a syntactic
             // pattern match here that a stray `(...)` could dodge.)
-            let globals = self.current_ct_globals();
+            let globals = self.current_ct_globals().into_owned();
             let mut mutated = std::collections::HashMap::new();
             let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
                 &b.init,
@@ -1202,6 +1287,11 @@ impl<'a> Checker<'a> {
             && !matches!(&final_ty, Type::Named(name) if name == "Fixed"))
         .then(|| self.evaluate_constant(&b.init))
         .flatten();
+        let normalized_path_source = (!b.mutable
+            && !init_has_error
+            && matches!(&final_ty, Type::String))
+            .then(|| self.normalized_path_string_source(&b.init))
+            .flatten();
         self.declare_with_sendability(
             &b.name,
             b.name_span,
@@ -1221,6 +1311,13 @@ impl<'a> Checker<'a> {
             },
             binding_sendable,
         );
+        if let Some(source) = normalized_path_source {
+            self.flow
+                .path_strings
+                .set_at(&b.name, self.scope_depth(), crate::Sema::FlowFacts::PathStringFact {
+                    source,
+                });
+        }
         if let Some(arena) = arena_alloc_source {
             self.record_arena_view(&b.name, arena, b.name_span);
         }

@@ -635,6 +635,24 @@ mod tests {
     use super::*;
 
     const COMPILER_SPEED_PLAN: &str = include_str!("../../../docs/plans/compiler-speed.md");
+    const BATCH_SEMA_PLAN_CANARY: &str = "## #1026 incremental batch sema canary";
+
+    fn batch_sema_plan_is_intact(plan: &str) -> bool {
+        [
+            BATCH_SEMA_PLAN_CANARY,
+            "crates/jet-driver/src/QueryService.rs::tests::batch_disk_interface_change_keeps_unrelated_module_warm",
+            "changed module interface rechecks that module and its importer",
+            "unrelated module remains a cache hit",
+            "Removing the batch cache handoff or",
+            "dependent-only invalidation must fail the check.",
+            "crates/jet-driver/src/Loader.rs::stale_manifest_name_tests::staged_frontend_is_bounded_and_deterministic",
+            "at most eight workers",
+            "consumes staged",
+            "serially in stable module order",
+        ]
+        .iter()
+        .all(|requirement| plan.contains(requirement))
+    }
 
     fn checked_key(path: impl AsRef<Path>) -> QueryKey {
         QueryKey::for_file(
@@ -719,15 +737,23 @@ mod tests {
 
     #[test]
     fn batch_disk_interface_change_keeps_unrelated_module_warm() {
-        for requirement in [
-            "Promote the jet-queries demand cache onto the batch compile path: per-module",
-            "Hand-rolled (I6) bounded staged-source lex/parse fan-out",
-        ] {
-            assert!(
-                COMPILER_SPEED_PLAN.contains(requirement),
-                "batch frontend proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
-            );
-        }
+        assert!(
+            batch_sema_plan_is_intact(COMPILER_SPEED_PLAN),
+            "batch frontend proof is no longer backed by docs/plans/compiler-speed.md"
+        );
+        let bypassed = COMPILER_SPEED_PLAN.replacen(
+            BATCH_SEMA_PLAN_CANARY,
+            "## #1026 batch frontend canary bypassed",
+            1,
+        );
+        assert_ne!(
+            bypassed, COMPILER_SPEED_PLAN,
+            "batch frontend canary mutation did not apply"
+        );
+        assert!(
+            !batch_sema_plan_is_intact(&bypassed),
+            "batch frontend proof must fail when its plan section is bypassed"
+        );
         let root =
             std::env::temp_dir().join(format!("jet-query-batch-interface-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -781,6 +807,7 @@ mod tests {
             "an unchanged disk batch must record a query hit"
         );
 
+        let before_change = service.stats();
         std::fs::write(&dependency, changed_dependency).unwrap();
         let changed = service.check_disk(&main.to_string_lossy(), false);
         assert!(
@@ -788,6 +815,11 @@ mod tests {
             "a changed imported interface must recheck the real batch path"
         );
         let warm = service.stats();
+        assert_eq!(
+            warm.item_recomputes - before_change.item_recomputes,
+            2,
+            "only the changed dependency and its importer may recheck"
+        );
         assert!(
             warm.item_hits > cold.item_hits,
             "an unrelated module must remain reusable after dependency invalidation: cold={cold:?}, warm={warm:?}"

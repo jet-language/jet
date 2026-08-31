@@ -1,10 +1,9 @@
-use core.crypto.[sha256_bytes]
+use core.crypto.[sha256]
 use core.encoding.json as json
 use core.files as files
 use core.http.server as http_server
 use core.math as math
 use core.net.url as url
-use core.process as process
 use core.regex as re
 use core.time as time
 
@@ -106,37 +105,6 @@ fn array_field(tree: DataTree, name: String) [DataTree] !Never -> {
     }
 }
 
-// #2356: split payload arms for AOT codegen.
-fn scalar_text_text(value: DataTree) String !Never -> {
-    return if value == {
-        .Text(text) -> ~text
-        else -> scalar_text_int(~value)
-    }
-}
-
-fn scalar_text_int(value: DataTree) String !Never -> {
-    return if value == {
-        .Int(number) -> "{number}"
-        else -> scalar_text_float(~value)
-    }
-}
-
-fn scalar_text_float(value: DataTree) String !Never -> {
-    return if value == {
-        .Float(number) -> "{number}"
-        else -> scalar_text_bool(~value)
-    }
-}
-
-fn scalar_text_bool(value: DataTree) String !Never -> {
-    return if value == {
-        .Bool(flag) -> "{flag}"
-        else -> ""
-    }
-}
-
-fn scalar_text(value: DataTree) String !Never -> { return scalar_text_text(~value) }
-
 fn javascript_truthy_null(value: DataTree) Bool !Never -> {
     return if value == {
         .Null -> false
@@ -160,7 +128,7 @@ fn javascript_truthy_int(value: DataTree) Bool !Never -> {
 
 fn javascript_truthy_float(value: DataTree) Bool !Never -> {
     return if value == {
-        .Float(number) -> number != 0.0
+        .Float(number) -> number != 0.0 && !math.is_nan(number)
         else -> javascript_truthy_text(~value)
     }
 }
@@ -189,14 +157,14 @@ fn javascript_truthy_object(value: DataTree) Bool !Never -> {
 fn javascript_truthy(value: DataTree) Bool !Never -> { return javascript_truthy_null(~value) }
 
 fn javascript_text_or_empty(value: DataTree) String -> {
-    if javascript_truthy(~value) -> return scalar_text(~value)
+    if javascript_truthy(~value) -> return value.to_text() ?? ""
     return ""
 }
 
 fn text_field(tree: DataTree, name: String, fallback: String) String !Never -> {
     value :: tree_field(tree, name)
-    if is_null(~value) -> return fallback
-    return scalar_text(~value)
+    if is_null(~value) -> return ~fallback
+    return value.to_text() ?? ""
 }
 
 fn int_value(value: DataTree, fallback: Int) Int !Never -> {
@@ -218,119 +186,27 @@ fn bool_value(value: DataTree) Bool !Never -> {
     }
 }
 
-fn same_source_value(left: DataTree, right: DataTree) Bool !Never -> {
-    return semantic_equal(left, right)
-}
-
-fn arrays_semantically_equal(left_values: [DataTree], right_values: [DataTree]) Bool !Never -> {
-    if left_values.len() != right_values.len() -> return false
-    i := 0
-    loop i < left_values.len() {
-        left_value :: left_values[i]
-        right_value :: right_values[i]
-        if !semantic_equal(~left_value, ~right_value) -> return false
-        i += 1
-    }
-    return true
-}
-
-fn objects_semantically_equal(left_fields: [String:DataTree], right_fields: [String:DataTree]) Bool !Never -> {
-    if left_fields.len() != right_fields.len() -> return false
-    loop (key, value) in left_fields {
-        if !right_fields.has_key(key) -> return false
-        right_value :: right_fields[key]
-        if !semantic_equal(~value, ~right_value) -> return false
-    }
-    return true
-}
-
-fn semantic_equal_left_null(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Null -> is_null(~right)
-        else -> semantic_equal_left_bool(~left, ~right)
+fn identity_key(value: DataTree) String -> {
+    return if value == {
+        .Null -> ""
+        .Text(text) -> "t|{text}"
+        else -> ""
     }
 }
 
-fn semantic_equal_left_bool(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Bool(left_value) -> {
-            return if right == {
-                .Bool(right_value) -> left_value == right_value
-                else -> false
-            }
-
+fn indexed_positions(records: [DataTree], field_name: String) [String:[Int]] -> {
+    out := [String:[Int]]{}
+    index := 0
+    loop record in records {
+        key :: identity_key(tree_field(~record, ~field_name))
+        if key != "" {
+            bucket := out.get(key) ?? [Int]{}
+            bucket.push(index)
+            out[key] = bucket
         }
-        else -> semantic_equal_left_int(~left, ~right)
+        index += 1
     }
-}
-
-fn semantic_equal_left_int(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Int(left_value) -> {
-            return if right == {
-                .Int(right_value) -> left_value == right_value
-                else -> false
-            }
-
-        }
-        else -> semantic_equal_left_float(~left, ~right)
-    }
-}
-
-fn semantic_equal_left_float(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Float(left_value) -> {
-            return if right == {
-                .Float(right_value) -> left_value == right_value
-                else -> false
-            }
-
-        }
-        else -> semantic_equal_left_text(~left, ~right)
-    }
-}
-
-fn semantic_equal_left_text(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Text(left_value) -> {
-            return if right == {
-                .Text(right_value) -> left_value == right_value
-                else -> false
-            }
-
-        }
-        else -> semantic_equal_left_array(~left, ~right)
-    }
-}
-
-fn semantic_equal_left_array(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Array(left_values) -> {
-            return if right == {
-                .Array(right_values) -> arrays_semantically_equal(~left_values, ~right_values)
-                else -> false
-            }
-
-        }
-        else -> semantic_equal_left_object(~left, ~right)
-    }
-}
-
-fn semantic_equal_left_object(left: DataTree, right: DataTree) Bool !Never -> {
-    return if left == {
-        .Object(left_fields) -> {
-            return if right == {
-                .Object(right_fields) -> objects_semantically_equal(~left_fields, ~right_fields)
-                else -> false
-            }
-
-        }
-        else -> false
-    }
-}
-
-pub fn semantic_equal(left: DataTree, right: DataTree) Bool !Never -> {
-    return semantic_equal_left_null(~left, ~right)
+    return out
 }
 
 fn normalized_array_field(tree: DataTree, name: String) DataTree -> {
@@ -454,16 +330,16 @@ fn normalize_milestone(milestone: DataTree, captured_day: String) DataTree -> {
     criteria :: normalize_criteria(tree_field(~milestone, "criteria"), ~captured_day)
 
     if status == "met" && !javascript_truthy(tree_field(~milestone, "verification")) {
-        out := object_fields(object_without(~milestone, ["metAt"]))
-        out["criteria"] = criteria
-        out["status"] = DataTree.Text("review-ready")
-        return DataTree.Object(out)
+        unverified := object_fields(object_without(~milestone, ["metAt"])) ?? panic("milestone object copy cannot fail")
+        unverified["criteria"] = criteria
+        unverified["status"] = DataTree.Text("review-ready")
+        return DataTree.Object(unverified)
     }
 
-    out := object_fields(~milestone)
-    out["criteria"] = criteria
-    out["status"] = DataTree.Text(~status)
-    return DataTree.Object(out)
+    normalized := object_fields(~milestone) ?? panic("milestone object copy cannot fail")
+    normalized["criteria"] = criteria
+    normalized["status"] = DataTree.Text(~status)
+    return DataTree.Object(normalized)
 }
 
 fn normalize_milestones(milestones: [DataTree], captured_day: String) [DataTree] -> {
@@ -510,7 +386,7 @@ fn normalize_epochs(epochs: [DataTree], current_epoch: DataTree) [DataTree] -> {
     out := [DataTree]{}
     loop epoch in epochs {
         fields := object_fields(~epoch)
-        if !active_present && !is_null(~current_epoch) && same_source_value(tree_field(~epoch, "id"), ~current_epoch) {
+        if !active_present && !is_null(~current_epoch) && tree_field(~epoch, "id").equal_unordered(~current_epoch) {
             fields["status"] = DataTree.Text("active")
         }
         out.push(DataTree.Object(fields))
@@ -549,21 +425,36 @@ fn normalize_meta(meta: DataTree) DataTree -> {
     return DataTree.Object(clean_fields)
 }
 
-fn milestone_progress(milestone: DataTree, cards: [DataTree], history_cards: [DataTree]) DataTree -> {
-    selected := [String:DataTree]{}
-    milestone_id :: tree_field(~milestone, "id")
-
+fn milestone_cards_index(cards: [DataTree], history_cards: [DataTree]) [String:[Int]] -> {
+    out := [String:[Int]]{}
+    history_index := 0
     loop card in history_cards {
-        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) {
-            card_id :: scalar_text(tree_field(~card, "id"))
-            selected[card_id] = ~card
+        key :: identity_key(tree_field(~card, "milestoneId"))
+        if key != "" {
+            bucket := out.get(key) ?? [Int]{}
+            bucket.push(-history_index - 1)
+            out[key] = bucket
         }
+        history_index += 1
     }
+    card_index := 0
     loop card in cards {
-        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) {
-            card_id :: scalar_text(tree_field(~card, "id"))
-            selected[card_id] = ~card
+        key :: identity_key(tree_field(~card, "milestoneId"))
+        if key != "" {
+            bucket := out.get(key) ?? [Int]{}
+            bucket.push(card_index)
+            out[key] = bucket
         }
+        card_index += 1
+    }
+    return out
+}
+
+fn milestone_progress(milestone: DataTree, linked_cards: [DataTree]) DataTree -> {
+    selected := [String:DataTree]{}
+    loop card in linked_cards {
+        card_id :: tree_field(~card, "id").to_text() ?? ""
+        selected[card_id] = ~card
     }
 
     total :: selected.len()
@@ -581,29 +472,56 @@ fn milestone_progress(milestone: DataTree, cards: [DataTree], history_cards: [Da
     ])
 }
 
-fn sync_milestone(milestone: DataTree, cards: [DataTree], history_cards: [DataTree]) DataTree -> {
-    progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+fn milestone_progress_scan(milestone: DataTree, cards: [DataTree], history_cards: [DataTree]) DataTree -> {
+    linked := [DataTree]{}
+    milestone_id :: tree_field(~milestone, "id")
+    loop card in history_cards {
+        if tree_field(~card, "milestoneId").equal_unordered(~milestone_id) -> linked.push(~card)
+    }
+    loop card in cards {
+        if tree_field(~card, "milestoneId").equal_unordered(~milestone_id) -> linked.push(~card)
+    }
+    return milestone_progress(~milestone, ~linked)
+}
+
+fn sync_milestone(milestone: DataTree, progress: DataTree) DataTree -> {
     total :: int_field(~progress, "total", 0)
     done :: int_field(~progress, "done", 0)
 
     if total == 0 || done != total {
-        out := object_fields(object_without(~milestone, ["verification", "metAt"]))
-        out["status"] = DataTree.Text("open")
-        return DataTree.Object(out)
+        open := object_fields(object_without(~milestone, ["verification", "metAt"])) ?? panic("milestone object copy cannot fail")
+        open["status"] = DataTree.Text("open")
+        return DataTree.Object(open)
     }
 
     if text_field(~milestone, "status", "") == "met" && javascript_truthy(tree_field(~milestone, "verification")) {
         return ~milestone
     }
 
-    out := object_fields(object_without(~milestone, ["verification", "metAt"]))
-    out["status"] = DataTree.Text("review-ready")
-    return DataTree.Object(out)
+    ready := object_fields(object_without(~milestone, ["verification", "metAt"])) ?? panic("milestone object copy cannot fail")
+    ready["status"] = DataTree.Text("review-ready")
+    return DataTree.Object(ready)
 }
 
 fn sync_milestones(milestones: [DataTree], cards: [DataTree], history_cards: [DataTree]) [DataTree] -> {
+    milestone_index := milestone_cards_index(~cards, ~history_cards)
     out := [DataTree]{}
-    loop milestone in milestones -> out.push(sync_milestone(~milestone, ~cards, ~history_cards))
+    loop milestone in milestones {
+        key :: identity_key(tree_field(~milestone, "id"))
+        progress := DataTree.Null
+        if key != "" {
+            positions :: milestone_index.get(key) ?? [Int]{}
+            linked := [DataTree]{}
+            loop position in positions {
+                if position < 0 {
+                    history_index := -position - 1
+                    linked.push(~history_cards[history_index])
+                } else { linked.push(~cards[position]) }
+            }
+            progress = milestone_progress(~milestone, ~linked)
+        } else { progress = milestone_progress_scan(~milestone, ~cards, ~history_cards) }
+        out.push(sync_milestone(~milestone, ~progress))
+    }
     return out
 }
 
@@ -641,22 +559,21 @@ fn normalize_state(tower: DataTree, history: DataTree, captured_day: String) Dat
     ])
 }
 
-fn linked_records(records: [DataTree], card: DataTree, field_name: String) [DataTree] !Never -> {
+fn linked_records_scan(records: [DataTree], card: DataTree, field_name: String) [DataTree] !Never -> {
     out := [DataTree]{}
     target :: tree_field(~card, "id")
     loop record in records {
-        if same_source_value(tree_field(~record, ~field_name), ~target) -> out.push(~record)
+        if tree_field(~record, ~field_name).equal_unordered(~target) -> out.push(~record)
     }
     return out
 }
 
-fn clearance_for(card: DataTree, decisions: [DataTree]) DataTree !Never -> {
-    target :: tree_field(~card, "id")
+fn clearance_for(decisions: [DataTree]) DataTree !Never -> {
     open_ids := [DataTree]{}
     total := 0
     ratified := 0
     loop decision in decisions {
-        if same_source_value(tree_field(~decision, "cardId"), ~target) && !bool_value(tree_field(~decision, "draft")) {
+        if !bool_value(tree_field(~decision, "draft")) {
             total += 1
             if text_field(~decision, "status", "") == "ratified" -> ratified += 1 else {
                 open_ids.push(tree_field(~decision, "id"))
@@ -680,41 +597,13 @@ fn blocking_decision(decision: DataTree) Bool !Never -> {
 
 fn reference_number(reference: String) Int !Never -> {
     text := ~reference
-    if (~text).starts_with("#") -> text = (~text).slice(1, (~text).len())
+    if (~text).starts_with("#") && (~text).len() > 1 -> text = (~text).slice(1, (~text).len() - 1)
     return Int.parse(~text) ?? -1
-}
-
-fn card_matches_id(card: DataTree, reference: String) Bool !Never -> {
-    card_id :: scalar_text(tree_field(~card, "id"))
-    return card_id == reference
-}
-
-fn card_matches_number(card: DataTree, number: Int) Bool !Never -> {
-    return int_field(~card, "num", -1) == number
-}
-
-fn card_for_reference(reference: DataTree, cards: [DataTree]) Int !Never -> {
-    reference_text :: scalar_text(~reference)
-    index := 0
-    loop card in cards {
-        if card_matches_id(~card, ~reference_text) -> return index
-        index += 1
-    }
-
-    number :: reference_number(~reference_text)
-    if number >= 0 {
-        index = 0
-        loop card in cards {
-            if card_matches_number(~card, number) -> return index
-            index += 1
-        }
-    }
-    return -1
 }
 
 fn open_decision_for_reference(reference: DataTree, decisions: [DataTree]) Bool !Never -> {
     loop decision in decisions {
-        if same_source_value(tree_field(~decision, "id"), ~reference) && text_field(~decision, "status", "") != "ratified" {
+        if tree_field(~decision, "id").equal_unordered(~reference) && text_field(~decision, "status", "") != "ratified" {
             return true
         }
     }
@@ -729,17 +618,16 @@ fn lane_record(lane: String, who: DataTree, label: String) DataTree !Never -> {
     ])
 }
 
-fn lane_of(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !Never -> {
+fn lane_of(card: DataTree, linked_decisions: [DataTree], blockers: [DataTree], blocker_labels: [String], acceptance_open: Bool) DataTree !Never -> {
     phase :: text_field(~card, "phase", "")
     if phase == "done" -> return lane_record("done", DataTree.Null, "Done")
     if phase == "frozen" {
         return lane_record("frozen", DataTree.Text("owner"), "Frozen — owner reactivates it")
     }
 
-    target :: tree_field(~card, "id")
     open_ids := [DataTree]{}
-    loop decision in decisions {
-        if same_source_value(tree_field(~decision, "cardId"), ~target) && blocking_decision(~decision) && text_field(~decision, "group", "") != "acceptance" {
+    loop decision in linked_decisions {
+        if blocking_decision(~decision) && text_field(~decision, "group", "") != "acceptance" {
             open_ids.push(tree_field(~decision, "id"))
         }
     }
@@ -754,32 +642,13 @@ fn lane_of(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !N
         ])
     }
 
-    blockers := [DataTree]{}
-    labels := [String]{}
-    for_blocked :: array_field(~card, "blockedBy")
-    loop reference in for_blocked {
-        found_index :: card_for_reference(~reference, ~cards)
-        if found_index >= 0 {
-            blocking_card :: ~cards[found_index]
-            if text_field(~blocking_card, "phase", "") != "done" {
-                blockers.push(~reference)
-                blocking_num :: int_field(~blocking_card, "num", 0)
-                labels.push("#{blocking_num}")
-            }
-        } else {
-            if open_decision_for_reference(~reference, ~decisions) {
-                blockers.push(~reference)
-                labels.push(scalar_text(~reference))
-            }
-        }
-    }
     if blockers.len() > 0 {
-        label_text :: labels.join(", ")
+        label_text :: blocker_labels.join(", ")
         return DataTree.Object([
             "lane": DataTree.Text("blocked"),
             "who": DataTree.Null,
             "label": DataTree.Text("Blocked by {label_text}"),
-            "blockers": DataTree.Array(blockers)
+            "blockers": DataTree.Array(~blockers)
         ])
     }
 
@@ -803,14 +672,6 @@ fn lane_of(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !N
     }
     if phase == "verify" {
         if bool_value(tree_field(~card, "needsAcceptance")) {
-            card_num :: int_field(~card, "num", 0)
-            expected :: "D-ACCEPT-{card_num}"
-            acceptance_open := false
-            loop decision in decisions {
-                if scalar_text(tree_field(~decision, "id")) == expected && text_field(~decision, "status", "") != "ratified" {
-                    acceptance_open = true
-                }
-            }
             if acceptance_open {
                 return lane_record("verify", DataTree.Text("owner"), "Owner visual/UX acceptance")
             }
@@ -821,9 +682,7 @@ fn lane_of(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !N
     return lane_record("blocked", DataTree.Null, "")
 }
 
-fn project_card(card: DataTree, decisions: [DataTree], cards: [DataTree], questions: [DataTree]) DataTree !Never -> {
-    linked_decisions :: linked_records(~decisions, ~card, "cardId")
-    linked_questions :: linked_records(~questions, ~card, "cardId")
+fn project_card(card: DataTree, linked_decisions: [DataTree], linked_questions: [DataTree], lane: DataTree) DataTree !Never -> {
     open_questions := 0
     loop question in linked_questions {
         if text_field(~question, "kind", "") != "message" && text_field(~question, "status", "") == "open" {
@@ -832,30 +691,123 @@ fn project_card(card: DataTree, decisions: [DataTree], cards: [DataTree], questi
     }
 
     out := object_fields(~card)
-    out["clearance"] = clearance_for(~card, ~decisions)
-    out["decisions"] = DataTree.Array(linked_decisions)
-    out["questions"] = DataTree.Array(linked_questions)
+    out["clearance"] = clearance_for(~linked_decisions)
+    out["decisions"] = DataTree.Array(~linked_decisions)
+    out["questions"] = DataTree.Array(~linked_questions)
     out["openQ"] = DataTree.Int(open_questions)
-    out["lane"] = lane_of(~card, ~decisions, ~cards)
+    out["lane"] = ~lane
     return DataTree.Object(out)
+}
+
+fn project_cards_with_context(selected_cards: [DataTree], all_cards: [DataTree], decisions: [DataTree], questions: [DataTree]) [DataTree] -> {
+    decisions_by_card := indexed_positions(~decisions, "cardId")
+    questions_by_card := indexed_positions(~questions, "cardId")
+    cards_by_id := [String:Int]{}
+    cards_by_num := [Int:Int]{}
+    decision_open_by_id := [String:Bool]{}
+    card_index := 0
+    loop candidate in all_cards {
+        card_id :: tree_field(~candidate, "id").to_text() ?? ""
+        if !cards_by_id.has_key(card_id) -> cards_by_id[card_id] = card_index
+        card_num :: int_field(~candidate, "num", -1)
+        if card_num >= 0 && !cards_by_num.has_key(card_num) -> cards_by_num[card_num] = card_index
+        card_index += 1
+    }
+    loop decision in decisions {
+        key :: identity_key(tree_field(~decision, "id"))
+        if key != "" {
+            if text_field(~decision, "status", "") != "ratified" -> decision_open_by_id[key] = true else if !decision_open_by_id.has_key(key) {
+                decision_open_by_id[key] = false
+            }
+        }
+    }
+
+    out := [DataTree]{}
+    loop card in selected_cards {
+        card_key :: identity_key(tree_field(~card, "id"))
+        linked_decisions := [DataTree]{}
+        linked_questions := [DataTree]{}
+        if card_key != "" {
+            decision_positions :: decisions_by_card.get(card_key) ?? [Int]{}
+            question_positions :: questions_by_card.get(card_key) ?? [Int]{}
+            loop index in decision_positions -> linked_decisions.push(~decisions[index])
+            loop index in question_positions -> linked_questions.push(~questions[index])
+        } else {
+            linked_decisions = linked_records_scan(~decisions, ~card, "cardId")
+            linked_questions = linked_records_scan(~questions, ~card, "cardId")
+        }
+
+        blockers := [DataTree]{}
+        blocker_labels := [String]{}
+        for_blocked :: array_field(~card, "blockedBy")
+        loop reference in for_blocked {
+            reference_text :: reference.to_text() ?? ""
+            blocking_index := cards_by_id.get(reference_text) ?? -1
+            if blocking_index < 0 {
+                number :: reference_number(~reference_text)
+                if number >= 0 -> blocking_index = cards_by_num.get(number) ?? -1
+            }
+            if blocking_index >= 0 {
+                blocking_card :: all_cards[blocking_index]
+                if text_field(~blocking_card, "phase", "") != "done" {
+                    blockers.push(~reference)
+                    blocking_num :: int_field(~blocking_card, "num", 0)
+                    blocker_labels.push("#{blocking_num}")
+                }
+            } else {
+                reference_key :: identity_key(~reference)
+                open := false
+                if reference_key != "" -> open = decision_open_by_id.get(reference_key) ?? false else {
+                    open = open_decision_for_reference(~reference, ~decisions)
+                }
+                if open {
+                    blockers.push(~reference)
+                    blocker_labels.push(reference.to_text() ?? "")
+                }
+            }
+        }
+
+        acceptance_open := false
+        if text_field(~card, "phase", "") == "verify" && bool_value(tree_field(~card, "needsAcceptance")) {
+            card_num :: int_field(~card, "num", 0)
+            expected_key :: identity_key(DataTree.Text("D-ACCEPT-{card_num}"))
+            acceptance_open = decision_open_by_id.get(expected_key) ?? false
+        }
+        lane :: lane_of(~card, ~linked_decisions, ~blockers, ~blocker_labels, acceptance_open)
+        out.push(project_card(~card, ~linked_decisions, ~linked_questions, ~lane))
+    }
+    return out
 }
 
 pub fn project_archived_card(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !Never -> {
     questions :: array_field(~card, "questions")
-    projected :: project_card(~card, ~decisions, ~cards, ~questions)
-    return object_with(~projected, "archived", DataTree.Bool(true))
+    selected := [DataTree]{}
+    selected.push(~card)
+    projected :: project_cards_with_context(~selected, ~cards, ~decisions, ~questions) ?? panic("archived card projection failed")
+    return object_with(~projected[0], "archived", DataTree.Bool(true))
 }
 
 fn project_cards(cards: [DataTree], decisions: [DataTree], questions: [DataTree]) [DataTree] -> {
-    out := [DataTree]{}
-    loop card in cards -> out.push(project_card(~card, ~decisions, ~cards, ~questions))
-    return out
+    return project_cards_with_context(~cards, ~cards, ~decisions, ~questions)
 }
 
 fn project_milestones(milestones: [DataTree], cards: [DataTree], history_cards: [DataTree]) [DataTree] -> {
+    milestone_index := milestone_cards_index(~cards, ~history_cards)
     out := [DataTree]{}
     loop milestone in milestones {
-        progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+        key :: identity_key(tree_field(~milestone, "id"))
+        progress := DataTree.Null
+        if key != "" {
+            positions :: milestone_index.get(key) ?? [Int]{}
+            linked := [DataTree]{}
+            loop position in positions {
+                if position < 0 {
+                    history_index := -position - 1
+                    linked.push(~history_cards[history_index])
+                } else { linked.push(~cards[position]) }
+            }
+            progress = milestone_progress(~milestone, ~linked)
+        } else { progress = milestone_progress_scan(~milestone, ~cards, ~history_cards) }
         out.push(object_with(~milestone, "progress", ~progress))
     }
     return out
@@ -1011,15 +963,15 @@ fn default_config() DataTree -> {
 
 fn public_config(config: DataTree) DataTree -> {
     if is_null(~config) -> return DataTree.Null
-    out := object_fields(default_config())
+    out := object_fields(default_config()) ?? panic("default config object copy cannot fail")
     config_subject := ~config
     out = if config_subject == {
         .Object(fields) -> merge_public_config_fields(~out, ~fields)
         else -> out
     }
 
-    terms := object_fields(tree_field(default_config(), "terms"))
-    raw_terms :: tree_field(~config, "terms")
+    terms := object_fields(tree_field(default_config(), "terms")) ?? panic("default terms object copy cannot fail")
+    raw_terms :: tree_field(~config, "terms") ?? panic("config terms copy cannot fail")
     terms = if raw_terms == {
         .Object(fields) -> merge_object_fields(~terms, ~fields)
         else -> terms
@@ -1045,24 +997,19 @@ fn parsed_unix_ms(text: String, date_only: Bool) ?Int -> {
     value := text
     if value == "" -> return None
     if date_only && value.len() <= 10 -> value = "{value}T00:00:00Z"
-    parsed :: time.parse_rfc3339(value) ? instant -> {
-        Val(instant.to_unix_ms())
-    }
-    ! _error -> {
-        return None
-    }
-    return parsed
+    instant :: time.parse_rfc3339(value) ?? return None
+    return Val(instant.to_unix_ms())
 }
 
 fn day_key(value: DataTree) String -> {
     text :: javascript_text_or_empty(value)
-    if text.len() >= 10 -> return text.slice(0, 10)
+    if text.len() >= 10 -> return text.slice(0, 9)
     return ""
 }
 
 fn older_than(value: DataTree, captured_at: String, days: Int) Bool -> {
     if !javascript_truthy(~value) -> return false
-    stamped :: parsed_unix_ms(scalar_text(~value), true) ?? return false
+    stamped :: parsed_unix_ms(value.to_text() ?? "", true) ?? return false
     captured :: parsed_unix_ms(~captured_at, false) ?? return false
     return captured - stamped > days * 86400000
 }
@@ -1173,9 +1120,9 @@ fn limited_events(events: [DataTree]) DataTree -> {
 }
 
 fn epoch_order(epoch: DataTree) Int -> {
-    order :: tree_field(~epoch, "order")
+    order :: tree_field(~epoch, "order") ?? panic("epoch order lookup cannot fail")
     if !is_null(~order) -> return int_value(~order, 999)
-    number :: tree_field(~epoch, "num")
+    number :: tree_field(~epoch, "num") ?? panic("epoch number lookup cannot fail")
     if !is_null(~number) -> return int_value(~number, 999)
     return 999
 }
@@ -1183,7 +1130,7 @@ fn epoch_order(epoch: DataTree) Int -> {
 fn current_epoch_id(epochs: [DataTree]) String -> {
     loop epoch in epochs {
         if text_field(~epoch, "status", "") == "active" {
-            return scalar_text(tree_field(~epoch, "id"))
+            return tree_field(~epoch, "id").to_text() ?? ""
         }
     }
     return ""
@@ -1193,7 +1140,7 @@ fn ordered_epochs(epochs: [DataTree], current: String) [DataTree] -> {
     current_epochs := [DataTree]{}
     other_epochs := [DataTree]{}
     loop epoch in epochs {
-        if scalar_text(tree_field(~epoch, "id")) == current -> current_epochs.push(~epoch) else {
+        if (tree_field(~epoch, "id").to_text() ?? "") == current -> current_epochs.push(~epoch) else {
             other_epochs.push(~epoch)
         }
     }
@@ -1206,7 +1153,7 @@ fn active_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
     count := 0
     loop card in cards {
         phase :: text_field(~card, "phase", "")
-        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && phase != "done" && phase != "frozen" {
+        if (tree_field(~card, "epoch").to_text() ?? "") == epoch_id && text_field(~card, "track", "") != "sidequest" && phase != "done" && phase != "frozen" {
             count += 1
         }
     }
@@ -1216,7 +1163,7 @@ fn active_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
 fn done_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
     count := 0
     loop card in cards {
-        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" {
+        if (tree_field(~card, "epoch").to_text() ?? "") == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" {
             count += 1
         }
     }
@@ -1225,7 +1172,7 @@ fn done_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
 
 fn done_card_ref(ref: DataTree, cards: [DataTree], epoch_id: String) Bool -> {
     loop card in cards {
-        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" && same_source_value(tree_field(~card, "id"), ~ref) {
+        if (tree_field(~card, "epoch").to_text() ?? "") == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" && tree_field(~card, "id").equal_unordered(~ref) {
             return true
         }
     }
@@ -1265,32 +1212,40 @@ fn burndown30(cards: [DataTree], events: [DataTree], epoch_id: String, captured_
     return DataTree.Array(out)
 }
 
-fn milestone_stalled_days(milestone: DataTree, cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
-    milestone_id :: tree_field(~milestone, "id")
+fn milestone_stalled_days(linked_cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
     linked_ids := [DataTree]{}
-    loop card in cards {
-        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) && !linked_ids.contains(tree_field(~card, "id")) {
-            linked_ids.push(tree_field(~card, "id"))
+    linked_id_keys := [String:Bool]{}
+    loop card in linked_cards {
+        card_id :: tree_field(~card, "id")
+        key :: identity_key(~card_id)
+        if key != "" -> linked_id_keys[key] = true else if !linked_ids.contains(~card_id) {
+            linked_ids.push(~card_id)
         }
     }
-    if linked_ids.len() == 0 -> return DataTree.Null
+    if linked_ids.len() == 0 && linked_id_keys.len() == 0 -> return DataTree.Null
 
     found := false
     hit := DataTree.Null
     loop event in events {
-        if !found && linked_ids.contains(tree_field(~event, "ref")) {
+        event_ref :: tree_field(~event, "ref") ?? panic("event reference lookup cannot fail")
+        event_key :: identity_key(~event_ref) ?? panic("event identity cannot fail")
+        linked := false
+        if event_key != "" -> linked = linked_id_keys.get(event_key) ?? false else {
+            linked = linked_ids.contains(~event_ref)
+        }
+        if !found && linked {
             found = true
             hit = ~event
         }
     }
     if !found -> return DataTree.Null
-    age :: age_days(tree_field(~hit, "at"), ~captured_at)
+    hit_at :: tree_field(~hit, "at") ?? panic("event timestamp lookup cannot fail")
+    age :: age_days(hit_at, ~captured_at) ?? panic("event age calculation cannot fail")
     if age == Float.INFINITY -> return DataTree.Null
     return DataTree.Int(Int.from_float(math.floor(age)) ?? 0)
 }
 
-fn radar_milestone(milestone: DataTree, cards: [DataTree], history_cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
-    progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+fn radar_milestone(milestone: DataTree, progress: DataTree, linked_cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
     return DataTree.Object([
         "id": tree_field(~milestone, "id"),
         "title": tree_field(~milestone, "title"),
@@ -1300,18 +1255,8 @@ fn radar_milestone(milestone: DataTree, cards: [DataTree], history_cards: [DataT
         "total": tree_field(~progress, "total"),
         "done": tree_field(~progress, "done"),
         "reviewReady": tree_field(~progress, "reviewReady"),
-        "stalledDays": milestone_stalled_days(~milestone, ~cards, ~events, ~captured_at)
+        "stalledDays": milestone_stalled_days(~linked_cards, ~events, ~captured_at)
     ])
-}
-
-fn radar_milestones(milestones: [DataTree], epoch_id: String, cards: [DataTree], history_cards: [DataTree], events: [DataTree], captured_at: String) [DataTree] -> {
-    out := [DataTree]{}
-    loop milestone in milestones {
-        if scalar_text(tree_field(~milestone, "epochId")) == epoch_id && !javascript_truthy(tree_field(~milestone, "archived")) {
-            out.push(radar_milestone(~milestone, ~cards, ~history_cards, ~events, ~captured_at))
-        }
-    }
-    return out
 }
 
 fn radar_data(epochs: [DataTree], milestones: [DataTree], cards: [DataTree], events: [DataTree], history_cards: [DataTree], captured_at: String) DataTree -> {
@@ -1320,12 +1265,43 @@ fn radar_data(epochs: [DataTree], milestones: [DataTree], cards: [DataTree], eve
         status :: text_field(~epoch, "status", "")
         if status != "arrived" && status != "done" -> active_epochs.push(~epoch)
     }
+    milestone_index := milestone_cards_index(~cards, ~history_cards)
+    active_milestone_index := indexed_positions(~cards, "milestoneId")
     ordered :: ordered_epochs(active_epochs, current_epoch_id(~epochs))
-    captured_day :: captured_at.slice(0, 10)
+    captured_day :: captured_at.slice(0, 9)
     out := [DataTree]{}
     loop epoch in ordered {
-        epoch_id :: scalar_text(tree_field(~epoch, "id"))
-        milestone_values :: radar_milestones(~milestones, ~epoch_id, ~cards, ~history_cards, ~events, ~captured_at)
+        epoch_id :: tree_field(~epoch, "id").to_text() ?? ""
+        milestone_values := [DataTree]{}
+        loop milestone in milestones {
+            if (tree_field(~milestone, "epochId").to_text() ?? "") == epoch_id && !javascript_truthy(tree_field(~milestone, "archived")) {
+                key :: identity_key(tree_field(~milestone, "id"))
+                progress := DataTree.Null
+                linked := [DataTree]{}
+                active_linked := [DataTree]{}
+                if key != "" {
+                    positions :: milestone_index.get(key) ?? [Int]{}
+                    loop position in positions {
+                        if position < 0 {
+                            history_index := -position - 1
+                            linked.push(~history_cards[history_index])
+                        } else { linked.push(~cards[position]) }
+                    }
+                    active_positions :: active_milestone_index.get(key) ?? [Int]{}
+                    loop position in active_positions -> active_linked.push(~cards[position])
+                    progress = milestone_progress(~milestone, ~linked)
+                } else {
+                    progress = milestone_progress_scan(~milestone, ~cards, ~history_cards)
+                    milestone_id :: tree_field(~milestone, "id")
+                    loop card in cards {
+                        if tree_field(~card, "milestoneId").equal_unordered(~milestone_id) {
+                            active_linked.push(~card)
+                        }
+                    }
+                }
+                milestone_values.push(radar_milestone(~milestone, ~progress, ~active_linked, ~events, ~captured_at))
+            }
+        }
         milestone_total :: milestone_values.len()
         milestones_met := 0
         loop milestone in milestone_values {
@@ -1358,7 +1334,7 @@ fn shifted_day(day: String, offset: Int) String -> {
 
 pub fn project_state(tower: DataTree, history: DataTree, config: DataTree, captured_at: String) DataTree -> {
     validated_captured_at :: required_capture_at(~captured_at)
-    captured_day :: validated_captured_at.slice(0, 10)
+    captured_day :: validated_captured_at.slice(0, 9)
     normalized :: normalize_state(~tower, ~history, ~captured_day)
     meta :: tree_field(~normalized, "meta")
     epochs :: array_field(~normalized, "epochs")
@@ -1411,118 +1387,69 @@ fn detail_finding(rule: String, reference: String, detail: String) DataTree -> {
     ])
 }
 
-fn value_string_null(value: DataTree) String -> {
+// Tower's lint prose mirrors JavaScript String(value), including `null` and
+// container text. Keep this named domain policy separate from DataTree.to_text.
+fn javascript_value_string_null(value: DataTree) String -> {
     return if value == {
         .Null -> "null"
-        else -> value_string_bool(~value)
+        else -> javascript_value_string_bool(~value)
     }
 }
 
-fn value_string_bool(value: DataTree) String -> {
+fn javascript_value_string_bool(value: DataTree) String -> {
     return if value == {
         .Bool(flag) -> "{flag}"
-        else -> value_string_int(~value)
+        else -> javascript_value_string_int(~value)
     }
 }
 
-fn value_string_int(value: DataTree) String -> {
+fn javascript_value_string_int(value: DataTree) String -> {
     return if value == {
         .Int(number) -> "{number}"
-        else -> value_string_float(~value)
+        else -> javascript_value_string_float(~value)
     }
 }
 
-fn value_string_float(value: DataTree) String -> {
+fn javascript_value_string_float(value: DataTree) String -> {
     return if value == {
         .Float(number) -> "{number}"
-        else -> value_string_text(~value)
+        else -> javascript_value_string_text(~value)
     }
 }
 
-fn value_string_text(value: DataTree) String -> {
+fn javascript_value_string_text(value: DataTree) String -> {
     return if value == {
         .Text(text) -> ~text
-        else -> value_string_array(~value)
+        else -> javascript_value_string_array(~value)
     }
 }
 
-fn value_string_array(value: DataTree) String -> {
+fn javascript_value_string_array(value: DataTree) String -> {
     return if value == {
         .Array(_items) -> "[object Object]"
-        else -> value_string_object(~value)
+        else -> javascript_value_string_object(~value)
     }
 }
 
-fn value_string_object(value: DataTree) String -> {
+fn javascript_value_string_object(value: DataTree) String -> {
     return if value == {
         .Object(_entries) -> "[object Object]"
         else -> ""
     }
 }
 
-fn value_string(value: DataTree) String -> { return value_string_null(~value) }
+fn javascript_value_string(value: DataTree) String -> { return javascript_value_string_null(~value) }
 
 fn text_at(tree: DataTree, name: String) String -> {
     value :: tree_field(tree, name)
     if is_null(~value) -> return ""
-    return value_string(~value)
+    return javascript_value_string(~value)
 }
 
 fn has_text(value: DataTree) Bool -> {
-    if !truthy(~value) -> return false
-    return value_string(~value).trim() != ""
+    if !javascript_truthy(~value) -> return false
+    return javascript_value_string(~value).trim() != ""
 }
-
-fn truthy_null(value: DataTree) Bool -> {
-    return if value == {
-        .Null -> false
-        else -> truthy_bool(~value)
-    }
-}
-
-fn truthy_bool(value: DataTree) Bool -> {
-    return if value == {
-        .Bool(flag) -> flag
-        else -> truthy_int(~value)
-    }
-}
-
-fn truthy_int(value: DataTree) Bool -> {
-    return if value == {
-        .Int(number) -> number != 0
-        else -> truthy_float(~value)
-    }
-}
-
-fn truthy_float(value: DataTree) Bool -> {
-    return if value == {
-        .Float(number) -> number != 0.0 && !math.is_nan(number)
-        else -> truthy_text(~value)
-    }
-}
-
-fn truthy_text(value: DataTree) Bool -> {
-    return if value == {
-        .Text(text) -> text != ""
-        else -> truthy_array(~value)
-    }
-}
-
-fn truthy_array(value: DataTree) Bool -> {
-    return if value == {
-        .Array(_items) -> true
-        else -> truthy_object(~value)
-    }
-}
-
-fn truthy_object(value: DataTree) Bool -> {
-    return if value == {
-        .Object(_entries) -> true
-        else -> true
-    }
-}
-
-fn truthy(value: DataTree) Bool -> { return truthy_null(~value) }
 
 fn age_days(value: DataTree, captured_at: String) Float -> {
     raw_value :: value.text() ?? return Float.INFINITY
@@ -1547,7 +1474,7 @@ fn criteria_settled(card: DataTree) Bool -> {
     items :: list_at(card, "criteria")
     if items.len() == 0 -> return false
     loop item in items {
-        status :: text_at(item, "status")
+        status :: text_at(item, "status") ?? panic("criterion status lookup cannot fail")
         if status != "met" && status != "verified" -> return false
     }
     return true
@@ -1574,7 +1501,7 @@ fn rule_done_without_evidence(cards: [DataTree]) [DataTree] -> {
 fn rule_claimed_idle(cards: [DataTree], captured_at: String) [DataTree] -> {
     findings := [DataTree]{}
     loop card in cards {
-        if !truthy(tree_field(card, "assignee")) -> next
+        if !javascript_truthy(tree_field(card, "assignee")) -> next
         phase :: text_at(card, "phase")
         if phase != "building" && phase != "ready" -> next
         age :: age_days(tree_field(card, "updated"), ~captured_at)
@@ -1595,12 +1522,12 @@ fn rule_missing_attribution(events: [DataTree]) [DataTree] -> {
     loop index in 0..<limit {
         event :: events[index]
         by :: tree_field(event, "by")
-        if truthy(by) && value_string(by).trim() != "" -> next
+        if javascript_truthy(by) && javascript_value_string(by).trim() != "" -> next
         ref_value :: tree_field(event, "ref")
         reference := "(no ref)"
-        if truthy(ref_value) -> reference = value_string(ref_value)
-        action :: value_string(tree_field(event, "action"))
-        at :: value_string(tree_field(event, "at"))
+        if javascript_truthy(ref_value) -> reference = javascript_value_string(ref_value)
+        action :: javascript_value_string(tree_field(event, "action"))
+        at :: javascript_value_string(tree_field(event, "at"))
         findings.push(finding("missing-attribution", reference, "event \"{action}\" at {at} has no attribution (by)"))
     }
     return findings
@@ -1615,7 +1542,7 @@ fn sentence_count(text: String) Int -> { re.split(Regex{"[.!?]\s+"}, text.trim()
 fn prose_density(label: String, value: DataTree) [String] -> {
     gaps := [String]{}
     if !has_text(value) -> return gaps
-    text :: value_string(value).trim()
+    text :: javascript_value_string(value).trim()
     paragraphs :: re.split(Regex{"\n\s*\n"}, text)
     paragraph_number := 0
     loop paragraph in paragraphs {
@@ -1640,7 +1567,7 @@ fn prose_density(label: String, value: DataTree) [String] -> {
 fn example_prose_density(label: String, value: DataTree) [String] -> {
     gaps := [String]{}
     if !has_text(value) -> return gaps
-    text :: value_string(value)
+    text :: javascript_value_string(value)
     lines :: re.split(Regex{"\n"}, text)
     line_number := 0
     loop line in lines {
@@ -1664,7 +1591,7 @@ fn word_count(text: String) Int -> {
 
 fn option_key_text(option: DataTree) String -> {
     key :: tree_field(option, "key")
-    if truthy(key) -> return value_string(key)
+    if javascript_truthy(key) -> return javascript_value_string(key)
     return "?"
 }
 
@@ -1701,7 +1628,7 @@ fn plain_language_gaps(decision: DataTree) [String] -> {
     loop comparison in comparisons {
         language_value :: tree_field(comparison, "lang")
         language := "?"
-        if truthy(language_value) -> language = value_string(language_value)
+        if javascript_truthy(language_value) -> language = javascript_value_string(language_value)
         prose = prose_density("comparison {language}", tree_field(comparison, "note"))
         loop gap in prose -> gaps.push(gap)
     }
@@ -1732,7 +1659,8 @@ fn plain_language_gaps(decision: DataTree) [String] -> {
 
     passes :: tree_field(decision, "reviewPasses")
     loop key in review_pass_keys() {
-        prose = prose_density("reviewPasses.{key}", tree_field(passes, key))
+        summary :: review_pass_summary(~key, tree_field(~passes, ~key))
+        prose = prose_density("reviewPasses.{key}", ~summary)
         loop gap in prose -> gaps.push(gap)
     }
 
@@ -1751,7 +1679,7 @@ fn option_key_list(options: [DataTree]) [String] -> {
     keys := [String]{}
     loop option in options {
         key :: tree_field(option, "key")
-        if truthy(key) -> keys.push(value_string(key))
+        if javascript_truthy(key) -> keys.push(javascript_value_string(key))
     }
     return keys
 }
@@ -1763,7 +1691,7 @@ fn missing_option_labels(options: [DataTree], field: String) [String] -> {
         if !has_text(tree_field(option, field)) {
             key :: tree_field(option, "key")
             label := "#{missing_index + 1}"
-            if truthy(key) -> label = value_string(key)
+            if javascript_truthy(key) -> label = javascript_value_string(key)
             labels.push(label)
             missing_index += 1
         }
@@ -1791,6 +1719,55 @@ fn recommendation_has_reason(why_not: [DataTree], key: String) Bool -> {
         return has_text(tree_field(~item, "reason"))
     }
     return false
+}
+
+fn no_dissent_metadata() [String] -> [String]{}
+
+fn missing_dissent_metadata_gap() [String] -> {
+    [String]{"reviewPasses.adversarial (must begin with `Author model family: <family>. Adversarial model family: <family>.`)"}
+}
+
+fn dissent_metadata(pass: String) DataTree -> {
+    prefix :: "Author model family: "
+    if !pass.starts_with(prefix) -> return DataTree.Null
+    families :: pass.split_once(". Adversarial model family: ") ?? return DataTree.Null
+    if !families.before.starts_with(prefix) -> return DataTree.Null
+    author :: families.before.slice(prefix.len(), families.before.len() - prefix.len()).trim()
+    adversarial_and_summary :: families.after.split_once(".") ?? return DataTree.Null
+    adversarial :: adversarial_and_summary.before.trim()
+    if author == "" || adversarial == "" -> return DataTree.Null
+    return DataTree.Object([
+        "author": DataTree.Text(~author),
+        "adversarial": DataTree.Text(~adversarial),
+        "summary": DataTree.Text(adversarial_and_summary.after.trim())
+    ])
+}
+
+fn review_pass_summary(key: String, pass: DataTree) DataTree -> {
+    if key != "adversarial" -> return ~pass
+    return if pass == {
+        .Text(text) -> {
+            metadata :: dissent_metadata(~text) ?? panic("dissent metadata extraction cannot fail")
+            if is_null(~metadata) -> return DataTree.Text(~text)
+            return DataTree.Text(text_at(~metadata, "summary") ?? panic("dissent summary lookup cannot fail"))
+
+        }
+        else -> ~pass
+    }
+}
+
+fn dissent_metadata_gaps(decision: DataTree) [String] -> {
+    passes :: tree_field(~decision, "reviewPasses")
+    adversarial :: tree_field(~passes, "adversarial")
+    text :: adversarial.text() ?? return missing_dissent_metadata_gap()
+    metadata :: dissent_metadata(~text)
+    if is_null(~metadata) -> return missing_dissent_metadata_gap()
+    author :: re.replace(Regex{"[\\s_-]+"}, "-", text_at(~metadata, "author").to_lower())
+    adversarial_family :: re.replace(Regex{"[\\s_-]+"}, "-", text_at(~metadata, "adversarial").to_lower())
+    if author == adversarial_family {
+        return [String]{"reviewPasses.adversarial (author and adversarial model families must differ)"}
+    }
+    return no_dissent_metadata()
 }
 
 fn review_pass_text_gap(key: String, text: String) String -> {
@@ -1829,7 +1806,7 @@ fn ballot_gaps(decision: DataTree) [String] -> {
     if !has_text(tree_field(decision, "gist")) -> missing.push("gist")
 
     lesson :: tree_field(decision, "lesson")
-    if !has_text(lesson) -> missing.push("lesson") else if paragraph_count(value_string(lesson)) > 1 {
+    if !has_text(lesson) -> missing.push("lesson") else if paragraph_count(javascript_value_string(lesson)) > 1 {
         missing.push("lesson (one paragraph maximum)")
     }
 
@@ -1865,9 +1842,9 @@ fn ballot_gaps(decision: DataTree) [String] -> {
 
     rec_value :: tree_field(decision, "rec")
     rec_text := ""
-    if truthy(rec_value) -> rec_text = value_string(rec_value)
-    if !truthy(rec_value) || rec_text.trim() == "" -> missing.push("rec")
-    if truthy(rec_value) && !option_keys.contains(rec_text) {
+    if javascript_truthy(rec_value) -> rec_text = javascript_value_string(rec_value)
+    if !javascript_truthy(rec_value) || rec_text.trim() == "" -> missing.push("rec")
+    if javascript_truthy(rec_value) && !option_keys.contains(rec_text) {
         missing.push("rec (must match an option key)")
     }
 
@@ -1890,12 +1867,14 @@ fn ballot_gaps(decision: DataTree) [String] -> {
         passes :: tree_field(decision, "reviewPasses")
         if is_null(~passes) || !is_object(~passes) -> missing.push("reviewPasses") else {
             loop key in review_pass_keys() {
-                summary :: tree_field(passes, key)
+                summary :: review_pass_summary(~key, tree_field(~passes, ~key))
                 gap :: review_pass_gap(~key, ~summary)
                 if gap != "" -> missing.push(gap)
             }
             unexpected_gaps :: unexpected_review_pass_gaps(~passes)
             loop gap in unexpected_gaps -> missing.push(gap)
+            dissent_gaps :: dissent_metadata_gaps(~decision)
+            loop gap in dissent_gaps -> missing.push(gap)
         }
     } else if ballot_mode == "short" {
         if !has_text(tree_field(decision, "shortAuthorizedBy")) -> missing.push("shortAuthorizedBy")
@@ -1915,7 +1894,7 @@ fn rule_ballot_gaps(decisions: [DataTree]) [DataTree] -> {
     findings := [DataTree]{}
     loop decision in decisions {
         if text_at(decision, "status") == "ratified" -> next
-        if truthy(tree_field(decision, "draft")) -> next
+        if javascript_truthy(tree_field(decision, "draft")) -> next
         if text_at(decision, "group") == "acceptance" -> next
         gaps :: ballot_gaps(decision)
         if gaps.len() == 0 -> next
@@ -1929,7 +1908,7 @@ fn rule_ballot_gaps(decisions: [DataTree]) [DataTree] -> {
 fn rule_stale_draft(decisions: [DataTree], captured_at: String) [DataTree] -> {
     findings := [DataTree]{}
     loop decision in decisions {
-        if !truthy(tree_field(decision, "draft")) -> next
+        if !javascript_truthy(tree_field(decision, "draft")) -> next
         age :: age_days(tree_field(decision, "created"), ~captured_at)
         if age <= 7.0 -> next
         id :: text_at(decision, "id")
@@ -1942,7 +1921,7 @@ fn rule_stale_draft(decisions: [DataTree], captured_at: String) [DataTree] -> {
 fn card_resolves(cards: [DataTree], reference: String) Bool -> {
     loop card in cards {
         id :: tree_field(~card, "id")
-        if !is_null(~id) && value_string(~id) == reference -> return true
+        if !is_null(~id) && javascript_value_string(~id) == reference -> return true
     }
     number_text := reference
     if reference.starts_with("#") -> number_text = reference.replace("#", "")
@@ -1960,7 +1939,7 @@ fn rule_orphan_blockers(cards: [DataTree], decisions: [DataTree], history_cards:
     loop card in cards {
         blocked_by :: list_at(card, "blockedBy")
         loop blocker in blocked_by {
-            reference :: value_string(blocker)
+            reference :: javascript_value_string(blocker)
             if card_resolves(cards, reference) -> next
             if card_resolves(history_cards, reference) -> next
             if decision_ids.contains(reference) -> next
@@ -1980,8 +1959,10 @@ fn rule_blocker_unpopulated(cards: [DataTree]) [DataTree] -> {
         plan :: tree_field(card, "plan")
         if !has_text(plan) -> next
         if list_at(card, "blockedBy").len() > 0 -> next
-        lower :: value_string(plan).to_lower()
-        if re.is_match(Regex{"\b(?:blockedby\s*:\s*none|no blockers?)\b"}, lower) -> next
+        lower :: javascript_value_string(plan).to_lower()
+        if re.is_match(Regex{"(^|[^a-z0-9_])(?:blockedby\s*:\s*none|no blockers?)([^a-z0-9_]|$)"}, lower) {
+            next
+        }
         number :: int_at(card, "num")
         title :: text_at(card, "title")
         findings.push(finding("blocker-unpopulated", "#{number}", "#{number} \"{title}\" has a plan but empty blockedBy — record prerequisites (or write \"blockedBy: none\" in the plan)"))
@@ -2021,7 +2002,7 @@ fn positive_evidence(text: String) Bool -> {
 }
 
 fn evidence_conflicts(evidence: String) Bool -> {
-    prose :: re.replace_all(Regex{"`[^`]*`"}, " ", evidence)
+    prose :: re.replace(Regex{"`[^`]*`"}, " ", evidence)
     has_positive :: positive_evidence(~prose)
     sentences :: re.split(Regex{"\n+|[.!?]\s+"}, prose)
     loop sentence in sentences {
@@ -2047,8 +2028,8 @@ fn rule_criteria_evidence_conflicts(cards: [DataTree]) [DataTree] -> {
             status :: text_at(item, "status")
             if status != "met" && status != "verified" -> next
             evidence_value :: tree_field(item, "evidence")
-            if !truthy(evidence_value) -> next
-            evidence :: value_string(evidence_value).trim()
+            if !javascript_truthy(evidence_value) -> next
+            evidence :: javascript_value_string(evidence_value).trim()
             if evidence == "" -> next
             if !evidence_conflicts(evidence) -> next
             number :: int_at(card, "num")
@@ -2091,14 +2072,14 @@ fn reference_tokens(body: String) [String] -> {
 
 fn card_open(card: DataTree) Bool -> {
     if is_null(~card) -> return false
-    phase :: text_at(~card, "phase")
+    phase :: text_at(~card, "phase") ?? panic("card phase lookup cannot fail")
     return phase != "done" && phase != "frozen"
 }
 
 fn card_identity(card: DataTree) String -> {
     id :: tree_field(~card, "id")
-    if !is_null(~id) -> return value_string(~id)
-    number :: int_at(~card, "num")
+    if !is_null(~id) -> return javascript_value_string(~id)
+    number :: int_at(~card, "num") ?? panic("card number lookup cannot fail")
     return "#{number}"
 }
 
@@ -2108,8 +2089,8 @@ fn duplicate_findings(cards: [DataTree]) [DataTree] -> {
     open_tokens := [[String]]{}
     loop card in cards {
         if !card_open(~card) -> next
-        open_cards.push(card)
         open_tokens.push(reference_tokens(text_at(~card, "body")))
+        open_cards.push(card)
     }
 
     seen_tokens := [String]{}
@@ -2120,11 +2101,13 @@ fn duplicate_findings(cards: [DataTree]) [DataTree] -> {
     loop i in 0..<open_cards.len() {
         loop token in open_tokens[i] {
             if seen_tokens.contains(token) -> next
-            seen_tokens.push(token)
             matching := [Int]{}
             loop j in 0..<open_cards.len() {
                 if open_tokens[j].contains(token) -> matching.push(j)
             }
+            label := ""
+            if matching.len() >= 2 -> label = reference_label(token)
+            seen_tokens.push(token)
             if matching.len() < 2 -> next
 
             key := ""
@@ -2142,8 +2125,8 @@ fn duplicate_findings(cards: [DataTree]) [DataTree] -> {
             if group_index < 0 {
                 group_keys.push(key)
                 group_cards.push(matching)
-                group_references.push([reference_label(token)])
-            } else { group_references[group_index].push(reference_label(token)) }
+                group_references.push([label])
+            } else { group_references[group_index].push(label) }
         }
     }
 
@@ -2157,7 +2140,7 @@ fn duplicate_findings(cards: [DataTree]) [DataTree] -> {
             if card_text != "" -> card_text += "; "
             title :: tree_field(~open_cards[index], "title")
             title_text := "(untitled)"
-            if !is_null(~title) -> title_text = value_string(~title)
+        if !is_null(~title) -> title_text = javascript_value_string(~title)
             card_text += "#{number} \"{title_text}\""
         }
         references :: group_references[group_index].join(", ")
@@ -2211,15 +2194,8 @@ pub fn lint_findings(tower: DataTree, history: DataTree) [DataTree] -> {
 
 fn live_tower_root() String -> "plugins/tower/.tower"
 
-fn path_is_under(path: String, root: String) Bool -> {
-    candidate :: path.replace("\\", "/")
-    base :: root.replace("\\", "/")
-    if candidate == base -> return true
-    return candidate.starts_with("{base}/")
-}
-
 fn paths_overlap(left: String, right: String) Bool -> {
-    return path_is_under(~left, ~right) || path_is_under(~right, ~left)
+    return Path.from(left).is_within(Path.from(right)) || Path.from(right).is_within(Path.from(left))
 }
 
 fn canonical_live_root() String -> {
@@ -2308,14 +2284,14 @@ pub fn load_snapshot(dir: String) [String:DataTree] -> {
         verified[file] = verify_file_hash(~entry, ~date, ~file, ~path)
     }
 
-    tower :: parse_verified_json(verified["tower.json"], "tower.json")
+    tower_tree :: parse_verified_json(verified["tower.json"], "tower.json")
     history :: parse_verified_json(verified["history.json"], "history.json")
     config :: parse_verified_json(verified["config.json"], "config.json")
     captured_at :: required_capture_at(verified["capture-time.txt"])
-    captured_value :: json.parse("\"{captured_at}\"") ?? panic("snapshot capture time is not valid JSON")
+    captured_value :: DataTree.Text(~captured_at)
 
     return [
-        "tower": tower,
+        "tower": tower_tree,
         "history": history,
         "config": config,
         "capturedAt": captured_value
@@ -2334,11 +2310,11 @@ pub fn snapshot_captured_at(snapshot: [String:DataTree]) String -> {
 }
 
 pub fn project_snapshot(snapshot: [String:DataTree]) DataTree -> {
-    tower :: snapshot_tower(~snapshot)
+    tower_tree :: snapshot_tower(~snapshot)
     history :: snapshot_history(~snapshot)
     config :: snapshot_config(~snapshot)
     captured_at :: snapshot_captured_at(~snapshot)
-    return project_state(~tower, ~history, ~config, ~captured_at)
+    return project_state(~tower_tree, ~history, ~config, ~captured_at)
 }
 
 fn server_text_at(tree: DataTree, name: String) String !Never -> {
@@ -2352,12 +2328,9 @@ fn revision(state: DataTree) Int !Never -> {
 }
 
 fn query_value(path: String, wanted: String) String !Never -> {
-    query :: path.split_once("?") ?? return ""
-    loop pair in query.after.split("&").to_list() {
-        fields :: pair.split_once("=") ?? next
-        key :: url.percent_decode(fields.before) ?? ""
-        if key != wanted -> next
-        return url.percent_decode(fields.after) ?? ""
+    parsed :: url.parse("http://tower{path}") ?? return ""
+    loop pair in parsed.query_pairs() {
+        if pair.len() > 1 && pair[0] == wanted -> return pair[1]
     }
     return ""
 }
@@ -2368,9 +2341,7 @@ fn card_matches(card: DataTree, reference: String) Bool !Never -> {
     if server_text_at(~card, "id") == reference -> return true
 
     number :: int_at(~card, "num")
-    if reference.starts_with("#") {
-        return number == (Int.parse(reference.slice(1, reference.len())) ?? -1)
-    }
+    if reference.starts_with("#") -> return number == reference_number(~reference)
     return number == (Int.parse(reference) ?? -1)
 }
 
@@ -2404,10 +2375,10 @@ pub fn project_snapshot_dir(dir: String) DataTree -> {
 
 pub fn lint_snapshot_dir(dir: String) DataTree -> {
     snapshot :: load_snapshot(dir)
-    tower :: snapshot_tower(~snapshot)
+    tower_tree :: snapshot_tower(~snapshot)
     history :: snapshot_history(~snapshot)
     captured_at :: snapshot_captured_at(~snapshot)
-    return DataTree.Array(lint_findings_at(~tower, ~history, ~captured_at))
+    return DataTree.Array(lint_findings_at(~tower_tree, ~history, ~captured_at))
 }
 
 fn api_error(status: Int, code: String, message: String) HTTPResponse !HTTPError -> {
@@ -2429,7 +2400,8 @@ fn card_response(req: HTTPRequest, state: DataTree, history: DataTree) HTTPRespo
         return api_error(400, "E_BAD_REQUEST", "GET /api/card requires an id query parameter")
     }
 
-    live_card :: find_card(list_at(~state, "cards"), ~reference)
+    state_cards :: list_at(~state, "cards") ?? panic("state card lookup cannot fail")
+    live_card :: find_card(state_cards, ~reference) ?? panic("live card lookup cannot fail")
     if !is_null(~live_card) {
         payload :: DataTree.Object([
             "rev": DataTree.Int(revision(~state)),
@@ -2438,16 +2410,17 @@ fn card_response(req: HTTPRequest, state: DataTree, history: DataTree) HTTPRespo
         return Ok(http_server.json(200, payload))
     }
 
-    history_decisions :: list_at(~history, "decisions")
-    history_cards :: list_at(~history, "cards")
-    archived_value :: find_card(~history_cards, ~reference)
+    history_decisions :: list_at(~history, "decisions") ?? panic("history decision lookup cannot fail")
+    history_cards :: list_at(~history, "cards") ?? panic("history card lookup cannot fail")
+    archived_value :: find_card(~history_cards, ~reference) ?? panic("archived card lookup cannot fail")
     if is_null(~archived_value) {
         return api_error(404, "E_NOT_FOUND", "card {reference} is not present in the snapshot")
     }
 
+    archived_card :: project_archived_card(~archived_value, ~history_decisions, ~history_cards) ?? panic("archived card projection cannot fail")
     payload :: DataTree.Object([
         "rev": DataTree.Int(revision(~state)),
-        "card": project_archived_card(~archived_value, ~history_decisions, ~history_cards)
+        "card": archived_card
     ])
     return Ok(http_server.json(200, payload))
 }
@@ -2487,9 +2460,10 @@ fn history_response(req: HTTPRequest, _state: DataTree, history: DataTree) HTTPR
         return Ok(http_server.json(200, payload))
     }
 
+    selected_count :: selected.len()
     payload :: DataTree.Object([
         "cards": DataTree.Array(selected),
-        "count": DataTree.Int(selected.len())
+        "count": DataTree.Int(selected_count)
     ])
     return Ok(http_server.json(200, payload))
 }
@@ -2518,7 +2492,7 @@ fn stream_response(state: DataTree) HTTPResponse !HTTPError -> {
         .header("cache-control", "no-cache"))
 }
 
-fn read_only_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn read_only_response() HTTPResponse !HTTPError -> {
     return api_error(405, "E_READ_ONLY", "Jet Tower shadow is read-only; POST, PUT, PATCH, and DELETE are unavailable")
 }
 
@@ -2540,11 +2514,11 @@ fn js_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
 
 pub fn serve(snapshot_dir: String, port: String) {
     snapshot :: load_snapshot(snapshot_dir)
-    tower :: snapshot_tower(~snapshot)
+    tower_tree :: snapshot_tower(~snapshot)
     history :: snapshot_history(~snapshot)
     captured_at :: snapshot_captured_at(~snapshot)
     state :: project_snapshot(~snapshot)
-    lint :: DataTree.Array(lint_findings_at(~tower, ~history, ~captured_at))
+    lint :: DataTree.Array(lint_findings_at(~tower_tree, ~history, ~captured_at))
 
     mux :: http_server.mux()
     mux.get("/", (req: HTTPRequest) -> index_response(req))
@@ -2559,14 +2533,12 @@ pub fn serve(snapshot_dir: String, port: String) {
     mux.get("/api/version", (_req: HTTPRequest) -> version_response(~state, ~captured_at))
     mux.get("/api/stream", (_req: HTTPRequest) -> stream_response(~state))
 
-    mux.post("/api", (req: HTTPRequest) -> read_only_response(req))
-    mux.post("/api/*path", (req: HTTPRequest) -> read_only_response(req))
-    mux.put("/api", (req: HTTPRequest) -> read_only_response(req))
-    mux.put("/api/*path", (req: HTTPRequest) -> read_only_response(req))
-    mux.patch("/api", (req: HTTPRequest) -> read_only_response(req))
-    mux.patch("/api/*path", (req: HTTPRequest) -> read_only_response(req))
-    mux.delete("/api", (req: HTTPRequest) -> read_only_response(req))
-    mux.delete("/api/*path", (req: HTTPRequest) -> read_only_response(req))
+    // Refuse every mutating request, including paths outside /api.
+    // This shadow has no mutation surface and never writes its snapshot.
+    mux.post("/*path", (_request: HTTPRequest) -> read_only_response())
+    mux.put("/*path", (_request: HTTPRequest) -> read_only_response())
+    mux.patch("/*path", (_request: HTTPRequest) -> read_only_response())
+    mux.delete("/*path", (_request: HTTPRequest) -> read_only_response())
 
     print("Jet Tower shadow (read-only, snapshot-backed) listening on http://localhost:{port}")
     http_server.serve("127.0.0.1:{port}", mux) ?? panic("Tower shadow server failed")
@@ -2689,7 +2661,7 @@ fn validate_manifest_entry(entry: DataTree, index: Int, date: String, captured_a
     if fixture_capture != captured_at {
         panic("{section}: capture-time.txt does not match captured_at")
     }
-    if fixture_capture.slice(0, 10) != capture_day {
+    if fixture_capture.slice(0, 9) != capture_day {
         panic("{section}: capture-time.txt does not match capture_day")
     }
 }
@@ -2703,7 +2675,7 @@ fn validate_manifest(manifest: DataTree) {
     }
     captured_at :: required_capture_at(manifest_text(~manifest, "captured_at", ~section))
     capture_day :: manifest_text(~manifest, "capture_day", ~section)
-    if capture_day != captured_at.slice(0, 10) {
+    if capture_day != captured_at.slice(0, 9) {
         panic("{section}: capture_day does not match captured_at")
     }
     snapshots :: manifest.field("snapshots") ?? panic("{section}: snapshots missing")
@@ -2737,7 +2709,7 @@ fn verify_file_hash(entry: DataTree, date: String, file: String, path: String) S
     canonical :: canonical_fixture_path(~path, ~root, ~date, ~file, "{date}/{file}")
     expected :: expected_hash(entry, date, file)
     raw :: files.read(~canonical) ?? panic("{date}/{file}: fixture read failure")
-    actual :: sha256_bytes(raw.bytes())
+    actual :: sha256(raw.bytes()).hex()
     assert(actual == expected, "{date}/{file}: SHA-256 mismatch")
     return raw
 }
@@ -2768,37 +2740,193 @@ fn assert_finding_array(tree: DataTree, section: String) {
     if !is_array_tree(~tree) -> panic("{section}: lint findings are not an array")
 }
 
+#Test("indexed Tower derivation preserves links lanes and progress") {
+    cards := [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("done-card"),
+            "num": DataTree.Int(1),
+            "phase": DataTree.Text("done"),
+            "milestoneId": DataTree.Text("m1"),
+            "blockedBy": DataTree.Array([DataTree]{})
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("blocker-card"),
+            "num": DataTree.Int(2),
+            "phase": DataTree.Text("building"),
+            "blockedBy": DataTree.Array([DataTree]{})
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("blocked-card"),
+            "num": DataTree.Int(3),
+            "phase": DataTree.Text("ready"),
+            "blockedBy": DataTree.Array([DataTree.Text("blocker-card"), DataTree.Text("D-BLOCK")])
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("deciding-card"),
+            "num": DataTree.Int(4),
+            "phase": DataTree.Text("ready"),
+            "blockedBy": DataTree.Array([DataTree]{})
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("verify-card"),
+            "num": DataTree.Int(5),
+            "phase": DataTree.Text("verify"),
+            "needsAcceptance": DataTree.Bool(true),
+            "blockedBy": DataTree.Array([DataTree]{})
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("open-card"),
+            "num": DataTree.Int(6),
+            "phase": DataTree.Text("building"),
+            "milestoneId": DataTree.Text("m1"),
+            "blockedBy": DataTree.Array([DataTree]{})
+        ])
+    }
+    decisions := [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("D-BLOCK"),
+            "status": DataTree.Text("open"),
+            "draft": DataTree.Bool(false),
+            "group": DataTree.Text("policy")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("D-OPEN"),
+            "cardId": DataTree.Text("deciding-card"),
+            "status": DataTree.Text("open"),
+            "draft": DataTree.Bool(false),
+            "group": DataTree.Text("policy")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("D-RATIFIED"),
+            "cardId": DataTree.Text("deciding-card"),
+            "status": DataTree.Text("ratified"),
+            "draft": DataTree.Bool(false),
+            "group": DataTree.Text("policy")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("D-ACCEPT-5"),
+            "cardId": DataTree.Text("verify-card"),
+            "status": DataTree.Text("open"),
+            "draft": DataTree.Bool(false),
+            "group": DataTree.Text("acceptance")
+        ])
+    }
+    questions := [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("Q-OPEN"),
+            "cardId": DataTree.Text("deciding-card"),
+            "kind": DataTree.Text("question"),
+            "status": DataTree.Text("open")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("Q-MESSAGE"),
+            "cardId": DataTree.Text("deciding-card"),
+            "kind": DataTree.Text("message"),
+            "status": DataTree.Text("open")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("Q-CLOSED"),
+            "cardId": DataTree.Text("deciding-card"),
+            "kind": DataTree.Text("question"),
+            "status": DataTree.Text("closed")
+        ])
+    }
+    milestones := [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("m1"),
+            "status": DataTree.Text("open")
+        ])
+    }
+    history_cards := [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("done-card"),
+            "phase": DataTree.Text("building"),
+            "milestoneId": DataTree.Text("m1")
+        ])
+    }
+
+    projected := project_cards(~cards, ~decisions, ~questions)
+    blocked := ~projected[2]
+    blocked_lane :: tree_field(~blocked, "lane")
+    assert(text_field(~blocked_lane, "lane", "") == "blocked")
+    blocked_refs :: array_field(~blocked_lane, "blockers")
+    assert(blocked_refs.len() == 2)
+    assert((blocked_refs[0].to_text() ?? "") == "blocker-card")
+    assert((blocked_refs[1].to_text() ?? "") == "D-BLOCK")
+
+    deciding := ~projected[3]
+    linked_decisions :: array_field(~deciding, "decisions")
+    linked_questions :: array_field(~deciding, "questions")
+    clearance :: tree_field(~deciding, "clearance")
+    deciding_lane :: tree_field(~deciding, "lane")
+    assert(linked_decisions.len() == 2)
+    assert(linked_questions.len() == 3)
+    assert(int_field(~deciding, "openQ", 0) == 1)
+    assert(text_field(~clearance, "state", "") == "pending")
+    assert(int_field(~clearance, "total", 0) == 2)
+    assert(int_field(~clearance, "ratified", 0) == 1)
+    open_decisions :: array_field(~clearance, "open")
+    assert(open_decisions.len() == 1)
+    assert((open_decisions[0].to_text() ?? "") == "D-OPEN")
+    assert(text_field(~deciding_lane, "lane", "") == "decide")
+    lane_decisions :: array_field(~deciding_lane, "decisions")
+    assert((lane_decisions[0].to_text() ?? "") == "D-OPEN")
+
+    verify_lane :: tree_field(~projected[4], "lane")
+    assert(text_field(~verify_lane, "lane", "") == "verify")
+    assert(text_field(~verify_lane, "who", "") == "owner")
+    assert(text_field(tree_field(~projected[0], "lane"), "lane", "") == "done")
+
+    progress_projected := project_milestones(~milestones, ~cards, ~history_cards)
+    progress :: tree_field(~progress_projected[0], "progress")
+    assert(int_field(~progress, "total", 0) == 2)
+    assert(int_field(~progress, "done", 0) == 1)
+    assert(bool_value(tree_field(~progress, "reviewReady")) == false)
+    synced := sync_milestones(~milestones, ~cards, ~history_cards)
+    assert(text_field(~synced[0], "status", "") == "open")
+}
+
+#Test("dissent metadata extraction preserves families and summary") {
+    metadata :: dissent_metadata("Author model family: Claude. Adversarial model family: OpenAI. One concrete finding.")
+    assert(text_at(~metadata, "author") == "Claude")
+    assert(text_at(~metadata, "adversarial") == "OpenAI")
+    assert(text_at(~metadata, "summary") == "One concrete finding.")
+    assert(is_null(dissent_metadata("One concrete finding.")))
+}
+
 fn check_snapshot(date: String, index: Int) {
     fixture :: "{fixtures_root()}/{date}"
     entry :: manifest_snapshot(index, date)
 
-    loop file in parity_files() -> verify_file_hash(entry, date, file, "{fixture}/{file}")
+    loop file in parity_files() {
+        verify_file_hash(entry, date, file, "{fixture}/{file}").drop("snapshot hash verified")
+    }
 
     actual :: project_snapshot_dir(fixture)
     expected :: read_json("{fixture}/state.json", "{date}/state.json", ~date, "state.json")
-    assert(semantic_equal(actual, expected), "{date}/state.json: full project snapshot mismatch")
+    assert(actual.equal_unordered(expected), "{date}/state.json: full project snapshot mismatch")
 
     actual_lanes :: actual.field("lanes") ?? panic("{date}/lanes: computed section missing")
     expected_lanes :: expected.field("lanes") ?? panic("{date}/lanes: recorded section missing")
-    assert(semantic_equal(actual_lanes, expected_lanes), "{date}/lanes: computed lane mismatch")
+    assert(actual_lanes.equal_unordered(expected_lanes), "{date}/lanes: computed lane mismatch")
 
     actual_card_lanes :: parity_array_field(actual.field("cards") ?? panic("{date}/cards: computed section missing"), "lane", "{date}/cards")
     expected_card_lanes :: parity_array_field(expected.field("cards") ?? panic("{date}/cards: recorded section missing"), "lane", "{date}/cards")
-    assert(semantic_equal(actual_card_lanes, expected_card_lanes), "{date}/cards: lane mismatch")
+    assert(actual_card_lanes.equal_unordered(expected_card_lanes), "{date}/cards: lane mismatch")
 
     actual_progress :: parity_array_field(actual.field("milestones") ?? panic("{date}/milestones: computed section missing"), "progress", "{date}/milestones")
     expected_progress :: parity_array_field(expected.field("milestones") ?? panic("{date}/milestones: recorded section missing"), "progress", "{date}/milestones")
-    assert(semantic_equal(actual_progress, expected_progress), "{date}/milestones: progress mismatch")
+    assert(actual_progress.equal_unordered(expected_progress), "{date}/milestones: progress mismatch")
 
     actual_counts :: actual.field("counts") ?? panic("{date}/counts: computed section missing")
     expected_counts :: expected.field("counts") ?? panic("{date}/counts: recorded section missing")
-    assert(semantic_equal(actual_counts, expected_counts), "{date}/counts: mismatch")
+    assert(actual_counts.equal_unordered(expected_counts), "{date}/counts: mismatch")
 
     expected_lint :: read_json("{fixture}/lint.json", "{date}/lint.json", ~date, "lint.json")
     assert_finding_array(expected_lint, "{date}/lint.json")
     actual_lint :: lint_snapshot_dir(fixture)
     assert_finding_array(actual_lint, "{date}/lint")
-    assert(semantic_equal(actual_lint, expected_lint), "{date}/lint.json: lint finding array mismatch")
+    assert(actual_lint.equal_unordered(expected_lint), "{date}/lint.json: lint finding array mismatch")
 }
 
 #Test("Tower parity 2026-08-26") {
@@ -2813,9 +2941,12 @@ fn check_snapshot(date: String, index: Int) {
     check_snapshot("2026-08-28", 2)
 }
 
-fn run() {
-    args :: process.argv()
-    snapshot_dir :: args.get(1) ?? "dogfood/tower/tests/parity/fixtures/2026-08-28"
-    port :: args.get(2) ?? "8090"
-    serve(snapshot_dir, port)
+#CLI
+struct TowerArgs {
+    snapshot_dir: String
+    port: String
+}
+
+fn run(args: TowerArgs) {
+    serve(args.snapshot_dir, args.port)
 }

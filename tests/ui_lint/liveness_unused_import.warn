@@ -1,19 +1,19 @@
-Warning [L0101] (unused_local_binding): Local binding `dead` is never read.
+Warning [L0101] (unused_local_binding): local binding `dead` is never read.
   --> tests/ui_lint/liveness_unused_import.jet:10:5
     |
  10 |     dead :: 5
     |     ^^^^
  Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `dead` to `_dead` when the value must be computed.
+ Fix: remove the binding when its initializer is side-effect free, or rename `dead` to `_dead` when the value must be computed.
 More: jet-lang.dev/e/L0101
 
-Warning [L0103] (unused_import): Import `files` is never used.
+Warning [L0103] (unused_import): import `files` is never used.
   --> tests/ui_lint/liveness_unused_import.jet:1:19
     |
   1 | use core.files as files
     |                   ^^^^^
- Why: An unused import adds a name and dependency to the file without contributing to checked code.
- Fix: Remove the import, or rename `files` to `_files` when the import is intentionally kept.
+ Why: an unused import adds a name and dependency to the file without contributing to checked code.
+ Fix: remove the import, or rename `files` to `_files` when the import is intentionally kept.
 More: jet-lang.dev/e/L0103
 
 Warning [L0105] (unreachable_export): Package export `package_helper` is unreachable.
@@ -21,15 +21,15 @@ Warning [L0105] (unreachable_export): Package export `package_helper` is unreach
     |
   3 | pub(package) fn package_helper() {
     |                 ^^^^^^^^^^^^^^
- Why: The package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.
- Fix: Remove the export, or rename `package_helper` to `_package_helper` when it is intentional.
+ Why: the package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.
+ Fix: remove the export, or rename `package_helper` to `_package_helper` when it is intentional.
 More: jet-lang.dev/e/L0105
 
-Warning [L0104] (unused_private_fn): Private function `unused_helper` is never called or used as a value.
+Warning [L0104] (unused_private_fn): private function `unused_helper` is never called or used as a value.
   --> tests/ui_lint/liveness_unused_import.jet:6:4
     |
   6 | fn unused_helper() {
     |    ^^^^^^^^^^^^^
  Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
- Fix: Remove the function, or rename `unused_helper` to `_unused_helper` when it is intentional.
+ Fix: remove the function, or rename `unused_helper` to `_unused_helper` when it is intentional.
 More: jet-lang.dev/e/L0104

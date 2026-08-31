@@ -4,8 +4,9 @@
 # One checked corpus, six production rows per program:
 #   jit-clean, jit-no-change, jit-representative-edit,
 #   aot-release-clean, aot-release-no-change, aot-release-representative-edit.
-# Every row records wall latency, peak compiler RSS, deterministic output,
-# elapsed variance, and the phase report emitted by that production path.
+# Every row records process CPU latency, peak compiler RSS, deterministic
+# output, CPU-time variance, and the phase report emitted by that production
+# path.
 #
 # Usage:
 #   tools/perf/dashboard.sh
@@ -17,6 +18,7 @@
 #   tools/perf/dashboard.sh --construct-scale-json
 
 set -eu
+export LC_ALL=C
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 PERF_DIR="$ROOT/tools/perf"
@@ -24,14 +26,16 @@ CORPUS="$PERF_DIR/corpus.tsv"
 FIXTURE_PACKAGE="$PERF_DIR/package.jet"
 SCALE_CORPUS="$PERF_DIR/construct-scale.tsv"
 BASELINE="$PERF_DIR/baseline.json"
-TMP_ROOT=${TMPDIR:-"$HOME/.cache/jet-test-scratch"}
+TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
 JET_ENV="$ROOT/scripts/agent/jet-env"
 JET_BIN="$ROOT/target/debug/jet"
 
 # Materialize the core toolchain once. Re-entering `jet-env` for every AOT
 # sample adds an environment-launch measurement to the compiler stage and
 # makes clean samples bimodal; the measured command must be the same production
-# compiler inside the already-pinned shell.
+# compiler inside the already-materialized shell. Keep the caller's full CPU
+# affinity: process CPU time removes scheduler wait, while a one-core pin would
+# serialize rustc/LLVM and turn a stable measurement into a slow one.
 if [ "${JET_ENV_DISABLE:-0}" != "1" ]; then
     exec "$JET_ENV" "$ROOT/tools/perf/dashboard.sh" "$@"
 fi
@@ -44,9 +48,26 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-}
 if [ -z "$TIMEOUT_BIN" ]; then
     TIMEOUT_BIN=$(type -P timeout 2>/dev/null || true)
 fi
+BASH_BIN=${BASH_BIN:-}
+if [ -z "$BASH_BIN" ]; then
+    BASH_BIN=$(type -P bash 2>/dev/null || true)
+fi
+SETSID_BIN=${SETSID_BIN:-}
+if [ -z "$SETSID_BIN" ]; then
+    SETSID_BIN=$(type -P setsid 2>/dev/null || true)
+fi
+FLOCK_BIN=${FLOCK_BIN:-}
+if [ -z "$FLOCK_BIN" ]; then
+    FLOCK_BIN=$(type -P flock 2>/dev/null || true)
+fi
+if [ -n "$SETSID_BIN" ] && [ ! -x "$SETSID_BIN" ]; then
+    echo "invalid setsid helper: $SETSID_BIN" >&2
+    exit 1
+fi
 SAMPLES=20
 SCALE_SAMPLES=${JET_PERF_SCALE_SAMPLES:-3}
 WARMUPS=1
+CORPUS_LIMIT=${JET_PERF_CORPUS_LIMIT:-}
 TRIAL_DEADLINE_SECONDS=120
 MAX_CORPUS_FILE_BYTES=$((64 * 1024 * 1024))
 LATENCY_REGRESSION_PCT=15
@@ -56,12 +77,16 @@ VARIANCE_BUDGET_PCT=100
 # quarter of the run disagreeing means the path itself is bimodal.
 OUTLIER_BUDGET_COUNT=5
 TAB=$(printf '\t')
+ROW_HEADER=$(printf 'program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases')
 REPORT_VERSION=4
 PARITY_RECEIPT=unverified
 PARITY_CASE_COUNT=0
+OUTLIER_TOTAL=0
 
 [ -x "$TIME_BIN" ] || { echo "missing GNU time: $TIME_BIN" >&2; exit 1; }
 [ -x "$TIMEOUT_BIN" ] || { echo "missing timeout: $TIMEOUT_BIN" >&2; exit 1; }
+[ -x "$BASH_BIN" ] || { echo "missing bash timing helper: $BASH_BIN" >&2; exit 1; }
+[ -x "$FLOCK_BIN" ] || { echo "missing flock helper: $FLOCK_BIN" >&2; exit 1; }
 [ -f "$CORPUS" ] || { echo "missing compiler-speed corpus: $CORPUS" >&2; exit 1; }
 [ -f "$FIXTURE_PACKAGE" ] || { echo "missing compiler-speed fixture package: $FIXTURE_PACKAGE" >&2; exit 1; }
 [ -x "$ROOT/target/debug/jet" ] || {
@@ -69,21 +94,131 @@ PARITY_CASE_COUNT=0
     echo "build Jet before running the compiler-speed dashboard" >&2
     exit 1
 }
+case "$SAMPLES:$WARMUPS" in
+    20:1) ;;
+    *) echo "compiler-speed sample policy must remain one warmup and twenty samples" >&2; exit 1 ;;
+esac
+case "$CORPUS_LIMIT" in
+    "") ;;
+    0*|*[!0-9]*) echo "JET_PERF_CORPUS_LIMIT must be a positive integer" >&2; exit 2 ;;
+esac
+scratch_resolved=$(realpath -m -- "$TMP_ROOT" 2>/dev/null || printf '%s' "$TMP_ROOT")
+case "$scratch_resolved" in
+    /tmp|/tmp/*|*/target|*/target/*)
+        echo "refusing compiler-speed scratch on RAM-backed /tmp or a target directory: $TMP_ROOT" >&2
+        exit 1
+        ;;
+esac
 mkdir -p "$TMP_ROOT"
-
-# Pin the compiler process for the whole receipt. A concurrent cargo build can
-# replace target/debug/jet while this script is between a warmup and a sample;
-# the JIT run-cache correctly treats that as a compiler-identity change, which
-# would turn a valid no-change measurement into a false cache miss. The copy is
-# the exact binary identified below and is used by every measured and parity
-# invocation, so a receipt never mixes compiler builds.
+scratch_device=$(df -P "$TMP_ROOT" 2>/dev/null | awk 'NR == 2 { print $1; exit }')
+case "$scratch_device" in
+    ""|tmpfs|ramfs|none)
+        echo "refusing compiler-speed scratch without a disk-backed filesystem: $TMP_ROOT" >&2
+        exit 1
+        ;;
+esac
+scratch_probe="$TMP_ROOT/.compiler-speed-write.$$"
+if ! (umask 077 && : > "$scratch_probe"); then
+    echo "compiler-speed scratch is not writable: $TMP_ROOT" >&2
+    exit 1
+fi
+rm -f "$scratch_probe"
+# A receipt is a single-machine experiment. Serialize dashboards that share
+# the scratch root so their compiler, rustc, linker, cache, and disk activity
+# cannot make each other's samples bimodal. `flock` keeps the lock for the
+# re-exec'd dashboard and releases it on exit, including abnormal termination.
+if [ "${JET_PERF_LOCK_HELD:-0}" != "1" ]; then
+    exec "$FLOCK_BIN" "$TMP_ROOT/compiler-speed.lock" \
+        env JET_PERF_LOCK_HELD=1 "$0" "$@"
+fi
 run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")
+# Keep other workers' runtime-cache locks out of this receipt. The warmup fills
+# this run-scoped cache before measured samples; the 120s trial cap is unchanged.
+runtime_cache_dir="$run_dir/runtime-cache"
+mkdir -p "$runtime_cache_dir"
+export JET_RUNTIME_CACHE_DIR="$runtime_cache_dir"
 rows_file="$run_dir/rows.tsv"
 outputs_dir="$run_dir/outputs"
-trap 'rm -rf "$run_dir"' EXIT HUP INT TERM
+ACTIVE_PID=
+ACTIVE_GROUP=0
+cleanup_run() {
+    cleanup_status=$?
+    trap - EXIT HUP INT TERM
+    if [ -n "${ACTIVE_PID:-}" ]; then
+        cleanup_alive() {
+            if [ "${ACTIVE_GROUP:-0}" -eq 1 ]; then
+                kill -0 "-$ACTIVE_PID" 2>/dev/null
+            else
+                kill -0 "$ACTIVE_PID" 2>/dev/null
+            fi
+        }
+        if [ "${ACTIVE_GROUP:-0}" -eq 1 ]; then
+            kill -TERM "-$ACTIVE_PID" 2>/dev/null || true
+        else
+            kill -TERM "$ACTIVE_PID" 2>/dev/null || true
+        fi
+        cleanup_wait=0
+        while cleanup_alive; do
+            [ "$cleanup_wait" -ge 5 ] && break
+            sleep 1
+            cleanup_wait=$((cleanup_wait + 1))
+        done
+        if cleanup_alive; then
+            if [ "${ACTIVE_GROUP:-0}" -eq 1 ]; then
+                kill -KILL "-$ACTIVE_PID" 2>/dev/null || true
+            else
+                kill -KILL "$ACTIVE_PID" 2>/dev/null || true
+            fi
+        fi
+        wait "$ACTIVE_PID" 2>/dev/null || true
+        ACTIVE_PID=
+        ACTIVE_GROUP=0
+    fi
+    rm -rf "$run_dir"
+    exit "$cleanup_status"
+}
+trap cleanup_run EXIT HUP INT TERM
 cp "$JET_BIN" "$run_dir/jet"
 JET_BIN="$run_dir/jet"
+# Keep every fixture on the same manifest bytes as the receipt identity.
+cp "$FIXTURE_PACKAGE" "$run_dir/package.jet"
+FIXTURE_PACKAGE="$run_dir/package.jet"
+if [ -n "$CORPUS_LIMIT" ]; then
+    reduced_corpus="$run_dir/corpus.tsv"
+    awk -v limit="$CORPUS_LIMIT" '
+        /^[[:space:]]*(#|$)/ { print; next }
+        selected < limit { print; selected++; if (selected == limit) exit }
+    ' "$CORPUS" > "$reduced_corpus"
+    CORPUS="$reduced_corpus"
+fi
 mkdir -p "$outputs_dir"
+load_milli() {
+    awk '
+        BEGIN { valid = 0 }
+        NR == 1 && $1 ~ /^[0-9]+([.][0-9]+)?$/ {
+            printf "%.0f\n", $1 * 1000
+            valid = 1
+        }
+        END { if (!valid) exit 1 }
+    ' /proc/loadavg 2>/dev/null
+}
+machine_load_start_milli=$(load_milli) || {
+    echo "unavailable machine load identity" >&2
+    exit 1
+}
+machine_load_peak_milli=$machine_load_start_milli
+machine_load_end_milli=$machine_load_start_milli
+record_machine_load() {
+    observed_load=$(load_milli) || {
+        echo "unavailable machine load sample" >&2
+        exit 1
+    }
+    if [ "$observed_load" -gt "$machine_load_peak_milli" ]; then
+        machine_load_peak_milli=$observed_load
+    fi
+    machine_load_end_milli=$observed_load
+}
+record_machine_load
 
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -280,6 +415,10 @@ for identity_pair in \
 done
 machine="$machine_os/$machine_arch/cpus=$machine_cpus/host=$machine_host"
 corpus_sha=$(sha256 "$CORPUS")
+# The package manifest is a semantic build input, not dashboard metadata. Keep
+# its content identity beside the corpus so policy-only changes cannot reuse a
+# matching performance receipt.
+manifest_sha256=$(sha256 "$FIXTURE_PACKAGE")
 
 check_corpus() {
     corpus_count=0
@@ -345,7 +484,7 @@ append_timing_phases() {
     timing_file=$1
     phase_file=$2
     [ -s "$timing_file" ] || { echo "missing timing report: $timing_file" >&2; exit 1; }
-    for phase_name in parse sema ffi tir emission build_plan backend link frontend jit jit_cache_hit cache_hit rust_bytes; do
+    for phase_name in parse sema ffi tir emission build_plan cache_key backend link frontend jit jit_cache_hit cache_hit rust_bytes; do
         phase_value=$(timing_field "$timing_file" "$phase_name")
         case "$phase_value" in
             ""|*[!0-9]*) ;;
@@ -382,9 +521,92 @@ run_timed() {
     timed_stdout=$2
     timed_stderr=$3
     shift 3
-    "$TIME_BIN" -f '%e\t%M' -o "$timed_stats" \
-        "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@" \
-        >"$timed_stdout" 2>"$timed_stderr"
+    timed_cpu_stats="$timed_stats.cpu"
+    # GNU time's %U/%S values have only centisecond precision. Bash's timing
+    # builtin uses the same child CPU accounting with six decimal places;
+    # retain GNU time for peak RSS and use the precise CPU values for latency.
+    if [ -n "$SETSID_BIN" ]; then
+        LC_ALL=C "$SETSID_BIN" "$TIME_BIN" -f '%M' -o "$timed_stats" \
+            "$BASH_BIN" -c '
+                timed_cpu_stats=$1
+                timed_command_stderr=$2
+                shift 2
+                TIMEFORMAT="%6U %6S"
+                { time "$@" 2>"$timed_command_stderr"; } 2>"$timed_cpu_stats"
+            ' bash "$timed_cpu_stats" "$timed_stderr" \
+            "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@" \
+            >"$timed_stdout" 2>"$timed_stderr" &
+        ACTIVE_GROUP=1
+    else
+        LC_ALL=C "$TIME_BIN" -f '%M' -o "$timed_stats" \
+            "$BASH_BIN" -c '
+                timed_cpu_stats=$1
+                timed_command_stderr=$2
+                shift 2
+                TIMEFORMAT="%6U %6S"
+                { time "$@" 2>"$timed_command_stderr"; } 2>"$timed_cpu_stats"
+            ' bash "$timed_cpu_stats" "$timed_stderr" \
+            "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@" \
+            >"$timed_stdout" 2>"$timed_stderr" &
+        ACTIVE_GROUP=0
+    fi
+    ACTIVE_PID=$!
+    if wait "$ACTIVE_PID"; then
+        timed_status=0
+    else
+        timed_status=$?
+    fi
+    ACTIVE_PID=
+    ACTIVE_GROUP=0
+    if [ "$timed_status" -eq 0 ]; then
+        timed_memory_kib=$(sed -n '1p' "$timed_stats")
+        if ! awk '
+            BEGIN { valid = 1 }
+            NR != 1 || NF != 2 ||
+                $1 !~ /^[0-9]+([.][0-9]+)?$/ || $1 < 0 ||
+                $2 !~ /^[0-9]+([.][0-9]+)?$/ || $2 < 0 || $1 + $2 <= 0 {
+                valid = 0
+            }
+            END { if (NR != 1 || !valid) exit 1 }
+        ' "$timed_cpu_stats"; then
+            echo "invalid precise process timing sample: $timed_cpu_stats" >&2
+            exit 1
+        fi
+        IFS=' ' read -r timed_user_seconds timed_system_seconds < "$timed_cpu_stats"
+        printf '%s\t%s\t%s\n' "$timed_user_seconds" "$timed_system_seconds" "$timed_memory_kib" > "$timed_stats"
+    fi
+    record_machine_load
+    return "$timed_status"
+}
+
+run_bounded_process() {
+    process_cwd=$1
+    process_stdout=$2
+    process_stderr=$3
+    shift 3
+    if [ -n "$SETSID_BIN" ]; then
+        (
+            cd "$process_cwd" && exec "$SETSID_BIN" \
+                "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@"
+        ) >"$process_stdout" 2>"$process_stderr" &
+        ACTIVE_GROUP=1
+    else
+        (
+            cd "$process_cwd" && exec "$TIMEOUT_BIN" \
+                --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@"
+        ) >"$process_stdout" 2>"$process_stderr" &
+        ACTIVE_GROUP=0
+    fi
+    ACTIVE_PID=$!
+    if wait "$ACTIVE_PID"; then
+        process_status=0
+    else
+        process_status=$?
+    fi
+    ACTIVE_PID=
+    ACTIVE_GROUP=0
+    record_machine_load
+    return "$process_status"
 }
 
 report_trial_failure() {
@@ -402,17 +624,35 @@ report_trial_failure() {
 
 read_timed_stats() {
     stats_file=$1
-    IFS="$TAB" read -r elapsed_seconds peak_rss_kib < "$stats_file"
-    case "$elapsed_seconds:$peak_rss_kib" in
-        ''|*[!0-9.]*:*|*:*[!0-9]*)
-            echo "incomplete process timing: $stats_file" >&2
-            exit 1
-            ;;
-    esac
-    TRIAL_LATENCY_NS=$(awk -v seconds="$elapsed_seconds" 'BEGIN { printf "%.0f\n", seconds * 1000000000 }')
+    [ -f "$stats_file" ] || {
+        echo "missing process timing: $stats_file" >&2
+        exit 1
+    }
+    if ! awk -F "$TAB" '
+        BEGIN { valid = 1 }
+        {
+            if (NR != 1 || NF != 3 ||
+                $1 !~ /^[0-9]+([.][0-9]+)?$/ || $1 < 0 ||
+                $2 !~ /^[0-9]+([.][0-9]+)?$/ || $2 < 0 ||
+                $3 !~ /^[0-9]+$/ || $3 <= 0 || $1 + $2 <= 0) {
+                valid = 0
+            }
+        }
+        END {
+            if (NR != 1 || !valid) exit 1
+        }
+    ' "$stats_file"; then
+        echo "invalid process timing sample: $stats_file" >&2
+        exit 1
+    fi
+    IFS="$TAB" read -r user_seconds system_seconds peak_rss_kib < "$stats_file"
+    TRIAL_LATENCY_NS=$(awk -v user="$user_seconds" -v sys="$system_seconds" 'BEGIN { printf "%.0f\n", (user + sys) * 1000000000 }')
     TRIAL_MEMORY_BYTES=$((peak_rss_kib * 1024))
     case "$TRIAL_LATENCY_NS:$TRIAL_MEMORY_BYTES" in
-        ''|*[!0-9]*:*) echo "invalid process timing: $stats_file" >&2; exit 1 ;;
+        ''|0:*|*[!0-9]*:*|*:0|*:*[!0-9]*)
+            echo "invalid process timing sample: $stats_file" >&2
+            exit 1
+            ;;
     esac
 }
 
@@ -461,8 +701,14 @@ set_linker_provenance() {
 }
 
 workload_digest() {
-    printf 'jet.compiler-speed.workload.v1\nprogram=%s\nrole=%s\nsource_sha256=%s\nexpected_sha256=%s\nsource_bytes=%s\nexpected_bytes=%s\n' \
-        "$1" "$2" "$3" "$4" "$5" "$6" | sha256_text
+    printf 'jet.compiler-speed.workload.v2\nprogram=%s\nrole=%s\nsource_sha256=%s\nexpected_sha256=%s\nsource_bytes=%s\nexpected_bytes=%s\nmanifest_sha256=%s\ntoolchain_sha256=%s\n' \
+        "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" | sha256_text
+}
+
+reset_fixture_state() {
+    fixture_root=$1
+    rm -rf "$fixture_root/build" "$fixture_root/cache" \
+        "$fixture_root/timing" "$fixture_root/jet-timing.json"
 }
 
 prepare_fixture() {
@@ -470,13 +716,23 @@ prepare_fixture() {
     fixture_program=$2
     fixture_expected=$3
     mkdir -p "$fixture_work"
+    reset_fixture_state "$fixture_work"
     cp "$FIXTURE_PACKAGE" "$fixture_work/package.jet"
     cp "$ROOT/$fixture_program" "$fixture_work/run.jet"
     cp "$ROOT/$fixture_expected" "$fixture_work/expected.out"
-    printf '%s\n' \
-        'name: "compiler_speed_fixture"' \
-        'version: "0.1.0"' \
-        'authority: .{ holds: { allow: [IO, Mem.Alloc] } }' > "$fixture_work/package.jet"
+}
+
+# D-JOB-SUBCMD1=C: the project witness is measured through its shipped job.
+# The Dev job is exercised by the named-job parity contract below because a
+# release binary must not expose it as an argv subcommand.
+job_argument_for_program() {
+    case "$1" in
+        examples/features/devloop/job_runner.jet|tools/perf/edits/job_runner.jet)
+            printf '%s\n' greet
+            ;;
+        *)
+            ;;
+    esac
 }
 
 check_trial_output() {
@@ -498,6 +754,13 @@ run_jit_trial() {
     trial_output=$3
     trial_stats=$4
     trial_phases=$5
+    trial_program=${6:-}
+    trial_job=$(job_argument_for_program "$trial_program")
+    if [ -n "$trial_job" ]; then
+        trial_invocation="exec '$JET_BIN' run run.jet -- '$trial_job'"
+    else
+        trial_invocation="exec '$JET_BIN' run run.jet"
+    fi
     mkdir -p "$trial_work/timing" "$trial_cache"
     if run_timed "$trial_stats" "$trial_output.stdout" "$trial_output.stderr" \
         env \
@@ -506,7 +769,7 @@ run_jit_trial() {
         JET_TIMING=1 \
         JET_TIMING_DIR="$trial_work/timing" \
         NO_COLOR=1 \
-        bash -c "cd '$trial_work' && exec '$JET_BIN' run run.jet"; then
+        bash -c "cd '$trial_work' && $trial_invocation"; then
         trial_status=0
     else
         trial_status=$?
@@ -532,42 +795,38 @@ run_aot_trial() {
     trial_output=$3
     trial_stats=$4
     trial_phases=$5
+    trial_program=${6:-}
+    trial_profile=${7:-release}
+    trial_job=$(job_argument_for_program "$trial_program")
     mkdir -p "$trial_work/timing" "$trial_cache"
-    if [ "${JET_ENV_DISABLE:-0}" = "1" ]; then
-        if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
-            env \
-            JET_CACHE_DIR="$trial_cache/build" \
-            JET_ROOT="$trial_work" \
-            JET_RECEIPT_BYPASS=1 \
-            JET_TIMING=1 \
-            JET_TIMING_DIR="$trial_work/timing" \
-            NO_COLOR=1 \
-            sh -c "cd '$trial_work' && exec '$JET_BIN' build --profile=release --verbose run.jet"; then
-            trial_status=0
-        else
-            trial_status=$?
-        fi
-    else
-        if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
-            env \
-            JET_CACHE_DIR="$trial_cache/build" \
-            JET_RECEIPT_BYPASS=1 \
-            JET_TIMING=1 \
-            JET_TIMING_DIR="$trial_work/timing" \
-            NO_COLOR=1 \
-            "$JET_ENV" bash -c "cd '$trial_work' && exec '$JET_BIN' build --profile=release --verbose run.jet"; then
-            trial_status=0
-        else
-            trial_status=$?
-        fi
-    fi
-    [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.build.stderr"
-    [ -x "$trial_work/build/run" ] || { echo "missing AOT artifact: $trial_work/build/run" >&2; exit 1; }
-    if "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" \
-        "$trial_work/build/run" >"$trial_output.stdout" 2>"$trial_output.stderr"; then
+    if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
+        env \
+        JET_CACHE_DIR="$trial_cache/build" \
+        JET_ROOT="$trial_work" \
+        JET_TIMING=1 \
+        JET_TIMING_DIR="$trial_work/timing" \
+        NO_COLOR=1 \
+        "$BASH_BIN" -c "cd '$trial_work' && exec '$JET_BIN' build --profile=$trial_profile --verbose run.jet"; then
         trial_status=0
     else
         trial_status=$?
+    fi
+    [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.build.stderr"
+    [ -x "$trial_work/build/run" ] || { echo "missing AOT artifact: $trial_work/build/run" >&2; exit 1; }
+    if [ -n "$trial_job" ]; then
+        if run_bounded_process "$trial_work" "$trial_output.stdout" "$trial_output.stderr" \
+            env NO_COLOR=1 "$trial_work/build/run" "$trial_job"; then
+            trial_status=0
+        else
+            trial_status=$?
+        fi
+    else
+        if run_bounded_process "$trial_work" "$trial_output.stdout" "$trial_output.stderr" \
+            env NO_COLOR=1 "$trial_work/build/run"; then
+            trial_status=0
+        else
+            trial_status=$?
+        fi
     fi
     [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.stderr"
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
@@ -597,9 +856,33 @@ run_aot_trial() {
     read_timed_stats "$trial_stats"
 }
 
+validate_sample_file() {
+    sample_file_path=$1
+    expected_sample_count=${2:-$SAMPLES}
+    sample_count=$(awk '
+        {
+            if (NF != 1 || $1 !~ /^[0-9]+$/ || $1 <= 0) invalid = 1
+            count++
+        }
+        END {
+            if (count == 0 || invalid) exit 1
+            print count
+        }
+    ' "$sample_file_path" 2>/dev/null) || {
+        echo "invalid compiler-speed sample file: $sample_file_path" >&2
+        exit 1
+    }
+    [ "$sample_count" -eq "$expected_sample_count" ] || {
+        echo "incomplete compiler-speed sample file: $sample_file_path (expected $expected_sample_count, got $sample_count)" >&2
+        exit 1
+    }
+}
+
 median_file() {
     median_file_path=$1
-    sort -n "$median_file_path" | awk -v count="$SAMPLES" 'NR == int((count + 1) / 2) { print $1; exit }'
+    median_sample_count=${2:-$SAMPLES}
+    validate_sample_file "$median_file_path" "$median_sample_count"
+    sort -n "$median_file_path" | awk -v count="$median_sample_count" 'NR == int((count + 1) / 2) { print $1; exit }'
 }
 
 # Dispersion of the sample distribution, relative to its median.
@@ -620,12 +903,12 @@ median_file() {
 # Input must be sorted numerically; both callers sort.
 variance_file() {
     variance_file_path=$1
-    sort -n "$variance_file_path" | awk -v count="$SAMPLES" '
+    variance_sample_count=${2:-$SAMPLES}
+    validate_sample_file "$variance_file_path" "$variance_sample_count"
+    sort -n "$variance_file_path" | awk -v count="$variance_sample_count" '
         { values[NR] = $1 }
         END {
-            if (count == 0) exit 1
             median = values[int((count + 1) / 2)]
-            if (median == 0) exit 1
             first_quartile = values[int((count + 3) / 4)]
             third_quartile = values[int((3 * count + 1) / 4)]
             printf "%.0f\n", ((third_quartile - first_quartile) * 100) / median
@@ -637,10 +920,11 @@ variance_file() {
 # is the case the spread alone would not catch.
 outlier_file() {
     outlier_file_path=$1
-    sort -n "$outlier_file_path" | awk -v count="$SAMPLES" '
+    outlier_sample_count=${2:-$SAMPLES}
+    validate_sample_file "$outlier_file_path" "$outlier_sample_count"
+    sort -n "$outlier_file_path" | awk -v count="$outlier_sample_count" '
         { values[NR] = $1 }
         END {
-            if (count == 0) { print 0; exit }
             first_quartile = values[int((count + 3) / 4)]
             third_quartile = values[int((3 * count + 1) / 4)]
             fence = (third_quartile - first_quartile) * 3 / 2
@@ -689,9 +973,13 @@ restore_edit_fixture() {
     edit_warm_cache=$3
     edit_program=$4
     edit_expected=$5
-    rm -rf "$edit_work/build" "$edit_work/cache" "$edit_work/timing" "$edit_work/jet-timing.json"
-    cp -R "$edit_warm_cache" "$edit_cache"
+    [ -d "$edit_warm_cache" ] || {
+        echo "missing warm cache snapshot: $edit_warm_cache" >&2
+        exit 1
+    }
+    reset_fixture_state "$edit_work"
     prepare_fixture "$edit_work" "$edit_program" "$edit_expected"
+    cp -R "$edit_warm_cache" "$edit_cache"
 }
 
 phase_average() {
@@ -721,7 +1009,7 @@ parity_run_process() {
     parity_stderr=$3
     parity_cwd=$4
     shift 4
-    if (cd "$parity_cwd" && "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@") >"$parity_stdout" 2>"$parity_stderr"; then
+    if run_bounded_process "$parity_cwd" "$parity_stdout" "$parity_stderr" "$@"; then
         parity_status=0
     else
         parity_status=$?
@@ -870,20 +1158,36 @@ parity_run_dev_case() {
     rm -rf "$parity_root"
     mkdir -p "$parity_root"
     prepare_fixture "$parity_root" "$parity_program" "$parity_expected"
-    parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_CACHE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
-        "$JET_BIN" dev run.jet --watch=off --quiet
+    parity_job=$(job_argument_for_program "$parity_program")
+    if [ -n "$parity_job" ]; then
+        parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_CACHE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+            "$JET_BIN" dev run.jet --watch=off --quiet -- "$parity_job"
+    else
+        parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_CACHE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+            "$JET_BIN" dev run.jet --watch=off --quiet
+    fi
     parity_require_status "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/dev"
     parity_compare "$parity_root/expected.out" "$parity_root/dev.stdout" "$parity_id/expected-dev-stdout"
     parity_compare "$parity_jit_stdout" "$parity_root/dev.stdout" "$parity_id/jit-dev-stdout"
     parity_compare "$parity_jit_stderr" "$parity_root/dev.stderr" "$parity_id/jit-dev-stderr"
 
-    parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_CACHE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
-        "$JET_BIN" run run.jet --trace-tiers
-    parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_CACHE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
-        "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
+    if [ -n "$parity_job" ]; then
+        parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_CACHE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
+            "$JET_BIN" run run.jet --trace-tiers -- "$parity_job"
+        parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_CACHE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
+            "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers -- "$parity_job"
+    else
+        parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_CACHE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
+            "$JET_BIN" run run.jet --trace-tiers
+        parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_CACHE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
+            "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
+    fi
     parity_require_status "$(sed -n '1p' "$parity_root/jit-trace.status")" "$parity_id/jit-trace"
     parity_require_status "$(sed -n '1p' "$parity_root/dev-trace.status")" "$parity_id/dev-trace"
     parity_jit_tier=$(parity_tier_mode "$parity_root/jit-trace.stderr")
@@ -894,6 +1198,73 @@ parity_run_dev_case() {
     }
     parity_require_tier "$parity_jit_tier" native
     PARITY_CASE_COUNT=$((PARITY_CASE_COUNT + 1))
+}
+
+parity_check_job_runner_case() {
+    parity_case_id=$1
+    parity_case_program=$2
+    parity_case_greet_expected=$3
+    parity_case_seed_expected=$4
+    parity_case_root="$run_dir/parity-job-runner-$parity_case_id"
+    rm -rf "$parity_case_root"
+    mkdir -p "$parity_case_root"
+    prepare_fixture "$parity_case_root" "$parity_case_program" "$parity_case_seed_expected"
+
+    parity_run_process "$parity_case_root/run-seed.status" "$parity_case_root/run-seed.stdout" "$parity_case_root/run-seed.stderr" "$parity_case_root" \
+        env JET_RUN_CACHE_DIR="$parity_case_root/run-cache" JET_CACHE_DIR="$parity_case_root/build-cache" NO_COLOR=1 \
+        "$JET_BIN" run run.jet -- seed_data
+    parity_run_process "$parity_case_root/dev-seed.status" "$parity_case_root/dev-seed.stdout" "$parity_case_root/dev-seed.stderr" "$parity_case_root" \
+        env JET_RUN_CACHE_DIR="$parity_case_root/dev-run-cache" JET_CACHE_DIR="$parity_case_root/dev-build-cache" NO_COLOR=1 \
+        "$JET_BIN" dev run.jet --watch=off --quiet -- seed_data
+    parity_run_process "$parity_case_root/interpreter-seed.status" "$parity_case_root/interpreter-seed.stdout" "$parity_case_root/interpreter-seed.stderr" "$parity_case_root" \
+        env JET_RUN_CACHE_DIR="$parity_case_root/interpreter-run-cache" JET_CACHE_DIR="$parity_case_root/interpreter-build-cache" NO_COLOR=1 \
+        "$JET_BIN" run --interpret run.jet -- seed_data
+    parity_require_status "$(sed -n '1p' "$parity_case_root/run-seed.status")" "$parity_case_id/run-seed"
+    parity_require_status "$(sed -n '1p' "$parity_case_root/dev-seed.status")" "$parity_case_id/dev-seed"
+    parity_require_status "$(sed -n '1p' "$parity_case_root/interpreter-seed.status")" "$parity_case_id/interpreter-seed"
+    parity_compare "$parity_case_root/expected.out" "$parity_case_root/run-seed.stdout" "$parity_case_id/expected-run-seed"
+    parity_compare "$parity_case_root/expected.out" "$parity_case_root/dev-seed.stdout" "$parity_case_id/expected-dev-seed"
+    parity_compare "$parity_case_root/expected.out" "$parity_case_root/interpreter-seed.stdout" "$parity_case_id/expected-interpreter-seed"
+
+    parity_run_process "$parity_case_root/release-build.status" "$parity_case_root/release-build.stdout" "$parity_case_root/release-build.stderr" "$parity_case_root" \
+        env JET_CACHE_DIR="$parity_case_root/release-build-cache" NO_COLOR=1 \
+        "$JET_ENV" bash -c "cd '$parity_case_root' && exec '$JET_BIN' build --profile=release run.jet"
+    parity_require_status "$(sed -n '1p' "$parity_case_root/release-build.status")" "$parity_case_id/release-build"
+    [ -x "$parity_case_root/build/run" ] || { echo "missing job-runner release artifact: $parity_case_id" >&2; exit 1; }
+    parity_run_process "$parity_case_root/release-greet.status" "$parity_case_root/release-greet.stdout" "$parity_case_root/release-greet.stderr" "$parity_case_root" \
+        env NO_COLOR=1 "$parity_case_root/build/run" greet
+    parity_require_status "$(sed -n '1p' "$parity_case_root/release-greet.status")" "$parity_case_id/release-greet"
+    parity_compare "$ROOT/$parity_case_greet_expected" "$parity_case_root/release-greet.stdout" "$parity_case_id/expected-release-greet"
+    parity_run_process "$parity_case_root/release-seed.status" "$parity_case_root/release-seed.stdout" "$parity_case_root/release-seed.stderr" "$parity_case_root" \
+        env NO_COLOR=1 "$parity_case_root/build/run" seed_data
+    parity_seed_status=$(sed -n '1p' "$parity_case_root/release-seed.status")
+    [ "$parity_seed_status" -ne 0 ] || { echo "release exposed Dev job: $parity_case_id/seed_data" >&2; exit 1; }
+    [ ! -s "$parity_case_root/release-seed.stdout" ] || { echo "release Dev job leaked stdout: $parity_case_id/seed_data" >&2; exit 1; }
+    grep -Fq 'E1294' "$parity_case_root/release-seed.stderr" || { echo "release Dev job lost E1294: $parity_case_id/seed_data" >&2; exit 1; }
+    grep -Fq 'No job named `seed_data`' "$parity_case_root/release-seed.stderr" || { echo "release Dev job diagnostic changed: $parity_case_id/seed_data" >&2; exit 1; }
+    PARITY_CASE_COUNT=$((PARITY_CASE_COUNT + 1))
+}
+
+parity_check_job_runner() {
+    parity_listing_root="$run_dir/parity-job-runner-listing"
+    rm -rf "$parity_listing_root"
+    mkdir -p "$parity_listing_root"
+    prepare_fixture "$parity_listing_root" examples/features/devloop/job_runner.jet examples/features/expected/devloop/job_runner.greet.out
+    parity_run_process "$parity_listing_root/jobs.status" "$parity_listing_root/jobs.stdout" "$parity_listing_root/jobs.stderr" "$parity_listing_root" \
+        env NO_COLOR=1 "$JET_BIN" jobs
+    parity_require_status "$(sed -n '1p' "$parity_listing_root/jobs.status")" job-runner/jobs
+    {
+        printf '%-11s  [%s] %s\n' greet ship 'Say hello from a shipped project job'
+        printf '%-11s  [%s] %s\n' seed_data dev 'Seed local data (every 5min)'
+        printf '%-11s  [%s]\n' inspect_job internal
+    } > "$parity_listing_root/jobs.expected"
+    parity_compare "$parity_listing_root/jobs.expected" "$parity_listing_root/jobs.stdout" job-runner/jobs-output
+
+    parity_check_job_runner_case base examples/features/devloop/job_runner.jet \
+        examples/features/expected/devloop/job_runner.greet.out \
+        examples/features/expected/devloop/job_runner.seed_data.out
+    parity_check_job_runner_case edit tools/perf/edits/job_runner.jet \
+        tools/perf/edits/job_runner.out tools/perf/edits/job_runner.seed_data.out
 }
 
 parity_check_diagnostic() {
@@ -937,8 +1308,10 @@ run_parity_checks() {
             ""|\#*) continue ;;
         esac
         parity_run_dev_case "corpus-$(safe_id "$parity_program")" "$parity_program" "$parity_expected" "$parity_program-jit-clean"
-        parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_edit-jit-representative-edit"
+        # Edit receipts use the base corpus program as their state key.
+        parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-jit-representative-edit"
     done < "$CORPUS"
+    parity_check_job_runner
     parity_run_case trait-object examples/features/types/traits.jet examples/features/expected/types/traits.out explicit
     parity_run_case effects examples/features/effects/effects.jet examples/features/expected/effects/effects.out native
     parity_run_case closure examples/features/basics/bare_lambda_param.jet examples/features/expected/basics/bare_lambda_param.out native
@@ -995,18 +1368,18 @@ measure_state() {
         state_cache="$state_work/cache"
         prepare_fixture "$state_work" "$state_program" "$state_expected"
         if [ "$state_stage" = "jit-fast" ]; then
-            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         else
-            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         fi
     else
         state_work="$state_root/seeded"
         state_cache="$state_work/cache"
         prepare_fixture "$state_work" "$state_program" "$state_expected"
         if [ "$state_stage" = "jit-fast" ]; then
-            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         else
-            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         fi
         if [ "$state_kind" = "edit" ]; then
             state_warm_cache="$state_root/warm-cache"
@@ -1035,9 +1408,9 @@ measure_state() {
         sample_output="$state_root/sample-$sample_index"
         sample_stats="$state_root/sample-$sample_index.stats"
         if [ "$state_stage" = "jit-fast" ]; then
-            run_jit_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases"
+            run_jit_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases" "$state_program"
         else
-            run_aot_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases"
+            run_aot_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases" "$state_program"
         fi
         check_cache_state "$state_program" "$state_name" "$state_kind" "$state_stage"
         if [ "$sample_index" -eq 1 ]; then
@@ -1052,21 +1425,26 @@ measure_state() {
         sample_index=$((sample_index + 1))
     done
 
-    state_latency_median=$(median_file "$state_latency")
-    state_memory_max=$(sort -n "$state_memory" | tail -n1)
+    # Compute both gates over every measured sample. A warmup is never part of
+    # these files, and a Tukey outlier is never deleted before the IQR gate or
+    # the reported median/max are calculated.
     state_variance=$(variance_file "$state_latency")
     state_outliers=$(outlier_file "$state_latency")
     if [ "$state_variance" -gt "$VARIANCE_BUDGET_PCT" ]; then
         echo "unstable compiler-speed benchmark: $state_program/$state_name interquartile spread=${state_variance}% budget=${VARIANCE_BUDGET_PCT}%" >&2
         exit 1
     fi
-    # A wide middle half means an unstable compiler; a fat tail means a bimodal
-    # path, which the spread alone cannot see. Allow the handful of samples a
-    # shared machine costs us, and fail when a quarter of the run disagrees.
+    # A wide middle half means an unstable compiler; a fat tail means a
+    # bimodal path, which the spread alone cannot see. Allow neither hidden
+    # samples nor a wider budget.
     if [ "$state_outliers" -gt "$OUTLIER_BUDGET_COUNT" ]; then
         echo "bimodal compiler-speed benchmark: $state_program/$state_name outliers=${state_outliers} of ${SAMPLES} budget=${OUTLIER_BUDGET_COUNT}" >&2
         exit 1
     fi
+    state_latency_median=$(median_file "$state_latency")
+    validate_sample_file "$state_memory"
+    state_memory_max=$(sort -n "$state_memory" | tail -n1)
+    OUTLIER_TOTAL=$((OUTLIER_TOTAL + state_outliers))
     if [ "$state_stage" = "jit-fast" ]; then
         state_backend="cranelift"
         state_linker="none"
@@ -1096,7 +1474,7 @@ measure_state() {
             state_tir_us=$(required_phase_average "$state_phases" tir)
             state_emission_us=$(required_phase_average "$state_phases" emission)
         fi
-        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$state_tir_us;emission_us=$state_emission_us;build_plan_us=$(phase_average "$state_phases" build_plan);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
+        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$state_tir_us;emission_us=$state_emission_us;build_plan_us=$(phase_average "$state_phases" build_plan);cache_key_us=$(phase_average "$state_phases" cache_key);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
     fi
     state_artifact_source="$state_work"
     if [ "$state_kind" = "clean" ]; then
@@ -1136,14 +1514,14 @@ measure_state() {
     state_expected_hash=$(sha256 "$ROOT/$state_expected_source")
     state_source_bytes=$(file_bytes "$ROOT/$state_source")
     state_expected_bytes=$(file_bytes "$ROOT/$state_expected_source")
-    state_workload_sha256=$(workload_digest "$state_program" "$state_role" "$state_source_hash" "$state_expected_hash" "$state_source_bytes" "$state_expected_bytes")
+    state_workload_sha256=$(workload_digest "$state_program" "$state_role" "$state_source_hash" "$state_expected_hash" "$state_source_bytes" "$state_expected_bytes" "$manifest_sha256" "$machine_toolchain_sha256")
     case "$state_kind" in
         clean) state_cache_state=Clean; state_cache_policy=fresh-cache-per-sample ;;
         no-change) state_cache_state=NoChange; state_cache_policy=shared-cache-after-warmup ;;
         edit) state_cache_state=Edit; state_cache_policy=base-cache-snapshot-before-edit ;;
         *) echo "unknown compiler-speed cache state: $state_kind" >&2; exit 1 ;;
     esac
-    state_phase_text="$state_phase_text;source=$state_source;source_sha256=$state_source_hash;source_bytes=$state_source_bytes;expected_sha256=$state_expected_hash;expected_bytes=$state_expected_bytes;workload_sha256=$state_workload_sha256;role=$state_role;profile=$state_profile;backend=$state_backend;linker=$state_linker;linker_path=$state_linker_path;linker_sha256=$state_linker_sha256;linker_backend=$state_linker_backend;linker_backend_path=$state_linker_backend_path;linker_backend_sha256=$state_linker_backend_sha256;cache_state=$state_cache_state;cache_policy=$state_cache_policy;cache_hits=$(phase_average "$state_phases" cache_hit);cache_misses=$(phase_average "$state_phases" cache_miss);generated_rust_bytes=$(phase_average "$state_phases" rust_bytes);artifact_bytes=$state_artifact_bytes;libc_sha256=$machine_libc_sha256;allocator_sha256=$machine_allocator_source_sha256;allocator_environment_sha256=$machine_allocator_environment_sha256;hardware_sha256=$machine_hardware_sha256;topology_sha256=$machine_topology_sha256;toolchain_sha256=$machine_toolchain_sha256;rustc_sha256=$machine_rustc_sha256;top_cause=$(top_cause "$state_phases");full_artifact=$state_full_artifact"
+    state_phase_text="$state_phase_text;outliers_discarded=$state_outliers;source=$state_source;source_sha256=$state_source_hash;source_bytes=$state_source_bytes;expected_sha256=$state_expected_hash;expected_bytes=$state_expected_bytes;manifest_sha256=$manifest_sha256;workload_sha256=$state_workload_sha256;role=$state_role;profile=$state_profile;backend=$state_backend;linker=$state_linker;linker_path=$state_linker_path;linker_sha256=$state_linker_sha256;linker_backend=$state_linker_backend;linker_backend_path=$state_linker_backend_path;linker_backend_sha256=$state_linker_backend_sha256;cache_state=$state_cache_state;cache_policy=$state_cache_policy;cache_hits=$(phase_average "$state_phases" cache_hit);cache_misses=$(phase_average "$state_phases" cache_miss);generated_rust_bytes=$(phase_average "$state_phases" rust_bytes);artifact_bytes=$state_artifact_bytes;libc_sha256=$machine_libc_sha256;allocator_sha256=$machine_allocator_source_sha256;allocator_environment_sha256=$machine_allocator_environment_sha256;hardware_sha256=$machine_hardware_sha256;topology_sha256=$machine_topology_sha256;toolchain_sha256=$machine_toolchain_sha256;rustc_sha256=$machine_rustc_sha256;top_cause=$(top_cause "$state_phases");full_artifact=$state_full_artifact"
     printf '%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
         "$state_program" "$TAB" "$state_name" "$TAB" "$state_stage" "$TAB" \
         "$state_latency_median" "$TAB" "$state_memory_max" "$TAB" "$state_variance" "$TAB" \
@@ -1152,19 +1530,19 @@ measure_state() {
 }
 
 print_environment_json() {
-    printf '{"schema":"jet.compiler-speed.environment","version":1,"report_version":%s,"corpus_sha256":%s,"corpus_count":%s,' \
-        "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$corpus_count"
-    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s},' \
+    printf '{"schema":"jet.compiler-speed.environment","version":1,"report_version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"corpus_count":%s,' \
+        "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$corpus_count"
+    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
         "$(json_q "$machine_allocator")" "$(json_q "$machine_allocator_environment_sha256")" "$(json_q "$machine_allocator_source_sha256")" \
         "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
         "$machine_cpu_numa_nodes" "$(json_q "$machine_cpu_online")" "$machine_cpu_cores_per_socket" "$machine_cpu_sockets" \
         "$machine_cpu_threads_per_core" "$(json_q "$machine_governor")" "$(json_q "$machine_hardware_sha256")" \
         "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" "$(json_q "$machine_libc_path")" \
         "$(json_q "$machine_libc_sha256")" "$(json_q "$machine_libc_version")" "$machine_memory" "$(json_q "$machine_os")" \
-        "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
+        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
         "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" "$(json_q "$machine_toolchain_sha256")" \
-        "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")"
-    printf '"contract":{"cache_states":["Clean","NoChange","Edit"],"identity":"program+role+source_sha256+expected_sha256+source_bytes+expected_bytes","comparison":"same workload identity only","unmatched_workloads":"reject","profiles":["fast","release"],"backends":["cranelift","rustc-llvm"]}}\n'
+        "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
+    printf '"contract":{"cache_states":["Clean","NoChange","Edit"],"identity":"program+role+source_sha256+expected_sha256+source_bytes+expected_bytes+manifest_sha256+toolchain_sha256","comparison":"same workload identity only","unmatched_workloads":"reject","profiles":["fast","release"],"backends":["cranelift","rustc-llvm"]}}\n'
 }
 
 check_construct_scale() {
@@ -1172,6 +1550,7 @@ check_construct_scale() {
     scale_count=0
     scale_inputs="$run_dir/construct-scale-inputs.tsv"
     : > "$scale_inputs"
+    printf 'manifest_sha256\t%s\ntoolchain_sha256\t%s\n' "$manifest_sha256" "$machine_toolchain_sha256" >> "$scale_inputs"
     while IFS="$TAB" read -r scale_construct scale_point scale_axis scale_instantiations scale_glue_units scale_source scale_expected; do
         case "$scale_construct" in
             ""|\#*) continue ;;
@@ -1203,10 +1582,35 @@ check_construct_scale() {
         echo "construct-scale matrix must contain 21 rows, got $scale_count" >&2
         exit 1
     }
+    expected_scale_families=generic-instantiations,bounded-variadics,derives-reflection,large-matches,closures,taskgroups-select,drop-cleanup
+    actual_scale_families=$(awk -F "$TAB" '
+        $1 !~ /^[[:space:]]*(#|$)/ {
+            if ($1 != previous) {
+                printf "%s%s", separator, $1
+                separator = ","
+                previous = $1
+            }
+        }
+    ' "$SCALE_CORPUS")
+    [ "$actual_scale_families" = "$expected_scale_families" ] || {
+        echo "construct-scale families must be ordered: expected $expected_scale_families, got $actual_scale_families" >&2
+        exit 1
+    }
     for scale_family in generic-instantiations bounded-variadics derives-reflection large-matches closures taskgroups-select drop-cleanup; do
         scale_family_count=$(awk -F "$TAB" -v family="$scale_family" '$1 == family { count++ } END { print count + 0 }' "$SCALE_CORPUS")
         [ "$scale_family_count" -eq 3 ] || {
             echo "construct-scale family must contain three points: $scale_family ($scale_family_count)" >&2
+            exit 1
+        }
+        scale_family_points=$(awk -F "$TAB" -v family="$scale_family" '$1 == family { print $2 }' "$SCALE_CORPUS" | paste -sd, -)
+        [ "$scale_family_points" = "1,2,4" ] || {
+            echo "construct-scale family must use ordered points 1,2,4: $scale_family ($scale_family_points)" >&2
+            exit 1
+        }
+        scale_source_count=$(awk -F "$TAB" -v family="$scale_family" '$1 == family { print $6 }' "$SCALE_CORPUS" | sort -u | wc -l | tr -d '[:space:]')
+        scale_expected_count=$(awk -F "$TAB" -v family="$scale_family" '$1 == family { print $7 }' "$SCALE_CORPUS" | sort -u | wc -l | tr -d '[:space:]')
+        [ "$scale_source_count" -eq 3 ] && [ "$scale_expected_count" -eq 3 ] || {
+            echo "construct-scale family must use three unique source/golden pairs: $scale_family" >&2
             exit 1
         }
     done
@@ -1242,6 +1646,7 @@ measure_construct_scale_state() {
     scale_state_aot_latency="$scale_state_root/aot-latency.ns"
     scale_state_jit_memory="$scale_state_root/jit-memory.bytes"
     scale_state_aot_memory="$scale_state_root/aot-memory.bytes"
+    scale_state_aot_artifacts="$scale_state_root/aot-artifact.bytes"
     mkdir -p "$scale_state_root"
     : > "$scale_state_jit_phases"
     : > "$scale_state_aot_phases"
@@ -1249,6 +1654,7 @@ measure_construct_scale_state() {
     : > "$scale_state_aot_latency"
     : > "$scale_state_jit_memory"
     : > "$scale_state_aot_memory"
+    : > "$scale_state_aot_artifacts"
 
     scale_state_jit_warmup="$scale_state_root/jit-warmup"
     prepare_fixture "$scale_state_jit_warmup" "$scale_state_source" "$scale_state_expected"
@@ -1256,7 +1662,7 @@ measure_construct_scale_state() {
     scale_state_aot_warmup="$scale_state_root/aot-warmup"
     prepare_fixture "$scale_state_aot_warmup" "$scale_state_source" "$scale_state_expected"
     TRIAL_LINKER=
-    run_aot_trial "$scale_state_aot_warmup" "$scale_state_aot_warmup/cache" "$scale_state_root/aot-warmup" "$scale_state_root/aot-warmup.stats" "$scale_state_aot_phases"
+    run_aot_trial "$scale_state_aot_warmup" "$scale_state_aot_warmup/cache" "$scale_state_root/aot-warmup" "$scale_state_root/aot-warmup.stats" "$scale_state_aot_phases" "" debug
     : > "$scale_state_jit_phases"
     : > "$scale_state_aot_phases"
 
@@ -1270,10 +1676,10 @@ measure_construct_scale_state() {
 
         scale_state_aot_work="$scale_state_root/aot-$scale_state_index"
         prepare_fixture "$scale_state_aot_work" "$scale_state_source" "$scale_state_expected"
-        run_aot_trial "$scale_state_aot_work" "$scale_state_aot_work/cache" "$scale_state_root/aot-$scale_state_index" "$scale_state_root/aot-$scale_state_index.stats" "$scale_state_aot_phases"
+        run_aot_trial "$scale_state_aot_work" "$scale_state_aot_work/cache" "$scale_state_root/aot-$scale_state_index" "$scale_state_root/aot-$scale_state_index.stats" "$scale_state_aot_phases" "" debug
         printf '%s\n' "$TRIAL_LATENCY_NS" >> "$scale_state_aot_latency"
         printf '%s\n' "$TRIAL_MEMORY_BYTES" >> "$scale_state_aot_memory"
-        scale_state_aot_artifact_bytes=$TRIAL_ARTIFACT_BYTES
+        printf '%s\n' "$TRIAL_ARTIFACT_BYTES" >> "$scale_state_aot_artifacts"
         scale_state_index=$((scale_state_index + 1))
     done
 
@@ -1289,7 +1695,9 @@ measure_construct_scale_state() {
     SCALE_STATE_EXPECTED_SHA256=$(sha256 "$ROOT/$scale_state_expected")
     SCALE_STATE_JIT_LATENCY=$(median_file "$scale_state_jit_latency")
     SCALE_STATE_AOT_LATENCY=$(median_file "$scale_state_aot_latency")
+    validate_sample_file "$scale_state_jit_memory"
     SCALE_STATE_JIT_MEMORY=$(sort -n "$scale_state_jit_memory" | tail -n1)
+    validate_sample_file "$scale_state_aot_memory"
     SCALE_STATE_AOT_MEMORY=$(sort -n "$scale_state_aot_memory" | tail -n1)
     SCALE_STATE_JIT_VARIANCE=$(variance_file "$scale_state_jit_latency")
     SCALE_STATE_AOT_VARIANCE=$(variance_file "$scale_state_aot_latency")
@@ -1307,12 +1715,12 @@ measure_construct_scale_state() {
         exit 1
     }
     SCALE_STATE_GLUE_BYTES=$SCALE_STATE_GENERATED_RUST_BYTES
-    SCALE_STATE_ARTIFACT_BYTES=$scale_state_aot_artifact_bytes
+    SCALE_STATE_ARTIFACT_BYTES=$(median_file "$scale_state_aot_artifacts")
 }
 
 print_construct_scale() {
-    printf 'compiler-construct-scale version=1 matrix=%s matrix_sha256=%s inputs_sha256=%s stage=construct-scale machine=%s target=%s rustc=%s llvm=%s warmups=%s samples=%s\n' \
-        "$SCALE_CORPUS_COUNT" "$SCALE_CORPUS_SHA256" "$SCALE_INPUTS_SHA256" "$machine" "$machine_target" "$machine_rustc" "$machine_llvm" "$WARMUPS" "$SAMPLES"
+    printf 'compiler-construct-scale version=1 matrix=%s matrix_sha256=%s inputs_sha256=%s stage=construct-scale aot_profile=debug machine=%s target=%s rustc=%s llvm=%s warmups=%s samples=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s\n' \
+        "$SCALE_CORPUS_COUNT" "$SCALE_CORPUS_SHA256" "$SCALE_INPUTS_SHA256" "$machine" "$machine_target" "$machine_rustc" "$machine_llvm" "$WARMUPS" "$SAMPLES" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
     printf '%s\n' 'construct scale axis instantiations glue_units jit_latency_ns aot_latency_ns generated_rust_bytes glue_bytes artifact_size_bytes jit_memory_bytes aot_memory_bytes jit_variance_pct aot_variance_pct aot_latency_growth_pct artifact_growth_pct superlinear_growth source source_sha256 expected expected_sha256'
     while IFS="$TAB" read -r scale_construct scale_point scale_axis scale_instantiations scale_glue_units scale_jit_latency scale_aot_latency scale_generated_rust scale_glue_bytes scale_artifact scale_jit_memory scale_aot_memory scale_jit_variance scale_aot_variance scale_aot_growth scale_artifact_growth scale_superlinear scale_source scale_source_sha256 scale_expected scale_expected_sha256; do
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
@@ -1321,8 +1729,8 @@ print_construct_scale() {
 }
 
 print_construct_scale_json() {
-    printf '{"schema":"jet.compiler-speed.construct-scale","version":1,"matrix_sha256":%s,"inputs_sha256":%s,"machine":%s,"target":%s,"rustc":%s,"llvm":%s,"warmups":%s,"samples":%s,"runs":[' \
-        "$(json_q "$SCALE_CORPUS_SHA256")" "$(json_q "$SCALE_INPUTS_SHA256")" "$(json_q "$machine")" "$(json_q "$machine_target")" "$(json_q "$machine_rustc")" "$(json_q "$machine_llvm")" "$WARMUPS" "$SAMPLES"
+    printf '{"schema":"jet.compiler-speed.construct-scale","version":1,"matrix_sha256":%s,"inputs_sha256":%s,"aot_profile":"debug","machine":%s,"target":%s,"rustc":%s,"llvm":%s,"warmups":%s,"samples":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s,"runs":[' \
+        "$(json_q "$SCALE_CORPUS_SHA256")" "$(json_q "$SCALE_INPUTS_SHA256")" "$(json_q "$machine")" "$(json_q "$machine_target")" "$(json_q "$machine_rustc")" "$(json_q "$machine_llvm")" "$WARMUPS" "$SAMPLES" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
     scale_json_first=1
     while IFS="$TAB" read -r scale_construct scale_point scale_axis scale_instantiations scale_glue_units scale_jit_latency scale_aot_latency scale_generated_rust scale_glue_bytes scale_artifact scale_jit_memory scale_aot_memory scale_jit_variance scale_aot_variance scale_aot_growth scale_artifact_growth scale_superlinear scale_source scale_source_sha256 scale_expected scale_expected_sha256; do
         [ "$scale_json_first" -eq 1 ] || printf ','
@@ -1366,6 +1774,7 @@ if [ "${1:-}" = "--construct-scale" ] || [ "${1:-}" = "--construct-scale-json" ]
         scale_previous_aot_latency=$SCALE_STATE_AOT_LATENCY
         scale_previous_artifact=$SCALE_STATE_ARTIFACT_BYTES
     done < "$SCALE_CORPUS"
+    record_machine_load
     case "${1:-}" in
         --construct-scale) print_construct_scale ;;
         --construct-scale-json) print_construct_scale_json ;;
@@ -1414,7 +1823,7 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
         [ -s "$aot_stdout" ] || { echo "missing parity output: $program/$aot_state" >&2; exit 1; }
         cmp "$jit_stdout" "$aot_stdout" || { echo "JIT/AOT stdout parity failed: $program/$scenario" >&2; exit 1; }
         cmp "$jit_stderr" "$aot_stderr" || { echo "JIT/AOT stderr parity failed: $program/$scenario" >&2; exit 1; }
-        for workload_field in workload_sha256 source_sha256 source_bytes expected_sha256 expected_bytes; do
+        for workload_field in workload_sha256 source_sha256 source_bytes expected_sha256 expected_bytes manifest_sha256 toolchain_sha256; do
             jit_workload_value=$(row_phase_value "$program" "$jit_state" "$workload_field")
             aot_workload_value=$(row_phase_value "$program" "$aot_state" "$workload_field")
             [ -n "$jit_workload_value" ] && [ "$jit_workload_value" = "$aot_workload_value" ] || {
@@ -1426,48 +1835,70 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
 done < "$CORPUS"
 
 run_parity_checks
+record_machine_load
 
 print_table() {
-    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s parity=%s parity_cases=%s\n' \
+    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s manifest_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s outliers_discarded=%s parity=%s parity_cases=%s\n' \
         "$REPORT_VERSION" \
-        "$corpus_count" "$corpus_sha" "$machine" "$machine_target" "$machine_rustc" \
+        "$corpus_count" "$corpus_sha" "$manifest_sha256" "$machine" "$machine_target" "$machine_rustc" \
         "$machine_llvm" "$machine_rustc_vv_sha" "$machine_rustc_sha256" "$compiler_sha256" "$machine_jet_env_sha256" \
         "$machine_libc_sha256" "$machine_allocator_source_sha256" "$machine_allocator_environment_sha256" \
         "$machine_hardware_sha256" "$machine_topology_sha256" "$machine_toolchain_sha256" "$machine_kernel" \
-        "$machine_governor" "$machine_memory" "$WARMUPS" "$SAMPLES" "$PARITY_RECEIPT" "$PARITY_CASE_COUNT"
-    printf '%-54s %-25s %-16s %16s %16s %10s %-64s\n' \
-        program state stage latency_ns memory_bytes variance_pct output_sha256:stderr_sha256
+        "$machine_governor" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli" "$machine_memory" "$WARMUPS" "$SAMPLES" "$OUTLIER_TOTAL" "$PARITY_RECEIPT" "$PARITY_CASE_COUNT"
+    printf '%s\n' "$ROW_HEADER"
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
-        printf '%-54s %-25s %-16s %16s %16s %10s %s:%s phases=%s\n' \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s:%s\tphases=%s\n' \
             "$row_program" "$row_state" "$row_stage" "$row_latency" "$row_memory" "$row_variance" \
             "$row_stdout_sha" "$row_stderr_sha" "$row_phases"
     done < "$rows_file"
 }
 
 as_json() {
-    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"stage":"matrix",' "$REPORT_VERSION" "$(json_q "$corpus_sha")"
+    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"stage":"matrix",' "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")"
     printf '"parity":{"status":%s,"cases":%s,"semantic":%s,"diagnostics":%s,"effects":%s,"tiers":%s,"dev_profile":"dev","aot_profile":"release"},' \
         "$(json_q "$PARITY_RECEIPT")" "$PARITY_CASE_COUNT" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")"
-    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s},' \
+    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
         "$(json_q "$machine_allocator")" "$(json_q "$machine_allocator_environment_sha256")" "$(json_q "$machine_allocator_source_sha256")" \
         "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
         "$machine_cpu_numa_nodes" "$(json_q "$machine_cpu_online")" "$machine_cpu_cores_per_socket" "$machine_cpu_sockets" \
         "$machine_cpu_threads_per_core" "$(json_q "$machine_governor")" "$(json_q "$machine_hardware_sha256")" \
         "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" "$(json_q "$machine_libc_path")" \
         "$(json_q "$machine_libc_sha256")" "$(json_q "$machine_libc_version")" "$machine_memory" "$(json_q "$machine_os")" \
-        "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
+        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
         "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" "$(json_q "$machine_toolchain_sha256")" \
-        "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")"
-    printf '"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"runs":[' \
-        "$LATENCY_REGRESSION_PCT" "$MEMORY_REGRESSION_PCT" "$SAMPLES" "$VARIANCE_BUDGET_PCT" "$WARMUPS"
+        "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
+    printf '"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"outliers_discarded":%s,"runs":[' \
+        "$LATENCY_REGRESSION_PCT" "$MEMORY_REGRESSION_PCT" "$SAMPLES" "$VARIANCE_BUDGET_PCT" "$WARMUPS" "$OUTLIER_TOTAL"
     first=1
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
         [ "$first" -eq 1 ] || printf ','
         first=0
-        printf '{"program":%s,"state":%s,"stage":%s,"latency_ns":%s,"memory_bytes":%s,"variance_pct":%s,"stdout_sha256":%s,"stderr_sha256":%s,"phase_totals":%s}' \
+        row_outliers=$(printf '%s\n' "$row_phases" | sed -n 's/.*;outliers_discarded=\([^;]*\).*/\1/p')
+        row_source=$(row_phase_value "$row_program" "$row_state" source)
+        row_role=$(row_phase_value "$row_program" "$row_state" role)
+        row_profile=$(row_phase_value "$row_program" "$row_state" profile)
+        row_backend=$(row_phase_value "$row_program" "$row_state" backend)
+        row_linker=$(row_phase_value "$row_program" "$row_state" linker)
+        row_linker_path=$(row_phase_value "$row_program" "$row_state" linker_path)
+        row_cache_state=$(row_phase_value "$row_program" "$row_state" cache_state)
+        row_cache_policy=$(row_phase_value "$row_program" "$row_state" cache_policy)
+        row_cache_hits=$(row_phase_value "$row_program" "$row_state" cache_hits)
+        row_cache_misses=$(row_phase_value "$row_program" "$row_state" cache_misses)
+        row_generated_rust_bytes=$(row_phase_value "$row_program" "$row_state" generated_rust_bytes)
+        row_artifact_bytes=$(row_phase_value "$row_program" "$row_state" artifact_bytes)
+        row_top_cause=$(row_phase_value "$row_program" "$row_state" top_cause)
+        row_full_artifact=$(row_phase_value "$row_program" "$row_state" full_artifact)
+        case "$row_outliers" in
+            ''|*[!0-9]*) echo "invalid discarded-outlier count: $row_program/$row_state" >&2; exit 1 ;;
+        esac
+        printf '{"program":%s,"state":%s,"stage":%s,"source":%s,"role":%s,"profile":%s,"backend":%s,"linker":%s,"linker_path":%s,"cache_state":%s,"cache_policy":%s,"cache_hits":%s,"cache_misses":%s,"top_cause":%s,"generated_rust_bytes":%s,"artifact_bytes":%s,"full_artifact":%s,"latency_ns":%s,"memory_bytes":%s,"variance_pct":%s,"outliers_discarded":%s,"stdout_sha256":%s,"stderr_sha256":%s,"phase_totals":%s}' \
             "$(json_q "$row_program")" "$(json_q "$row_state")" "$(json_q "$row_stage")" \
-            "$row_latency" "$row_memory" "$row_variance" "$(json_q "$row_stdout_sha")" \
-            "$(json_q "$row_stderr_sha")" "$(json_q "$row_phases")"
+            "$(json_q "$row_source")" "$(json_q "$row_role")" "$(json_q "$row_profile")" \
+            "$(json_q "$row_backend")" "$(json_q "$row_linker")" "$(json_q "$row_linker_path")" \
+            "$(json_q "$row_cache_state")" "$(json_q "$row_cache_policy")" "$row_cache_hits" "$row_cache_misses" \
+            "$(json_q "$row_top_cause")" "$row_generated_rust_bytes" "$row_artifact_bytes" \
+            "$(json_q "$row_full_artifact")" "$row_latency" "$row_memory" "$row_variance" "$row_outliers" \
+            "$(json_q "$row_stdout_sha")" "$(json_q "$row_stderr_sha")" "$(json_q "$row_phases")"
     done < "$rows_file"
     printf ']}\n'
 }

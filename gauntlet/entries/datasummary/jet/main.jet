@@ -1,50 +1,29 @@
-use core.files as files
-use core.process as process
-use core.math as math
+use core.[data, files]
 
-fn mean(values: [Float]) Float -> {
-    total := Float{0.0}
-    loop value in values -> total += value
-    return total / Float.from_int(values.len())
+struct Measurement {
+    group: String
+    value: Float
+}
+
+#CLI
+struct Args {
+    input: String
 }
 
 fn summary(values: [Float]) String -> {
     sorted := values.copy()
-    sorted.sort_by((left: Float, right: Float) -> if left < right -> Ordering.Less else if left > right -> Ordering.Greater else -> Ordering.Equal)
+    sorted.sort()
     n := sorted.len()
-    avg :: mean(values)
-    median :: sorted[(n - 1) /% 2]
-    p95 :: sorted[((19 * n + 19) /% 20) - 1]
-    squared := Float{0.0}
-    loop value in values {
-        delta :: value - avg
-        squared += delta * delta
-    }
-    sd :: math.sqrt(squared / Float.from_int(n))
-    return "n={n} mean={avg:Fixed(2)} median={median:Fixed(2)} p95={p95:Fixed(2)} sd={sd:Fixed(2)}"
+    stats :: data.describe(values)
+    "n={n} mean={stats.mean:Fixed(2)} median={sorted[(n - 1) /% 2]:Fixed(2)} p95={sorted[((19 * n + 19) /% 20) - 1]:Fixed(2)} sd={stats.stddev:Fixed(2)}"
 }
 
-fn run() {
-    args :: process.argv()
-    path :: args.get(1) ?? "measurements.csv"
-    text :: files.read(path) ?? panic("read failed")
-    groups := [String:[Float]]{}
-    loop line in text.lines() {
-        if line == "group,value" -> next
-        fields :: line.split(",").to_list()
-        group :: fields.get(0) ?? ""
-        value :: Float.parse(fields.get(1) ?? "") ?? 0.0
-        values := groups.get(group) ?? [Float]{}
-        values.push(value)
-        groups[group] = values
+fn run(args: Args) {
+    text :: files.read(args.input) ?? panic("read failed")
+    measurements :: data.csv<Measurement>(text) ?? panic("csv failed")
+    loop (name, rows) in measurements.group_by(measurement -> measurement.group) {
+        print("{name} {summary(rows.map(measurement -> measurement.value))}")
     }
-    names := groups.keys().to_list()
-    names.sort()
-    all := [Float]{}
-    loop name in names {
-        values :: groups.get(name) ?? [Float]{}
-        loop value in values -> all.push(value)
-        print("{name} {summary(values)}")
-    }
-    print("overall n={all.len()} mean={mean(all):Fixed(2)}")
+    overall :: measurements.fold(Float{0.0}, (total, measurement) -> total + measurement.value) / Float.from_int(measurements.len())
+    print("overall n={measurements.len()} mean={overall:Fixed(2)}")
 }

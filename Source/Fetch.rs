@@ -13,11 +13,27 @@ use crate::Publish::SemVer::SemVer;
 use crate::Publish::{self, ResolveMode, SolverCandidate, VersionConstraint, VersionReq};
 use crate::Store;
 use crate::Syntax;
-use crate::SHA256::tree_hash;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    windows
+))]
+use std::fs::File;
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+use std::os::fd::{AsRawFd, FromRawFd};
 
 // ──────────────────────────────────────────────
 // Main entry points
@@ -112,7 +128,7 @@ pub fn fetch(
     // Write the lock file, inside the project's `.jet/` managed folder (U2).
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
+        ensure_fetch_directory(parent).map_err(|e| {
             vec![Diagnostic::error(
                 "E1206",
                 format!("couldn't create {}", parent.display()),
@@ -163,37 +179,20 @@ fn write_lock_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "lock has no parent")
     })?;
-    let parent_metadata = std::fs::symlink_metadata(parent)?;
-    if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "lock parent is not a real directory",
-        ));
-    }
-    let partial = parent.join(format!(
-        ".{}.partial-{}-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("lock"),
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0),
-    ));
+    ensure_fetch_directory(parent)?;
+    let temporary_root = jetpack::Provider::exclusive_temp_dir(parent, "jet-lock")?;
+    let temporary = temporary_root.join("lock");
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&partial)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        add_fetch_nofollow_flags(&mut options);
+        let mut file = options.open(&temporary)?;
         use std::io::Write;
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&partial, path)
+        std::fs::rename(&temporary, path)
     })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&partial);
-    }
+    let _ = std::fs::remove_dir_all(&temporary_root);
     result
 }
 
@@ -511,14 +510,16 @@ impl<'a> Resolver<'a> {
                     )]
                 })?;
                 let repo = Publish::index_repo_path(&registry);
-                let artifact = Publish::verify_artifact(&repo, &entry).map_err(|error| {
-                    vec![registry_diagnostic(
-                        &name,
-                        &format!("published artifact is unavailable or corrupt: {error}"),
-                        "refresh the registry mirror or publish the immutable source artifact",
-                    )]
-                })?;
-                let dep_manifest = self.load_dep_manifest(&artifact, &name)?;
+                let artifact_snapshot = Publish::snapshot_verified_artifact(&repo, &entry)
+                    .map_err(|error| {
+                        vec![registry_diagnostic(
+                            &name,
+                            &format!("published artifact is unavailable or corrupt: {error}"),
+                            "refresh the registry mirror or publish the immutable source artifact",
+                        )]
+                    })?;
+                let artifact = artifact_snapshot.path();
+                let dep_manifest = self.load_dep_manifest(artifact, &name)?;
                 if dep_manifest.package.name != name
                     || dep_manifest.package.version != entry.version
                 {
@@ -529,7 +530,7 @@ impl<'a> Resolver<'a> {
                     )]);
                 }
                 let registry_metadata =
-                    self.load_registry_metadata(&artifact, &name, &entry.version)?;
+                    self.load_registry_metadata(artifact, &name, &entry.version)?;
                 let registry_dependencies =
                     registry_dependency_edges(&dep_manifest, registry_metadata.as_ref(), &name)?;
                 Publish::authorize_package_candidate(
@@ -743,15 +744,20 @@ impl<'a> Resolver<'a> {
                         .unwrap_or(true);
                     if lexical_escape || canonical_escape {
                         return Err(vec![path_dependency_escape_diagnostic(
-                            dep_name,
-                            path,
-                            parent_dir,
+                            dep_name, path, parent_dir,
                         )]);
                     }
                 }
 
-                // Load the dep's manifest.
-                let dep_manifest = self.load_dep_manifest(&abs_path, dep_name)?;
+                // Freeze the source before reading its manifest, dependency
+                // metadata, or hash. Everything below consumes this exact
+                // snapshot; the project path is never used as package input
+                // again.
+                let snapshot = Store::snapshot_tree(&abs_path).map_err(|d| vec![d])?;
+                let source = snapshot.path();
+
+                // Load the dep's manifest from the held snapshot.
+                let dep_manifest = self.load_dep_manifest(source, dep_name)?;
 
                 let dep_version = dep_manifest.package.version.clone();
                 let dep_name_in_manifest = dep_manifest.package.name.clone();
@@ -777,14 +783,14 @@ impl<'a> Resolver<'a> {
                 }
 
                 // Compute tree hash (for fingerprint and store).
-                let th = tree_hash(&abs_path);
+                let th = snapshot.content_hash().to_string();
 
                 // Resolve transitive deps.
                 let mut trans_deps = Vec::new();
                 for (trans_name, trans_spec) in &dep_manifest.dependencies {
                     let mut child_chain = chain.to_vec();
                     child_chain.push(trans_name.clone());
-                    self.resolve_dep(trans_name, trans_spec, &abs_path, &child_chain)?;
+                    self.resolve_dep(trans_name, trans_spec, source, &child_chain)?;
                     trans_deps.push(trans_name.clone());
                 }
 
@@ -794,13 +800,13 @@ impl<'a> Resolver<'a> {
                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
                     .collect();
                 // c129: fold the dep's frozen capability contract into its pin.
-                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&abs_path);
+                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(source);
                 let fp = Lock::compute_fingerprint(&th, &dep_fps, &cap_digest);
 
                 // Store the path dep (copy to store for inode sharing).
                 // D-CASTORE1=A: returns (path, content_hash) for lock recording.
                 let (store_path, content_hash) =
-                    Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
+                    Store::ensure_path_dep(dep_name, &dep_version, &fp, source)
                         .map_err(|d| vec![d])?;
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
@@ -825,7 +831,7 @@ impl<'a> Resolver<'a> {
                         fingerprint: fp,
                         content_hash: Some(content_hash),
                         deps: trans_deps,
-                        source_dir: abs_path,
+                        source_dir: store_path,
                         provenance,
                         envelope: None,
                         receipt: None,
@@ -834,25 +840,29 @@ impl<'a> Resolver<'a> {
             }
 
             DepSpec::Git { url, selector } => {
-                // Check if git is available.
+                let transport = match validate_git_transport_url(url, self.project_root) {
+                    Ok(transport) => transport,
+                    Err(reason) => return Err(vec![git_transport_diagnostic(url, &reason)]),
+                };
+                // Check if git is available after validating the transport.
                 if !git_available() {
                     return Err(vec![Lock::e1203()]);
                 }
-                if let Err(reason) = validate_git_transport_url(url, self.project_root) {
-                    return Err(vec![git_transport_diagnostic(url, &reason)]);
-                }
 
                 // Determine what rev to fetch.
-                let rev_to_fetch = self.resolve_git_rev(dep_name, url, selector)?;
+                let rev_to_fetch = self.resolve_git_rev(dep_name, url, selector, &transport)?;
                 let clone_dir = git_cache_dir(url, &rev_to_fetch).map_err(|d| vec![d])?;
 
                 // Clone/fetch if not already cached.
                 if !is_real_directory(&clone_dir) {
-                    git_clone(url, &rev_to_fetch, &clone_dir, self.project_root)?;
+                    git_clone(url, &rev_to_fetch, &clone_dir, &transport)?;
                 }
 
-                // Load the dep's manifest from the cloned dir.
-                let dep_manifest = self.load_dep_manifest(&clone_dir, dep_name)?;
+                // Freeze the checkout before reading package metadata. The
+                // mutable Git cache is never used as the resolved source.
+                let snapshot = Store::snapshot_tree(&clone_dir).map_err(|d| vec![d])?;
+                let source = snapshot.path();
+                let dep_manifest = self.load_dep_manifest(source, dep_name)?;
                 let dep_version = dep_manifest.package.version.clone();
 
                 // Content hash of the checked-out source tree. This MUST use the
@@ -862,7 +872,7 @@ impl<'a> Resolver<'a> {
                 // different hash space and would never match, falsely tripping
                 // E1204 on every git dep. Git identity is already recorded by the
                 // locked `rev`; this field is the content fingerprint.
-                let git_tree_hash = tree_hash(&clone_dir);
+                let git_tree_hash = snapshot.content_hash().to_string();
 
                 // Check for version conflicts.
                 let dep_name_in_manifest = dep_manifest.package.name.clone();
@@ -890,7 +900,7 @@ impl<'a> Resolver<'a> {
                 for (trans_name, trans_spec) in &dep_manifest.dependencies {
                     let mut child_chain = chain.to_vec();
                     child_chain.push(trans_name.clone());
-                    self.resolve_dep(trans_name, trans_spec, &clone_dir, &child_chain)?;
+                    self.resolve_dep(trans_name, trans_spec, source, &child_chain)?;
                     trans_deps.push(trans_name.clone());
                 }
 
@@ -900,13 +910,13 @@ impl<'a> Resolver<'a> {
                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
                     .collect();
                 // c129: fold the dep's frozen capability contract into its pin.
-                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&clone_dir);
+                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(source);
                 let fp = Lock::compute_fingerprint(&git_tree_hash, &dep_fps, &cap_digest);
 
                 // Store.
                 // D-CASTORE1=A: returns (path, content_hash).
                 let (store_path, _content_hash) =
-                    Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
+                    Store::ensure_git_dep(dep_name, &dep_version, &fp, source)
                         .map_err(|d| vec![d])?;
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
@@ -940,7 +950,7 @@ impl<'a> Resolver<'a> {
                         fingerprint: fp,
                         content_hash: Some(git_tree_hash.clone()),
                         deps: trans_deps,
-                        source_dir: clone_dir,
+                        source_dir: store_path,
                         provenance,
                         envelope: None,
                         receipt: None,
@@ -1057,15 +1067,18 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 let registry_repo = Publish::index_repo_path(&registry);
-                let artifact =
-                    Publish::verify_artifact(&registry_repo, &selected).map_err(|error| {
-                        vec![registry_diagnostic(
+                let artifact_snapshot =
+                    Publish::snapshot_verified_artifact(&registry_repo, &selected).map_err(
+                        |error| {
+                            vec![registry_diagnostic(
                             dep_name,
                             &format!("published artifact is unavailable or corrupt: {error}"),
                             "refresh the registry mirror or publish the immutable source artifact",
                         )]
-                    })?;
-                let dep_manifest = self.load_dep_manifest(&artifact, dep_name)?;
+                        },
+                    )?;
+                let artifact = artifact_snapshot.path();
+                let dep_manifest = self.load_dep_manifest(artifact, dep_name)?;
                 if dep_manifest.package.name != dep_name
                     || dep_manifest.package.version != selected.version
                 {
@@ -1076,7 +1089,7 @@ impl<'a> Resolver<'a> {
                     )]);
                 }
                 let registry_metadata =
-                    self.load_registry_metadata(&artifact, dep_name, &selected.version)?;
+                    self.load_registry_metadata(artifact, dep_name, &selected.version)?;
                 let registry_dependencies =
                     registry_dependency_edges(&dep_manifest, registry_metadata.as_ref(), dep_name)?;
                 let policy_receipt = Publish::authorize_package_candidate(
@@ -1416,6 +1429,7 @@ impl<'a> Resolver<'a> {
         dep_name: &str,
         url: &str,
         selector: &GitSelector,
+        transport: &ValidatedGitTransport,
     ) -> Result<String, Vec<Diagnostic>> {
         match selector {
             GitSelector::Rev(r) => validate_cached_revision(r)
@@ -1433,7 +1447,7 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 // Resolve the tag to a specific commit via ls-remote.
-                git_resolve_ref(url, t, self.project_root).map_err(|d| vec![d])
+                git_resolve_ref(url, t, transport).map_err(|d| vec![d])
             }
             GitSelector::Branch(b) | GitSelector::Tag(b) => {
                 // Moving selector: always re-resolve if updating.
@@ -1446,7 +1460,7 @@ impl<'a> Resolver<'a> {
                             });
                     }
                 }
-                git_resolve_ref(url, b, self.project_root).map_err(|d| vec![d])
+                git_resolve_ref(url, b, transport).map_err(|d| vec![d])
             }
         }
     }
@@ -1953,6 +1967,39 @@ fn ingest_registry_artifact(
 // Build dep_dirs from existing lock (--locked mode)
 // ──────────────────────────────────────────────
 
+fn locked_store_source_path(
+    dep_name: &str,
+    package: &LockedPackage,
+) -> Result<PathBuf, Vec<Diagnostic>> {
+    let fingerprint = package
+        .fingerprint
+        .strip_prefix("sha256-")
+        .unwrap_or(&package.fingerprint);
+    if !safe_store_component(dep_name)
+        || !safe_store_component(&package.version)
+        || !safe_store_component(fingerprint)
+    {
+        return Err(vec![locked_source_diagnostic(
+            dep_name,
+            "the lock has no safe immutable store fingerprint",
+        )]);
+    }
+    Ok(Store::store_path(dep_name, &package.version, fingerprint))
+}
+
+fn safe_store_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains(['/', '\\', ':'])
+        && !value.chars().any(char::is_control)
+        && matches!(
+            Path::new(value).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+        && Path::new(value).components().nth(1).is_none()
+}
+
 fn build_dep_dirs_from_lock(
     lock: &LockFile,
     project_root: &Path,
@@ -1964,8 +2011,7 @@ fn build_dep_dirs_from_lock(
             DepSpec::Path { path } => {
                 let source_dir = normalize_path(&project_root.join(path));
                 let Some(package) = lock.packages.iter().find(|package| {
-                    package.name == *dep_name
-                        && matches!(&package.source, LockSource::Path(_))
+                    package.name == *dep_name && matches!(&package.source, LockSource::Path(_))
                 }) else {
                     return Err(vec![locked_source_diagnostic(
                         dep_name,
@@ -1981,6 +2027,7 @@ fn build_dep_dirs_from_lock(
                         "the locked path source disagrees with the manifest",
                     )]);
                 }
+                let source_dir = locked_store_source_path(dep_name, package)?;
                 Store::verify_entry(
                     dep_name,
                     &source_dir,
@@ -1991,8 +2038,7 @@ fn build_dep_dirs_from_lock(
             }
             DepSpec::Git { url, selector } => {
                 let Some(package) = lock.packages.iter().find(|package| {
-                    package.name == *dep_name
-                        && matches!(&package.source, LockSource::Git { .. })
+                    package.name == *dep_name && matches!(&package.source, LockSource::Git { .. })
                 }) else {
                     return Err(vec![locked_source_diagnostic(
                         dep_name,
@@ -2019,11 +2065,11 @@ fn build_dep_dirs_from_lock(
                         "the lock has no pinned git revision",
                     )]);
                 };
-                let source_dir = git_cache_dir(url, &revision.rev).map_err(|diagnostic| vec![diagnostic])?;
                 let expected_hash = package
                     .content_hash
                     .as_deref()
                     .unwrap_or(&revision.tree_hash);
+                let source_dir = locked_store_source_path(dep_name, package)?;
                 Store::verify_entry(dep_name, &source_dir, expected_hash)
                     .map_err(|diagnostic| vec![diagnostic])?;
                 source_dir
@@ -2132,14 +2178,16 @@ fn build_dep_dirs_from_lock(
                     &config.name,
                 )
                 .map_err(|diagnostic| vec![diagnostic])?;
-                let artifact = crate::Publish::verify_artifact(&repo, &entry).map_err(|error| {
+                let artifact_snapshot = crate::Publish::snapshot_verified_artifact(&repo, &entry)
+                    .map_err(|error| {
                     vec![registry_diagnostic(
                         dep_name,
                         &format!("locked registry artifact is unavailable: {error}"),
                         "restore the artifact in the local registry mirror; locked mode stays offline",
                     )]
-                })?;
-                let dep_manifest = load_dep_manifest(&artifact, dep_name)?;
+                    })?;
+                let artifact = artifact_snapshot.path();
+                let dep_manifest = load_dep_manifest(artifact, dep_name)?;
                 if dep_manifest.package.name != *dep_name
                     || dep_manifest.package.version != locked.version
                 {
@@ -2150,7 +2198,7 @@ fn build_dep_dirs_from_lock(
                     )]);
                 }
                 let registry_metadata = crate::Publish::read_registry_package_metadata(
-                    &artifact,
+                    artifact,
                     dep_name,
                     &locked.version,
                 )
@@ -2204,7 +2252,7 @@ fn build_dep_dirs_from_lock(
                 let store_path = ingest_registry_artifact(
                     &config,
                     &entry,
-                    &artifact,
+                    artifact,
                     &[],
                     None,
                     Some(&policy_receipt),
@@ -2379,7 +2427,10 @@ fn locked_source_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
 // ──────────────────────────────────────────────
 
 pub fn git_available() -> bool {
-    Command::new("git").arg("--version").output().is_ok()
+    jetpack::Provider::hardened_git_command()
+        .arg("--version")
+        .output()
+        .is_ok()
 }
 
 fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
@@ -2404,15 +2455,19 @@ fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
     Ok(path)
 }
 
-fn git_resolve_ref(url: &str, refname: &str, project_root: &Path) -> Result<String, Diagnostic> {
-    if let Err(reason) = validate_git_transport_url(url, project_root) {
-        return Err(git_transport_diagnostic(url, &reason));
-    }
+fn git_resolve_ref(
+    url: &str,
+    refname: &str,
+    transport: &ValidatedGitTransport,
+) -> Result<String, Diagnostic> {
     if let Err(reason) = validate_git_revision(refname) {
         return Err(git_revision_diagnostic(refname, &reason));
     }
-    let out = hardened_git_command()
-        .args(["ls-remote", "--exit-code", "--", url, refname])
+    let remote = transport
+        .git_remote(url)
+        .map_err(|reason| git_transport_diagnostic(url, &reason))?;
+    let out = hardened_git_transport_command(transport)
+        .args(["ls-remote", "--exit-code", "--", &remote, refname])
         .output()
         .map_err(|_| Lock::e1203())?;
     if !out.status.success() {
@@ -2448,11 +2503,8 @@ fn git_clone(
     url: &str,
     rev: &str,
     dest: &Path,
-    project_root: &Path,
+    transport: &ValidatedGitTransport,
 ) -> Result<(), Vec<Diagnostic>> {
-    if let Err(reason) = validate_git_transport_url(url, project_root) {
-        return Err(vec![git_transport_diagnostic(url, &reason)]);
-    }
     if let Err(reason) = validate_git_revision(rev) {
         return Err(vec![git_revision_diagnostic(rev, &reason)]);
     }
@@ -2462,7 +2514,8 @@ fn git_clone(
     if let Err(reason) = validate_git_cache_path(dest) {
         return Err(vec![git_cache_diagnostic(dest, &reason)]);
     }
-    std::fs::create_dir_all(dest).map_err(|e| {
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    ensure_fetch_directory(parent).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
             format!("couldn't create git cache directory: {}", e),
@@ -2472,32 +2525,41 @@ fn git_clone(
         )]
     })?;
 
-    // Clone the repository and check out the specific revision.
-    let tmp = dest.with_extension("_tmp");
-    if let Err(reason) = validate_git_cache_path(&tmp) {
-        return Err(vec![git_cache_diagnostic(&tmp, &reason)]);
-    }
-    if let Ok(metadata) = std::fs::symlink_metadata(&tmp) {
-        let result = if metadata.is_dir() {
-            std::fs::remove_dir_all(&tmp)
-        } else {
-            std::fs::remove_file(&tmp)
-        };
-        if let Err(error) = result {
-            return Err(vec![git_cache_diagnostic(
-                &tmp,
-                &format!("could not clear the temporary checkout: {error}"),
-            )]);
-        }
-    }
+    // Clone into an absent child of an unpredictable, exclusively-created
+    // staging directory. Git needs the child path not to exist, while the
+    // parent gives cleanup and the final rename one private namespace.
+    let tmp_root = jetpack::Provider::exclusive_temp_dir(parent, "jet-fetch").map_err(|error| {
+        vec![Diagnostic::error(
+            "E1206",
+            "couldn't create temporary git cache directory".to_string(),
+            format!("the cache staging directory could not be allocated: {error}"),
+            "check disk space and permissions".to_string(),
+            None,
+        )]
+    })?;
+    let tmp = tmp_root.join("checkout");
+    let cleanup = || {
+        let _ = std::fs::remove_dir_all(&tmp_root);
+    };
 
-    let clone_ok = hardened_git_command()
-        .args(["clone", "--quiet", "--", url, tmp.to_str().unwrap_or(".")])
+    let remote = transport.git_remote(url).map_err(|reason| {
+        cleanup();
+        vec![git_transport_diagnostic(url, &reason)]
+    })?;
+    let clone_ok = hardened_git_transport_command(transport)
+        .args([
+            "clone",
+            "--quiet",
+            "--",
+            &remote,
+            tmp.to_str().unwrap_or("."),
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
 
     if !clone_ok {
+        cleanup();
         return Err(vec![Diagnostic::error(
             "E1203",
             format!("failed to clone `{}`", url),
@@ -2507,7 +2569,7 @@ fn git_clone(
         )]);
     }
 
-    let checkout_ok = hardened_git_command()
+    let checkout_ok = jetpack::Provider::hardened_git_command()
         .args([
             "-C",
             tmp.to_str().unwrap_or("."),
@@ -2520,7 +2582,7 @@ fn git_clone(
         .unwrap_or(false);
 
     if !checkout_ok {
-        let _ = std::fs::remove_dir_all(&tmp);
+        cleanup();
         return Err(vec![Diagnostic::error(
             "E1203",
             format!("couldn't check out revision `{}` from `{}`", rev, url),
@@ -2530,7 +2592,9 @@ fn git_clone(
         )]);
     }
 
-    std::fs::rename(&tmp, dest).map_err(|e| {
+    let rename = std::fs::rename(&tmp, dest);
+    cleanup();
+    rename.map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
             format!("couldn't move cloned repo into place: {}", e),
@@ -2557,11 +2621,7 @@ fn normalize_path(p: &Path) -> PathBuf {
     out
 }
 
-fn path_dependency_escape_diagnostic(
-    dep_name: &str,
-    path: &str,
-    parent_dir: &Path,
-) -> Diagnostic {
+fn path_dependency_escape_diagnostic(dep_name: &str, path: &str, parent_dir: &Path) -> Diagnostic {
     Diagnostic::error(
         "E1206",
         format!("path dependency `{dep_name}` escapes its parent package"),
@@ -2609,7 +2669,7 @@ fn git_cache_diagnostic(path: &Path, reason: &str) -> Diagnostic {
 }
 
 fn validate_git_revision(revision: &str) -> Result<(), String> {
-    if revision.is_empty() || revision.chars().any(char::is_control) || revision.starts_with('-') {
+    if revision.is_empty() || has_terminal_control(revision) || revision.starts_with('-') {
         return Err("the revision is empty or contains unsafe characters".to_string());
     }
     Ok(())
@@ -2621,7 +2681,7 @@ fn validate_cached_revision(revision: &str) -> Result<(), String> {
         || revision == ".."
         || revision.starts_with('-')
         || revision.contains(['/', '\\', ':'])
-        || revision.chars().any(char::is_control)
+        || has_terminal_control(revision)
         || !matches!(
             Path::new(revision).components().next(),
             Some(std::path::Component::Normal(_))
@@ -2658,60 +2718,285 @@ fn validate_git_cache_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_fetch_directory(path: &Path) -> std::io::Result<()> {
+    let components = path.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory path is empty",
+        ));
+    }
+    let mut current = PathBuf::new();
+    for component in components {
+        if component == std::path::Component::ParentDir {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path contains a parent component",
+            ));
+        }
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "directory must not be a symlink",
+                ));
+            }
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "directory path is not a directory",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir(&current) {
+                    Ok(()) => {}
+                    Err(create_error)
+                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(create_error) => return Err(create_error),
+                }
+                let metadata = std::fs::symlink_metadata(&current)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "directory must not be a symlink or non-directory",
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn add_fetch_nofollow_flags(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_CLOEXEC: i32 = 0o2000000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_CLOEXEC: i32 = 0x01000000;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_NOFOLLOW: i32 = 0o400000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+}
+
+fn has_terminal_control(value: &str) -> bool {
+    value
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+}
+
 fn is_real_directory(path: &Path) -> bool {
     std::fs::symlink_metadata(path)
         .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
         .unwrap_or(false)
 }
 
-fn hardened_git_command() -> Command {
-    let mut command = Command::new("git");
-    command
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", git_null_device())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", git_null_device())
-        .env("GIT_SSH_COMMAND", hardened_ssh_command())
-        // Command-line config wins over a repository-local credential helper.
-        .args([
-            "-c",
-            "credential.helper=",
-            "-c",
-            "protocol.ext.allow=never",
-            "-c",
-            "protocol.file.allow=always",
-        ]);
-    command
+#[derive(Debug)]
+enum ValidatedGitTransport {
+    Local(LocalGitSource),
+    Network {
+        scheme: String,
+        host: String,
+        port: u16,
+        explicit_port: bool,
+        address: IpAddr,
+    },
 }
 
-fn git_null_device() -> &'static str {
-    if cfg!(windows) {
-        "NUL"
-    } else {
-        "/dev/null"
+#[derive(Debug)]
+struct LocalGitSource {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    handle: File,
+    #[cfg(windows)]
+    path: PathBuf,
+    #[cfg(windows)]
+    _handles: Vec<File>,
+}
+
+impl ValidatedGitTransport {
+    fn pinned_url(&self, url: &str) -> String {
+        let Self::Network {
+            scheme,
+            port,
+            explicit_port,
+            address,
+            ..
+        } = self
+        else {
+            return url.to_string();
+        };
+        if scheme != "git" {
+            return url.to_string();
+        }
+        let Some((url_scheme, rest)) = url.split_once("://") else {
+            return url.to_string();
+        };
+        let authority_end = rest
+            .find(|character| matches!(character, '/' | '?' | '#'))
+            .unwrap_or(rest.len());
+        let suffix = &rest[authority_end..];
+        let port = if *explicit_port {
+            format!(":{port}")
+        } else {
+            String::new()
+        };
+        format!("{url_scheme}://{}{}{}", git_host(*address), port, suffix)
+    }
+
+    fn git_config_values(&self) -> Vec<String> {
+        let Self::Network {
+            scheme,
+            host,
+            port,
+            address,
+            ..
+        } = self
+        else {
+            return Vec::new();
+        };
+        if !matches!(scheme.as_str(), "http" | "https") {
+            return Vec::new();
+        }
+        // Keep the URL host unchanged so HTTPS still verifies that host's
+        // certificate. curloptResolve pins the socket address, and redirects
+        // stay disabled because a redirected host has no validated address.
+        vec![
+            "http.followRedirects=false".to_string(),
+            "http.proxy=".to_string(),
+            "http.sslVerify=true".to_string(),
+            format!(
+                "http.curloptResolve={}:{}:{}",
+                curl_resolve_host(host),
+                port,
+                curl_resolve_address(*address)
+            ),
+        ]
+    }
+
+    fn ssh_command(&self) -> Option<String> {
+        let Self::Network {
+            scheme, address, ..
+        } = self
+        else {
+            return None;
+        };
+        (scheme == "ssh").then(|| hardened_ssh_command_for(*address))
+    }
+
+    fn git_remote(&self, url: &str) -> Result<String, String> {
+        match self {
+            Self::Local(source) => source.git_path(),
+            Self::Network { .. } => Ok(self.pinned_url(url)),
+        }
     }
 }
 
-fn hardened_ssh_command() -> &'static str {
-    if cfg!(windows) {
-        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
-    } else {
-        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
+impl LocalGitSource {
+    fn git_path(&self) -> Result<String, String> {
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios"
+        ))]
+        {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            let prefix = "/proc/self/fd/";
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            let prefix = "/dev/fd/";
+            return Ok(format!("{prefix}{}", self.handle.as_raw_fd()));
+        }
+
+        #[cfg(windows)]
+        {
+            return Ok(self.path.to_string_lossy().into_owned());
+        }
+
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            windows
+        )))]
+        {
+            let _ = self;
+            Err("descriptor-relative Git source access is unavailable on this platform".to_string())
+        }
     }
 }
 
-fn validate_git_transport_url(url: &str, project_root: &Path) -> Result<(), String> {
-    if url.is_empty() || url.chars().any(char::is_control) || url.starts_with('-') {
+fn git_host(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => address.to_string(),
+        IpAddr::V6(address) => format!("[{address}]"),
+    }
+}
+
+fn curl_resolve_address(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => address.to_string(),
+        IpAddr::V6(address) => format!("[{address}]"),
+    }
+}
+
+fn curl_resolve_host(host: &str) -> String {
+    if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
+fn hardened_git_transport_command(transport: &ValidatedGitTransport) -> Command {
+    let mut command = jetpack::Provider::hardened_git_command();
+    for config in transport.git_config_values() {
+        command.args(["-c", &config]);
+    }
+    if let Some(ssh_command) = transport.ssh_command() {
+        command.env("GIT_SSH_COMMAND", ssh_command);
+    }
+    command
+}
+
+fn hardened_ssh_command_for(address: IpAddr) -> String {
+    format!(
+        "{} -oHostName={address}",
+        jetpack::Provider::hardened_ssh_command()
+    )
+}
+
+fn validate_git_transport_url(
+    url: &str,
+    project_root: &Path,
+) -> Result<ValidatedGitTransport, String> {
+    if url.is_empty() || has_terminal_control(url) || url.starts_with('-') {
         return Err("the URL is empty or contains unsafe characters".to_string());
     }
     if let Some(path) = url.strip_prefix("file://") {
-        if path.is_empty()
-            || path.contains(['?', '#', '\\'])
-            || !path.starts_with('/')
-        {
+        if path.is_empty() || path.contains(['?', '#', '\\']) || !path.starts_with('/') {
             return Err("file URLs must name a local absolute path".to_string());
         }
-        return validate_local_git_path(Path::new(path), project_root);
+        let source = validate_local_git_path(Path::new(path), project_root)?;
+        return Ok(ValidatedGitTransport::Local(source));
     }
     if !url.contains("://") && !looks_like_scp_url(url) {
         return Err("local git paths must use file:// inside the project root".to_string());
@@ -2731,20 +3016,27 @@ fn validate_git_transport_url(url: &str, project_root: &Path) -> Result<(), Stri
     if let Some((user, _)) = authority.rsplit_once('@') {
         if scheme != "ssh"
             || user.is_empty()
-            || user.contains('@')
-            || user.contains(':')
-            || user.chars().any(char::is_whitespace)
+            || user.starts_with('-')
+            || !user
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
         {
-            return Err("embedded credentials are not allowed in Git URLs".to_string());
+            return Err("SSH user-info must be a safe username".to_string());
         }
     }
     let host = host_from_git_authority(authority)?;
-    let port = if let Some(port) = port_from_git_authority(authority)? {
+    if host.starts_with('-') {
+        return Err("Git transport host must not begin with `-`".to_string());
+    }
+    let explicit_port = port_from_git_authority(authority)?;
+    let port = if let Some(port) = explicit_port {
         port
     } else if scheme == "https" {
         443
     } else if scheme == "http" {
         80
+    } else if scheme == "git" {
+        9418
     } else {
         22
     };
@@ -2760,10 +3052,42 @@ fn validate_git_transport_url(url: &str, project_root: &Path) -> Result<(), Stri
     if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
         return Err("the destination resolves to a non-public address".to_string());
     }
-    Ok(())
+    Ok(ValidatedGitTransport::Network {
+        scheme,
+        host,
+        port,
+        explicit_port: explicit_port.is_some(),
+        address: addresses[0].ip(),
+    })
 }
 
-fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<(), String> {
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<LocalGitSource, String> {
+    let resolver = crate::Authority::AuthorityResolver::open(project_root)
+        .map_err(|error| format!("could not open the project root authority: {error}"))?;
+    let candidate = std::fs::canonicalize(path)
+        .map_err(|error| format!("could not resolve the local Git path: {error}"))?;
+    if !candidate.starts_with(resolver.root()) {
+        return Err("the local Git path resolves outside the project root".to_string());
+    }
+    reject_git_path_symlinks(path)?;
+    let relative = candidate
+        .strip_prefix(resolver.root())
+        .map_err(|_| "the local Git path resolves outside the project root".to_string())?;
+    let directory = resolver
+        .checked_directory(relative)
+        .map_err(|error| format!("could not open the local Git path authority: {error}"))?;
+    let handle = duplicate_inheritable_file(directory.handle.as_ref())?;
+    Ok(LocalGitSource { handle })
+}
+
+#[cfg(windows)]
+fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<LocalGitSource, String> {
     let root = std::fs::canonicalize(project_root)
         .map_err(|error| format!("could not resolve the project root: {error}"))?;
     let candidate = std::fs::canonicalize(path)
@@ -2771,13 +3095,191 @@ fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<(), Strin
     if !candidate.starts_with(&root) {
         return Err("the local Git path resolves outside the project root".to_string());
     }
-    reject_git_path_symlinks(path)?;
-    if !is_real_directory(&candidate) {
-        return Err("the local Git path must be a real directory".to_string());
-    }
-    Ok(())
+    let handles = windows_git_authority::open_chain(&root, &candidate)?;
+    Ok(LocalGitSource {
+        path: candidate,
+        _handles: handles,
+    })
 }
 
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    windows
+)))]
+fn validate_local_git_path(_path: &Path, _project_root: &Path) -> Result<LocalGitSource, String> {
+    Err("descriptor-relative Git source access is unavailable on this platform".to_string())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+fn duplicate_inheritable_file(file: &File) -> Result<File, String> {
+    unsafe extern "C" {
+        fn fcntl(file: i32, command: i32, ...) -> i32;
+    }
+    const F_DUPFD: i32 = 0;
+    let fd = unsafe { fcntl(file.as_raw_fd(), F_DUPFD, 3) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+#[cfg(windows)]
+mod windows_git_authority {
+    use super::*;
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    type Handle = *mut c_void;
+
+    unsafe extern "system" {
+        fn GetFileAttributesW(name: *const u16) -> u32;
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_len: u32,
+            flags: u32,
+        ) -> u32;
+    }
+
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    fn is_reparse(path: &Path) -> Result<bool, String> {
+        let wide = wide_path(path);
+        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+        if attributes == u32::MAX {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    }
+
+    fn final_path(file: &File) -> Result<String, String> {
+        let needed =
+            unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
+        if needed == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let mut buffer = vec![0u16; needed as usize + 1];
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0,
+            )
+        };
+        if written == 0 || written as usize >= buffer.len() {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        buffer.truncate(written as usize);
+        Ok(String::from_utf16_lossy(&buffer))
+    }
+
+    fn normalized_final_path(path: String) -> String {
+        path.replace('/', "\\")
+            .trim_start_matches(r"\\?\")
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    }
+
+    fn reject_reparse_components(path: &Path) -> Result<(), String> {
+        let mut current = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                    current.push(component.as_os_str());
+                }
+                std::path::Component::CurDir => {}
+                std::path::Component::Normal(name) => {
+                    current.push(name);
+                    if is_reparse(&current)? {
+                        return Err(format!(
+                            "the local Git path contains a Windows reparse point `{}`",
+                            current.display()
+                        ));
+                    }
+                }
+                std::path::Component::ParentDir => {
+                    return Err("the local Git path contains parent traversal".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn open_directory(path: &Path) -> Result<File, String> {
+        if is_reparse(path)? {
+            return Err(format!(
+                "the local Git path contains a Windows reparse point `{}`",
+                path.display()
+            ));
+        }
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(GENERIC_READ)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|error| format!("could not open the local Git path authority: {error}"))?;
+        let actual = normalized_final_path(final_path(&directory)?);
+        let expected = normalized_final_path(path.to_string_lossy().into_owned());
+        if is_reparse(path)?
+            || actual != expected
+            || !directory
+                .metadata()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+        {
+            return Err(format!(
+                "the local Git path is not a real directory `{}`",
+                path.display()
+            ));
+        }
+        Ok(directory)
+    }
+
+    pub(super) fn open_chain(root: &Path, candidate: &Path) -> Result<Vec<File>, String> {
+        reject_reparse_components(root)?;
+        reject_reparse_components(candidate)?;
+        let relative = candidate
+            .strip_prefix(root)
+            .map_err(|_| "the local Git path resolves outside the project root".to_string())?;
+        let mut current = root.to_path_buf();
+        let mut handles = vec![open_directory(&current)?];
+        for component in relative.components() {
+            let std::path::Component::Normal(name) = component else {
+                return Err("the local Git path contains unsupported components".to_string());
+            };
+            current.push(name);
+            handles.push(open_directory(&current)?);
+        }
+        Ok(handles)
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
 fn reject_git_path_symlinks(path: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in path.components() {
@@ -2821,7 +3323,10 @@ fn host_from_git_authority(authority: &str) -> Result<String, String> {
         }
         return Ok(host.to_string());
     }
-    let host = authority.rsplit_once(':').map(|(host, _)| host).unwrap_or(authority);
+    let host = authority
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(authority);
     if host.is_empty() || host.contains(':') || host.chars().any(char::is_whitespace) {
         return Err("the URL has an invalid host".to_string());
     }
@@ -2900,5 +3405,80 @@ mod tests {
         assert!(super::validate_git_revision("main").is_ok());
         assert!(super::validate_git_revision("--upload-pack=touch pwned").is_err());
         assert!(super::validate_git_revision("main\n--upload-pack=touch").is_err());
+    }
+
+    #[test]
+    fn git_diagnostics_keep_source_data_but_escape_terminal_projection() {
+        let diagnostic = super::git_transport_diagnostic(
+            "https://example.invalid/repo.git\nforged",
+            "provider stderr: \x1b[31mfailed",
+        );
+        let rendered = diagnostic.render("", "");
+        assert!(!rendered.contains('\x1b'));
+        assert!(rendered.contains("\\nforged"));
+        assert!(rendered.contains("\\u{001b}"));
+        assert!(diagnostic.why.contains('\n'));
+    }
+
+    #[test]
+    fn git_network_transport_pins_validated_address_and_disables_redirects() {
+        let https_url = "https://8.8.8.8/repository.git";
+        let https = super::validate_git_transport_url(https_url, std::path::Path::new("."))
+            .expect("numeric public HTTPS host should validate");
+        assert_eq!(https.pinned_url(https_url), https_url);
+        assert_eq!(
+            https.git_config_values(),
+            vec![
+                "http.followRedirects=false".to_string(),
+                "http.proxy=".to_string(),
+                "http.sslVerify=true".to_string(),
+                "http.curloptResolve=8.8.8.8:443:8.8.8.8".to_string(),
+            ]
+        );
+        let rebound = super::ValidatedGitTransport::Network {
+            scheme: "https".to_string(),
+            host: "rebind.example".to_string(),
+            port: 443,
+            explicit_port: false,
+            address: "8.8.8.8".parse().unwrap(),
+        };
+        assert_eq!(
+            rebound.pinned_url("https://rebind.example/repository.git"),
+            "https://rebind.example/repository.git"
+        );
+        assert!(rebound
+            .git_config_values()
+            .iter()
+            .any(|value| value == "http.curloptResolve=rebind.example:443:8.8.8.8"));
+        assert_eq!(super::curl_resolve_host("2001:db8::1"), "[2001:db8::1]");
+
+        let git_url = "git://8.8.8.8/repository.git";
+        let git = super::validate_git_transport_url(git_url, std::path::Path::new("."))
+            .expect("numeric public Git host should validate");
+        assert_eq!(
+            git.pinned_url(git_url),
+            "git://8.8.8.8/repository.git".to_string()
+        );
+
+        let ssh = super::validate_git_transport_url(
+            "ssh://git@8.8.8.8/repository.git",
+            std::path::Path::new("."),
+        )
+        .expect("numeric public SSH host should validate");
+        assert!(ssh
+            .ssh_command()
+            .expect("SSH transport should pin its address")
+            .contains("-oHostName=8.8.8.8"));
+    }
+
+    #[test]
+    fn git_transport_rejects_reserved_ipv4_destination() {
+        for address in ["192.0.0.1", "192.0.0.9", "192.0.0.255"] {
+            let url = format!("https://{address}/repository.git");
+            assert!(
+                super::validate_git_transport_url(&url, std::path::Path::new(".")).is_err(),
+                "reserved Git destination was accepted: {url}"
+            );
+        }
     }
 }

@@ -23,7 +23,7 @@ const fresh = () => {
 
 const ballot = (extra = {}) => ({
   ballotMode: 'full',
-  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
+  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
   recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
@@ -113,7 +113,7 @@ test('ballot-gaps: clean when an open decision has a complete ballot', () => {
 test('ballot-gaps: flags an open non-draft decision missing ballot fields', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: ballot().reviewPasses }));
   // simulate a gap slipping past the write-time E_BALLOT gate (e.g. hand
   // migration, or a draft flipped without going through --ready)
   st.mutate((s) => { s.decisions[0].draft = false; });
@@ -130,7 +130,7 @@ test('ballot-gaps: excludes drafts and acceptance ballots', () => {
   st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
   st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent-1' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-WIP', title: 'WIP', draft: true }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-WIP', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: ballot().reviewPasses }));
   const s = st.load();
   assert.ok(s.decisions.find(d => d.id === 'D-ACCEPT-1'));
   assert.deepEqual(ruleBallotGaps(s), []);
@@ -141,14 +141,14 @@ test('ballot-gaps: excludes drafts and acceptance ballots', () => {
 test('stale-draft: clean for a fresh draft', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: ballot().reviewPasses }));
   assert.deepEqual(ruleStaleDraft(st.load()), []);
 });
 
 test('stale-draft: flags a draft older than 7 days', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: ballot().reviewPasses }));
   st.mutate((s) => { s.decisions[0].created = OLD_ISO; });
   const findings = ruleStaleDraft(st.load());
   assert.equal(findings.length, 1);

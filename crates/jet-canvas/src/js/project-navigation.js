@@ -1486,8 +1486,7 @@
     actions.push(...traitMethodActions(latestDoc));
     if (!sourceTransactionOnly) actions.push(...eventDispatcherActions(latestDoc));
     for (const item of palette.concat(actionEntries)) {
-      if (!canvasCapability("runtime_output")
-        && (item.action_id === "canvas.command:run" || item.action_id === "canvas.command:dev")) continue;
+      if (!canvasCapability("runtime_output") && item.action_id === "canvas.command:run") continue;
       const run = sourceTransactionOnly && item.kind === "canvas.core_catalog"
         ? () => runLibraryAction(item)
         : () => runPalette(item);

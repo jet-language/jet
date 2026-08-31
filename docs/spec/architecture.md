@@ -203,6 +203,15 @@ arbitrary task and channel wait cycles. The M:N scheduler parks tasks at
 `channel` waits; `task` and `task.group` handles define join duties. These
 mechanisms do not detect arbitrary wait cycles.
 
+At the process-exit boundary, the observe registry emits the registered E3013
+runtime diagnostic when tasks remain parked. The report is bounded by both task
+cardinality and rendered bytes; each row carries the task identity, state, wait
+target, and compiler spawn site, while channel payloads and task locals stay
+outside the report. A direct named task call uses that function name plus the
+spawn site for identity; an arbitrary task expression uses the bounded
+`task@<site>` fallback. A child panic reaches `TaskFailure.Panicked(reason)` with
+the same identity prefix and the original child text.
+
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
 vetted runtime internal must also uphold its boundary contract.
 
@@ -465,22 +474,34 @@ gate sends the same checked example to optimized AOT and the default tiered
 lens, then compares exit status, stdout, and stderr. A record identifies
 resident Cranelift execution or interpreter deopt; a refusal, newly broken AOT
 oracle, missing record, or divergent result remains visible as a failure.
+Named-job parity uses the same checked program-argument slice for `jet run`,
+`jet dev`, and interpreter execution; an unknown job remains an E1294 failure.
 
 The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
-fixed warmups and samples, elapsed variance, peak RSS, and phase totals. The
+fixed warmups and samples, process CPU-time variance, peak RSS, and phase totals. The
 `dev` profile invokes the production Cranelift JIT lens; optimized `release`
 invokes the production rustc AOT lens. Clean, no-change, and representative-
 edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
-hiding cold-cache work. The checked-corpus dashboard drives the production
-default JIT and optimized AOT paths through clean and incremental rows, with
-one warmup and twenty samples per row. Its pinned baseline allows at most 15%
-latency or peak-RSS regression and 100% range/median variance; exact
-stdout/stderr hashes and phase totals remain part of each row. A baseline is
-valid only for its pinned machine and toolchain.
+hiding cold-cache work. The checked-corpus report is schema version 4 and emits
+six rows for each active corpus row: `jit-clean`, `jit-no-change`,
+`jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
+`aot-release-representative-edit`. The current corpus has five active rows, so
+the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
+Its top-level receipt records verified semantic, diagnostic, effect, and tier
+parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
+an interquartile spread of 100% or less, and at most five Tukey-fence outliers;
+exact stdout/stderr hashes, phase totals, and workload identity remain part of
+each row. The five active corpus rows are ordered
+`examples/features/basics/hello.jet`,
+`examples/features/collections/wordcount.jet`,
+`examples/features/serde/json.jet`,
+`examples/features/basics/pattern_matching.jet`, and
+`examples/features/devloop/job_runner.jet`; `job_runner` is fifth.
+A baseline is valid only for its pinned machine and toolchain.
 
 The code-action engine uses the same semantic index. It ships unique workspace
 imports, binding and function extraction, and immutable-binding inline actions.
@@ -774,7 +795,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
   | `core.files` | Host | Explicit comptime filesystem authority and policy boundary. |
-  | `core.text.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
+  | `core.text.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, decimal, grouping, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
   | `core.term` | Host | I/O authority boundary; pure progress values use `Core/Progress.rs`. |
   | `core.math.abs: non-numeric argument` | Mixed | Numeric argument validation stays with the shared math rules. |
   | `core.math` | Mixed | `MathLibPure.rs` owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |

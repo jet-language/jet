@@ -160,12 +160,17 @@ impl JetByteBuffer {
         if n < 0 {
             return Err(JetAbsent);
         }
-        let n = n as usize;
-        if self.pos + n > self.bytes.len() {
+        let Ok(n) = usize::try_from(n) else {
+            return Err(JetAbsent);
+        };
+        let Some(end) = self.pos.checked_add(n) else {
+            return Err(JetAbsent);
+        };
+        if end > self.bytes.len() {
             return Err(JetAbsent);
         }
-        let out = self.bytes[self.pos..self.pos + n].to_vec();
-        self.pos += n;
+        let out = self.bytes[self.pos..end].to_vec();
+        self.pos = end;
         Ok(out)
     }
     pub(crate) fn read(&mut self) -> JetOutcome<Vec<u8>, JetAbsent> {

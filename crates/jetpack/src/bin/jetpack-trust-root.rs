@@ -151,6 +151,12 @@ fn readme(keys: &[PublicTrustKey]) -> String {
 This directory contains publication-safe trust metadata. It contains public\
 keys only. `TrustKey` HMAC secrets and signing keys stay in the offline\
 publisher or host trust stores and must never be copied here.\n\n\
+The stable index public-key document is published at\n\
+`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\n\
+value, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\n\
+The signed index URL is configured separately in\n\
+`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\n\
+trusted automatically.\n\n\
 ## Files\n\n\
 - `trust-manifest.json` records the domain, root pin, role, algorithm, key id,\
   and exact client trust-file path.\n",
@@ -180,4 +186,3 @@ approval.\n",
     );
     out
 }
-

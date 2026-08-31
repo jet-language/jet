@@ -1,7 +1,8 @@
 // Docs tab + OPS2 leftover tests (blocker-unpopulated / ready-across).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
@@ -66,6 +67,25 @@ test('docs: add/show/update/delete under docs/', () => {
   assert.equal(existsSync(join(proj, n.path)), false);
 });
 
+test('owner guidance is hidden from Docs and writable only through its owner API', () => {
+  const { dataDir, proj } = projectLayout();
+  mkdirSync(join(proj, 'docs', 'agents'), { recursive: true });
+  writeFileSync(join(proj, docs.OWNER_GUIDANCE_PATH), '# Owner guidance\n\nold\n');
+
+  const listed = docs.listDocs(dataDir).sections.flatMap(section => section.files.map(file => file.path));
+  assert.equal(listed.includes(docs.OWNER_GUIDANCE_PATH), false);
+  assert.match(docs.showOwnerGuidance(dataDir).body, /old/);
+
+  const ownerOnly = error => error?.code === 'E_OWNER_ONLY';
+  assert.throws(() => docs.addDoc(dataDir, { path: docs.OWNER_GUIDANCE_PATH, body: 'replace' }), ownerOnly);
+  assert.throws(() => docs.updateDoc(dataDir, docs.OWNER_GUIDANCE_PATH, { body: 'replace' }), ownerOnly);
+  assert.throws(() => docs.deleteDoc(dataDir, docs.OWNER_GUIDANCE_PATH), ownerOnly);
+  assert.throws(() => docs.archiveDoc(dataDir, docs.OWNER_GUIDANCE_PATH), ownerOnly);
+
+  docs.updateOwnerGuidance(dataDir, { body: '# Owner guidance\n\nnew\n' });
+  assert.match(docs.showOwnerGuidance(dataDir).body, /new/);
+});
+
 test('docs: path escape rejected; only docs/*.md writable', () => {
   const { dataDir } = projectLayout();
   const prev = docs.showDoc(dataDir, 'docs/proposals/idea.md');
@@ -74,6 +94,115 @@ test('docs: path escape rejected; only docs/*.md writable', () => {
   assert.throws(() => docs.showDoc(dataDir, '../secret.md'), /docs|path/);
   assert.throws(() => docs.showDoc(dataDir, 'docs/proposals/../../secret.md'), /docs|path|escape/);
   assert.throws(() => docs.deleteDoc(dataDir, 'docs/proposals/../../secret.md'), /docs|path|escape/);
+});
+
+test('docs: symlinked files and directories cannot redirect reads or writes', () => {
+  const { dataDir, proj } = projectLayout();
+  const outside = mkdtempSync(join(tmpdir(), 'tower-docs-outside-'));
+  writeFileSync(join(outside, 'secret.md'), 'outside secret');
+  symlinkSync(outside, join(proj, 'docs', 'linked'));
+
+  for (const operation of [
+    () => docs.showDoc(dataDir, 'docs/linked/secret.md'),
+    () => docs.addDoc(dataDir, { path: 'docs/linked/new.md', body: 'must not write' }),
+    () => docs.updateDoc(dataDir, 'docs/linked/secret.md', { body: 'must not write' }),
+    () => docs.deleteDoc(dataDir, 'docs/linked/secret.md'),
+    () => docs.archiveDoc(dataDir, 'docs/linked/secret.md'),
+  ]) assert.throws(operation, /docs|resolve|escape/);
+
+  const index = docs.listDocs(dataDir);
+  const listed = index.sections.flatMap(section => section.files.map(file => file.path));
+  assert.equal(listed.some(path => path.includes('linked')), false, 'walk must not follow symlinked directories');
+  assert.equal(readFileSync(join(outside, 'secret.md'), 'utf8'), 'outside secret');
+
+  const archiveOutside = mkdtempSync(join(tmpdir(), 'tower-docs-archive-outside-'));
+  symlinkSync(archiveOutside, join(proj, 'docs', 'archive'));
+  assert.throws(() => docs.archiveDoc(dataDir, 'docs/proposals/idea.md'), /docs|resolve|escape/);
+  assert.ok(existsSync(join(proj, 'docs', 'proposals', 'idea.md')), 'archive must not move through a symlink');
+});
+
+test('docs: descriptor-relative operations survive hostile directory swaps', async () => {
+  const swapper = `
+    const fs = require('node:fs');
+    const [target, alternate] = process.argv.slice(1);
+    const temp = target + '.swap-temp';
+    const end = Date.now() + 500;
+    while (Date.now() < end) {
+      try { fs.renameSync(target, temp); } catch {}
+      try { fs.renameSync(alternate, target); } catch {}
+      try { fs.renameSync(temp, alternate); } catch {}
+    }
+  `;
+  const cases = [
+    ['read', (dataDir) => docs.showDoc(dataDir, 'docs/race/doc.md')],
+    ['write', (dataDir) => docs.updateDoc(dataDir, 'docs/race/doc.md', { body: 'inside update' })],
+    ['create', (dataDir) => docs.addDoc(dataDir, { path: 'docs/race/new.md', body: 'inside create' })],
+    ['delete', (dataDir) => docs.deleteDoc(dataDir, 'docs/race/doc.md')],
+    ['rename', (dataDir) => docs.archiveDoc(dataDir, 'docs/race/doc.md')],
+  ];
+
+  for (const [name, operation] of cases) {
+    const { dataDir, proj } = projectLayout();
+    const outside = mkdtempSync(join(tmpdir(), `tower-docs-race-outside-${name}-`));
+    writeFileSync(join(outside, 'doc.md'), 'outside secret');
+    writeFileSync(join(outside, 'new.md'), 'outside new secret');
+    const race = join(proj, 'docs', 'race');
+    const alternate = join(proj, 'docs', 'race.swap');
+    mkdirSync(race, { recursive: true });
+    writeFileSync(join(race, 'doc.md'), 'inside secret');
+    symlinkSync(outside, alternate);
+
+    const attacker = spawn(process.execPath, ['-e', swapper, race, alternate], { stdio: 'ignore' });
+    for (let i = 0; i < 1_000; i++) {
+      try {
+        const result = operation(dataDir);
+        if (name === 'read') assert.notEqual(result.body, 'outside secret');
+      } catch (error) {
+        assert.ok(['E_INVALID', 'E_EXISTS', 'E_NOT_FOUND'].includes(error.code), `${name}: ${error.message}`);
+      }
+    }
+    await new Promise((resolve, reject) => {
+      attacker.once('error', reject);
+      attacker.once('close', resolve);
+    });
+    assert.equal(readFileSync(join(outside, 'doc.md'), 'utf8'), 'outside secret', `${name} touched outside document`);
+    assert.equal(readFileSync(join(outside, 'new.md'), 'utf8'), 'outside new secret', `${name} touched outside new document`);
+  }
+});
+
+test('docs: scratch migration ignores symlinked report sources', () => {
+  const { dataDir, proj } = projectLayout();
+  const outside = mkdtempSync(join(tmpdir(), 'tower-scratch-outside-'));
+  writeFileSync(join(outside, 'secret.md'), 'outside secret');
+  const scratch = join(dataDir, 'scratch');
+  mkdirSync(scratch, { recursive: true });
+  symlinkSync(join(outside, 'secret.md'), join(scratch, 'audit-leak.md'));
+
+  assert.deepEqual(docs.migrateScratchReports(dataDir), []);
+  assert.equal(existsSync(join(proj, 'docs', 'audits', 'audit-leak.md')), false);
+  assert.equal(readFileSync(join(outside, 'secret.md'), 'utf8'), 'outside secret');
+});
+
+test('docs: symlinked scratch directories and pads are rejected', () => {
+  const { dataDir } = projectLayout();
+  const outside = mkdtempSync(join(tmpdir(), 'tower-scratch-dir-outside-'));
+  writeFileSync(join(outside, 'secret.md'), 'outside secret');
+  symlinkSync(outside, join(dataDir, 'scratch'));
+  assert.throws(() => docs.migrateScratchReports(dataDir), /scratch/);
+  assert.throws(() => docs.showScratchPad(dataDir), /scratch/);
+
+  const { dataDir: padDataDir } = projectLayout();
+  const padOutside = mkdtempSync(join(tmpdir(), 'tower-scratch-pad-outside-'));
+  writeFileSync(join(padOutside, 'secret.md'), 'outside secret');
+  mkdirSync(join(padDataDir, 'scratch'), { recursive: true });
+  symlinkSync(join(padOutside, 'secret.md'), join(padDataDir, 'scratch', 'owner-scratch.md'));
+  assert.throws(() => docs.showScratchPad(padDataDir), /scratch/);
+
+  const { dataDir: legacyDataDir } = projectLayout();
+  const legacyOutside = mkdtempSync(join(tmpdir(), 'tower-legacy-scratch-outside-'));
+  writeFileSync(join(legacyOutside, 'secret.md'), 'outside secret');
+  symlinkSync(join(legacyOutside, 'secret.md'), join(legacyDataDir, 'owner-scratch.md'));
+  assert.throws(() => docs.showScratchPad(legacyDataDir), /legacy scratch/);
 });
 
 test('docs: scratchpad seeds and updates; cannot delete via docs delete of scratch path outside docs', () => {

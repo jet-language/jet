@@ -21,6 +21,41 @@ import os from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEFAULT_BATCH_SIZE,
+  DEFAULT_CORPUS_LIMIT,
+  MAX_BATCH_SIZE,
+  MAX_TIMEOUT_MS,
+  MUTATION_ARMS,
+  batchMutations,
+  bundleIdentity,
+  checkJetSource,
+  discoverCorpusSeeds,
+  executeCase,
+  makeResultBundle,
+  serializeBundles,
+  tierCommand,
+} from "./hardening-oracle-layer.mjs";
+import { hardeningDedupKey as buildHardeningDedupKey, redTeamMain } from "./hardening-red-team.mjs";
+import { buildDashboard } from "./hardening-dashboard.mjs";
+
+import {
+  checkGrammarNegativeControls,
+  diagnosticRegistryHash,
+  deriveConstructManifest,
+  constructManifestHash,
+  generateTypedPrograms,
+  runGrammarPrograms,
+} from "./hardening-grammar-layer.mjs";
+import {
+  generatePropertyCases,
+  propertyLayerSummary,
+  runPropertyCases,
+} from "./hardening-property-layer.mjs";
+import {
+  MUTATION_CATALOG,
+  runMutationSensitivity,
+} from "./hardening-mutation-layer.mjs";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = resolve(SCRIPT_DIR, "../..");
 const ROOT = resolve(process.env.JET_HARDENING_ROOT || DEFAULT_ROOT);
@@ -41,6 +76,7 @@ const SERVICE_NAME = "jet-hardening-rig.service";
 const TIMER_NAME = "jet-hardening-rig.timer";
 const STATE_PATH = join(CACHE_ROOT, "state.json");
 const RESULT_PATH = join(CACHE_ROOT, "result.json");
+const CYCLE_ROOT = join(CACHE_ROOT, "cycles");
 const FAILURE_PATH = join(CACHE_ROOT, "failure.json");
 const FAILURE_LOG_PATH = join(CACHE_ROOT, "logs/failure.log");
 const INTERESTING_ROOT = join(CACHE_ROOT, "interesting");
@@ -50,6 +86,14 @@ const BUILD_LEASE_PATH = join(TARGET_ROOT, ".jet-hardening-build.lock");
 const GIB = 1024 ** 3;
 const MIN_MEMORY_GIB = 16;
 const TARGET_CAP_BYTES = 80 * GIB;
+const DEFAULT_ORACLE_TIMEOUT_MS = 30_000;
+const DEFAULT_ORACLE_MAX_CASES = 128;
+const TOWER_CLI = resolve(
+  process.env.JET_HARDENING_TOWER_CLI || join(ROOT, "plugins/tower/tower.mjs"),
+);
+const TOWER_DATA = process.env.JET_HARDENING_TOWER_DATA
+  ? resolve(ROOT, process.env.JET_HARDENING_TOWER_DATA)
+  : null;
 const CACHE_CAP_BYTES = 4 * GIB;
 const INTERESTING_CAP_BYTES = 512 * 1024 ** 2;
 const LOG_CAP_BYTES = 1024 ** 2;
@@ -137,15 +181,18 @@ function atomicJson(path, value) {
 }
 
 function cleanAtomicTemps() {
-  if (!existsSync(CACHE_ROOT)) return;
-  for (const name of readdirSync(CACHE_ROOT)) {
-    if (!name.includes(".tmp-") || !["state.json", "result.json", "failure.json"].some((base) => name.startsWith(`${base}.tmp-`))) {
-      continue;
-    }
-    try {
-      unlinkSync(join(CACHE_ROOT, name));
-    } catch {
-      // A concurrent invocation owns it; its lease decides whether that is safe.
+  for (const [directory, ownedTemp] of [
+    [CACHE_ROOT, (name) => ["state.json", "result.json", "failure.json"].some((base) => name.startsWith(`${base}.tmp-`))],
+    [CYCLE_ROOT, (name) => name.startsWith("cycle-") && name.includes(".json.tmp-")],
+  ]) {
+    if (!existsSync(directory)) continue;
+    for (const name of readdirSync(directory)) {
+      if (!ownedTemp(name)) continue;
+      try {
+        unlinkSync(join(directory, name));
+      } catch {
+        // A concurrent invocation owns it; its lease decides whether that is safe.
+      }
     }
   }
 }
@@ -248,14 +295,19 @@ function commandText(program, args) {
   return [program, ...args].map((arg) => JSON.stringify(arg)).join(" ");
 }
 
-async function runCommand(label, program, args, environment, timeoutMs = DEFAULT_TIMEOUT_MS) {
+async function runCommand(label, program, args, environment, timeoutMs = DEFAULT_TIMEOUT_MS, stdin = undefined) {
   const command = commandText(program, args);
   const childEnv = { ...process.env, ...environment };
+  const input = stdin === undefined || stdin === null
+    ? null
+    : Buffer.isBuffer(stdin) || stdin instanceof Uint8Array
+      ? Buffer.from(stdin)
+      : Buffer.from(String(stdin), "utf8");
   const child = spawn(resolveCommand(program), args, {
     cwd: ROOT,
     detached: true,
     env: childEnv,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
   });
   const record = {
     label,
@@ -274,10 +326,30 @@ async function runCommand(label, program, args, environment, timeoutMs = DEFAULT
   child.stderr?.on("data", (chunk) => {
     record.stderr = captureAppend(record.stderr, chunk);
   });
+  child.stdout?.on("error", () => {});
+  child.stderr?.on("error", () => {});
+  child.stdin?.on("error", () => {});
+  if (input !== null) child.stdin?.end(input);
 
   let killPromise = null;
+  child.once("exit", () => {
+    if (child.pid && !killPromise) killPromise = killProcessGroup(child.pid);
+  });
   const timer = setTimeout(() => {
     record.timed_out = true;
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      // The process can exit between the timeout and group signal.
+    }
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // The process can exit between the timeout and direct signal.
+    }
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
     killPromise = killProcessGroup(child.pid);
   }, timeoutMs);
   const closed = await new Promise((resolvePromise) => {
@@ -518,6 +590,13 @@ function writeFailureLog(record) {
   atomicWrite(FAILURE_LOG_PATH, line.subarray(0, LOG_CAP_BYTES));
 }
 
+function archiveCycle(result) {
+  if (!result?.run_id || !/^[A-Za-z0-9_.-]+$/.test(result.run_id)) {
+    throw new Error("cycle result has no safe run id for archival");
+  }
+  atomicJson(join(CYCLE_ROOT, `cycle-${result.run_id}.json`), result);
+}
+
 function loadState() {
   const state = readJson(STATE_PATH);
   if (!state) {
@@ -593,12 +672,47 @@ function validateNames(values, label) {
     }
   }
 }
+function boundedIntegerEnv(name, fallback, minimum, maximum) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Refusal(`${name} must be an integer from ${minimum} through ${maximum}`, { value: raw });
+  }
+  return value;
+}
+
+function booleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value == null) return fallback;
+  if (["1", "true", "yes"].includes(value.toLowerCase())) return true;
+  if (["0", "false", "no"].includes(value.toLowerCase())) return false;
+  throw new Refusal(`${name} must be true or false`, { value });
+}
+
+function oracleIncludeDifferential() {
+  const configured = process.env.JET_HARDENING_INCLUDE_DIFFERENTIAL;
+  if (configured == null) return true;
+  if (["1", "true"].includes(configured.toLowerCase())) return true;
+  if (["0", "false"].includes(configured.toLowerCase())) return false;
+  throw new Refusal("JET_HARDENING_INCLUDE_DIFFERENTIAL must be true or false", { value: configured });
+}
+
+function oracleSeedPaths() {
+  return {
+    conformance: join(ROOT, "tests/conformance/corpus"),
+    differential_manifest: join(ROOT, "tests/fuzz/sema/differential/manifest.tsv"),
+  };
+}
+
 
 function config() {
   const proofTargets = csvEnv("JET_HARDENING_PROOF_TARGETS", DEFAULT_PROOF_TARGETS);
   const shards = csvEnv("JET_HARDENING_SHARDS", DEFAULT_SHARDS);
+  const mutationDisabledKillers = csvEnv("JET_HARDENING_MUTATION_DISABLED_KILLERS", []);
   validateNames(proofTargets, "proof targets");
   validateNames(shards, "shards");
+  validateNames(mutationDisabledKillers, "mutation disabled killers");
   const seed = process.env.JET_HARDENING_SEED || "2336";
   const variants = process.env.JET_HARDENING_VARIANTS || "50";
   const value = {
@@ -615,6 +729,32 @@ function config() {
     deterministic_shards: shards,
     seed,
     variants,
+    oracle_batch_size: boundedIntegerEnv(
+      "JET_HARDENING_ORACLE_BATCH_SIZE",
+      DEFAULT_BATCH_SIZE,
+      1,
+      MAX_BATCH_SIZE,
+    ),
+    oracle_max_cases: boundedIntegerEnv(
+      "JET_HARDENING_ORACLE_MAX_CASES",
+      DEFAULT_ORACLE_MAX_CASES,
+      1,
+      DEFAULT_CORPUS_LIMIT,
+    ),
+    oracle_timeout_ms: boundedIntegerEnv(
+      "JET_HARDENING_ORACLE_TIMEOUT_MS",
+      DEFAULT_ORACLE_TIMEOUT_MS,
+      1,
+      MAX_TIMEOUT_MS,
+    ),
+    oracle_include_differential: oracleIncludeDifferential(),
+    property_enabled: booleanEnv("JET_HARDENING_PROPERTY", false),
+    property_max_cases: boundedIntegerEnv("JET_HARDENING_PROPERTY_MAX_CASES", 128, 1, 4096),
+    grammar_enabled: booleanEnv("JET_HARDENING_GRAMMAR", false),
+    grammar_max_cases: boundedIntegerEnv("JET_HARDENING_GRAMMAR_MAX_CASES", 128, 1, 1024),
+    mutation_enabled: booleanEnv("JET_HARDENING_MUTATION", false),
+    mutation_max_cases: boundedIntegerEnv("JET_HARDENING_MUTATION_MAX_CASES", MUTATION_CATALOG.length, 1, MUTATION_CATALOG.length),
+    mutation_disabled_killers: mutationDisabledKillers,
   };
   return { ...value, hash: sha256(JSON.stringify(value)) };
 }
@@ -700,6 +840,11 @@ function baseResult(run, cfg, identity, manifest) {
     preflight: [],
     build: null,
     proof: null,
+    oracle: null,
+    property: null,
+    grammar: null,
+    mutation: null,
+    tower: null,
     cleanup: null,
   };
 }
@@ -806,6 +951,615 @@ function proofCommand(cfg) {
   };
 }
 
+function boundedOracleSelection(discovered, cfg) {
+  const armCount = Math.min(MUTATION_ARMS.length, cfg.oracle_max_cases);
+  const arms = MUTATION_ARMS.slice(0, armCount);
+  const seedLimit = Math.max(1, Math.floor(cfg.oracle_max_cases / armCount));
+  return {
+    arms,
+    seeds: discovered.seeds.slice(0, seedLimit),
+    omitted_seed_count: Math.max(0, discovered.seeds.length - seedLimit),
+  };
+}
+
+function oracleSourcePath(run, caseInput) {
+  const directory = join(run.scratch, "oracle");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const caseId = String(caseInput.case_id || sha256(caseInput.source)).replace(/[^A-Za-z0-9_-]/g, "_");
+  const path = join(directory, `${caseId}.jet`);
+  writeFileSync(path, caseInput.source, { mode: 0o600 });
+  return path;
+}
+
+async function executeOracleTier(run, request, environment, cfg) {
+  const sourcePath = oracleSourcePath(run, request);
+  const command = tierCommand(request.tier, sourcePath, { root: ROOT, jetEnv: JET_ENV });
+  const execution = await runCommand(
+    `oracle:${request.case_id || "case"}:${request.tier}`,
+    command.program,
+    command.args,
+    environment,
+    cfg.oracle_timeout_ms,
+    request.stdin,
+  );
+  return {
+    ...execution,
+    tier: request.tier,
+    tier_command: command.tier_command,
+    source_path: sourcePath,
+    source_sha256: sha256(request.source),
+  };
+}
+
+function findingClassification(caseResult) {
+  const loud = caseResult.tier_results.some((observation) => (
+    observation.error
+    || observation.timed_out
+    || observation.signal
+    || (observation.exit !== null && observation.exit !== 0)
+  ));
+  const defaultJetRunDivergence = caseResult.differences.includes("jet_run");
+  return {
+    classification: defaultJetRunDivergence ? "default-jet-run-divergence" : loud ? "loud-failure" : "silent-data",
+    silentWrongData: !loud,
+    defaultJetRunDivergence,
+    loudFailure: loud,
+  };
+}
+
+function findingBundle(run, caseInput, caseResult, manifest, cfg) {
+  const input = caseResult.result_bundle_input;
+  if (!input) throw new Error(`oracle returned no finding input for ${caseInput.case_id}`);
+  const selected = caseResult.tier_results.find((observation) => observation.tier === input.tier)
+    || caseResult.tier_results[0];
+  const classification = findingClassification(caseResult);
+  return makeResultBundle({
+    run_id: run.id,
+    stable_surface_id: caseInput.stable_surface_id,
+    tier: input.tier,
+    tier_command: selected.tier_command,
+    seed: caseInput.seed,
+    mutation_arm: caseInput.mutation_arm,
+    mutator_version: caseInput.mutator_version,
+    source: caseInput.source,
+    stdout: selected.stdout,
+    stderr: selected.stderr,
+    exit: selected.exit,
+    signal: selected.signal,
+    timeout: selected.timed_out,
+    expected_relation: input.expected_relation,
+    actual_relation: input.actual_relation,
+    normalization: caseInput.normalization || [],
+    oracle: caseInput.oracle,
+    commit: run.identity.commit,
+    binary_sha256: run.result?.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
+    registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
+    config_hash: cfg.hash,
+    classification: classification.classification,
+    tower_action: "create-or-update",
+    tier_observations: caseResult.observations,
+    applicable_tiers: caseInput.applicable_tiers,
+  });
+}
+
+function towerPayload(caseInput, caseResult, bundle) {
+  const classification = findingClassification(caseResult);
+  const hardeningSeam = caseInput.semantic_primitive || caseInput.root_seam || "unclassified";
+  const hardeningWrongTierMask = caseResult.differences;
+  const hardeningInputPartition = caseInput.mutation_arm;
+  const commands = caseResult.tier_results.map((observation) => `${observation.tier}: ${observation.tier_command}`);
+  const hardeningKey = buildHardeningDedupKey({
+    bundle,
+    hardening_seam: hardeningSeam,
+    violated_relation: bundle.expected_relation,
+    wrong_tier_mask: hardeningWrongTierMask,
+    input_partition: hardeningInputPartition,
+  });
+  return {
+    title: `Layer-1 hardening finding: ${caseInput.stable_surface_id} (${caseInput.mutation_arm})`,
+    body: "Confirmed by the bounded layer-1 differential oracle.",
+    hardeningSeam,
+    hardeningRelation: bundle.expected_relation,
+    hardeningWrongTierMask,
+    hardeningInputPartition,
+    hardeningDedupKey: hardeningKey,
+    hardeningEvidence: {
+      source: bundle.source,
+      commands,
+      expectedRelation: bundle.expected_relation,
+      actualRelation: bundle.actual_relation,
+      seed: bundle.seed,
+      targetCommit: bundle.commit,
+      bundleDigest: bundleIdentity(bundle),
+      classification: bundle.classification,
+      stdoutBytes: bundle.stdout_bytes,
+      stderrBytes: bundle.stderr_bytes,
+      exit: bundle.exit,
+      signal: bundle.signal,
+      timeout: bundle.timeout,
+      normalization: bundle.normalization,
+    },
+    source: bundle.source,
+    commands,
+    expectedRelation: bundle.expected_relation,
+    actualRelation: bundle.actual_relation,
+    seed: bundle.seed,
+    targetCommit: bundle.commit,
+    stdoutBytes: bundle.stdout_bytes,
+    stderrBytes: bundle.stderr_bytes,
+    exit: bundle.exit,
+    signal: bundle.signal,
+    timeout: bundle.timeout,
+    normalization: bundle.normalization,
+    classification: classification.classification,
+    silentWrongData: classification.silentWrongData,
+    defaultJetRunDivergence: classification.defaultJetRunDivergence,
+    loudFailure: classification.loudFailure,
+    tier: bundle.tier,
+    oracle: bundle.oracle,
+  };
+}
+
+async function runLayerOne(run, cfg, manifest, environment) {
+  const paths = oracleSeedPaths();
+  const includeDifferential = cfg.oracle_include_differential && existsSync(paths.differential_manifest);
+  transition(run, "oracle_discover", {
+    conformance_root: relative(ROOT, paths.conformance),
+    differential_manifest: includeDifferential ? relative(ROOT, paths.differential_manifest) : null,
+  });
+  const discovered = discoverCorpusSeeds(ROOT, { includeDifferential });
+  const selected = boundedOracleSelection(discovered, cfg);
+  const summary = {
+    engine: "hardening-oracle-layer",
+    schema_version: 1,
+    status: "SKIPPED",
+    include_differential: includeDifferential,
+    discovered_seed_count: discovered.seeds.length,
+    rejected_seed_count: discovered.rejected.length,
+    selected_seed_count: selected.seeds.length,
+    omitted_seed_count: selected.omitted_seed_count,
+    arms: selected.arms,
+    max_cases: cfg.oracle_max_cases,
+    batch_size: cfg.oracle_batch_size,
+    timeout_ms: cfg.oracle_timeout_ms,
+    rejected: [...discovered.rejected],
+    attempted: 0,
+    valid_case_count: 0,
+    batch_count: 0,
+    cases: [],
+    findings: [],
+    finding_payloads: [],
+    serialized_bundles: "",
+    bundle_sha256: sha256(""),
+  };
+  if (!selected.seeds.length) {
+    transition(run, "oracle_skipped", { reason: "no checked-in value-consuming seeds" });
+    return summary;
+  }
+
+  transition(run, "oracle_batch", {
+    seed_count: selected.seeds.length,
+    arms: selected.arms,
+    max_cases: cfg.oracle_max_cases,
+    batch_size: cfg.oracle_batch_size,
+  });
+  const batch = batchMutations(selected.seeds, {
+    batchSize: cfg.oracle_batch_size,
+    arms: selected.arms,
+    maxCases: cfg.oracle_max_cases,
+  });
+  summary.attempted = batch.attempted;
+  summary.valid_case_count = batch.valid_case_count;
+  summary.batch_count = batch.batches.length;
+  summary.cases = batch.cases.map((caseInput) => ({
+    case_id: caseInput.case_id,
+    stable_surface_id: caseInput.stable_surface_id,
+    seed: caseInput.seed,
+    domain: caseInput.domain,
+    mutation_arm: caseInput.mutation_arm,
+    mutator_version: caseInput.mutator_version,
+    source_sha256: `sha256:${sha256(caseInput.source)}`,
+    skeleton: caseInput.skeleton,
+    observer_fingerprint: caseInput.observer_fingerprint,
+    type_skeleton: caseInput.type_skeleton,
+    normalization: caseInput.normalization,
+    oracle: caseInput.oracle,
+    expected_relation: caseInput.expected_relation,
+    applicable_tiers: caseInput.applicable_tiers,
+  }));
+  summary.rejected.push(...batch.rejected);
+  if (!batch.cases.length) {
+    transition(run, "oracle_skipped", { reason: "no valid bounded mutations", rejected: batch.rejected.length });
+    return summary;
+  }
+
+  transition(run, "oracle_execute", { case_count: batch.cases.length, batch_count: batch.batches.length });
+  const findings = [];
+  const finding_payloads = [];
+  for (const caseInput of batch.cases) {
+    const caseResult = await executeCase(caseInput, {
+      executor: (request) => executeOracleTier(run, request, environment, cfg),
+      validate: false,
+      applicable_tiers: caseInput.applicable_tiers,
+      normalization: caseInput.normalization,
+      stdin: caseInput.stdin || "",
+    });
+    const failedTiers = caseResult.tier_results.filter((observation) => (
+      observation.error
+      || observation.timed_out
+      || observation.signal
+      || (observation.exit !== null && observation.exit !== 0)
+    ));
+    if (failedTiers.length) {
+      caseResult.ok = false;
+      caseResult.differences = [...new Set([
+        ...caseResult.differences,
+        ...failedTiers.map((observation) => observation.tier),
+      ])];
+      caseResult.result_bundle_input ||= {
+        tier: failedTiers[0].tier,
+        expected_relation: caseResult.expected_relation,
+        actual_relation: caseResult.actual_relation,
+        tier_observations: caseResult.observations,
+      };
+    }
+    if (caseResult.ok) continue;
+    const bundle = findingBundle(run, caseInput, caseResult, manifest, cfg);
+    findings.push(bundle);
+    finding_payloads.push({
+      bundle_identity: bundleIdentity(bundle),
+      payload: towerPayload(caseInput, caseResult, bundle),
+    });
+  }
+  const serialized = serializeBundles(findings);
+  summary.status = findings.length ? "FINDINGS" : "PASS";
+  summary.findings = findings;
+  summary.finding_payloads = finding_payloads;
+  summary.serialized_bundles = serialized;
+  summary.bundle_sha256 = sha256(serialized);
+  transition(run, findings.length ? "oracle_findings" : "oracle_pass", {
+    attempted: summary.attempted,
+    valid_case_count: summary.valid_case_count,
+    finding_count: findings.length,
+  });
+  return summary;
+}
+function layerPath(name, fallback = null) {
+  const value = process.env[name];
+  return value ? resolve(ROOT, value) : fallback;
+}
+
+function readLayerRows(path) {
+  if (!path || !existsSync(path)) return null;
+  const value = readJson(path);
+  if (Array.isArray(value)) return value;
+  if (value && Array.isArray(value.rows)) return value.rows;
+  if (value?.manifest && Array.isArray(value.manifest.rows)) return value.manifest.rows;
+  return null;
+}
+
+function layerSurfaces(manifest) {
+  const configured = layerPath(
+    "JET_HARDENING_PROPERTY_MANIFEST",
+    manifest?.path ? resolve(ROOT, manifest.path) : null,
+  );
+  return readLayerRows(configured) || [];
+}
+
+function layerValue(result) {
+  const bytes = Buffer.isBuffer(result?.stdout)
+    ? result.stdout
+    : Buffer.isBuffer(result?.stdout_bytes)
+      ? result.stdout_bytes
+      : typeof result?.stdout_base64 === "string"
+        ? Buffer.from(result.stdout_base64, "base64")
+        : Buffer.from(String(result?.stdout || ""), "utf8");
+  const text = bytes.toString("utf8").trim();
+  if (!text) return "";
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const candidate = lines.length === 1 ? lines[0] : lines[lines.length - 1];
+  try { return JSON.parse(candidate); } catch { return candidate; }
+}
+
+async function executeGeneratedTier(run, request, environment, cfg) {
+  const result = await executeOracleTier(run, request, environment, cfg);
+  const normalized_value = layerValue(result);
+  const stderr = Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf8") : String(result.stderr || "");
+  const rustText = [stderr, result.error, result.stdout, result.stderr_bytes]
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value))
+    .join(" ");
+  const rustRejected = request.layer === "grammar"
+    && request.value_consuming === true
+    && request.tier === "aot"
+    && !result.ok
+    && /(?:\brustc\b|generated Rust|generated code.*(?:rejected|error)|error\[[A-Z]\d+\])/i.test(rustText);
+  return {
+    ...result,
+    normalized_value,
+    relation: canonicalRelation(normalized_value),
+    ...(request.layer === "grammar" ? {
+      tir: request.tier === "interpreter"
+        ? { constructed: result.ok === true, evaluated: result.ok === true }
+        : { constructed: result.ok === true },
+      ...(rustRejected ? { rust: { accepted: false, error: rustText } } : {}),
+    } : {}),
+  };
+}
+
+function compilerStageObservation(result, accepted) {
+  return {
+    accepted: accepted === true,
+    ok: accepted === true,
+    ...(result?.error ? { error: String(result.error) } : {}),
+    ...(result?.json ? { diagnostics: result.json } : {}),
+  };
+}
+
+async function checkGeneratedGrammarStages(request, environment, cfg) {
+  const checked = await checkJetSource(request.source, {
+    root: ROOT,
+    jet_env: JET_ENV,
+    cwd: ROOT,
+    env: environment,
+    timeout_ms: cfg.oracle_timeout_ms,
+    capture_limit: MAX_CAPTURE_BYTES,
+  });
+  const parser = compilerStageObservation(checked.parse, checked.parse?.ok === true);
+  const sema = checked.parse?.ok === true
+    ? compilerStageObservation(checked.check, checked.check?.ok === true)
+    : null;
+  return {
+    parser,
+    ...(sema ? { sema } : {}),
+    source_sha256: sha256(request.source),
+  };
+}
+
+function canonicalRelation(value) {
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+function disabledLayerSummary(schema, reason) {
+  return {
+    schema,
+    schema_version: 1,
+    status: "DISABLED",
+    reason,
+    attempted: 0,
+    valid_case_count: 0,
+    rejected: [{ kind: "configuration", reason }],
+    findings: [],
+    serialized_bundles: "",
+    bundle_sha256: sha256(""),
+  };
+}
+
+async function runLayerTwo(run, cfg, manifest, environment) {
+  if (!cfg.property_enabled) return disabledLayerSummary("jet.hardening.property.v1", "property layer is opt-in");
+  const surfaces = layerSurfaces(manifest);
+  if (surfaces.length === 0) return disabledLayerSummary("jet.hardening.property.v1", "property manifest has no rows");
+  const generated = generatePropertyCases({
+    surfaces,
+    seed: cfg.seed,
+    maxCases: cfg.property_max_cases,
+  });
+  const result = await runPropertyCases(generated.cases, {
+    maxCases: cfg.property_max_cases,
+    executor: (request) => executeGeneratedTier(run, request, environment, cfg),
+    metadata: {
+      run_id: run.id,
+      commit: run.identity.commit,
+      binary_sha256: run.result.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
+      registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
+      config_hash: cfg.hash,
+    },
+  });
+  return propertyLayerSummary(generated, result);
+}
+
+function grammarSources() {
+  const syntax = layerPath(
+    "JET_HARDENING_GRAMMAR_SYNTAX",
+    join(ROOT, "crates/jet-foundation/src/Syntax.rs"),
+  );
+  const parser = process.env.JET_HARDENING_GRAMMAR_PARSER
+    ? csvEnv("JET_HARDENING_GRAMMAR_PARSER", []).map((path) => resolve(ROOT, path))
+    : undefined;
+  const sema = process.env.JET_HARDENING_GRAMMAR_SEMA
+    ? csvEnv("JET_HARDENING_GRAMMAR_SEMA", []).map((path) => resolve(ROOT, path))
+    : undefined;
+  return { syntaxSource: syntax, parserSources: parser, semaSources: sema };
+}
+
+async function runLayerThree(run, cfg, environment, manifest) {
+  if (!cfg.grammar_enabled) return disabledLayerSummary("jet.hardening.grammar.v1", "grammar layer is opt-in");
+  const negative_controls = checkGrammarNegativeControls();
+  const constructManifest = deriveConstructManifest({ root: ROOT, ...grammarSources() });
+  const generated = generateTypedPrograms(constructManifest, {
+    seed: cfg.seed,
+    maxCases: cfg.grammar_max_cases,
+    includeNearValid: booleanEnv("JET_HARDENING_GRAMMAR_NEAR_VALID", true),
+  });
+  const grammarManifestHash = constructManifestHash(constructManifest);
+  const result = await runGrammarPrograms(generated.programs, {
+    maxCases: cfg.grammar_max_cases,
+    executor: (request) => executeGeneratedTier(run, request, environment, cfg),
+    stageExecutor: (request) => checkGeneratedGrammarStages(request, environment, cfg),
+    metadata: {
+      run_id: run.id,
+      commit: run.identity.commit,
+      binary_sha256: run.result.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
+      registry_snapshot_hash: diagnosticRegistryHash(),
+      config_hash: cfg.hash,
+    },
+  });
+  return {
+    ...result,
+    denominator: generated.denominator,
+    manifest: constructManifest,
+    generated_rejected: generated.rejected,
+    generation: {
+      seed: generated.seed,
+      max_cases: generated.max_cases,
+      attempted: generated.attempted,
+      valid_case_count: generated.valid_case_count,
+      manifest_sha256: generated.manifest_sha256,
+      programs_sha256: generated.programs_sha256,
+      ordered_case_ids: generated.programs.map((program) => program.case_id),
+    },
+    negative_controls,
+  };
+}
+
+async function runLayerFour(run, cfg, environment, manifest) {
+  if (!cfg.mutation_enabled) return disabledLayerSummary("jet.hardening.mutation.v1", "mutation layer is opt-in");
+  if (!run.buildLease) throw new Error("mutation layer requires the clean checkout/build lease");
+  const adapterPath = layerPath("JET_HARDENING_MUTATION_ADAPTER");
+  if (!adapterPath) throw new Error("JET_HARDENING_MUTATION_ADAPTER is required when mutation layer is enabled");
+  const adapter = await import(adapterPath);
+  const baselineSource = adapter.baseline_source || WITNESS_MUTATION_SOURCE;
+  const baseline = {
+    source_sha256: sha256(baselineSource),
+    target_sha256: sha256File(JET_BINARY) || "sha256:unknown-binary",
+    current: typeof adapter.current === "function" ? adapter.current : undefined,
+  };
+  run.mutation_baseline = baseline;
+  run.mutation_context = null;
+  run.mutation_cleanup = async () => {
+    await adapter.interrupt?.();
+    const context = run.mutation_context;
+    if (!context) return;
+    await adapter.restore(context.mutant, context.input, baseline);
+    await adapter.removeWorkspace(context.mutant, context.input);
+    run.mutation_context = null;
+  };
+  return runMutationSensitivity({
+    catalog: MUTATION_CATALOG,
+    seed: cfg.seed,
+    maxMutants: cfg.mutation_max_cases,
+    baseline,
+    apply: adapter.apply,
+    build: adapter.build,
+    prove: adapter.prove,
+    restore: adapter.restore,
+    removeWorkspace: adapter.removeWorkspace || null,
+    workspaceRequired: true,
+    disabledKillers: cfg.mutation_disabled_killers,
+    onMutantStart: (mutant, input) => {
+      run.mutation_context = { mutant, input };
+    },
+    onMutantEnd: () => {
+      run.mutation_context = null;
+    },
+    metadata: {
+      run_id: run.id,
+      commit: run.identity.commit,
+      binary_sha256: baseline.target_sha256,
+      registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
+      config_hash: cfg.hash,
+    },
+  });
+}
+
+const WITNESS_MUTATION_SOURCE = `fn run() {
+    value :: 1
+    print(value)
+}
+`;
+
+function layerFindingEntries(layer, layerResult) {
+  if (layer === "4" && Array.isArray(layerResult?.gap_cards)) {
+    return layerResult.gap_cards.map((card) => {
+      const payload = card.payload || {};
+      return {
+        bundle_identity: card.identity,
+        payload: {
+          title: card.title,
+          body: card.reason,
+          hardeningLayer: layer,
+          hardeningSeam: payload.seam || "unclassified",
+          mutantId: payload.mutant_id || null,
+          expectedLayer: payload.expected_layer || null,
+          astMutation: payload.ast_mutation || null,
+          missingProof: payload.missing_proof || null,
+          gapCard: payload,
+          mutationScore: layerResult.mutation_score,
+          survivorIds: layerResult.survivor_ids,
+          classification: "hardening-gap-survivor",
+        },
+      };
+    });
+  }
+  return (layerResult?.findings || layerResult?.bundles || []).map((bundle) => ({
+    bundle_identity: bundleIdentity(bundle),
+    payload: {
+      title: `Layer-${layer} hardening finding: ${bundle.stable_surface_id}`,
+      body: `Confirmed by the bounded ${layer} hardening layer.`,
+      hardeningLayer: layer,
+      hardeningSeam: bundle.seam || bundle.law_id || bundle.construct_id || bundle.mutant_id || "unclassified",
+      source: bundle.source,
+      expectedRelation: bundle.expected_relation,
+      actualRelation: bundle.actual_relation,
+      seed: bundle.seed,
+      targetCommit: bundle.commit,
+      classification: bundle.classification,
+      oracle: bundle.oracle,
+      proof: bundle.proof || null,
+    },
+  }));
+}
+
+function towerDryRun() {
+  return TEST_MODE || process.env.JET_HARDENING_DRY_RUN === "1";
+}
+
+async function writeTowerFinding(run, entry, environment, cfg) {
+  if (towerDryRun()) {
+    return {
+      status: "SKIPPED",
+      reason: TEST_MODE ? "test mode" : "dry run",
+      bundle_identity: entry.bundle_identity,
+    };
+  }
+  if (!existsSync(TOWER_CLI)) throw new Error(`Tower CLI is missing: ${TOWER_CLI}`);
+  const args = [];
+  if (TOWER_DATA) args.push("--data", TOWER_DATA);
+  args.push("card", "add", "--stdin", "--json", "--by", "hardening-rig");
+  const command = await runCommand(
+    "tower:hardening-card",
+    process.execPath,
+    [TOWER_CLI, ...args],
+    environment,
+    cfg.oracle_timeout_ms,
+    JSON.stringify(entry.payload),
+  );
+  if (!command.ok) throw new ChildFailure("tower", command);
+  let card;
+  try {
+    card = JSON.parse(command.stdout.toString("utf8"));
+  } catch (error) {
+    throw new Error(`Tower hardening response is not JSON: ${error.message}`);
+  }
+  if (!card || card.error) throw new Error(`Tower hardening write failed: ${card?.message || "invalid response"}`);
+  return {
+    status: "WRITTEN",
+    bundle_identity: entry.bundle_identity,
+    card_id: card.id || null,
+    card_num: card.num || null,
+    action: card.action || null,
+    command: childSummary(command),
+  };
+}
+
+async function writeTowerFindings(run, oracle, environment, cfg) {
+  const actions = [];
+  for (const entry of oracle.finding_payloads) {
+    actions.push(await writeTowerFinding(run, entry, environment, cfg));
+  }
+  return actions;
+}
+
 async function runCycle(options) {
   const id = runId();
   const run = {
@@ -827,6 +1581,7 @@ async function runCycle(options) {
   mkdirSync(CACHE_ROOT, { recursive: true, mode: 0o700 });
   const manifest = manifestIdentity();
   let result = baseResult(run, run.config, null, manifest);
+  run.result = result;
   let childResult = null;
   let refusal = null;
   try {
@@ -940,9 +1695,61 @@ async function runCycle(options) {
       result.proof = { skipped: true, reason: "no named proof targets or shards" };
     }
 
+    const oracle = await runLayerOne(run, run.config, manifest, environment);
+    result.oracle = oracle;
+    if (oracle.findings.length) {
+      transition(run, "tower_card_findings", { finding_count: oracle.findings.length });
+      const towerActions = await writeTowerFindings(run, oracle, environment, run.config);
+      result.tower = {
+        status: towerDryRun() ? "SKIPPED" : "WRITTEN",
+        reason: towerDryRun() ? (TEST_MODE ? "test mode" : "dry run") : null,
+        actions: towerActions,
+      };
+      result.status = "RED";
+      result.failure_stage = "oracle";
+      const findingError = new Error(`layer-1 oracle confirmed ${oracle.findings.length} finding(s)`);
+      transition(run, "record_findings", {
+        status: result.status,
+        finding_count: oracle.findings.length,
+        tower_actions: result.tower.actions.length,
+      });
+      return finalizeCycle(run, result, childResult, findingError, null);
+    }
+    const property = await runLayerTwo(run, run.config, manifest, environment);
+    result.property = property;
+    const grammar = await runLayerThree(run, run.config, environment, manifest);
+    result.grammar = grammar;
+    const mutation = await runLayerFour(run, run.config, environment, manifest);
+    result.mutation = mutation;
+    const layerFindings = [
+      ...layerFindingEntries("2", property),
+      ...layerFindingEntries("3", grammar),
+      ...layerFindingEntries("4", mutation),
+    ];
+    if (layerFindings.length) {
+      transition(run, "layer_findings", { finding_count: layerFindings.length });
+      const towerActions = await writeTowerFindings(run, { finding_payloads: layerFindings }, environment, run.config);
+      result.tower = {
+        status: towerDryRun() ? "SKIPPED" : "WRITTEN",
+        reason: towerDryRun() ? (TEST_MODE ? "test mode" : "dry run") : null,
+        actions: towerActions,
+      };
+      result.status = "RED";
+      result.failure_stage = "hardening-layers";
+      const findingError = new Error(`hardening layers confirmed ${layerFindings.length} finding(s)`);
+      transition(run, "record_findings", {
+        status: result.status,
+        finding_count: layerFindings.length,
+        tower_actions: result.tower.actions.length,
+      });
+      return finalizeCycle(run, result, childResult, findingError, null);
+    }
+    result.tower = { status: "SKIPPED", reason: "no confirmed findings", actions: [] };
+
     result.status = "PASS";
     transition(run, "record_result", { status: result.status });
     return finalizeCycle(run, result, childResult, null, null);
+
   } catch (error) {
     if (error instanceof ChildFailure) {
       childResult = error.result;
@@ -1014,6 +1821,16 @@ async function finalizeCycle(run, result, childResult, error, refusal) {
     });
     transition(run, "resource_overage", { status: "RED", violations });
   }
+  transition(run, "status", { status: result.status, violations });
+  result.transitions = [...run.transitions];
+  try {
+    archiveCycle(result);
+  } catch (archiveFailure) {
+    result.status = "RED";
+    result.archive_error = archiveFailure.message;
+    transition(run, "archive_failure", { status: "RED", error: archiveFailure.message });
+    result.transitions = [...run.transitions];
+  }
   const state = loadState();
   atomicJson(STATE_PATH, {
     ...state,
@@ -1026,8 +1843,6 @@ async function finalizeCycle(run, result, childResult, error, refusal) {
       resource_violations: violations,
     },
   });
-  transition(run, "status", { status: result.status, violations });
-  result.transitions = [...run.transitions];
   atomicJson(RESULT_PATH, result);
   return result;
 }
@@ -1055,12 +1870,29 @@ function machineOutput(value, json) {
     return;
   }
   if (value.command === "status") {
+    const target = value.target || {};
+    const manifest = value.manifest || {};
+    const conformance = value.conformance || {};
+    const fuzz = value.fuzz || {};
+    const redTeam = value.red_team || {};
+    const tower = value.tower || {};
+    const resources = value.resources || {};
     process.stdout.write(`HARDENING RIG  ${value.status}\n`);
-    process.stdout.write(`cycle  ${value.last_cycle?.status || "IDLE"}\n`);
-    if (value.last_cycle?.refusal) process.stdout.write(`refusal  ${value.last_cycle.refusal}\n`);
-    process.stdout.write(`memory  ${value.resources.memory_available_gib ?? "unknown"}GiB available\n`);
-    process.stdout.write(`target  ${value.resources.target_gib ?? "unknown"}GiB / 80GiB\n`);
-    process.stdout.write(`cache   ${value.resources.cache_gib ?? "unknown"}GiB / 4GiB\n`);
+    process.stdout.write(`target commit  ${target.commit || "unknown"} (${target.clean ? "clean" : "dirty"})\n`);
+    process.stdout.write(`binary         ${target.binary_sha256 || "unknown"}\n`);
+    process.stdout.write(`manifest       ${manifest.hash || "unknown"} ${manifest.stale ? "STALE" : "current"}\n`);
+    process.stdout.write(`conformance    ${conformance.status || "RED"} ${JSON.stringify(conformance.totals || {})}\n`);
+    for (const exclusion of conformance.exclusions || []) {
+      process.stdout.write(`exclusion      ${exclusion.stable_id || "unknown"} ${exclusion.ratified ? "ratified" : "UNRATIFIED"} ${exclusion.reason || "missing reason"}\n`);
+    }
+    process.stdout.write(`fuzz           ${fuzz.status || "RED"} ${fuzz.clean_days || 0} clean days, ${fuzz.valid_cases || 0} valid cases, floor ${fuzz.lowest_row ?? "unknown"}/${fuzz.row_floor?.required ?? 100}\n`);
+    process.stdout.write(`fuzz domains   ${JSON.stringify(fuzz.domain_distribution || {})}\n`);
+    process.stdout.write(`fuzz findings  ${fuzz.silent_findings || 0} silent, seed ${fuzz.last_seed || "unknown"}${fuzz.invalidation_cause ? `, invalidated by ${fuzz.invalidation_cause}` : ""}\n`);
+    process.stdout.write(`red team       ${redTeam.status || "RED"} ${redTeam.quota?.completed_lanes || 0}/${redTeam.quota?.lanes || 8} lanes, ${redTeam.unique_p0 || 0} unique P0\n`);
+    process.stdout.write(`Tower P0       ${tower.open_p0 ?? "unknown"} ${tower.refs?.length ? tower.refs.join(",") : ""}\n`);
+    process.stdout.write(`resources      ${resources.status || "RED"} memory ${resources.memory_available_gib ?? "unknown"}GiB, free ${resources.free_space_gib ?? "unknown"}GiB\n`);
+    process.stdout.write(`target/cache   ${resources.target_gib ?? "unknown"}GiB / 80GiB, ${resources.cache_gib ?? "unknown"}GiB / 4GiB\n`);
+    if (value.reasons?.length) process.stdout.write(`reasons        ${value.reasons.join("; ")}\n`);
     return;
   }
   process.stdout.write(`${value.status || value.state || value.command}\n`);
@@ -1081,23 +1913,25 @@ function statusReport() {
   resources.memory_available_gib = memoryAvailableGib;
   const malformedState = state?.__error || null;
   const violations = capViolations(resources);
-  const status = malformedState || state?.blocked || violations.length || result?.status === "RED" ? "RED" : "NOT READY";
-  return {
-    command: "status",
-    status,
+  const report = buildDashboard({
     root: ROOT,
-    target: TARGET_ROOT,
-    binary: JET_BINARY,
-    cache: CACHE_ROOT,
-    scratch: SCRATCH_ROOT,
-    state: malformedState ? { unreadable: malformedState } : state || null,
-    last_cycle: state?.last_cycle || null,
-    last_result: result || null,
-    manifest: manifestIdentity(),
+    evidenceRoot: process.env.JET_HARDENING_EVIDENCE_DIR
+      || process.env.JET_HARDENING_EVIDENCE
+      || CACHE_ROOT,
+    cacheRoot: CACHE_ROOT,
+    targetRoot: TARGET_ROOT,
+    binaryPath: JET_BINARY,
+    towerCli: TOWER_CLI,
+    towerData: TOWER_DATA,
     resources,
-    cap_violations: violations,
-    caps: { target_gib: 80, cache_gib: 4, interesting_mib: 512, log_mib: 1 },
-  };
+    capViolations: violations,
+    state: malformedState ? { unreadable: malformedState } : state || null,
+    result: result?.__error ? null : result || null,
+  });
+  report.scratch = SCRATCH_ROOT;
+  report.cap_violations = report.resources.cap_violations;
+  report.caps = report.resources.caps;
+  return report;
 }
 
 function systemctl(args) {
@@ -1157,18 +1991,35 @@ async function handleSignal(signal) {
     const run = currentRun;
     run.signal = signal;
     await killOwnedChildren(run);
+    let mutationCleanupError = null;
+    try {
+      await run.mutation_cleanup?.();
+    } catch (error) {
+      mutationCleanupError = error;
+    }
     const result = baseResult(run, run.config, run.identity, manifestIdentity());
     result.status = "RED";
     result.failure_stage = "signal";
     result.signal = signal;
     result.finished = now();
-    result.cleanup = { signal, children: true, scratch_removed: run.scratch ? removeScratch(run.scratch, run) : true };
+    result.cleanup = {
+      signal,
+      children: true,
+      mutation_restored: mutationCleanupError === null,
+      mutation_cleanup_error: mutationCleanupError?.message || null,
+      scratch_removed: run.scratch ? removeScratch(run.scratch, run) : true,
+    };
     atomicJson(FAILURE_PATH, failureBundle(result, null, new Error(`received ${signal}`)));
     writeFailureLog(result);
     try {
       run.buildLease?.release();
       run.rigLease?.release();
       transition(run, "signal", { status: "RED", signal });
+      try {
+        archiveCycle(result);
+      } catch {
+        // Preserve the signal result even when the cache cannot accept another record.
+      }
       atomicJson(RESULT_PATH, result);
     } catch {
       // Preserve signal exit even if state storage is unavailable.
@@ -1180,10 +2031,10 @@ async function handleSignal(signal) {
 process.on("SIGHUP", () => void handleSignal("SIGHUP"));
 process.on("SIGINT", () => void handleSignal("SIGINT"));
 process.on("SIGTERM", () => void handleSignal("SIGTERM"));
-
 async function main() {
   const args = process.argv.slice(2);
-  const command = args.find((arg) => !arg.startsWith("--")) || "status";
+  const commandIndex = args.findIndex((arg) => !arg.startsWith("--"));
+  const command = commandIndex < 0 ? "status" : args[commandIndex];
   const json = args.includes("--json");
   const simulationArg = args.find((arg) => arg.startsWith("--simulate="));
   const simulationIndex = args.indexOf("--simulate");
@@ -1192,6 +2043,7 @@ async function main() {
     : simulationIndex >= 0
       ? args[simulationIndex + 1]
       : process.env.JET_HARDENING_SIMULATE || null;
+  if (command === "red-team") return redTeamMain(args.slice(commandIndex + 1));
   if (command === "help" || command === "--help" || command === "-h") {
     help();
     return 0;

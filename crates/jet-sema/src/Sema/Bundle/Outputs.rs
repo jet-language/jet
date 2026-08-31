@@ -90,6 +90,53 @@ fn output_fields<'a>(
     Some(fields)
 }
 
+fn output_module_path(entry: &Expr) -> Option<(String, Span, Vec<(String, Span)>)> {
+    let mut members = Vec::new();
+    let mut cursor = entry;
+    while let Expr::Field(base, member, span) = cursor {
+        members.push((member.clone(), *span));
+        cursor = base.as_ref();
+    }
+    let Expr::Ident(alias, alias_span) = cursor else {
+        return None;
+    };
+    members.reverse();
+    Some((alias.clone(), *alias_span, members))
+}
+
+fn record_output_import_use(
+    name_ledger: &mut jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    name: &str,
+) {
+    if let Some(span) = name_ledger
+        .effective_alias(module_idx, name)
+        .map(|alias| alias.span)
+    {
+        name_ledger.record_alias_use(module_idx, span);
+    }
+}
+
+
+fn output_module_alias_visible(
+    from_module: usize,
+    owner_module: usize,
+    alias: &str,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> bool {
+    let Some(import) = name_ledger.alias(owner_module, alias) else {
+        return false;
+    };
+    match import.visibility {
+        jet_foundation::Names::NameVisibility::Public => true,
+        jet_foundation::Names::NameVisibility::Package => name_ledger
+            .module(from_module)
+            .zip(name_ledger.module(owner_module))
+            .is_some_and(|(from, owner)| from.package == owner.package),
+        jet_foundation::Names::NameVisibility::Private => from_module == owner_module,
+    }
+}
+
 fn resolve_output_callable(
     module_idx: usize,
     address: String,
@@ -98,7 +145,7 @@ fn resolve_output_callable(
     entry: &Expr,
     bundle: &ProgramBundle,
     states: &[ModuleState],
-    name_ledger: &jet_foundation::Names::NameLedger,
+    name_ledger: &mut jet_foundation::Names::NameLedger,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<crate::AST::ResolvedOutput> {
     let (target, source_name, lowered_name) = match entry {
@@ -107,8 +154,10 @@ fn resolve_output_callable(
             if state.funcs.contains_key(name) {
                 (module_idx, name.clone(), name.clone())
             } else if let Some(mangled) = state.unqualified.get(name) {
+                record_output_import_use(name_ledger, module_idx, name);
                 (module_idx, name.clone(), mangled.clone())
             } else if let Some((real, target)) = state.unqualified_file.get(name) {
+                record_output_import_use(name_ledger, module_idx, name);
                 (*target, real.clone(), real.clone())
             } else {
                 diags.push(output_error(
@@ -121,58 +170,181 @@ fn resolve_output_callable(
                 return None;
             }
         }
-        Expr::Field(base, member, span) => {
-            let Expr::Ident(alias, alias_span) = base.as_ref() else {
+        Expr::Field(..) => {
+            let Some((alias, alias_span, members)) = output_module_path(entry) else {
                 diags.push(output_error(
                     "Output entry has no resolvable module owner".to_string(),
                     "qualified function references use one imported or inline module alias"
                         .to_string(),
                     "write `entry: module_name.function`".to_string(),
-                    *span,
+                    entry.span(),
                 ));
                 return None;
             };
+            let member_path = members
+                .iter()
+                .map(|(member, _)| member.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            record_output_import_use(name_ledger, module_idx, &alias);
             let state = &states[module_idx];
-            if let Some(canonical) = state.code_modules.get(alias) {
+            if let Some(canonical) = state.code_modules.get(&alias) {
+                if members.len() != 1 {
+                    diags.push(output_error(
+                        format!("module `{alias}` has no function `{member_path}`"),
+                        "Output entries use ordinary module member resolution".to_string(),
+                        "update `entry:` to a function that exists".to_string(),
+                        members
+                            .last()
+                            .map(|(_, span)| *span)
+                            .unwrap_or(entry.span()),
+                    ));
+                    return None;
+                }
+                let member = &members[0].0;
+                let span = members[0].1;
                 let lowered = jet_foundation::Names::member_name(canonical, member);
                 if !state.funcs.contains_key(&lowered) {
                     diags.push(output_error(
                         format!("module `{alias}` has no function `{member}`"),
                         "Output entries use ordinary module member resolution".to_string(),
                         "update `entry:` to a function that exists".to_string(),
-                        *span,
+                        span,
                     ));
                     return None;
                 }
                 (module_idx, member.clone(), lowered)
-            } else if let Some(target) = state.imports.get(alias).copied() {
-                let target_state = &states[target];
-                if !target_state.funcs.contains_key(member) {
-                    diags.push(output_error(
-                        format!("module `{alias}` has no function `{member}`"),
-                        "Output entries use ordinary module member resolution".to_string(),
-                        "update `entry:` to a function that exists".to_string(),
-                        *span,
-                    ));
-                    return None;
+            } else if let Some(mut current) = state.imports.get(&alias).copied() {
+                let mut resolved = None;
+                for (index, (member, member_span)) in members.iter().enumerate() {
+                    let is_last = index + 1 == members.len();
+                    if let Some(next) = states[current].imports.get(member).copied() {
+                        record_output_import_use(name_ledger, current, member);
+                        if current != module_idx
+                            && !output_module_alias_visible(
+                                module_idx,
+                                current,
+                                member,
+                                name_ledger,
+                            )
+                        {
+                            diags.push(output_error(
+                                format!("module `{alias}.{member_path}` is private"),
+                                "an Output can only invoke code visible from its declaring module"
+                                    .to_string(),
+                                format!(
+                                    "make the `{member}` module import public, or keep the Output beside it"
+                                ),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        if is_last {
+                            diags.push(output_error(
+                                format!("module `{alias}` has no function `{member_path}`"),
+                                "Output entries use ordinary module member resolution".to_string(),
+                                "update `entry:` to a function that exists".to_string(),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        current = next;
+                        continue;
+                    }
+                    if !is_last {
+                        diags.push(output_error(
+                            format!("module `{alias}` has no function `{member_path}`"),
+                            "Output entries use ordinary module member resolution".to_string(),
+                            "update `entry:` to a function that exists".to_string(),
+                            *member_span,
+                        ));
+                        return None;
+                    }
+                    if let Some((real, target)) = states[current].reexports.get(member) {
+                        record_output_import_use(name_ledger, current, member);
+                        if !name_ledger.visible(module_idx, *target, real) {
+                            diags.push(output_error(
+                                format!("function `{alias}.{member_path}` is private"),
+                                "an Output can only invoke code visible from its declaring module"
+                                    .to_string(),
+                                format!(
+                                    "make `fn {real}` public to this package, or keep the Output beside it"
+                                ),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        resolved = Some((*target, real.clone(), real.clone()));
+                    } else if let Some((real, target)) =
+                        states[current].unqualified_file.get(member)
+                    {
+                        record_output_import_use(name_ledger, current, member);
+                        if current != module_idx
+                            && !output_module_alias_visible(
+                                module_idx,
+                                current,
+                                member,
+                                name_ledger,
+                            )
+                        {
+                            diags.push(output_error(
+                                format!("function `{alias}.{member_path}` is private"),
+                                "an Output can only invoke code visible from its declaring module"
+                                    .to_string(),
+                                format!(
+                                    "make the `{member}` import public, or keep the Output beside it"
+                                ),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        if !name_ledger.visible(module_idx, *target, real) {
+                            diags.push(output_error(
+                                format!("function `{alias}.{member_path}` is private"),
+                                "an Output can only invoke code visible from its declaring module"
+                                    .to_string(),
+                                format!(
+                                    "make `fn {real}` public to this package, or keep the Output beside it"
+                                ),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        resolved = Some((*target, real.clone(), real.clone()));
+                    } else if states[current].funcs.contains_key(member) {
+                        if !name_ledger.visible(module_idx, current, member) {
+                            diags.push(output_error(
+                                format!("function `{alias}.{member_path}` is private"),
+                                "an Output can only invoke code visible from its declaring module"
+                                    .to_string(),
+                                format!(
+                                    "make `fn {member}` public to this package, or keep the Output beside it"
+                                ),
+                                *member_span,
+                            ));
+                            return None;
+                        }
+                        resolved = Some((current, member.clone(), member.clone()));
+                    } else {
+                        diags.push(output_error(
+                            format!("module `{alias}` has no function `{member_path}`"),
+                            "Output entries use ordinary module member resolution".to_string(),
+                            "update `entry:` to a function that exists".to_string(),
+                            *member_span,
+                        ));
+                        return None;
+                    }
                 }
-                let visible = name_ledger.visible(module_idx, target, member);
-                if !visible {
-                    diags.push(output_error(
-                        format!("function `{alias}.{member}` is private"),
-                        "an Output can only invoke code visible from its declaring module".to_string(),
-                        format!("make `fn {member}` public to this package, or keep the Output beside it"),
-                        *span,
-                    ));
+                let Some(resolved) = resolved else {
                     return None;
-                }
-                (target, member.clone(), member.clone())
+                };
+                resolved
             } else {
                 diags.push(output_error(
                     format!("no module named `{alias}` is in scope"),
                     "qualified Output entries use ordinary imported module aliases".to_string(),
-                    format!("import the module before `entry: {alias}.{member}`"),
-                    *alias_span,
+                    format!("import the module before `entry: {alias}.{member_path}`"),
+                    alias_span,
                 ));
                 return None;
             }
@@ -320,7 +492,7 @@ fn output_default(
 pub(super) fn resolve_outputs(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
-    name_ledger: &jet_foundation::Names::NameLedger,
+    name_ledger: &mut jet_foundation::Names::NameLedger,
     mode: CompileMode,
     explicit: Option<&str>,
     diags: &mut Vec<Diagnostic>,

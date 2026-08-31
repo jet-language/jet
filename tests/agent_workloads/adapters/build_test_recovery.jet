@@ -4,10 +4,13 @@ use core.process as process
 use core.time as time
 use core.sys as env
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: build_test_recovery INPUT_ROOT")
-    input :: args.get(1) ?? panic("missing input root")
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
     jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
     project := "project"
     fs.copy_dir(input, project) ?? panic("cannot copy build/test project")

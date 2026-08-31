@@ -102,6 +102,7 @@ impl JitBackend for CraneliftBackend {
 }
 
 fn run_bundle_on_compiler_stack(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    let _loaded_mod_scope = crate::Mod::LoadScope;
     if let Some(diagnostic) = bundle
         .package_guarantees
         .application_authority
@@ -109,6 +110,9 @@ fn run_bundle_on_compiler_stack(bundle: &ProgramBundle, try_anyway: bool) -> Run
     {
         return RunOutcome::Problems(vec![diagnostic]);
     }
+    // A one-shot run has the same fresh process-local Core state as AOT.
+    // Hot-swap and restart deliberately skip this boundary and retain state.
+    crate::reset_one_shot_core_state();
     let resident = crate::with_program_allocator(bundle, || {
         let _ = try_anyway;
         TIR::install_comptime_bridge();

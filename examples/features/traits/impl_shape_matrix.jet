@@ -86,6 +86,7 @@ impl UnitOwner.Debug {
 #Printable
 DistinctOwner :: distinct Int
 
+
 fn run() {
     auto :: AutoOwner{value: 1}
     display_only :: DisplayOnlyOwner{value: 2}
@@ -156,7 +157,8 @@ fn run() {
     print("enum/pretty={enum_value:Pretty}")
     print(~enum_value)
     enum_list :: [EnumOwner]{~enum_value}
-    enum_map :: [String:EnumOwner]{"k": ~enum_value}
+    enum_map := [String:EnumOwner]{}
+    enum_map["k"] = ~enum_value
     enum_tuple :: (value: ~enum_value, tag: "tuple")
     print("enum/nested={enum_list}|{enum_map}|{enum_tuple}")
 
@@ -172,7 +174,7 @@ fn run() {
     print("distinct/bare={distinct}")
     print("distinct/debug={distinct.raw():Debug}")
     print("distinct/pretty={distinct.raw():Pretty}")
-    print(distinct.raw())
+    print(~distinct)
     distinct_list :: [DistinctOwner]{~distinct}
     distinct_map :: [String:Int]{"k": distinct.raw()}
     distinct_tuple :: (value: distinct.raw(), tag: "tuple")

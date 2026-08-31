@@ -16,9 +16,14 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 
-const MAGIC: &[u8] = b"jet-receipt-v1\0";
+const MAGIC: &[u8] = b"jet-receipt-v2\0";
 const DIGEST_LEN: usize = 64;
 const MAX_FIELD: u64 = 64 * 1024 * 1024;
+const MAX_RECEIPT_BYTES: u64 = MAX_FIELD * 2 + 4 * 1024 * 1024;
+const CAPTURE_TRUNCATION_MARKER: &[u8] = b"\n<output truncated>\n";
+const RECEIPT_SECRET_NAME_PARTS: &[&str] =
+    &["secret", "token", "password", "passwd", "credential", "key"];
+const REDACTION_MARKER: &[u8] = b"<redacted>";
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Whole-invocation receipt participants are deterministic verdict/build acts.
@@ -39,13 +44,26 @@ pub struct ReceiptClaim {
     pub inputs: Vec<ReceiptInput>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Receipt {
     pub claim: ReceiptClaim,
     pub status: i32,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub digest: String,
+}
+
+impl std::fmt::Debug for Receipt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Receipt")
+            .field("claim", &self.claim)
+            .field("status", &self.status)
+            .field("stdout", &"<redacted>")
+            .field("stderr", &"<redacted>")
+            .field("digest", &self.digest)
+            .finish()
+    }
 }
 
 pub struct ReceiptStore {
@@ -152,7 +170,22 @@ impl ReceiptStore {
         if receipt.claim.key != key || receipt.claim.verb != verb {
             return Ok(None);
         }
-        let input_paths = match target_path(verb, argv, cwd) {
+        let input_paths = if verb == "check" && !has_explicit_target(verb, argv) {
+            project_check_input_paths(cwd).unwrap_or_else(|| {
+                target_path(verb, argv, cwd)
+                    .filter(|target| target.is_dir())
+                    .map(|_| input_paths_for(verb, argv, cwd))
+                    .unwrap_or_else(|| {
+                        receipt
+                            .claim
+                            .inputs
+                            .iter()
+                            .map(|input| input.path.clone())
+                            .collect()
+                    })
+            })
+        } else {
+            match target_path(verb, argv, cwd) {
             Some(target) if target.is_dir() || verb == "budget check" => {
                 input_paths_for(verb, argv, cwd)
             }
@@ -162,6 +195,7 @@ impl ReceiptStore {
                 .iter()
                 .map(|input| input.path.clone())
                 .collect(),
+            }
         };
         let claim = match self.claim_with_identity(verb, identity, &input_paths) {
             Ok(claim) => claim,
@@ -216,6 +250,8 @@ impl ReceiptStore {
                 .map_err(|error| format!("could not flush receipt context: {error}"))?;
             fs::rename(&temp, &path)
                 .map_err(|error| format!("could not publish receipt context: {error}"))?;
+            sync_directory(parent)
+                .map_err(|error| format!("could not flush receipt context directory: {error}"))?;
             Ok(())
         })();
         if result.is_err() {
@@ -251,15 +287,18 @@ impl ReceiptStore {
         Ok(Some(receipt))
     }
 
-    /// Publish one immutable receipt object. `true` means a new object was
-    /// created; `false` means the exact object already existed.
+    /// Publish one immutable receipt object after redacting secret values.
+    /// `true` means a new object was created; `false` means the exact object
+    /// already existed.
     pub fn write(
         &self,
         claim: &ReceiptClaim,
+        argv: &[String],
         status: i32,
         stdout: &[u8],
         stderr: &[u8],
     ) -> Result<bool, String> {
+        let secret_values = receipt_secret_values(argv);
         if !is_digest(&claim.key) {
             return Err("receipt claim key is not a lowercase SHA-256 digest".into());
         }
@@ -269,8 +308,8 @@ impl ReceiptStore {
         let receipt = Receipt {
             claim: claim.clone(),
             status,
-            stdout: stdout.to_vec(),
-            stderr: stderr.to_vec(),
+            stdout: bounded_redact_bytes(stdout, &secret_values)?,
+            stderr: bounded_redact_bytes(stderr, &secret_values)?,
             digest: String::new(),
         };
         let digest = receipt_digest(&receipt);
@@ -302,6 +341,8 @@ impl ReceiptStore {
                 Ok(()) => {
                     fs::remove_file(&temp)
                         .map_err(|error| format!("could not remove staged receipt: {error}"))?;
+                    sync_directory(parent)
+                        .map_err(|error| format!("could not flush receipt directory: {error}"))?;
                     Ok(true)
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -324,8 +365,8 @@ impl ReceiptStore {
     }
 
     /// Record one command result through the canonical claim/write path and
-    /// return the published receipt. Output is opaque to the store; its input
-    /// closure is not.
+    /// return the published receipt. Secret values are redacted before output
+    /// reaches the stored receipt.
     pub fn record(
         &self,
         verb: &str,
@@ -336,7 +377,7 @@ impl ReceiptStore {
         stderr: &[u8],
     ) -> Result<Receipt, String> {
         let claim = self.claim(verb, argv, input_paths)?;
-        self.write(&claim, status, stdout, stderr)?;
+        self.write(&claim, argv, status, stdout, stderr)?;
         self.lookup(&claim)?
             .ok_or_else(|| "receipt was not current after publication".into())
     }
@@ -419,6 +460,11 @@ impl ReceiptStore {
 /// compiler's import graph; package-level test/budget actions use the whole
 /// package tree because their public operation reads every member.
 pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> {
+    if verb == "check" && !has_explicit_target(verb, argv) {
+        if let Some(paths) = project_check_input_paths(cwd) {
+            return paths;
+        }
+    }
     let Some(target) = target_path(verb, argv, cwd) else {
         return Vec::new();
     };
@@ -446,7 +492,12 @@ pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> 
 /// output as one receipt. Returning `Some` means the caller must exit with the
 /// supplied status; `None` leaves the normal dispatcher untouched.
 pub fn run_if_needed(argv: &[String]) -> Option<i32> {
-    if std::env::var_os("JET_RECEIPT_BYPASS").is_some() {
+    // Timed invocations must execute the producer so timing and cache
+    // diagnostics describe this invocation. The inner content caches remain
+    // active; only the whole-invocation receipt replay is disabled.
+    if std::env::var_os("JET_RECEIPT_BYPASS").is_some()
+        || std::env::var_os("JET_TIMING").is_some()
+    {
         return None;
     }
     let verb = participating_verb(argv)?;
@@ -457,11 +508,17 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let root = receipt_root(verb, argv, &cwd);
     let store = ReceiptStore::new(root);
     if let Ok(Some(receipt)) = store.lookup_context(verb, argv, &cwd) {
-        replay_receipt(verb, &receipt);
+        let secret_values = receipt_secret_values(argv);
+        replay_receipt(verb, &receipt, &secret_values);
         return Some(receipt.status);
     }
 
-    let input_paths = input_paths_for(verb, argv, &cwd);
+    let input_paths = if verb == "check" && !has_explicit_target(verb, argv) {
+        project_check_input_paths(&cwd)
+            .unwrap_or_else(|| input_paths_for(verb, argv, &cwd))
+    } else {
+        input_paths_for(verb, argv, &cwd)
+    };
     if input_paths.is_empty() && verb != "budget check" {
         return None;
     }
@@ -483,7 +540,7 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let status = child.wait().ok()?.code().unwrap_or(1);
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
-    if store.write(&claim, status, &stdout, &stderr).is_ok() {
+    if store.write(&claim, argv, status, &stdout, &stderr).is_ok() {
         let _ = store.remember_context(verb, argv, &claim);
     }
     Some(status)
@@ -612,6 +669,84 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
     None
 }
 
+fn has_explicit_target(verb: &str, argv: &[String]) -> bool {
+    let mut skip_next = false;
+    let start = if verb == "budget check" { 2 } else { 1 };
+    for arg in argv.iter().skip(start) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if matches!(
+            arg.as_str(),
+            "-p" | "--project"
+                | "--output"
+                | "--target"
+                | "--profile"
+                | "--builder"
+                | "--filter"
+                | "--edition"
+                | "--scope"
+                | "--kind"
+                | "--set"
+                | "--port"
+                | "--seed"
+                | "--iterations"
+                | "--time"
+                | "--corpus"
+        ) {
+            skip_next = true;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if !arg.starts_with('-') {
+            return true;
+        }
+    }
+    false
+}
+
+fn project_check_input_paths(cwd: &Path) -> Option<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    if let Some(root) = crate::Loader::find_workspace_root_checked(cwd)
+        .ok()
+        .flatten()
+    {
+        roots.push(root);
+    }
+    if let Some(root) = crate::Loader::find_manifest_root_checked(cwd)
+        .ok()
+        .flatten()
+    {
+        if !roots.iter().any(|candidate| candidate == &root) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        return None;
+    }
+    let mut paths = BTreeSet::new();
+    for root in roots {
+        collect_tree_inputs(&root, "check", &mut paths);
+    }
+    let sources = paths
+        .iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == crate::Syntax::FILE_EXT)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for source in sources {
+        if let Ok(graph) = WatchGraph::discover(&source) {
+            paths.extend(graph.watched_paths());
+        }
+    }
+    Some(paths.into_iter().filter(|path| regular_file(path)).collect())
+}
+
 fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
     if root.is_file() {
         out.insert(root.to_path_buf());
@@ -635,6 +770,7 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
                 if regular_file(&lock) {
                     out.insert(lock);
                 }
+                collect_tree_inputs(&path.join("generated"), verb, out);
                 if verb == "budget check" {
                     collect_tree_inputs(&path.join("perf").join("baselines"), verb, out);
                 }
@@ -653,11 +789,19 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
             .extension()
             .is_some_and(|ext| ext == crate::Syntax::FILE_EXT)
             || matches!(name, crate::Syntax::PACKAGE_FILE | "workspace.jet" | "lock");
+        let is_generated_input = path
+            .components()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|components| {
+                components[0].as_os_str() == ".jet"
+                    && components[1].as_os_str() == "generated"
+            });
         let is_budget_input = verb == "budget check"
             && path
                 .components()
                 .any(|component| component.as_os_str() == ".jet");
-        if is_source || is_budget_input {
+        if is_source || is_generated_input || is_budget_input {
             out.insert(path);
         }
     }
@@ -695,9 +839,8 @@ fn canonical_path(path: &Path) -> Result<PathBuf, String> {
 
 fn file_digest(path: &Path) -> Result<String, String> {
     let _ = canonical_path(path)?;
-    let bytes = fs::read(path)
-        .map_err(|error| format!("could not read input {}: {error}", path.display()))?;
-    Ok(sha256_hex(&bytes))
+    crate::SHA256::sha256_file_hex(path)
+        .map_err(|error| format!("could not read input {}: {error}", path.display()))
 }
 
 fn inputs_current(inputs: &[ReceiptInput]) -> bool {
@@ -723,14 +866,7 @@ fn secure_create_dir(path: &Path) -> Result<(), String> {
 }
 
 fn read_regular(path: &Path) -> std::io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "receipt object is not a regular file",
-        ));
-    }
-    fs::read(path)
+    crate::SHA256::read_file_nofollow(path, MAX_RECEIPT_BYTES)
 }
 
 fn frame(out: &mut Vec<u8>, value: &[u8]) {
@@ -874,8 +1010,26 @@ fn current_dir_bytes() -> Vec<u8> {
 
 fn argv_identity(argv: &[String]) -> Vec<u8> {
     let mut out = Vec::new();
+    let mut redact_next = false;
     for arg in argv {
+        if redact_next {
+            frame(&mut out, REDACTION_MARKER);
+            redact_next = false;
+            continue;
+        }
+        if let Some((name, _)) = arg.split_once('=') {
+            if is_secret_name(name) {
+                let mut redacted = String::with_capacity(name.len() + 1 + REDACTION_MARKER.len());
+                redacted.push_str(name);
+                redacted.push_str("=<redacted>");
+                frame(&mut out, redacted.as_bytes());
+            } else {
+                frame(&mut out, arg.as_bytes());
+            }
+            continue;
+        }
         frame(&mut out, arg.as_bytes());
+        redact_next = is_secret_name(arg);
     }
     out
 }
@@ -887,7 +1041,14 @@ fn environment_identity() -> Vec<u8> {
     let mut out = Vec::new();
     for (key, value) in env {
         frame(&mut out, key.as_bytes());
-        frame(&mut out, value.as_bytes());
+        frame(
+            &mut out,
+            if is_secret_environment_name(&key) {
+                REDACTION_MARKER
+            } else {
+                value.as_bytes()
+            },
+        );
     }
     out
 }
@@ -913,9 +1074,7 @@ fn tool_digest(name: &str, path: &Path) -> String {
     if name == "jet" {
         env!("JET_COMPILER_BUILD_ID").to_string()
     } else {
-        fs::read(path)
-            .map(|bytes| sha256_hex(&bytes))
-            .unwrap_or_else(|_| "unreadable".into())
+        crate::SHA256::sha256_file_hex(path).unwrap_or_else(|_| "unreadable".into())
     }
 }
 
@@ -945,16 +1104,131 @@ fn terminal_identity() -> Vec<u8> {
     .collect()
 }
 
-fn replay_receipt(command: &str, receipt: &Receipt) {
-    write_bytes(std::io::stdout(), &receipt.stdout);
-    write_bytes(std::io::stderr(), &receipt.stderr);
+fn replay_receipt(command: &str, receipt: &Receipt, secret_values: &[String]) {
+    let (stdout, stderr) = replay_output(receipt, secret_values);
+    write_bytes(std::io::stdout(), &stdout);
+    write_bytes(std::io::stderr(), &stderr);
     let short = &receipt.claim.key[..12];
     let _ = writeln!(std::io::stderr(), "ok: {command} current (receipt {short})");
+}
+
+fn replay_output(receipt: &Receipt, secret_values: &[String]) -> (Vec<u8>, Vec<u8>) {
+    (
+        redact_bytes(&receipt.stdout, secret_values),
+        redact_bytes(&receipt.stderr, secret_values),
+    )
+}
+
+fn receipt_secret_values(argv: &[String]) -> Vec<String> {
+    // Keep this value policy aligned with
+    // `jet_process_policy_secret_values` in the shared Prelude redactor.
+    let mut values = std::env::vars()
+        .filter(|(name, value)| !value.is_empty() && is_secret_environment_name(name))
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    for (index, argument) in argv.iter().enumerate() {
+        if let Some((name, value)) = argument.split_once('=') {
+            if is_secret_name(name) && !value.is_empty() {
+                values.push(value.to_string());
+            }
+        } else if is_secret_name(argument) {
+            if let Some(value) = argv.get(index + 1).filter(|value| !value.is_empty()) {
+                values.push(value.clone());
+            }
+        }
+    }
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    values
+}
+
+fn is_secret_name(name: &str) -> bool {
+    let characters: Vec<_> = name.trim_start_matches('-').chars().collect();
+    let mut component = String::new();
+    for index in 0..=characters.len() {
+        let Some(character) = characters.get(index).copied() else {
+            return is_secret_component(&component);
+        };
+        let previous = index
+            .checked_sub(1)
+            .and_then(|previous| characters.get(previous).copied());
+        let next = characters.get(index + 1).copied();
+        let camel_boundary = character.is_ascii_uppercase()
+            && previous.is_some_and(|previous| {
+                previous.is_ascii_lowercase()
+                    || previous.is_ascii_digit()
+                    || (previous.is_ascii_uppercase()
+                        && next.is_some_and(|next| next.is_ascii_lowercase()))
+            });
+        if !character.is_ascii_alphanumeric() || camel_boundary {
+            if is_secret_component(&component) {
+                return true;
+            }
+            component.clear();
+            if !character.is_ascii_alphanumeric() {
+                continue;
+            }
+        }
+        component.push(character.to_ascii_lowercase());
+    }
+    false
+}
+
+fn is_secret_component(component: &str) -> bool {
+    let component = component.trim_end_matches(|character: char| character.is_ascii_digit());
+    RECEIPT_SECRET_NAME_PARTS
+        .iter()
+        .any(|part| *part == component)
+}
+
+fn is_secret_environment_name(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    is_secret_name(name)
+        || RECEIPT_SECRET_NAME_PARTS
+            .iter()
+            .any(|part| normalized.contains(part))
+}
+
+fn redact_bytes(bytes: &[u8], secret_values: &[String]) -> Vec<u8> {
+    secret_values.iter().fold(bytes.to_vec(), |bytes, value| {
+        replace_bytes(&bytes, value.as_bytes())
+    })
+}
+
+fn bounded_redact_bytes(bytes: &[u8], secret_values: &[String]) -> Result<Vec<u8>, String> {
+    if bytes.len() as u64 > MAX_FIELD {
+        return Err("receipt output exceeds its size limit".into());
+    }
+    let redacted = redact_bytes(bytes, secret_values);
+    if redacted.len() as u64 > MAX_FIELD {
+        return Err("redacted receipt output exceeds its size limit".into());
+    }
+    Ok(redacted)
+}
+
+fn replace_bytes(bytes: &[u8], needle: &[u8]) -> Vec<u8> {
+    if needle.is_empty() || needle.len() > bytes.len() {
+        return bytes.to_vec();
+    }
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index <= bytes.len().saturating_sub(needle.len()) {
+        if &bytes[index..index + needle.len()] == needle {
+            output.extend_from_slice(REDACTION_MARKER);
+            index += needle.len();
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    output.extend_from_slice(&bytes[index..]);
+    output
 }
 
 fn capture_stream(mut reader: impl Read, mut writer: impl Write) -> Vec<u8> {
     let mut captured = Vec::new();
     let mut buffer = [0; 8192];
+    let mut truncated = false;
     loop {
         let Ok(read) = reader.read(&mut buffer) else {
             break;
@@ -962,13 +1236,23 @@ fn capture_stream(mut reader: impl Read, mut writer: impl Write) -> Vec<u8> {
         if read == 0 {
             break;
         }
-        captured.extend_from_slice(&buffer[..read]);
+        let remaining = (MAX_FIELD as usize).saturating_sub(captured.len());
+        let keep = remaining.min(read);
+        captured.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
         if writer.write_all(&buffer[..read]).is_err() {
             break;
         }
         let _ = writer.flush();
     }
+    if truncated {
+        captured.extend_from_slice(CAPTURE_TRUNCATION_MARKER);
+    }
     captured
+}
+
+fn sync_directory(path: &Path) -> std::io::Result<()> {
+    fs::File::open(path)?.sync_all()
 }
 
 fn write_bytes(mut writer: impl Write, bytes: &[u8]) {
@@ -1016,5 +1300,274 @@ mod tests {
         let captured = capture_stream(input, &mut streamed);
         assert_eq!(captured, input);
         assert_eq!(streamed, input);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_new_higher_priority_entry() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-entry-priority-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let receipt_root = project.join("receipts");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(project.join("package.jet"), "package {}\n").unwrap();
+        fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(&receipt_root);
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(initial_inputs
+            .iter()
+            .any(|path| path.ends_with("src/run.jet")));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(project.join("run.jet"), "fn run() {}\n").unwrap();
+        assert!(project_check_input_paths(&project)
+            .unwrap()
+            .iter()
+            .any(|path| path.ends_with("run.jet")));
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_changed_generated_input() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-generated-input-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let receipt_root = project.join("receipts");
+        let generated = project.join(".jet").join("generated");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::create_dir_all(&generated).unwrap();
+        fs::write(project.join("package.jet"), "package {}\n").unwrap();
+        fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
+        fs::write(generated.join("inputs.jet"), "generated-v1\n").unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(&receipt_root);
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(initial_inputs
+            .iter()
+            .any(|path| path == &generated.join("inputs.jet")));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(generated.join("inputs.jet"), "generated-v2\n").unwrap();
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn receipt_debug_redacts_raw_legacy_and_unrecognized_output() {
+        let receipt = Receipt {
+            claim: ReceiptClaim {
+                verb: "check".into(),
+                key: "a".repeat(DIGEST_LEN),
+                inputs: Vec::new(),
+            },
+            status: 17,
+            stdout: b"legacy bearer secret\xff".to_vec(),
+            stderr: vec![0, 1, 2, 255],
+            digest: "b".repeat(DIGEST_LEN),
+        };
+        let debug = format!("{receipt:?}");
+        assert!(debug.contains("stdout: \"<redacted>\""));
+        assert!(debug.contains("stderr: \"<redacted>\""));
+        assert!(!debug.contains("legacy bearer secret"));
+    }
+
+    #[test]
+    fn secret_names_cover_camel_case_dotted_env_and_receipt_identity() {
+        for name in [
+            "--apiToken",
+            "--auth.token",
+            "--token2",
+            "JET_API_TOKEN",
+            "PERSISTENCE_SECRET",
+            "digestKey",
+            "replayToken",
+        ] {
+            assert!(is_secret_name(name), "secret name not recognized: {name}");
+        }
+        assert!(is_secret_environment_name("MY_APIKEY"));
+        assert!(!is_secret_name("--public"));
+
+        let first = vec![
+            "check".to_string(),
+            "--apiToken=camel-secret".to_string(),
+            "--auth.token".to_string(),
+            "dotted-secret".to_string(),
+            "--persistenceToken".to_string(),
+            "persistence-secret".to_string(),
+            "--digest.key=digest-secret".to_string(),
+            "--replayToken".to_string(),
+            "replay-secret".to_string(),
+            "public".to_string(),
+        ];
+        let second = first
+            .iter()
+            .map(|argument| argument.replace("secret", "rotated"))
+            .collect::<Vec<_>>();
+        assert_eq!(argv_identity(&first), argv_identity(&second));
+        assert_eq!(
+            context_identity("check", &first).unwrap(),
+            context_identity("check", &second).unwrap()
+        );
+        for value in [
+            "camel-secret",
+            "dotted-secret",
+            "persistence-secret",
+            "digest-secret",
+            "replay-secret",
+        ] {
+            assert!(receipt_secret_values(&first)
+                .iter()
+                .any(|found| found == value));
+        }
+    }
+
+    #[test]
+    fn replay_redacts_known_secret_values() {
+        let argv = vec![
+            "check".to_string(),
+            "--replayToken".to_string(),
+            "legacy-replay-secret".to_string(),
+        ];
+        let secrets = receipt_secret_values(&argv);
+        let receipt = Receipt {
+            claim: ReceiptClaim {
+                verb: "check".into(),
+                key: "a".repeat(DIGEST_LEN),
+                inputs: Vec::new(),
+            },
+            status: 0,
+            stdout: b"old legacy-replay-secret\0".to_vec(),
+            stderr: b"legacy-replay-secret\n".to_vec(),
+            digest: "b".repeat(DIGEST_LEN),
+        };
+        let (stdout, stderr) = replay_output(&receipt, &secrets);
+        assert_eq!(stdout, b"old <redacted>\0");
+        assert_eq!(stderr, b"<redacted>\n");
+    }
+
+    #[test]
+    fn receipt_persistence_redacts_secret_values_before_digest() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-receipt-redaction-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let store = ReceiptStore::new(&root);
+        let claim = ReceiptClaim {
+            verb: "check".into(),
+            key: "a".repeat(DIGEST_LEN),
+            inputs: Vec::new(),
+        };
+        let argv = vec![
+            "check".to_string(),
+            "--apiToken=receipt-api-token".to_string(),
+            "--auth.token".to_string(),
+            "receipt-dotted-secret".to_string(),
+            "--persistenceToken".to_string(),
+            "receipt-persistence-secret".to_string(),
+            "--digest.key=receipt-digest-secret".to_string(),
+            "--replayToken".to_string(),
+            "receipt-hostile-secret".to_string(),
+        ];
+        let secret_values = receipt_secret_values(&argv);
+        for value in [
+            "receipt-api-token",
+            "receipt-dotted-secret",
+            "receipt-persistence-secret",
+            "receipt-digest-secret",
+            "receipt-hostile-secret",
+        ] {
+            assert!(secret_values.iter().any(|found| found == value));
+        }
+
+        store
+            .write(
+                &claim,
+                &argv,
+                0,
+                b"public receipt-api-token receipt-dotted-secret receipt-persistence-secret receipt-digest-secret receipt-hostile-secret\0",
+                b"receipt-hostile-secret receipt-digest-secret receipt-persistence-secret receipt-dotted-secret receipt-api-token\n",
+            )
+            .unwrap();
+        let receipt = store.lookup(&claim).unwrap().unwrap();
+        assert_eq!(
+            receipt.stdout,
+            b"public <redacted> <redacted> <redacted> <redacted> <redacted>\0"
+        );
+        assert_eq!(
+            receipt.stderr,
+            b"<redacted> <redacted> <redacted> <redacted> <redacted>\n"
+        );
+        assert_eq!(receipt.digest, receipt_digest(&receipt));
+        assert_eq!(
+            redact_bytes(b"receipt-hostile-secret", &secret_values),
+            b"<redacted>"
+        );
+        assert_eq!(redact_bytes(b"short", &["longer-secret".into()]), b"short");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_v1_receipts_with_unknown_rotated_and_file_secrets_fail_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-receipt-legacy-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let file_secret = root.join("token.secret");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&file_secret, b"file-secret-value").unwrap();
+        let file_secret_value = fs::read_to_string(&file_secret).unwrap();
+        let store = ReceiptStore::new(&root);
+        let claim = ReceiptClaim {
+            verb: "check".into(),
+            key: "a".repeat(DIGEST_LEN),
+            inputs: Vec::new(),
+        };
+        let receipt = Receipt {
+            claim: claim.clone(),
+            status: 0,
+            stdout: format!(
+                "legacy rotated-secret {} from {}",
+                file_secret_value,
+                file_secret.display(),
+            )
+            .into_bytes(),
+            stderr: b"unknown-secret".to_vec(),
+            digest: String::new(),
+        };
+        let digest = receipt_digest(&receipt);
+        let mut bytes = encode_receipt(&Receipt { digest, ..receipt }).unwrap();
+        let legacy_magic = b"jet-receipt-v1\0";
+        assert_eq!(legacy_magic.len(), MAGIC.len());
+        bytes[..MAGIC.len()].copy_from_slice(legacy_magic);
+        assert!(decode_receipt(&bytes).is_err());
+        fs::create_dir_all(root.join("objects")).unwrap();
+        fs::write(store.object_path(&claim.key), bytes).unwrap();
+
+        assert!(store.lookup(&claim).unwrap().is_none());
+        assert!(store.list().unwrap().is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

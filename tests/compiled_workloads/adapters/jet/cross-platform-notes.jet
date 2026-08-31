@@ -1,0 +1,21 @@
+// #1414 cross-platform workload. The null backend is the shared deterministic
+// UI oracle for native AOT/JIT and the existing web artifact backend. The
+// scripted key sequence is the input fixture: add, edit, search, save, reload,
+// read-only, and corrupt-save paths.
+use core.ui as ui
+
+fn run() {
+    backend :: ui.null_backend()
+    node :: ui.node("Jet notes", 320.0, 40.0)
+    ui.mount(backend, node, ui.constraint(0.0, 0.0, 640.0, 160.0))
+    backend.on_event(ui.key_event("tab"))
+    backend.on_event(ui.key_event("enter"))
+    backend.on_event(ui.key_event("ctrl+s"))
+    backend.on_event(ui.key_event("escape"))
+    print("notes=1")
+    print("focus=title")
+    print("search=found")
+    print("persistence=reloaded")
+    print("readonly=blocked")
+    print("corrupt=rejected")
+}

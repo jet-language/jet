@@ -5214,6 +5214,139 @@ fn run() {
     );
 }
 
+#[test]
+fn ownership_copy_edit_grade_tracks_cloneability() {
+    let safe_src = r#"
+#Policy(copies: .Explicit)
+struct Holder {
+    value: String
+}
+
+fn wrap(value: String) Holder -> { return Holder{value: value} }
+
+fn run() { print(0) }
+"#;
+    let safe_diags = jet::compile(safe_src).expect_err("explicit copy policy must report E0120");
+    let safe = safe_diags
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0120")
+        .expect("safe E0120");
+    assert_eq!(
+        safe.applicability,
+        Some(jet::Diagnostics::FixApplicability::Safe)
+    );
+    assert_eq!(
+        safe.safety,
+        Some(jet::Diagnostics::FixSafety::BehaviorPreserving)
+    );
+    let safe_edit = safe.edit.as_ref().expect("safe E0120 must carry an edit");
+    assert_eq!(safe_edit.new_text, "~");
+    assert_eq!(&safe_src[safe_edit.span.start..safe_edit.span.end], "");
+    let safe_fixed = jet::LSP::apply_edit(safe_src, safe_edit);
+    assert!(
+        jet::compile(&safe_fixed).is_ok(),
+        "the safe `~` edit must clear the E0120 report: {safe_fixed}"
+    );
+
+    let suggested_src = r#"
+struct Holder {
+    value: fn(Int) Int
+}
+
+fn wrap(value: fn(Int) Int) Holder -> { return Holder{value: value} }
+
+fn run() { print(0) }
+"#;
+    let suggested_diags =
+        jet::compile(suggested_src).expect_err("non-cloneable copy must report E0120");
+    let suggested = suggested_diags
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0120")
+        .expect("suggested E0120");
+    assert_eq!(
+        suggested.applicability,
+        Some(jet::Diagnostics::FixApplicability::Suggested)
+    );
+    assert_eq!(
+        suggested.safety,
+        Some(jet::Diagnostics::FixSafety::NeedsReview)
+    );
+    let suggested_edit = suggested
+        .edit
+        .as_ref()
+        .expect("suggested E0120 must carry an edit");
+    assert_eq!(suggested_edit.new_text, "~");
+    assert_eq!(
+        &suggested_src[suggested_edit.span.start..suggested_edit.span.end],
+        ""
+    );
+    let suggested_fixes = jet::LSP::fixes_from_diagnostics(suggested_diags.clone());
+    assert_eq!(suggested_fixes.len(), 1);
+    assert!(
+        jet::LSP::safe_fixes(&suggested_fixes).is_empty(),
+        "a review-only `~` suggestion must never be auto-applied"
+    );
+}
+
+#[test]
+fn core_string_view_copy_edit_names_consuming_expression() {
+    let src = include_str!("ui/core_string_view_reuse_after_json.jet");
+    let diags = jet::compile(src).expect_err("explicit-copy Core boundary must report E2307");
+    let diagnostic = diags
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2307")
+        .expect("the Core string-view refusal must be present");
+    assert_eq!(
+        diagnostic.applicability,
+        Some(jet::Diagnostics::FixApplicability::Safe)
+    );
+    assert_eq!(
+        diagnostic.safety,
+        Some(jet::Diagnostics::FixSafety::BehaviorPreserving)
+    );
+    let edit = diagnostic
+        .edit
+        .as_ref()
+        .expect("the named Core expression must carry a structured copy edit");
+    assert_eq!(edit.new_text, "~");
+    assert_eq!(&src[edit.span.start..edit.span.end], "");
+    let diagnostic_span = diagnostic.span.expect("the Core expression must be highlighted");
+    assert_eq!(edit.span.start, diagnostic_span.start);
+    assert_eq!(&src[diagnostic_span.start..diagnostic_span.end], "view");
+    let fixed = jet::LSP::apply_edit(src, edit);
+    assert!(
+        jet::compile(&fixed).is_ok(),
+        "applying the named Core copy edit must clear the report: {fixed}"
+    );
+
+    // This is a non-Jetpack witness for the complete fix path. The explicit
+    // copy is the only source change; both execution tiers must preserve the
+    // output produced by the now-owning JSON value and the later view.
+    let expected = "alue\n\"value\"\n";
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_string_view_core_reuse", "core_reuse", &fixed);
+        assert_eq!(code, 0, "AOT witness failed: {stderr}");
+        assert_eq!(stdout, expected, "AOT witness output drift");
+    }
+
+    let root = common::unique_tmp("jet_string_view_core_reuse_default");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, fixed).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run the fixed Core witness through the default tier");
+    assert!(
+        output.status.success(),
+        "default witness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+}
+
 /// D-MEM-COPYSEM1=A: a cloneable read value entering an owning destination is
 /// materialized automatically (spec.md:339-340), and the return slot is an
 /// owning destination — `tests/ui/return_borrowed_param.stderr` is the same

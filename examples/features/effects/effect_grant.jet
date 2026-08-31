@@ -8,8 +8,8 @@ fn run() {
     // block. Every effect used inside (`FS` for the file work, `IO` for `print`)
     // must be in the named block's list (E0712). The handle may not escape (E0711).
     #FX(grant: FS, IO) {
-        fs.write(path, "granted\nthen revoked") ?? return Err("write failed")
-        text :: fs.read(path) ?? return Err("read failed")
+        fs.write(path, "granted\nthen revoked")
+        text :: fs.read(path)
         print(text.to_upper())
     }
     // Outside the block the authority is revoked — ordinary code resumes.

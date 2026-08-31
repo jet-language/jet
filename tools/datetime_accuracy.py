@@ -249,7 +249,11 @@ class Corpus:
                 [
                     "",
                     "fn parse_status(text: String) String -> {",
-                    '    return time.parse_rfc3339(text) ? value -> "accepted|{value.format_rfc3339()}" ! _error -> "rejected"',
+                    "    if time.parse_rfc3339(text) == {",
+                    '        .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }',
+                    '        .Err(_) -> { return "rejected" }',
+                    "    }",
+                    '    return "rejected"',
                     "}",
                 ]
             )
@@ -596,9 +600,9 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
                 corpus.add("F6", ident, f"{tag}_offset", int(value.utcoffset().total_seconds()), f"{variable}.offset_seconds()", metadata)
                 corpus.add("F6", ident, f"{tag}_dst", bool_text(value.dst() not in (None, timedelta(0))), f"{variable}.is_dst()", metadata)
 
-        # Force one fall-back overlap.  The exact selected instant is pinned
-        # to the current Prelude resolver; validity is checked independently
-        # against both Python fold candidates below.
+        # Force one fall-back overlap. The compatible default selects the
+        # earlier instant, matching Temporal and the documented Jet policy.
+        # Both Python fold candidates remain in the witness metadata.
         fall = next(
             t
             for t in transition
@@ -614,7 +618,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
         target_candidates = local_candidates(ambiguous, zone)
         if len(target_candidates) != 2:
             raise RuntimeError(f"failed to find two overlap candidates for {name}")
-        selected_seconds = jet_local_resolve(ambiguous, zone)
+        selected_seconds = target_candidates[0]
         selected = datetime.fromtimestamp(selected_seconds, UTC).astimezone(zone)
         ident = f"f6_{name.replace('/', '_')}_ambiguous_fallback"
         decl_name = safe_name(ident)
@@ -629,7 +633,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
             target_ambiguous_local=ambiguous.isoformat(),
             candidate_fold0_ms=target_candidates[0] * 1000,
             candidate_fold1_ms=target_candidates[1] * 1000,
-            resolver_utc_ms=selected_seconds * 1000,
+            compatible_utc_ms=selected_seconds * 1000,
             python_fold=0,
         )
         absolute = (base_utc + timedelta(hours=24)).astimezone(zone)
@@ -725,7 +729,7 @@ def render(corpora: list[Corpus]) -> tuple[str, dict[str, str], dict[str, str]]:
         "# oracle=Python stdlib datetime/date/calendar/zoneinfo; Jet and Python share the selected TZif root",
         "# families=F1 epoch;F2 civil;F3 arithmetic;F4 zones/DST;F5 parse;F6 zoned arithmetic;PROP laws",
         "# batches=epoch_parse;civil_arithmetic;zones",
-        "# F6 overlap: docs/reference/core-library.md defines the instant+zone model but does not ratify a fold choice; exact resolver output is pinned and period_candidate_valid checks both independent candidates",
+        "# F6 overlap: the compatible default selects the earlier instant; period_candidate_valid also checks both independent Python fold candidates",
         "# columns=batch<TAB>family<TAB>id<TAB>operation<TAB>inputs<TAB>oracle",
     ]
     vector = "\n".join(header + [row.table_line() for row in rows]) + "\n"

@@ -1,27 +1,32 @@
-use core.files as files
-use core.process as process
-use core.time as time
+use core.[files, time]
 
 struct Meeting {
-    millis: Int
+    when: DateTime
     name: String
-    utc: String
-    weekday: String
+}
+
+#CLI
+struct Args {
+    input: String
 }
 
 fn parse_meeting(line: String) Meeting -> {
-    fields :: line.split("|").to_list()
-    local :: time.parse_rfc3339(fields.get(1) ?? panic("bad meeting")) ?? panic("bad timestamp")
-    return Meeting{millis: local.to_unix_ms(), name: fields.get(0) ?? panic("bad meeting"), utc: local.format_rfc3339(), weekday: local.format("%a")}
+    fields :: line.split_once("|") ?? panic("bad meeting")
+    local :: time.parse_rfc3339(fields.after) ?? panic("bad timestamp")
+    Meeting{when: local, name: fields.before}
 }
 
-fn run() {
-    text :: files.read(process.argv().get(1) ?? "meetings.txt") ?? panic("read meetings")
-    meetings := text.lines().filter(line -> line != "").map(line -> parse_meeting(line))
-    meetings.sort_by(meeting -> meeting.millis)
-    loop position in 0..<meetings.len() {
-        gap :: if position == 0 -> "-" else -> "{(meetings[position].millis - meetings[position - 1].millis) /% 60000}"
-        print("{meetings[position].name} utc={meetings[position].utc} day={meetings[position].weekday} gap={gap}")
+fn run(args: Args) {
+    text :: files.read(args.input) ?? panic("read failed")
+    meetings := [Meeting]{}
+    loop line in text.lines() {
+        if line != "" -> meetings.push(parse_meeting(line))
     }
-    print("span {if meetings.len() == 0 -> 0 else -> (meetings[meetings.len() - 1].millis - meetings[0].millis) /% 60000} minutes {meetings.len()}")
+    meetings.sort_by(meeting -> (when: meeting.when, name: meeting.name))
+    loop (position, meeting) in meetings {
+        gap :: if position == 0 -> "-" else -> "{meeting.when.difference(meetings[position - 1].when).in(.Minutes) ?? 0}"
+        print("{meeting.name} utc={meeting.when.format_rfc3339()} day={meeting.when.format("%a")} gap={gap}")
+    }
+    span :: if meetings.len() == 0 -> 0 else -> meetings[meetings.len() - 1].when.difference(meetings[0].when).in(.Minutes) ?? 0
+    print("span {span} minutes {meetings.len()}")
 }

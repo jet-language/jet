@@ -458,9 +458,10 @@ function walk(root) {
   if (!existsSync(root)) return [];
   const out = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const path = join(root, entry.name);
     if (entry.isDirectory()) out.push(...walk(path));
-    else if (entry.isFile() && entry.name.endsWith(".jet")) out.push(path);
+    else if (entry.isFile() && entry.name !== "package.jet" && entry.name.endsWith(".jet")) out.push(path);
   }
   return out.sort();
 }
@@ -616,6 +617,13 @@ function likelyOpaque(module, member) {
   return /(?:^|\.)(open|connect|listen|accept|bind|stdin|stdout|stderr|reader|writer|session|socket|request|response|handle|lock|watch|spawn|transaction|cursor|stream|server|client)$/.test(`${module}.${member}`);
 }
 
+function explicitPropagationObserver(code, callClose, observers) {
+  const lineEnd = code.indexOf("\n", callClose);
+  const tail = code.slice(callClose + 1, lineEnd < 0 ? code.length : lineEnd);
+  if (!/\?\?\s*panic\s*\(/.test(tail)) return null;
+  return observers.find(({ open }) => open > callClose) || null;
+}
+
 function seedInspection(key, source) {
   const errors = [];
   const dot = key.lastIndexOf(".");
@@ -624,6 +632,15 @@ function seedInspection(key, source) {
   const expectedMarker = `// core-conformance: ${key}`;
   if (source.split(/\r?\n/, 1)[0] !== expectedMarker) errors.push(`missing exact marker ${expectedMarker}`);
   const code = codeOnly(source);
+  const unitRun = code.match(/\bfn\s+run\s*\(\s*\)\s*\{/);
+  if (unitRun) {
+    const opening = unitRun.index + unitRun[0].lastIndexOf("{");
+    const closing = matching(code, opening, "{", "}");
+    if (/\?\?\s*return\s+Err\s*\(/.test(code.slice(opening + 1, closing))) {
+      errors.push("Unit run cannot use ?? return Err(...) propagation");
+      return { errors, sink: null };
+    }
+  }
   const aliasMatches = [...code.matchAll(new RegExp(`^\\s*use\\s+${module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)`, "gm"))];
   if (aliasMatches.length !== 1) return { errors: [...errors, `expected one use for ${module}`], sink: null };
   const alias = aliasMatches[0][1];
@@ -653,6 +670,19 @@ function seedInspection(key, source) {
   const declarations = bindingDeclarations(code, observers);
   const binding = declarations.find(({ rhsStart, end }) => rhsStart <= callStart && callStart < end) || null;
   if (!binding) {
+    const propagationObserver = explicitPropagationObserver(code, callClose, observers);
+    if (propagationObserver && !likelyOpaque(module, member)) {
+      return {
+        errors,
+        sink: {
+          kind: "propagated-result",
+          operation: propagationObserver.operation,
+          follow_up: "error-propagation",
+          type_aware: true,
+          observed_type: "successful-continuation",
+        },
+      };
+    }
     errors.push("direct result has no observable sink");
     if (likelyOpaque(module, member)) errors.push("opaque result needs a follow-up operation before observation");
     return { errors, sink: null };
@@ -1448,28 +1478,36 @@ function hostileFixtures() {
   stale.source_snapshot.hash = sha256("changed");
   rehash(stale);
   if (validateManifest(stale, { currentSnapshotHash: manifest.source_snapshot.hash }).ok) fail("stale snapshot accepted");
-  const inspectFixture = (body) => seedInspection(
-    "core.test.open",
-    ["// core-conformance: core.test.open", "use core.test as api", "", "fn run() {", ...body.split("\n").map((line) => `    ${line}`), "}"].join("\n"),
-  );
-  for (const [name, body] of [
+  const inspectFixture = (body, fixtureKey = "core.test.open") => {
+    const dot = fixtureKey.lastIndexOf(".");
+    const fixtureModule = fixtureKey.slice(0, dot);
+    return seedInspection(
+      fixtureKey,
+      [`// core-conformance: ${fixtureKey}`, `use ${fixtureModule} as api`, "", "fn run() {", ...body.split("\n").map((line) => `    ${line}`), "}"].join("\n"),
+    );
+  };
+  for (const [name, body, fixtureKey] of [
     ["nested", `print(api.inspect(api.open("value")))`],
     ["propagation", `print(api.open("value") ?? panic("open"))`],
     ["equality", `value :: api.open("value") ?? panic("open")\nprint(value == "value")`],
     ["argument", `value :: api.open("value") ?? panic("open")\nprint(api.inspect(value))`],
     ["method", `value :: api.open("value") ?? panic("open")\nprint(value.len())`],
     ["transitive", `value :: api.open("value") ?? panic("open")\nalias :: value\nprint(alias.len())`],
+    ["direct-propagation", `api.call("value") ?? panic("call")\nprint("done")`, "core.test.call"],
   ]) {
-    const result = inspectFixture(body);
+    const result = inspectFixture(body, fixtureKey);
     if (result.errors.length) fail(`accepted observer fixture rejected: ${name}`);
   }
-  for (const [name, body] of [
+  for (const [name, body, fixtureKey] of [
     ["discard", `_ :: api.open("value") ?? panic("open")\nprint("done")`],
     ["compile-only", `api.open("value")`],
+    ["direct-discard", `api.call("value")`, "core.test.call"],
+    ["unit-return-propagation", `api.call("value") ?? return Err("call")\nprint("done")`, "core.test.call"],
+    ["unit-bound-return-propagation", `value :: api.open("value") ?? return Err("open")\nprint(value.len())`],
     ["unused", `value :: api.open("value") ?? panic("open")\nprint("done")`],
     ["opaque-direct", `print(api.open("value"))`],
   ]) {
-    if (inspectFixture(body).errors.length === 0) fail(`rejected observer fixture accepted: ${name}`);
+    if (inspectFixture(body, fixtureKey).errors.length === 0) fail(`rejected observer fixture accepted: ${name}`);
   }
   console.log("hardening manifest hostile fixtures: PASS");
   return 0;

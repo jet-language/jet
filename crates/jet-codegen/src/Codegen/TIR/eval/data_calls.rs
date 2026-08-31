@@ -441,12 +441,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // Sema's registered field/type tables are the same rows AOT
                 // lowering reads, so an empty table still answers from its
                 // declared row type instead of guessing from a missing sample.
-                let field_types = &self.struct_field_types;
-                let type_params = &self.struct_type_params;
+                let this = &*self;
                 let row: DataPipeline::SchemaRow<'_> = &|name: &str| {
+                    // #2252: the row type may be declared by an imported
+                    // module, whose shape rows are keyed by that module's
+                    // canonical identity.
+                    let canonical = this.canonical_nominal(name);
+                    let key = canonical.as_deref().unwrap_or(name);
                     Some((
-                        type_params.get(name).cloned().unwrap_or_default(),
-                        field_types.get(name)?.clone(),
+                        this.struct_type_params
+                            .get(key)
+                            .cloned()
+                            .unwrap_or_default(),
+                        this.struct_field_types.get(key)?.clone(),
                     ))
                 };
                 DataPipeline::schema_value(&recv, args.first().map(|arg| &arg.ty), row, span)

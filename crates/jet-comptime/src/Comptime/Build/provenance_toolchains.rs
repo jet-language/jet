@@ -148,6 +148,56 @@ pub enum ToolchainRole {
     Target,
 }
 
+/// How an action resolves its executable. Ambient resolution is retained for
+/// existing host actions. Declared-only resolution is the hermetic path used
+/// by provisioned toolchains: no executable may come from PATH or an
+/// undeclared filesystem spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolchainResolution {
+    #[default]
+    Ambient,
+    DeclaredOnly,
+}
+
+/// A read-only host directory made visible to a sandboxed build action. The
+/// source and destination are both part of the action's toolchain identity;
+/// the execution adapters only marshal this declaration to their native
+/// sandbox backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildMount {
+    pub source: String,
+    pub destination: String,
+    /// Stable content identity for action keys. Empty means the source path
+    /// itself is the identity, which preserves the behavior of generic
+    /// callers; provisioned toolchains supply their Hangar object digest.
+    pub identity: String,
+}
+
+impl BuildMount {
+    pub fn read_only(
+        source: impl Into<String>,
+        destination: impl Into<String>,
+    ) -> Self {
+        BuildMount {
+            source: source.into(),
+            destination: destination.into(),
+            identity: String::new(),
+        }
+    }
+
+    pub fn read_only_with_identity(
+        source: impl Into<String>,
+        destination: impl Into<String>,
+        identity: impl Into<String>,
+    ) -> Self {
+        BuildMount {
+            source: source.into(),
+            destination: destination.into(),
+            identity: identity.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolchainSpec {
     pub role: ToolchainRole,
@@ -159,6 +209,8 @@ pub struct ToolchainSpec {
     /// Executables are part of the declared toolchain. Target actions and
     /// probes resolve through this map instead of borrowing the host PATH.
     pub tools: BTreeMap<String, String>,
+    pub resolution: ToolchainResolution,
+    pub mounts: Vec<BuildMount>,
     pub provenance: BuildProvenance,
 }
 
@@ -172,6 +224,8 @@ impl ToolchainSpec {
             linker: None,
             sysroot: None,
             tools: BTreeMap::new(),
+            resolution: ToolchainResolution::Ambient,
+            mounts: Vec::new(),
             provenance,
         }
     }
@@ -186,6 +240,8 @@ impl ToolchainSpec {
             linker: None,
             sysroot: None,
             tools: BTreeMap::new(),
+            resolution: ToolchainResolution::Ambient,
+            mounts: Vec::new(),
             provenance,
         }
     }
@@ -214,6 +270,38 @@ impl ToolchainSpec {
         self.tools.insert(name.into(), path.into());
         self
     }
+
+    /// Require every action executable to be named by this toolchain. This is
+    /// the only mode allowed for a hermetic provisioned compiler.
+    pub fn declared_only(mut self) -> Self {
+        self.resolution = ToolchainResolution::DeclaredOnly;
+        self
+    }
+
+    /// Make one immutable directory available to actions using this
+    /// toolchain. The sandbox validates and mounts it read-only at launch.
+    pub fn with_read_only_mount(
+        mut self,
+        source: impl Into<String>,
+        destination: impl Into<String>,
+    ) -> Self {
+        self.mounts.push(BuildMount::read_only(source, destination));
+        self
+    }
+
+    pub fn with_read_only_mount_identity(
+        mut self,
+        source: impl Into<String>,
+        destination: impl Into<String>,
+        identity: impl Into<String>,
+    ) -> Self {
+        self.mounts.push(BuildMount::read_only_with_identity(
+            source,
+            destination,
+            identity,
+        ));
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +315,8 @@ pub struct BuildToolchain {
     pub linker: Option<LinkerIdentity>,
     pub sysroot: Option<SysrootIdentity>,
     pub tools: BTreeMap<String, String>,
+    pub resolution: ToolchainResolution,
+    pub mounts: Vec<BuildMount>,
     pub provenance: BuildProvenance,
 }
 

@@ -92,6 +92,31 @@ breadth, flatpak, Studio). Each reopens with its original scope and a
 native, proof-gated exit. Studio (#235/#264/#357) becomes the live config
 authoring app over the same typed option registry.
 
+## Install trust law
+
+`D-JOS-INSTALLTRUST1=A` is the jetos install-trust contract. It protects the
+system without making Jet central review a permission to run software.
+
+- **Freedom:** anyone may install software they choose or build. Owner-built
+  local installs and `jet run` run without Jet notarization, catalog approval,
+  or a category ban.
+- **Capability boundary:** third-party and foreign apps run sandboxed and start
+  with deny-by-default access to files, network, devices, and agents. A grant
+  is explicit and is recorded through Studio or Jet configuration; capability
+  escalation never follows from install or catalog presence.
+- **Identity and provenance:** Hangar hashes and optional publisher signatures
+  are trust UI signals. They identify the artifact or publisher and can provide
+  supply-chain evidence; they do not decide whether owner software may run. An
+  unsigned remote catalog artifact may warn, but it is not blocked by that
+  warning. Catalog ranking may prefer signed publishers, but ranking is not a
+  hard gate.
+- **Recovery:** installs are committed as generations so a bad install can be
+  rolled back atomically.
+- **Policy:** family and enterprise locks are expert opt-in tightenings, not
+  the beginner default. The same law applies to every future jetos device
+  class unless a later ballot amends it; mobile implementation remains
+  deferred by `D-VERDICT-480-1`.
+
 ### P4 — Migration and acceptance
 The semantic importer stays central. The jet→NixOS realizer is repackaged
 behind `jet os migrate compare-nixos <host> --out <dir>`. This command

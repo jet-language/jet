@@ -163,7 +163,7 @@ fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
 }
 
 const JIT_ENTRY_SOURCE: &str = r#"
-fn twice(n: Int) Int {
+fn twice(n: Int) Int -> {
     return n + n
 }
 fn run() {
@@ -222,8 +222,7 @@ fn package_edition_survives_tir_eval_worker() {
                 assert_eq!(exit_code, 0, "{tier} must run: {stderr}");
                 assert!(stderr.is_empty(), "{tier} emitted diagnostics: {stderr}");
                 assert_eq!(
-                    stdout,
-                    "checked\nedition-sentinel\n",
+                    stdout, "checked\nedition-sentinel\n",
                     "{tier} lost the package edition"
                 );
             }
@@ -386,6 +385,7 @@ fn tir_func(
         is_scalar: false,
         kernel_proof: None,
         memo_field: None,
+        uses_stack_sentry: false,
         body,
         kind: jet::Codegen::TIR::TFuncKind::TopLevel,
     }
@@ -432,6 +432,7 @@ fn nested_tir_program(
         memo_dependencies: std::collections::HashMap::new(),
         reflection_fields: std::collections::HashMap::new(),
         reflect_paths: std::collections::HashMap::new(),
+        nominal_identities: std::collections::HashMap::new(),
         struct_type_params: std::collections::HashMap::new(),
         enum_variants: std::collections::HashMap::new(),
         enum_variant_payload_types: std::collections::HashMap::new(),
@@ -480,10 +481,8 @@ fn run_tir_program_with_sink(
 
 #[test]
 fn tir_unmatched_enum_match_cannot_report_empty_success() {
+    use jet::Codegen::TIR::{TEnumPayload, TExpr, TExprKind, TMatchArm, TPattern, TStmt, TStrPart};
     use jet::AST::{Pattern, Type};
-    use jet::Codegen::TIR::{
-        TEnumPayload, TExpr, TExprKind, TMatchArm, TPattern, TStmt, TStrPart,
-    };
 
     let source = "fn run() {\n    when Light.Blue { ... }\n    print(\"completed\")\n}\n";
     let span = jet::Diagnostics::Span::new(0, source.len());

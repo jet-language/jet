@@ -278,6 +278,8 @@ pub mod terminal_runtime {
     include!("Prelude/Term.rs");
     include!("Prelude/Core/TermKey.rs");
 }
+#[cfg(unix)]
+pub(crate) use terminal_runtime::jet_term_configure_fd;
 /// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
 /// emitted process prelude and the resident JIT adapter.
 #[path = "Prelude/CoreLib/ProcessPty.rs"]

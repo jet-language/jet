@@ -63,7 +63,7 @@ pub(super) fn repl_effect_request(
             ("core.term", "input" | "read_all_input" | "stdin") => {
                 ("IO", "Read", "stdin".to_string())
             }
-            ("core.process", "argv") => ("IO", "Read", "argv".to_string()),
+            ("core.process", "argv" | "args") => ("IO", "Read", "argv".to_string()),
             ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
             ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
             ("core.math.random", _) => ("Rand", "Draw", method.to_string()),
@@ -374,6 +374,44 @@ fn repl_descriptor_path(fd: std::os::fd::RawFd) -> String {
     format!("/dev/fd/{fd}")
 }
 
+pub(super) const REPL_PROCESS_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+fn drain_repl_output(
+    mut reader: impl std::io::Read,
+    used: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    overflowed: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(output);
+        }
+        if used
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |previous| {
+                    previous
+                        .checked_add(count)
+                        .filter(|total| *total <= REPL_PROCESS_OUTPUT_LIMIT_BYTES)
+                },
+            )
+            .is_err()
+        {
+            overflowed.store(true, std::sync::atomic::Ordering::Release);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"
+                ),
+            ));
+        }
+        output.extend_from_slice(&buffer[..count]);
+    }
+}
+
 pub(super) fn run_repl_process(
     cmd: &[String],
     base_dir: &std::path::Path,
@@ -381,32 +419,10 @@ pub(super) fn run_repl_process(
     verified_root: Option<&std::fs::File>,
     timeout: std::time::Duration,
 ) -> std::io::Result<std::process::Output> {
-    use std::fs::OpenOptions;
     use std::process::Stdio;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
-    static CAPTURE_ID: AtomicU64 = AtomicU64::new(0);
-    let capture_file = |stream: &str| loop {
-        let id = CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "jet-repl-process-{}-{id}-{stream}",
-            std::process::id()
-        ));
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(file) => break Ok((path, file)),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => break Err(e),
-        }
-    };
-    let (stdout_path, stdout_file) = capture_file("stdout")?;
-    let (stderr_path, stderr_file) = match capture_file("stderr") {
-        Ok(capture) => capture,
-        Err(e) => {
-            let _ = std::fs::remove_file(&stdout_path);
-            return Err(e);
-        }
-    };
     #[cfg(unix)]
     use std::os::fd::AsRawFd;
     #[cfg(unix)]
@@ -418,8 +434,6 @@ pub(super) fn run_repl_process(
         .unwrap_or_else(|| cmd[0].clone());
     #[cfg(not(unix))]
     let executable = if pinned_executable.is_some() {
-        let _ = std::fs::remove_file(&stdout_path);
-        let _ = std::fs::remove_file(&stderr_path);
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "this platform cannot launch a descriptor-pinned REPL executable",
@@ -439,8 +453,8 @@ pub(super) fn run_repl_process(
         .current_dir(cwd)
         .env_clear()
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file));
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     if pinned_executable.is_some() {
         command.process_group(0);
@@ -448,70 +462,93 @@ pub(super) fn run_repl_process(
     let child = command.spawn();
     let mut child = match child {
         Ok(child) => child,
-        Err(e) => {
-            let _ = std::fs::remove_file(&stdout_path);
-            let _ = std::fs::remove_file(&stderr_path);
-            return Err(e);
+        Err(e) => return Err(e),
+    };
+    let stdout = child.stdout.take().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "process.run stdout pipe unavailable")
+    });
+    let stderr = child.stderr.take().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "process.run stderr pipe unavailable")
+    });
+    let (stdout, stderr) = match (stdout, stderr) {
+        (Ok(stdout), Ok(stderr)) => (stdout, stderr),
+        (Err(error), _) | (_, Err(error)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
         }
     };
+    let output_used = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let output_overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stdout_used = output_used.clone();
+    let stdout_overflowed = output_overflowed.clone();
+    let stdout_thread = std::thread::spawn(move || {
+        drain_repl_output(stdout, &stdout_used, &stdout_overflowed)
+    });
+    let stderr_used = output_used;
+    let stderr_overflowed = output_overflowed.clone();
+    let stderr_thread = std::thread::spawn(move || {
+        drain_repl_output(stderr, &stderr_used, &stderr_overflowed)
+    });
     #[cfg(unix)]
     let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
     #[cfg(unix)]
     let _terminal_signals = pinned_executable.and_then(|_| ReplTerminalSignals::enable());
 
+    let stop_child = |child: &mut std::process::Child| {
+        #[cfg(unix)]
+        if pinned_executable.is_some() {
+            kill_repl_process_group(child.id() as i32);
+        } else {
+            let _ = child.kill();
+        }
+        #[cfg(not(unix))]
+        let _ = child.kill();
+        let _ = child.wait();
+    };
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if output_overflowed.load(Ordering::Acquire) {
+            stop_child(&mut child);
+            break Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"),
+            ));
+        }
         match child.try_wait() {
-            Ok(Some(status)) => break status,
+            Ok(Some(status)) => break Ok(status),
             Ok(None) => {}
             Err(e) => {
-                #[cfg(unix)]
-                if pinned_executable.is_some() {
-                    kill_repl_process_group(child.id() as i32);
-                } else {
-                    let _ = child.kill();
-                }
-                #[cfg(not(unix))]
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = std::fs::remove_file(&stdout_path);
-                let _ = std::fs::remove_file(&stderr_path);
-                return Err(e);
+                stop_child(&mut child);
+                break Err(e);
             }
         }
         if Instant::now() >= deadline {
-            #[cfg(unix)]
-            if pinned_executable.is_some() {
-                kill_repl_process_group(child.id() as i32);
-            } else {
-                let _ = child.kill();
-            }
-            #[cfg(not(unix))]
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = std::fs::remove_file(&stdout_path);
-            let _ = std::fs::remove_file(&stderr_path);
-            return Err(std::io::Error::new(
+            stop_child(&mut child);
+            break Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "process.run exceeded the 30 second REPL limit",
             ));
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    #[cfg(unix)]
-    if pinned_executable.is_some() {
+    if status.is_ok() && pinned_executable.is_some() {
+        #[cfg(unix)]
         // A command that backgrounds descendants does not get to leak them past
         // the REPL operation boundary after its group leader exits.
         kill_repl_process_group(child.id() as i32);
     }
-    let stdout = std::fs::read(&stdout_path);
-    let stderr = std::fs::read(&stderr_path);
-    let _ = std::fs::remove_file(&stdout_path);
-    let _ = std::fs::remove_file(&stderr_path);
+    let stdout = stdout_thread.join().map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::Other, "process.run stdout reader panicked")
+    });
+    let stderr = stderr_thread.join().map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::Other, "process.run stderr reader panicked")
+    });
+    let status = status?;
     Ok(std::process::Output {
         status,
-        stdout: stdout?,
-        stderr: stderr?,
+        stdout: stdout??,
+        stderr: stderr??,
     })
 }
 
@@ -641,5 +678,30 @@ mod repl_process_tests {
         .expect_err("long process must time out");
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn output_limit_kills_a_flooding_process_before_capture_grows_unbounded() {
+        let executable = std::fs::File::open("/bin/sh").expect("pin /bin/sh");
+        let root = std::fs::File::open(".").expect("open cwd");
+        let cmd = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "yes x | head -c 67108865".to_string(),
+        ];
+        let started = Instant::now();
+        let error = run_repl_process(
+            &cmd,
+            std::path::Path::new("."),
+            Some(&executable),
+            Some(&root),
+            Duration::from_secs(10),
+        )
+        .expect_err("output beyond the REPL budget must fail");
+        assert!(
+            error.to_string().contains("output exceeded"),
+            "unexpected output-limit error: {error}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }

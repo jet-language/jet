@@ -23,7 +23,8 @@ use jet_driver::Diagnostics::ColorChoice;
 use jet_foundation::JSON::json_escape;
 
 use crate::{
-    content_type_for, query_param, static_path, write_response, MAX_REQUEST_BODY_BYTES, Request,
+    content_type_for, query_param, read_static_file_bounded, static_relative_path, write_response,
+    MAX_REQUEST_BODY_BYTES, Request,
 };
 
 /// Application preview ports tried, in order, before giving up. 8080 is the
@@ -37,7 +38,11 @@ const MAX_CONNECTION_THREADS: usize = 64;
 /// The watcher and in-process rebuild already fit inside the warm budget; this
 /// short poll closes the remaining edit-to-visible gap without a refresh.
 const LIVE_RELOAD_POLL_MS: u64 = 40;
-const CLIENT_TTL_MS: u64 = LIVE_RELOAD_POLL_MS * 4;
+const CLIENT_TTL_MS: u64 = crate::Session::CLIENT_TTL_MS;
+const MAX_CLIENTS: usize = crate::Session::MAX_CLIENTS;
+const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
+const MAX_STATIC_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
+static PUBLICATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
 /// header required as the terminal anchor): a one-line terminal status and a
@@ -65,8 +70,11 @@ struct DevStatus {
     /// The file `jet dev` is watching — used in the `building` parity line
     /// and the `save <file> → …` verbose log lines.
     watched_file: String,
-    /// Set once, right after the workbench listener binds — 0 until then.
+    /// Port shown in status surfaces: application preview for hybrid web
+    /// sessions, or Canvas control for Canvas-only sessions.
     port: AtomicU64,
+    /// Canvas control port shown in the terminal detail line.
+    canvas_port: AtomicU64,
     /// Static generator previews use the application listener only and must
     /// not advertise a Canvas URL that is not bound.
     canvas_enabled: AtomicBool,
@@ -128,6 +136,7 @@ impl DevStatus {
             command_receipt: Mutex::new(None),
             watched_file: file.to_string(),
             port: AtomicU64::new(0),
+            canvas_port: AtomicU64::new(0),
             canvas_enabled: AtomicBool::new(true),
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
@@ -146,12 +155,20 @@ impl DevStatus {
         self.port.store(port as u64, Ordering::SeqCst);
     }
 
+    fn set_canvas_port(&self, port: u16) {
+        self.canvas_port.store(port as u64, Ordering::SeqCst);
+    }
+
     fn set_canvas_enabled(&self, enabled: bool) {
         self.canvas_enabled.store(enabled, Ordering::SeqCst);
     }
 
     fn port(&self) -> u16 {
         self.port.load(Ordering::SeqCst) as u16
+    }
+
+    fn canvas_port(&self) -> u16 {
+        self.canvas_port.load(Ordering::SeqCst) as u16
     }
 
     fn header_text_for(&self, snap: &DevStatusSnapshot) -> (String, String) {
@@ -184,7 +201,7 @@ impl DevStatus {
             format!(
                 "         watching {} · Canvas http://localhost:{}/canvas · v verbose",
                 self.watched_file,
-                self.port()
+                self.canvas_port()
             )
         } else {
             format!("         watching {} · v verbose", self.watched_file)
@@ -406,8 +423,7 @@ impl DevStatus {
         let mut browser_relay = self.browser_relay.lock().unwrap();
         if self.browser_trace_enabled.load(Ordering::SeqCst) {
             browser_relay.take();
-            *browser_relay = fs::read_to_string("build/web.manifest.json")
-                .ok()
+            *browser_relay = read_web_manifest()
                 .and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
         }
         drop(browser_relay);
@@ -467,23 +483,36 @@ impl DevStatus {
     }
 
     fn client_count(&self) -> u64 {
+        self.prune_expired_clients();
         self.clients.lock().unwrap().len() as u64
     }
 
     fn note_client(&self, id: &str) {
-        if id.is_empty() || id.len() > 128 {
+        if !crate::Session::client_id_is_valid(id) {
             return;
         }
+        let pruned = self.prune_expired_clients();
         let mut clients = self.clients.lock().unwrap();
+        let is_new = !clients.contains_key(id);
+        if is_new && clients.len() >= MAX_CLIENTS {
+            return;
+        }
         let changed = clients.insert(id.to_string(), Instant::now()).is_none();
         drop(clients);
         let recovered = self.reconnecting.swap(false, Ordering::SeqCst);
-        if changed || recovered {
+        if pruned || changed || recovered {
             self.refresh();
         }
     }
 
     fn expire_clients(&self) {
+        let changed = self.prune_expired_clients();
+        if changed {
+            self.refresh();
+        }
+    }
+
+    fn prune_expired_clients(&self) -> bool {
         let cutoff = Duration::from_millis(CLIENT_TTL_MS);
         let now = Instant::now();
         let mut clients = self.clients.lock().unwrap();
@@ -495,12 +524,13 @@ impl DevStatus {
         if disconnected {
             self.reconnecting.store(true, Ordering::SeqCst);
         }
-        if changed {
-            self.refresh();
-        }
+        changed
     }
 
     fn drop_client(&self, id: &str) {
+        if !crate::Session::client_id_is_valid(id) {
+            return;
+        }
         let mut clients = self.clients.lock().unwrap();
         let changed = clients.remove(id).is_some();
         drop(clients);
@@ -531,7 +561,7 @@ impl DevStatus {
         if !matches!(crate::BrowserTrace::take_request(), Ok(true)) {
             return;
         }
-        if let Ok(manifest) = fs::read_to_string("build/web.manifest.json") {
+        if let Some(manifest) = read_web_manifest() {
             let _ = self.activate_browser_trace(&manifest);
         }
     }
@@ -574,45 +604,15 @@ pub struct WebHost {
     debug_sessions: Arc<crate::Canvas::DebugSessions>,
     session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
-    canvas_only: bool,
     bind_host: String,
     session_secret: String,
     static_root: PathBuf,
-    source_asset_fallback: bool,
 }
 
 impl WebHost {
+    /// Bind the application-preview listener for app-only web development.
     pub fn bind(file: &str, verbose: bool, port: Option<u16>) -> Result<Self, String> {
-        let listener = bind_workbench_server("127.0.0.1", port)?;
-        let bound_port = listener
-            .local_addr()
-            .map(|address| address.port())
-            .unwrap_or(0);
-        let status = Arc::new(DevStatus::new(file, verbose));
-        status.set_port(bound_port);
-        let session_secret = mint_session_secret()?;
-        Ok(Self {
-            listener: Mutex::new(Some(listener)),
-            application_listener: Mutex::new(None),
-            started: AtomicBool::new(false),
-            shutdown: Arc::new(AtomicBool::new(false)),
-            server_threads: Mutex::new(Vec::new()),
-            poll_thread: Mutex::new(None),
-            terminal_thread: Mutex::new(None),
-            status,
-            debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-            session: Arc::new(crate::ResidentDevSession::new(
-                file,
-                bound_port,
-                bound_port,
-            )),
-            canvas_file: file.to_string(),
-            canvas_only: false,
-            bind_host: "127.0.0.1".to_string(),
-            session_secret,
-            static_root: PathBuf::from("build"),
-            source_asset_fallback: true,
-        })
+        Self::bind_application_only(file, verbose, port, PathBuf::from("build"))
     }
 
     /// Bind the same application preview host for a generator's static output.
@@ -631,6 +631,15 @@ impl WebHost {
                 error
             )
         })?;
+        Self::bind_application_only(file, verbose, port, static_root)
+    }
+
+    fn bind_application_only(
+        file: &str,
+        verbose: bool,
+        port: Option<u16>,
+        static_root: PathBuf,
+    ) -> Result<Self, String> {
         let application_listener = bind_application_server(port)?;
         let application_port = application_listener
             .local_addr()
@@ -638,6 +647,7 @@ impl WebHost {
             .unwrap_or(0);
         let status = Arc::new(DevStatus::new(file, verbose));
         status.set_port(application_port);
+        status.set_canvas_port(0);
         status.set_canvas_enabled(false);
         let session_secret = mint_session_secret()?;
         Ok(Self {
@@ -656,11 +666,9 @@ impl WebHost {
                 application_port,
             )),
             canvas_file: file.to_string(),
-            canvas_only: false,
             bind_host: "127.0.0.1".to_string(),
             session_secret,
             static_root,
-            source_asset_fallback: false,
         })
     }
 
@@ -673,9 +681,9 @@ impl WebHost {
         Self::bind_canvas_with_options(file, verbose, &options)
     }
 
-    /// Bind one workbench listener for Canvas, application preview, and
-    /// diagnostics. Canvas transport settings select the host and port for the
-    /// entire session; route authorization still protects the Canvas namespace.
+    /// Bind separate Canvas-control and application-preview listeners for one
+    /// resident session. Canvas transport settings select the Canvas host and
+    /// port; the application listener remains application-owned.
     pub fn bind_web_with_canvas_options(
         file: &str,
         verbose: bool,
@@ -683,24 +691,38 @@ impl WebHost {
         options: &CanvasHostOptions,
     ) -> Result<Self, String> {
         let host = validate_canvas_options(options)?;
-        let listener = bind_workbench_server(&host, options.port.or(fallback_port))?;
-        let bound_port = listener
+        let (listener, application_listener) = if options.port.is_some() {
+            let listener = bind_canvas_server(&host, options.port)?;
+            let application_listener = bind_application_server(fallback_port)?;
+            (listener, application_listener)
+        } else {
+            let application_listener = bind_application_server(fallback_port)?;
+            let listener = bind_canvas_server(&host, None)?;
+            (listener, application_listener)
+        };
+        let canvas_port = listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
+        let application_port = application_listener
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
         let status = Arc::new(DevStatus::new(file, verbose || options.audit));
-        status.set_port(bound_port);
+        status.set_port(application_port);
+        status.set_canvas_port(canvas_port);
         let session_secret = mint_session_secret()?;
-        let session = Arc::new(crate::ResidentDevSession::new_with_canvas_host(
+        let session = Arc::new(crate::ResidentDevSession::new_with_hosts(
             file,
             &host,
-            bound_port,
-            bound_port,
+            canvas_port,
+            "127.0.0.1",
+            application_port,
         ));
         session.select_output_values(options.output.as_deref(), options.target.as_deref());
         Ok(Self {
             listener: Mutex::new(Some(listener)),
-            application_listener: Mutex::new(None),
+            application_listener: Mutex::new(Some(application_listener)),
             started: AtomicBool::new(false),
             shutdown: Arc::new(AtomicBool::new(false)),
             server_threads: Mutex::new(Vec::new()),
@@ -710,11 +732,9 @@ impl WebHost {
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
             session,
             canvas_file: file.to_string(),
-            canvas_only: false,
             bind_host: host,
             session_secret,
             static_root: PathBuf::from("build"),
-            source_asset_fallback: true,
         })
     }
 
@@ -731,6 +751,7 @@ impl WebHost {
             .unwrap_or(0);
         let status = Arc::new(DevStatus::new(file, verbose || options.audit));
         status.set_port(bound_port);
+        status.set_canvas_port(bound_port);
         let session_secret = mint_session_secret()?;
         let session = Arc::new(crate::ResidentDevSession::new_with_canvas_host(
             file, &host, bound_port, 0,
@@ -748,11 +769,9 @@ impl WebHost {
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
             session,
             canvas_file: file.to_string(),
-            canvas_only: true,
             bind_host: host,
             session_secret,
             static_root: PathBuf::from("build"),
-            source_asset_fallback: false,
         })
     }
 
@@ -762,16 +781,20 @@ impl WebHost {
 
     /// Start the HTTP/Canvas plane without taking terminal input. The native
     /// `jet dev --canvas` watcher owns its stdin and Ctrl-C lifecycle; both
-    /// surfaces still share this one host and session.
+    /// surfaces still share this one resident session.
     pub fn start_canvas(&self) {
         self.start_inner(false);
+    }
+
+    pub fn lock_source_transaction(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.session.lock_source_transaction()
     }
 
     pub fn canvas_url(&self) -> String {
         format!(
             "http://{}:{}/canvas?session={}",
             url_host(&self.bind_host),
-            self.status.port(),
+            self.session.canvas_port(),
             self.session_secret
         )
     }
@@ -787,17 +810,10 @@ impl WebHost {
             let debug_sessions = Arc::clone(&self.debug_sessions);
             let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
-            let canvas_only = self.canvas_only;
             let bind_host = self.bind_host.clone();
             let session_secret = self.session_secret.clone();
             let static_root = self.static_root.clone();
-            let source_asset_fallback = self.source_asset_fallback;
             let shutdown = Arc::clone(&self.shutdown);
-            let listener_kind = if canvas_only {
-                ListenerKind::Canvas
-            } else {
-                ListenerKind::Shared
-            };
             let handle = thread::spawn(move || {
                 serve_forever(
                     listener,
@@ -805,13 +821,11 @@ impl WebHost {
                     debug_sessions,
                     session,
                     canvas_file,
-                    listener_kind,
-                    canvas_only,
+                    ListenerKind::Canvas,
                     bind_host,
                     session_secret,
                     shutdown,
                     static_root,
-                    source_asset_fallback,
                 )
             });
             self.server_threads.lock().unwrap().push(handle);
@@ -822,7 +836,8 @@ impl WebHost {
             let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
             let static_root = self.static_root.clone();
-            let source_asset_fallback = self.source_asset_fallback;
+            let session_secret = self.session_secret.clone();
+            let application_host = self.session.application_host().to_string();
             let shutdown = Arc::clone(&self.shutdown);
             let handle = thread::spawn(move || {
                 serve_forever(
@@ -832,12 +847,10 @@ impl WebHost {
                     session,
                     canvas_file,
                     ListenerKind::Application,
-                    false,
-                    "127.0.0.1".to_string(),
-                    String::new(),
+                    application_host,
+                    session_secret,
                     shutdown,
                     static_root,
-                    source_asset_fallback,
                 )
             });
             self.server_threads.lock().unwrap().push(handle);
@@ -853,10 +866,10 @@ impl WebHost {
             });
             *self.poll_thread.lock().unwrap() = Some(handle);
         }
-        if !self.canvas_only {
+        if self.session_application_port() != 0 {
             println!(
                 "App preview: http://{}:{}/",
-                url_host(&self.bind_host),
+                url_host(self.session.application_host()),
                 self.session_application_port(),
             );
         }
@@ -881,7 +894,7 @@ impl WebHost {
 
     pub fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
         self.status.mark_ready(elapsed_ms, is_rebuild);
-        if let Ok(source) = fs::read_to_string(&self.canvas_file) {
+        if let Ok(source) = crate::Canvas::read_source_without_symlinks(Path::new(&self.canvas_file)) {
             let revision = crate::Canvas::source_revision(&source);
             self.session.observe_source(&revision);
             self.session.mark_last_good(
@@ -895,7 +908,7 @@ impl WebHost {
     pub fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
         self.status
             .mark_error(code.clone(), diagnostic.clone(), is_rebuild);
-        if let Ok(source) = fs::read_to_string(&self.canvas_file) {
+        if let Ok(source) = crate::Canvas::read_source_without_symlinks(Path::new(&self.canvas_file)) {
             self.session
                 .observe_source(&crate::Canvas::source_revision(&source));
         }
@@ -1067,14 +1080,15 @@ fn clock_time() -> String {
     format!("{:02}:{:02}:{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
 }
 
-/// Move every file `write_web_artifacts` staged into the real output
-/// directory. Each `fs::rename` is atomic on the same filesystem (staging
-/// lives under `build/`, so it always is), so a reader never observes a
-/// half-written file; the individual renames aren't a single transaction, but
-/// they only run after the entire staged set — including the wasm compile —
-/// has already succeeded, so there is nothing left that can fail mid-swap
-/// except a bare I/O error.
+/// Publish one completed web bundle under the same lock used by static
+/// readers. Preflight every member, journal the old bundle, then roll back the
+/// journal if any replacement fails.
 pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
+    let _publication = crate::lock_static_publication()?;
+    stage_and_swap_locked(staging, out_dir)
+}
+
+fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
     const FILES: [&str; 6] = [
         "web.manifest.json",
         "jet_dom_runtime.js",
@@ -1086,31 +1100,126 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
     const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
     let output_root = ensure_real_output_dir(out_dir)?;
     ensure_existing_real_dir(staging, &output_root)?;
+    let mut names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
+    let mut staged_names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
     for name in FILES {
         let src = staging.join(name);
-        let dst = out_dir.join(name);
-        reject_symlink_or_escape(&src, &output_root)?;
-        reject_symlink_or_escape(&dst, &output_root)?;
-        // `write_web_artifacts` already returned success for every one of
-        // these paths (rustc included) before we get here, so a rename
-        // failure here is a transient filesystem-visibility race, not a
-        // missing file — a handful of retries with a short backoff clears it
-        // without masking a genuine bug (which would fail every retry too).
-        rename_with_retry(&src, &dst)?;
+        let dst = output_root.join(name);
+        validate_publication_file(&src, &output_root, true)?;
+        validate_publication_file(&dst, &output_root, false)?;
+        names.push(name);
+        staged_names.push(name);
     }
     for name in MAP_FILES {
         let src = staging.join(name);
-        let dst = out_dir.join(name);
-        reject_symlink_or_escape(&dst, &output_root)?;
-        if src.exists() {
-            reject_symlink_or_escape(&src, &output_root)?;
-            rename_with_retry(&src, &dst)?;
-        } else if dst.exists() {
-            // Release (or map-less) rebuild: drop stale maps with the swap.
-            let _ = fs::remove_file(&dst);
+        let dst = output_root.join(name);
+        let staged = validate_publication_file(&src, &output_root, false)?;
+        let current = validate_publication_file(&dst, &output_root, false)?;
+        if staged || current {
+            names.push(name);
+        }
+        if staged {
+            staged_names.push(name);
         }
     }
+
+    let backup = create_publication_backup(&output_root)?;
+    let mut backed_up = Vec::new();
+    let mut published = Vec::new();
+    let result = (|| {
+        for name in &names {
+            let dst = output_root.join(name);
+            if fs::symlink_metadata(&dst).is_ok() {
+                rename_with_retry(&dst, &backup.join(name))?;
+                backed_up.push(*name);
+            }
+        }
+        for name in &staged_names {
+            rename_with_retry(&staging.join(name), &output_root.join(name))?;
+            published.push(*name);
+        }
+        Ok::<(), std::io::Error>(())
+    })();
+    if let Err(error) = result {
+        for name in published.iter().rev() {
+            let _ = fs::remove_file(output_root.join(name));
+        }
+        for name in backed_up.iter().rev() {
+            let _ = rename_with_retry(&backup.join(name), &output_root.join(name));
+        }
+        cleanup_publication_backup(&backup, &names);
+        return Err(error);
+    }
+
+    cleanup_publication_backup(&backup, &names);
     Ok(())
+}
+
+fn validate_publication_file(
+    path: &Path,
+    root: &Path,
+    required: bool,
+) -> std::io::Result<bool> {
+    reject_symlink_or_escape(path, root)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !is_singly_linked_regular_file(&metadata) => {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "web bundle members must be regular files",
+            ))
+        }
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn is_singly_linked_regular_file(metadata: &fs::Metadata) -> bool {
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        metadata.nlink() == 1
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.number_of_links() == 1
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+fn create_publication_backup(root: &Path) -> std::io::Result<PathBuf> {
+    let parent = root.parent().unwrap_or_else(|| Path::new("."));
+    for _ in 0..100 {
+        let name = format!(
+            ".jet-web-publication-{}-{}",
+            std::process::id(),
+            PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let path = parent.join(name);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a web publication journal",
+    ))
+}
+
+fn cleanup_publication_backup(path: &Path, names: &[&str]) {
+    for name in names {
+        let _ = fs::remove_file(path.join(name));
+    }
+    let _ = fs::remove_dir(path);
 }
 
 fn ensure_real_output_dir(path: &Path) -> std::io::Result<PathBuf> {
@@ -1255,51 +1364,6 @@ fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
         APPLICATION_PORT_RANGE.start(),
         APPLICATION_PORT_RANGE.end(),
         last_err.map(|e| format!(" ({})", e)).unwrap_or_default()
-    ))
-}
-
-/// Bind the unified workbench listener. An explicit port is authoritative;
-/// otherwise use the same small predictable range as application preview.
-fn bind_workbench_server(host: &str, port: Option<u16>) -> Result<TcpListener, String> {
-    if let Some(port) = port {
-        return match TcpListener::bind((host, port)) {
-            Ok(listener) => Ok(listener),
-            Err(error) => {
-                let fix = if error.kind() == std::io::ErrorKind::AddrInUse {
-                    format!(
-                        "\n fix: stop whatever's using port {}, or pick another with --port=<N> or --canvas-port=<N>",
-                        port
-                    )
-                } else {
-                    String::new()
-                };
-                Err(format!(
-                    "error: couldn't bind the workbench to {}:{}: {}{}",
-                    host, port, error, fix
-                ))
-            }
-        };
-    }
-    let mut last_err: Option<std::io::Error> = None;
-    for port in APPLICATION_PORT_RANGE {
-        match TcpListener::bind((host, port)) {
-            Ok(listener) => return Ok(listener),
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
-                last_err = Some(error);
-            }
-            Err(error) => {
-                return Err(format!(
-                    "error: couldn't start the workbench on {}: {}",
-                    host, error
-                ));
-            }
-        }
-    }
-    Err(format!(
-        "error: every workbench port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N> or --canvas-port=<N>",
-        APPLICATION_PORT_RANGE.start(),
-        APPLICATION_PORT_RANGE.end(),
-        last_err.map(|error| format!(" ({})", error)).unwrap_or_default()
     ))
 }
 
@@ -1449,7 +1513,8 @@ fn canvas_request_authorized(
     port: u16,
     session_secret: &str,
 ) -> bool {
-    if !matches!(request.method.as_str(), "GET" | "POST")
+    if session_secret.is_empty()
+        || !matches!(request.method.as_str(), "GET" | "POST")
         || request.body.len() > MAX_REQUEST_BODY_BYTES
         || request.headers.contains_key("transfer-encoding")
         || (request.method == "POST" && !request.headers.contains_key("content-length"))
@@ -1535,27 +1600,17 @@ fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
     )
 }
 
-fn canvas_namespace_path(path: &str, target: &str) -> bool {
-    path == "/__jet_canvas"
-        || path.starts_with("/__jet_canvas/")
-        || path == "/canvas"
-        || path.starts_with("/canvas/")
-        || path == "/panel"
-        || path.starts_with("/panel/")
-        || (path == "/"
-            && (query_param(target, "jet_panel").as_deref() == Some("1")
-                || query_param(target, "jet_panel_app").as_deref() == Some("1")
-                || query_param(target, "jet_panel_graph").as_deref() == Some("1")))
+fn requires_canvas_authorization(listener_kind: ListenerKind) -> bool {
+    listener_kind == ListenerKind::Canvas
 }
 
-fn requires_canvas_authorization(listener_kind: ListenerKind, path: &str, target: &str) -> bool {
-    match listener_kind {
-        ListenerKind::Canvas => true,
-        ListenerKind::Shared => {
-            !is_application_control_path(path) && canvas_namespace_path(path, target)
-        }
-        ListenerKind::Application => false,
-    }
+fn requires_session_authorization(listener_kind: ListenerKind, path: &str) -> bool {
+    (path != "/__jet_dev_status" && requires_canvas_authorization(listener_kind))
+        || (listener_kind == ListenerKind::Application
+            && matches!(
+                path,
+                "/__jet_dev_disconnect" | "/__jet_perf_browser"
+            ))
 }
 
 fn host_header_allowed(value: &str, bind_host: &str, port: u16) -> bool {
@@ -1594,20 +1649,68 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
     difference == 0
 }
 
-fn unauthorized(stream: &mut TcpStream) -> std::io::Result<()> {
+fn unauthorized(stream: &mut impl Write) -> std::io::Result<()> {
     write_response(
         stream,
         "401 Unauthorized",
         "text/plain; charset=utf-8",
-        b"Canvas session, host, or origin rejected",
+        b"devserver session, host, or origin rejected",
     )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ListenerKind {
     Canvas,
-    Shared,
     Application,
+}
+
+struct DeadlineStream {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+impl DeadlineStream {
+    fn new(stream: TcpStream, deadline: Instant) -> Self {
+        Self { stream, deadline }
+    }
+
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self::new(self.stream.try_clone()?, self.deadline))
+    }
+
+    fn remaining(&self) -> std::io::Result<Duration> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "devserver request deadline exceeded",
+            ))
+        } else {
+            Ok(remaining)
+        }
+    }
+}
+
+impl std::io::Read for DeadlineStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self.remaining()?;
+        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.read(buffer)
+    }
+}
+
+impl Write for DeadlineStream {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let remaining = self.remaining()?;
+        self.stream.set_write_timeout(Some(remaining))?;
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let remaining = self.remaining()?;
+        self.stream.set_write_timeout(Some(remaining))?;
+        self.stream.flush()
+    }
 }
 
 /// Accept connections forever, one thread per connection (a dev tool serving
@@ -1619,12 +1722,10 @@ fn serve_forever(
     session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
     listener_kind: ListenerKind,
-    canvas_only: bool,
     bind_host: String,
     session_secret: String,
     shutdown: Arc<AtomicBool>,
     static_root: PathBuf,
-    source_asset_fallback: bool,
 ) {
     if listener.set_nonblocking(true).is_err() {
         return;
@@ -1653,11 +1754,9 @@ fn serve_forever(
                         &session,
                         &canvas_file,
                         listener_kind,
-                        canvas_only,
                         &bind_host,
                         &session_secret,
                         &static_root,
-                        source_asset_fallback,
                     );
                     active_connections.fetch_sub(1, Ordering::AcqRel);
                 });
@@ -1698,7 +1797,6 @@ fn handle_connection(
     session: &crate::ResidentDevSession,
     canvas_file: &str,
     listener_kind: ListenerKind,
-    canvas_only: bool,
     bind_host: &str,
     session_secret: &str,
 ) -> std::io::Result<()> {
@@ -1709,11 +1807,9 @@ fn handle_connection(
         session,
         canvas_file,
         listener_kind,
-        canvas_only,
         bind_host,
         session_secret,
         Path::new("build"),
-        true,
     )
 }
 
@@ -1724,27 +1820,34 @@ fn handle_connection_with_root(
     session: &crate::ResidentDevSession,
     canvas_file: &str,
     listener_kind: ListenerKind,
-    canvas_only: bool,
     bind_host: &str,
     session_secret: &str,
     static_root: &Path,
-    source_asset_fallback: bool,
 ) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+    let deadline = Instant::now() + REQUEST_DEADLINE;
+    let mut stream = DeadlineStream::new(stream, deadline);
     let mut reader = BufReader::new(stream.try_clone()?);
     let Some(request) = Request::read(&mut reader)? else {
         return Ok(());
     };
 
-    let mut stream = stream;
     let method = request.method.as_str();
     let target = request.target.as_str();
     let body = request.body.as_slice();
     let path = target.split('?').next().unwrap_or("/");
 
-    if requires_canvas_authorization(listener_kind, path, target)
-        && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
+    if requires_session_authorization(listener_kind, path)
+        && !canvas_request_authorized(
+            &request,
+            target,
+            bind_host,
+            if listener_kind == ListenerKind::Canvas {
+                session.canvas_port()
+            } else {
+                session.application_port()
+            },
+            session_secret,
+        )
     {
         return unauthorized(&mut stream);
     }
@@ -1758,8 +1861,10 @@ fn handle_connection_with_root(
         );
     }
 
-    if let Some(client) = query_param(target, "client_id") {
-        session.note_client(&client);
+    if listener_kind == ListenerKind::Canvas {
+        if let Some(client) = query_param(target, "client_id") {
+            session.note_client(&client);
+        }
     }
     if listener_kind == ListenerKind::Application && !is_application_control_path(path) {
         if method != "GET" {
@@ -1778,8 +1883,7 @@ fn handle_connection_with_root(
             static_root,
             path,
             &nonce,
-            canvas_file,
-            source_asset_fallback,
+            session_secret,
         )?;
         status.log_request(method, path, code, started.elapsed());
         return Ok(());
@@ -2032,8 +2136,13 @@ fn handle_connection_with_root(
             .as_deref()
             .and_then(|id| crate::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
             .unwrap_or_else(|| PathBuf::from(canvas_file));
-        return match fs::read(&source_path) {
-            Ok(body) => write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", &body),
+        return match read_source_without_symlinks(&source_path) {
+            Ok(source) => write_response(
+                &mut stream,
+                "200 OK",
+                "text/plain; charset=utf-8",
+                source.as_bytes(),
+            ),
             Err(e) => write_response(
                 &mut stream,
                 "404 Not Found",
@@ -2047,6 +2156,7 @@ fn handle_connection_with_root(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
+        let _transaction = session.lock_source_transaction();
         return match crate::Canvas::command_receipt_json_for_entry(Path::new(canvas_file), &request)
         {
             Ok(body) => {
@@ -2197,9 +2307,22 @@ fn handle_connection_with_root(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        if let Some(client) = query_param(target, "client") {
-            status.note_client(&client);
-            session.note_client(&client);
+        let status_authorized = canvas_request_authorized(
+            &request,
+            target,
+            bind_host,
+            if listener_kind == ListenerKind::Canvas {
+                session.canvas_port()
+            } else {
+                session.application_port()
+            },
+            session_secret,
+        );
+        if status_authorized {
+            if let Some(client) = query_param(target, "client") {
+                status.note_client(&client);
+                session.note_client(&client);
+            }
         }
         let body = status.json();
         return write_response(
@@ -2267,7 +2390,7 @@ fn handle_connection_with_root(
             ),
         };
     }
-    if canvas_only {
+    if listener_kind == ListenerKind::Canvas {
         return write_response(
             &mut stream,
             "404 Not Found",
@@ -2291,8 +2414,7 @@ fn handle_connection_with_root(
         static_root,
         path,
         &nonce,
-        canvas_file,
-        source_asset_fallback,
+        session_secret,
     )?;
     status.log_request(method, path, code, started.elapsed());
     Ok(())
@@ -2313,7 +2435,7 @@ fn inject_canvas_session(
     asset
 }
 
-fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
+fn method_not_allowed(stream: &mut impl Write) -> std::io::Result<()> {
     write_response(
         stream,
         "405 Method Not Allowed",
@@ -2402,20 +2524,22 @@ fn current_revision_for_source_id(canvas_file: &str, source_id: Option<&str>) ->
             crate::Canvas::project_path_for_source_id(Path::new(canvas_file), source_id)
         })
         .unwrap_or_else(|| PathBuf::from(canvas_file));
-    fs::read_to_string(source_path)
+    crate::Canvas::read_source_without_symlinks(&source_path)
         .map(|source| crate::Canvas::source_revision(&source))
         .unwrap_or_default()
 }
 
 fn serve_static_from_root(
-    stream: &mut TcpStream,
+    stream: &mut impl Write,
     root: &Path,
     path: &str,
     nonce: &str,
-    canvas_file: &str,
-    source_asset_fallback: bool,
+    session_secret: &str,
 ) -> std::io::Result<u16> {
-    let root_path = match static_path(root, path) {
+    // The generated output root is the complete application preview boundary.
+    // Never fall back to the watched source directory: this listener has no
+    // Canvas capability gate for ordinary application assets.
+    let relative = match static_relative_path(path) {
         Ok(path) => path,
         Err(()) => {
             write_response(
@@ -2427,35 +2551,67 @@ fn serve_static_from_root(
             return Ok(400);
         }
     };
-    let file_path = if root_path.is_file() {
-        root_path
-    } else if source_asset_fallback {
-        source_asset_path(canvas_file, path).unwrap_or(root_path)
-    } else {
-        root_path
-    };
-    let bytes = match fs::read(&file_path) {
-        Ok(b) => b,
-        Err(_) => {
-            let body = format!("not found: {}", path);
-            write_response(
-                stream,
-                "404 Not Found",
-                "text/plain; charset=utf-8",
-                body.as_bytes(),
-            )?;
-            return Ok(404);
-        }
-    };
-
-    let content_type = content_type_for(&file_path);
-    let is_html = file_path
+    let content_type = content_type_for(&relative);
+    let is_html = relative
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("html"));
-    if is_html {
-        let html = String::from_utf8_lossy(&bytes).into_owned();
-        let injected = inject_live_reload(&html, nonce);
+    let mut reload_script = is_html.then(|| live_reload_script(nonce, session_secret));
+    let raw_limit = match reload_script.as_mut() {
+        Some(script) => {
+            script.shrink_to_fit();
+            if !html_script_fits_budget(script.capacity()) {
+                write_response(
+                    stream,
+                    "500 Internal Server Error",
+                    "text/plain; charset=utf-8",
+                    b"live-reload script exceeds the response budget",
+                )?;
+                return Ok(500);
+            }
+            html_raw_response_limit(script.capacity())
+        }
+        None => MAX_STATIC_RESPONSE_BYTES,
+    };
+    let bytes = read_static_file_bounded(root, &relative, raw_limit);
+    let bytes = match bytes {
+        Ok(b) => b,
+        Err(error) => {
+            let (status, code, body) = match error.kind() {
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData => (
+                    "404 Not Found",
+                    404,
+                    format!("not found: {}", path),
+                ),
+                _ => ("400 Bad Request", 400, "bad path".to_owned()),
+            };
+            write_response(stream, status, "text/plain; charset=utf-8", body.as_bytes())?;
+            return Ok(code);
+        }
+    };
+
+    if let Some(script) = reload_script {
+        let html = match decode_html(bytes) {
+            Ok(html) => html,
+            Err(_) => {
+                write_response(
+                    stream,
+                    "500 Internal Server Error",
+                    "text/plain; charset=utf-8",
+                    b"static HTML is not valid UTF-8",
+                )?;
+                return Ok(500);
+            }
+        };
+        let Some(injected) = inject_live_reload_with_script(&html, &script) else {
+            write_response(
+                stream,
+                "500 Internal Server Error",
+                "text/plain; charset=utf-8",
+                b"static HTML response is too large",
+            )?;
+            return Ok(500);
+        };
         write_response(stream, "200 OK", content_type, injected.as_bytes())?;
         return Ok(200);
     }
@@ -2463,57 +2619,46 @@ fn serve_static_from_root(
     Ok(200)
 }
 
-fn source_asset_path(canvas_file: &str, request_path: &str) -> Option<PathBuf> {
-    let source = Path::new(canvas_file);
-    let source_dir = source
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut roots = vec![source_dir.to_path_buf()];
-    if let Ok(source_text) = fs::read_to_string(source) {
-        let mut offset = 0;
-        while let Some(relative) = source_text[offset..].find("HTML(") {
-            let start = offset + relative + "HTML(".len();
-            let Some(rest) = source_text.get(start..) else {
-                break;
-            };
-            let rest = rest.trim_start();
-            let quote = rest.as_bytes().first().copied();
-            if !matches!(quote, Some(b'\'' | b'"')) {
-                offset = start;
-                continue;
-            }
-            let rest = &rest[1..];
-            let Some(end) = rest.find(char::from(quote.unwrap())) else {
-                offset = start;
-                continue;
-            };
-            let shell = source_dir.join(&rest[..end]);
-            if let Some(shell_dir) = shell.parent() {
-                roots.push(shell_dir.to_path_buf());
-            }
-            offset = start;
-        }
+fn read_source_without_symlinks(path: &Path) -> std::io::Result<String> {
+    #[cfg(windows)]
+    {
+        let bytes = crate::read_file_without_symlinks_bounded(path, MAX_STATIC_RESPONSE_BYTES)?;
+        return String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "source is not UTF-8")
+        });
     }
-    roots.sort();
-    roots.dedup();
-    for root in roots {
-        let Ok(candidate) = static_path(&root, request_path) else {
-            continue;
-        };
-        if candidate == source
-            || candidate
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("jet"))
-        {
-            continue;
-        }
-        if candidate.is_file() {
-            return Some(candidate);
-        }
+    #[cfg(not(windows))]
+    {
+        crate::Canvas::read_source_without_symlinks(path)
     }
-    None
+}
+
+fn read_web_manifest() -> Option<String> {
+    let bytes = read_static_file_bounded(
+        Path::new("build"),
+        Path::new("web.manifest.json"),
+        MAX_STATIC_RESPONSE_BYTES,
+    )
+    .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn decode_html(bytes: Vec<u8>) -> std::io::Result<String> {
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "static HTML is not valid UTF-8")
+    })
+}
+
+fn html_raw_response_limit(script_capacity: usize) -> u64 {
+    let script_bytes = u64::try_from(script_capacity).unwrap_or(u64::MAX);
+    MAX_STATIC_RESPONSE_BYTES
+        .saturating_sub(script_bytes.saturating_mul(2))
+        / 2
+}
+
+fn html_script_fits_budget(script_capacity: usize) -> bool {
+    let script_bytes = u64::try_from(script_capacity).unwrap_or(u64::MAX);
+    script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
 }
 
 /// Plain polling live-reload (no WebSocket/SSE — I6 + correct scoping for a
@@ -2527,7 +2672,7 @@ fn source_asset_path(canvas_file: &str, request_path: &str) -> Option<PathBuf> {
 /// (I4 — `s.diagnostic` is written via `textContent`, never re-escaped or
 /// reworded); a clean rebuild (browser strip is dumb — it just re-renders
 /// whatever the poll says) collapses it back to the pill.
-fn live_reload_script(nonce: &str) -> String {
+fn live_reload_script(nonce: &str, session_secret: &str) -> String {
     let perf_script = if nonce.is_empty() {
         String::new()
     } else {
@@ -2543,7 +2688,7 @@ fn live_reload_script(nonce: &str) -> String {
       duration_ns: String(Math.max(0, Math.floor((endMs - startMs) * 1000000))),
       clock_ns: String(Math.max(0, Math.floor(endMs * 1000000)))
     }});
-    try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce, body); }} catch (_) {{}}
+    try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce + "&session=" + encodeURIComponent(jetDevSession), body); }} catch (_) {{}}
   }};
 "#
         )
@@ -2551,6 +2696,7 @@ fn live_reload_script(nonce: &str) -> String {
     format!(
         r##"<script>
 (function () {{
+  var jetDevSession = "{session_secret}";
 {perf_script}
   var jetDevVersion = null, reconnectAttempt = 0;
   var jetDevClient = null;
@@ -2561,7 +2707,7 @@ fn live_reload_script(nonce: &str) -> String {
     try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
   }}
   addEventListener("pagehide", function () {{
-    try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient)); }} catch (_) {{}}
+    try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession)); }} catch (_) {{}}
   }});
   var pill = null, shade = null, overlay = null, overlayTitle = null, overlayBody = null, overlayFooter = null;
   var dismissedDiagnostic = null;
@@ -2637,7 +2783,7 @@ fn live_reload_script(nonce: &str) -> String {
     }}
   }}
   function poll() {{
-    fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient), {{ cache: "no-store" }})
+    fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }})
       .then(function (r) {{ return r.json(); }})
       .then(function (s) {{
         var recoveredConnection = reconnectAttempt > 0;
@@ -2667,26 +2813,42 @@ fn live_reload_script(nonce: &str) -> String {
 </script>
 "##,
         poll_ms = LIVE_RELOAD_POLL_MS,
-        perf_script = perf_script
+        perf_script = perf_script,
+        session_secret = json_escape(session_secret)
     )
 }
 
+#[cfg(test)]
 fn inject_live_reload(html: &str, nonce: &str) -> String {
-    let script = live_reload_script(nonce);
-    // Find the insertion point case-insensitively (HTML tags are ASCII, so a
-    // lowercase search never shifts a byte offset), but splice into the
-    // ORIGINAL bytes so the rest of the page is untouched.
-    if let Some(idx) = html.to_ascii_lowercase().find("</body>") {
-        let mut out = String::with_capacity(html.len() + script.len());
-        out.push_str(&html[..idx]);
-        out.push_str(&script);
-        out.push_str(&html[idx..]);
-        out
-    } else {
+    let mut script = live_reload_script(nonce, "");
+    script.shrink_to_fit();
+    inject_live_reload_with_script(html, &script).unwrap_or_else(|| {
         let mut out = html.to_string();
         out.push_str(&script);
         out
+    })
+}
+
+fn inject_live_reload_with_script(html: &str, script: &str) -> Option<String> {
+    let output_len = html.len().checked_add(script.len())?;
+    // Find the insertion point case-insensitively without allocating a
+    // lowercase copy. HTML tags are ASCII, so the original byte offset stays
+    // valid for the splice.
+    let insertion = html.as_bytes().windows(b"</body>".len()).position(|tag| {
+        tag.iter()
+            .zip(b"</body>")
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    });
+    let mut out = String::with_capacity(output_len);
+    if let Some(index) = insertion {
+        out.push_str(&html[..index]);
+        out.push_str(script);
+        out.push_str(&html[index..]);
+    } else {
+        out.push_str(html);
+        out.push_str(script);
     }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -2694,9 +2856,11 @@ mod tests {
     use super::{
         canvas_api_path, canvas_request_authorized, constant_time_equal, format_build_time,
         format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
-        handle_connection, inject_canvas_session, inject_live_reload, mint_session_secret,
-        origin_allowed, stage_and_swap, APPLICATION_PORT_RANGE, CanvasHostOptions, DevStatus,
-        ListenerKind, Ordering, WebHost, bind_application_server,
+        handle_connection, handle_connection_with_root, html_raw_response_limit,
+        inject_canvas_session, inject_live_reload, decode_html, mint_session_secret, origin_allowed,
+        stage_and_swap, try_acquire_connection, APPLICATION_PORT_RANGE, MAX_CONNECTION_THREADS,
+        MAX_STATIC_RESPONSE_BYTES, CanvasHostOptions, DeadlineStream, DevStatus, ListenerKind,
+        Ordering, WebHost, bind_application_server,
     };
     use crate::Request;
     use std::collections::HashMap;
@@ -2704,7 +2868,34 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Barrier};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn slowloris_request_hits_the_absolute_deadline_without_exhausting_admission() {
+        let active = std::sync::atomic::AtomicUsize::new(MAX_CONNECTION_THREADS);
+        assert!(
+            !try_acquire_connection(&active),
+            "the connection cap must reject the next slow client"
+        );
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            let _ = stream.write_all(b"G");
+            thread::sleep(Duration::from_millis(100));
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let started = Instant::now();
+        let mut reader = std::io::BufReader::new(DeadlineStream::new(
+            stream,
+            started + Duration::from_millis(40),
+        ));
+        let error = Request::read(&mut reader).expect_err("slow request must time out");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_millis(200));
+        client.join().unwrap();
+    }
 
     #[cfg(unix)]
     #[test]
@@ -2730,6 +2921,225 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canvas_source_route_rejects_symlinked_entry() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-canvas-source-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let real = root.join("real.jet");
+        let alias = root.join("alias.jet");
+        std::fs::write(&real, "fn run() { print(\"secret\") }\n").unwrap();
+        symlink(&real, &alias).unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let secret = "canvas-source-secret";
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let request = format!(
+            "GET /canvas/source?session={secret} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let status = DevStatus::new_with_terminal("alias.jet", false, false, false);
+        status.set_port(port);
+        let session = crate::ResidentDevSession::new("alias.jet", port, 0);
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        handle_connection(
+            server,
+            &status,
+            &debug_sessions,
+            &session,
+            alias.to_str().unwrap(),
+            ListenerKind::Canvas,
+            "127.0.0.1",
+            secret,
+        )
+        .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
+        assert!(!response.contains("secret"), "symlinked source was disclosed");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn application_preview_does_not_serve_files_from_source_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-source-disclosure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let build = root.join("build");
+        let source_dir = root.join("source");
+        let source = source_dir.join("app.jet");
+        std::fs::create_dir_all(&build).unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(&source, "fn main() {}\n").unwrap();
+        std::fs::write(source_dir.join("private.txt"), "must not be served").unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(
+                format!(
+                    "GET /private.txt HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let status = DevStatus::new_with_terminal("app.jet", false, false, false);
+        status.set_port(port);
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        let session = crate::ResidentDevSession::new("app.jet", port, port);
+        handle_connection_with_root(
+            server,
+            &status,
+            &debug_sessions,
+            &session,
+            source.to_str().unwrap(),
+            ListenerKind::Application,
+            "127.0.0.1",
+            "",
+            &build,
+        )
+        .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
+        assert!(!response.contains("must not be served"), "{response}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_utf8_html_fails_closed_without_lossy_replacement() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-invalid-html-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), [b'<', 0xff, b'>']).unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(
+                format!(
+                    "GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let status = DevStatus::new_with_terminal("app.jet", false, false, false);
+        status.set_port(port);
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        let session = crate::ResidentDevSession::new("app.jet", port, port);
+        handle_connection_with_root(
+            server,
+            &status,
+            &debug_sessions,
+            &session,
+            "app.jet",
+            ListenerKind::Application,
+            "127.0.0.1",
+            "",
+            &root,
+        )
+        .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 500 Internal Server Error"), "{response}");
+        assert!(!response.contains('\u{fffd}'), "invalid HTML was lossy-decoded");
+        assert!(decode_html(vec![0xff]).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn transformed_html_uses_one_aggregate_response_budget() {
+        let script_capacity = 4096;
+        let raw_limit = html_raw_response_limit(script_capacity);
+        assert!(
+            2 * raw_limit + 2 * script_capacity as u64 <= MAX_STATIC_RESPONSE_BYTES,
+            "raw HTML plus transformed HTML exceeds the shared response budget"
+        );
+        assert!(
+            2 * (raw_limit + 1) + 2 * script_capacity as u64 > MAX_STATIC_RESPONSE_BYTES,
+            "raw HTML limit leaves an unbounded transformed response"
+        );
+    }
+
+    #[test]
+    fn oversized_html_is_rejected_before_transformation() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-oversized-html-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = std::fs::File::create(root.join("index.html")).unwrap();
+        file.set_len(MAX_STATIC_RESPONSE_BYTES).unwrap();
+        drop(file);
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(
+                format!(
+                    "GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let status = DevStatus::new_with_terminal("app.jet", false, false, false);
+        status.set_port(port);
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        let session = crate::ResidentDevSession::new("app.jet", port, port);
+        handle_connection_with_root(
+            server,
+            &status,
+            &debug_sessions,
+            &session,
+            "app.jet",
+            ListenerKind::Application,
+            "127.0.0.1",
+            "",
+            &root,
+        )
+        .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2790,6 +3200,7 @@ mod tests {
     fn dashboard_detail_keeps_watched_target_and_canvas_route_pinned() {
         let status = DevStatus::new("app.jet", false);
         status.set_port(8123);
+        status.set_canvas_port(8123);
         assert_eq!(
             status.dashboard_detail_line(),
             "         watching app.jet · Canvas http://localhost:8123/canvas · v verbose"
@@ -3198,6 +3609,22 @@ mod tests {
         assert!(session.contains("\"run\":{\"output\":\"service@local#debug\",\"target\":\"board.browser\"}"));
         assert!(session.contains("\"canvas\":{\"host\":\"127.0.0.1\""));
         assert!(!session.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":0"));
+        assert_ne!(host.session.canvas_port(), host.session.application_port());
+        assert!(session.contains("\"listener\":\"canvas\""));
+        assert!(session.contains("\"listener\":\"application\""));
+    }
+
+    #[test]
+    fn app_only_bind_has_no_canvas_listener_or_session_alias() {
+        let host = WebHost::bind("app.jet", false, Some(0)).unwrap();
+        assert!(host.listener.lock().unwrap().is_none());
+        assert!(host.application_listener.lock().unwrap().is_some());
+        assert_eq!(host.session.canvas_port(), 0);
+        assert!(!host.status.canvas_enabled.load(Ordering::Relaxed));
+        let session = host.session.json();
+        assert!(session.contains("\"listeners\":{\"application\""));
+        assert!(!session.contains("\"listeners\":{\"canvas\""));
+        assert!(!session.contains("\"workbench\""));
     }
 
     #[test]
@@ -3222,7 +3649,6 @@ mod tests {
                     &session,
                     "app.jet",
                     ListenerKind::Canvas,
-                    true,
                     "127.0.0.1",
                     &secret,
                 )
@@ -3421,7 +3847,6 @@ mod tests {
             &session,
             "app.jet",
             ListenerKind::Canvas,
-            true,
             "127.0.0.1",
             secret,
         )

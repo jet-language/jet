@@ -1362,10 +1362,12 @@ trust surface exists. Grid cell: build / dependency.
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
-position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
-`read_f32_le`/`read_f64_le`,
-`take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
-fallible (`T !String`) — a bounds miss is an ordinary error value.
+position: `read_u8`/`read_i8`/`read_u16_le|be`/`read_i16_le|be`/
+`read_u32_le|be`/`read_i32_le|be`/`read_u64_le|be`/`read_i64_le|be`,
+`read_f32_le|be`/`read_f64_le|be`, `peek()`, `seek(position)`,
+`skip(n)`, `take(n: Int)`, `remaining()`, `is_at_end()`; every consuming read advances and is
+fallible (`T !String`) — a bounds miss is an ordinary error value, while
+`peek()` observes without advancing.
 **D-BINREAD-LEN1=A** narrowly extends the `take` length slot to accept
 `U8`/`U16`/`U32`, which widen internally to `Int`; `U64` remains an explicit
 conversion, and S42 sized-int separation is unchanged everywhere else.
@@ -2034,16 +2036,19 @@ which extracts a shared `policy:` value into a named `Config` when needed;
 # package.jet — policy: reads beside bare Package identity
 name:     "meter"
 version:  "1.0.0"
-policy:   .{ unsafe: .Forbid }
-effects:  .{ deny: [Mem.Alloc, Mem.Rc] }
+policy:   .{
+    unsafe: .Deny,
+    effects: .{ ".": -[]> }
+}
 
 # Source/sensor.jet — a function writes the memory denial on its signature
 fn sensor() -[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
 policy: .{ unsafe: .Allow }
-// error: package policy cannot authorize unsafe — write #Unsafe("reason")
-// at the exact block or function instead
+// error E1206: `policy.unsafe` must be `.Deny` or `.Paths([...])`
+// and cannot authorize unsafe code; each operation still needs
+// `#Unsafe("reason")` at the exact block or function.
 ```
 
 **D-MEM-FACTS1=B — transitive memory facts** *(ratified 2026-07-15, card
@@ -2437,11 +2442,22 @@ expression instead. A parenthesized or list operand can use `task { … }` or a
 named function when a local named `task` must remain visible. This is the final
 spelling for the spawn surface.
 
+**D-CONC-ALLNAMED1=A — named `task.all` results** *(ratified 2026-08-29,
+card #2279)*: `task.all` accepts either all positional branches or all
+`name: expression` branches. The positional form remains an ordered
+`[T] !TaskFailure`; the named form returns an anonymous named tuple/record
+`(name_1: T_1, name_2: T_2, …) !TaskFailure` and supports heterogeneous field
+types. Existing tuple field naming and canonicalization rules remain the type
+authority, while branch evaluation and result assembly stay in authored source
+order. `task.race` and `task.any` remain positional. Mixing named and
+positional branches is one parse error (E1117), with no successful lowering.
+
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
 `join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum with
-`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` returns
-its tuple on the same rail. A joined child panic becomes `.Panicked(reason)`;
+`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
+same rail: positional form returns its ordered list and named form its
+anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
 `TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
@@ -2824,6 +2840,10 @@ Every mode still requires a lexical `#Unsafe` block or function for every
 low-level operation; none permits generated Rust `unsafe` outside I1's audited
 regions. `jet inspect unsafe` reports the effective mode, its policy source,
 each gate, and tracked operation state.
+
+D-HARDENED1 adds runtime assertions for the same sentry facts on each reached
+raw operation in the hardened profile. That witness reports a failed claim; it
+does not discharge or replace the static obligations required by this decision.
 
 **D-FLAGSHIP-MMIO1 — MMIO writes**: volatile writes use the Core helper
 `mem.volatile_write(ptr, value)`, paired with `mem.volatile_read(ptr)`. No
@@ -3482,6 +3502,14 @@ spelling works uniformly for primitives, user types, `List`, `Option`, and
 `Decode` implementation is E0905 before codegen. No compiler-only helper,
 hidden alias, alternate codec, or fallback exists.
 
+**D-DATATREE-ERGO1 = A** *(ratified 2026-08-30, card #2380)*: `DataTree`
+provides `to_text()` for scalar text, integer, float, and boolean leaves,
+returning `None` for `Null` and containers; the strict `.text()` accessor is
+unchanged. `equal_unordered(other)` ignores object insertion order, preserves
+array order, keeps `Int` and `Float` distinct, and never equates `NaN`. No
+`DataTree.truthy()` operation is added; domain-specific truthiness remains
+explicit at its call site.
+
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
 `.lines()`/`.read_line()` (D-STDIN1). Scoped `#Live { … }` raw-terminal block (respelled by D-BLOCKPLANE1, 2026-07-12)
@@ -3626,7 +3654,8 @@ index, not a substitute for that law.
   `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
   `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
   `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
-  for JSON/CBOR, `DataTree` for JSONL, `[String]` for CSV, and D-ENCXML1's exact
+  for JSON/CBOR, `DataTree` for JSONL, `CSVRow` for CSV readers and `[String]`
+  for CSV writers, and D-ENCXML1's exact
   tagged `DataTree` event algebra for XML. Blocking calls provide backpressure; no
   hidden task, queue, partial-success state, or `WouldBlock` exists. Clean EOF
   follows complete structural/trailing-input validation; the first terminal
@@ -3638,6 +3667,17 @@ index, not a substitute for that law.
   bounded-memory law, summarized across primitives in the [Bounded buffering law](spec.md#bounded-buffering-law).
   Shipped `json.events(DataTree) -> String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
+
+  **D-ROWS1=A** fixes the existing CSV engine as the one whole-value and
+  streaming record path. `core.encoding.csv.rows(text, delimiter: ",",
+  header: false, skip_blank: false) -> [CSVRow] !String` adds the ratified
+  delimiter, header, and blank-record options without a second parser. A
+  delimiter is one character other than quote or a line ending; `header`
+  skips the first logical record, and `skip_blank` skips records with no
+  field content. `CSVRow.fields` contains decoded fields and `CSVRow.line` is
+  the one-based physical line where that record opens, including quoted
+  multiline records and records after CRLF. `csv.parse` and `csv.reader`
+  expose the same options and engine; `csv.reader.next()` returns `CSVRow`.
 
   **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
   algebra, not an `XmlDocument` or `XMLEvent` type. XML 1.0 Fifth Edition plus
@@ -3716,9 +3756,8 @@ index, not a substitute for that law.
   never the default. The dialect pins `\d` and `\w` to ASCII, `$` to absolute
   end-of-text, capture spans to zero-based Unicode-character positions, and
   `split` to omit captures. Empty matches advance one Unicode character while
-  preserving intervening text. `replace` replaces all matches; `replace_first`
-  is the explicit one-match operation; `replace_all` is the named all-match
-  spelling. The Thompson/Pike VM's work is bounded by pattern size times input
+  `replace` replaces all matches and `replace_first` replaces at most one.
+  The Thompson/Pike VM's work is bounded by pattern size times input
   length, so nested quantifiers do not expose recursive-backtracking ReDoS.
 - **D-NETSOCKET1=A**: `core.net` exposes typed blocking-looking
   TCP/UDP/Unix/DNS/TLS APIs over handles compatible with the task runtime, so
@@ -6173,9 +6212,9 @@ the service path consumes them directly. It must still not reinterpret raw
 extras as `#Every` or add a second scheduler.
 
 *Implementation log 2026-08-20 (card c0a5nr50)*: D-JOB-SUBCMD1=C is wired
-through one Prelude job-scope selector. `jet run <entry> -- <name>` and built
-binaries select the first program word before ordinary CLI parsing. Dev tiers
-expose bare/`.Dev`/`.Ship` jobs; release binaries expose `.Ship` only;
+through one Prelude job-scope selector. `jet run <entry> -- <name>`, `jet dev`,
+and built binaries select the first program word before ordinary CLI parsing.
+Dev tiers expose bare/`.Dev`/`.Ship` jobs; release binaries expose `.Ship` only;
 `.Internal` remains code/scheduler-only. Release builds report stripped jobs
 with the `#Job(.Ship)` fix.
 
@@ -7483,17 +7522,16 @@ checked before mapping. Native export produces static and shared libraries,
 the C header, and generated bindings for named languages. No new lexer token,
 keyword, or Jet-to-Jet ABI promise enters the surface.
 
-**2026-08-23 — D-EMBED1=E / D-EMBED2=C** *(card #1915)*: Jet has one typed
-embedding export surface: top-level `pub fn` items whose parameters and return
-type use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar. There is no
-separate `#Export` marker. `jet build --lib` lowers that surface to a native
-static/shared library and generated C header; it carries zero-runtime linkage
-but is a trusted native process boundary, not a sandbox. `jet build
---target=sandbox` lowers the same rows to a WASM Component and WIT world; it
-requires a Component host runtime and carries the sandbox boundary. Both
-artifacts grant no ambient Jet capability: the native host receives only the
-declared C exports, and the Component host supplies only explicit WIT imports
-(the current world has none).
+**D-ADOPT-GUEST1=A** *(card #1343)*: Jet uses matching function markers for
+the two directions of the C guest edge. `#Import(c) fn name(args) Return =
+"c_symbol"` declares a foreign function Jet calls; `#Export(c) fn name(args)
+Return -> body` offers a Jet function to a foreign host. The two directions
+share one sema-owned C-safe type law and typed surface. `#Extern` is retired;
+the module form is `#Import module c.<lib> { … }`. A native Library emits the
+static/shared library, C header, named bindings, and loadable metadata from
+the marked export rows. The same rows feed the sandbox Component projection.
+`#FFI(c|cpp)` remains the inline foreign-body escape and is not a library
+import.
 
 **2026-08-13 — D-MATRIX-MUL1=F / D-MATRIX-LIT1=E /
 D-MATRIX-BCAST1=E / D-MATRIX-INDEX1=E / D-MATRIX-SOLVE1=B /
@@ -7577,17 +7615,49 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 Owner-commissioned first-principles memory audit on card #1889. Five decisions ratified =A with the owner's checkpoint quotes on the ballots, plus one owner-designed tooling element. The named implementation card owns the I7 Syntax.rs rows, I4 diagnostic registration and snapshots, and I9 tier proof before its entry may be read as shipped law. Fresh-context review findings are folded in below; the ballot texts remain the historical record and this section is the operative wording where they differ.
 
-Card #1894 supplies the package-only `contain`/`harden` facts and the `jet inspect guarantees` projection described below. Runtime fence activation remains owned by the shared sentry seam in card #1892; this slice does not claim that missing runtime behavior.
+Card #1894 supplies the package-only `contain`/`harden` facts and the `jet inspect guarantees` projection described below. D-HARDENED1 (card #1888) supplies the named hardened profile and its foreign-edge checks; all runtime sentry behavior remains in the shared Prelude seam.
 
 **D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889; implementation #1890)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `~` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `~x` remains the one copy spelling (D-SHAPE-COPY1 untouched); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
 
 **D-CONC-FREEZE1=A — `freeze` and `^`-captures** *(ratified 2026-08-12, card #1889; implementation #1891)*: `freeze(x)` is a prefix verb returning a deeply immutable value; bare task captures of frozen values are legal because no race can exist; writing to a frozen value is a compile error naming the freeze site (code assigned, registered, and snapshotted by #1891 per I4); freezing twice is the identity. `^x` in a group-child capture consumes the value into the task (existing use-after-move E0121 applies afterward). Baseline corrected per review: D-TASKBORROW1=A already lets lexical `task.group` children borrow readable places where non-overlap is provable, and D-CONC-SHARE1=A already replaces `Shared.read/.edit` closures with `shared expr` plus ordinary field access — `freeze` covers what neither does: sharing past provable non-overlap and past the lexical group, without a lock. E1101's fix menu becomes: give it (`^`), freeze it (`freeze`), or share it (`shared`). Extends D-TASKBORROW1; composes with D-CONC-SHARE1; `Shared`/`Cell` semantics unchanged.
 
-**D-MEM-SENTRY1=A — dev-tier sentries for `#Unsafe`** *(ratified 2026-08-12, card #1889; implementation #1892)*: default `jet run` guards raw operations inside `#Unsafe` gates — freed storage quarantined and poisoned, writes checked against allocation provenance the runtime already tracks (no new storage declaration exists or is added). A violation is a located runtime fault (proposed R08xx report family — registered and snapshot-tested by #1892 before any code ships, per I4) naming the gate and the unmet obligation, and it feeds the `jet audit memory` ledger. Interaction with D-UNSAFE-OBLIG1, stated precisely: required obligations keep their compile-time law — a runtime witness never substitutes for a required static discharge; sentries watch the operations whose obligations were asserted or `.Skip`-ped, and a fault is evidence the assertion was false on that run. **This decision is an owner-ratified I9 instrumentation carve-out, named here**: the dev and hardened tiers report a fault for operations whose release meaning is undefined behavior inside a gate; release without `harden` runs unwatched. Sentry logic lives in the Prelude; engines marshal (AGENTS.md I9). Refusal exit exists at both scopes: `#Policy(sentries: .Off)` and `policy: .{ sentries: .Off }` keep the dev tier but drop the instrumentation. The hardened shipping profile is card #1888 (open — a dependency, not shipped).
+**D-MEM-SENTRY1=A — dev-tier sentries for `#Unsafe`** *(ratified 2026-08-12, card #1889; implementation #1892)*: default `jet run` guards raw operations inside `#Unsafe` gates — released allocator storage is quarantined and poisoned, while a stack place registered by `mem.address_of` or raw-of is tied to the owning Jet frame token and expires when that frame/scope exits; writes are checked against allocation provenance the runtime already tracks (no new storage declaration exists or is added). Stack expiry marks the allocation dead without poisoning bytes. Heap, static, and foreign lifetime handling keeps its existing provenance and quarantine behavior, and an unframed stack address is never made process-global live. A violation is a located runtime fault (proposed R08xx report family — registered and snapshot-tested by #1892 before any code ships, per I4) naming the gate and the unmet obligation, and it feeds the `jet audit memory` ledger. Interaction with D-UNSAFE-OBLIG1, stated precisely: required obligations keep their compile-time law — a runtime witness never substitutes for a required static discharge; sentries watch the operations whose obligations were asserted or `.Skip`-ped, and a fault is evidence the assertion was false on that run. **This decision is an owner-ratified I9 instrumentation carve-out, named here**: the dev and hardened tiers report a fault for operations whose release meaning is undefined behavior inside a gate; release without `harden` runs unwatched. Sentry logic lives in the Prelude; engines marshal (AGENTS.md I9). Refusal exit exists at both scopes: `#Policy(sentries: .Off)` and `policy: .{ sentries: .Off }` keep the dev tier but drop the instrumentation. The hardened shipping profile is D-HARDENED1 (card #1888), which reuses this kernel and keeps safe Jet unchanged.
 
 **D-FFI-CAP1=A — capability sigils across the FFI boundary** *(ratified 2026-08-12, card #1889; implementation #1893)*: extern signatures may accept `&` and `^` and a returned foreign handle may declare `#Close(fn)`. Corrected per review — `&` keeps its exact D-MEM1 meaning: **exclusive access for exactly this call** (the foreign side may read and write through it, must not retain it; no copy). `^` gives: the foreign side owns and frees; the Jet name dies. `#Close(fn)` joins the `close(^)` protocol — the named function runs exactly once or the program does not compile (S63 handle precedent). The `extern c "lib" { … }` block in the proposal is **proposed grammar**, not current surface; #1893 integrates the tier with the ratified D-FFI-UNIFY1 structure (`<lang>.<lib>` mounts, `#FFI` bodies, `extern rust "crate@version"` + `= "rust::path"`) rather than minting a parallel declaration form. Capability-tier functions are generated bindings, so the existing D-FFI-UNIFY1 rule stands: bindings are callable directly; raw symbols outside bindings still require `#Unsafe`. Tier behavior follows the existing FFI law (JIT/dev reports the native boundary; native build executes it); the web tier is out of scope for native FFI per that same law. Amends the D-FFI-UNIFY1 by-value-only rule; E0702 narrows from a ban to a gate; the by-value floor stays the default tier.
 
 **D-MEM-GUARANTEE1=A — the guarantee dial** *(ratified 2026-08-12, card #1889; implementation #1894)*: `package.jet` policy gains `contain: [deps]` — the named dependencies compile with tracked-handle pointers inside a fence, so a wild write there faults with a report instead of corrupting the program's heap, at a cost confined to the fence — and `harden: true`, which keeps D-MEM-SENTRY1's sentries in release **and contains every foreign dependency** (with `harden: true` no dependency may report TRUSTED; the earlier sample showing one was wrong and is corrected in the proposal). `jet inspect guarantees` (implementation #1894) prints the per-component truth: proven, watched, fenced, or TRUSTED. **Named amendment to D-PACKAGE-POLICY-SCOPE1**: `contain` and `harden` are the first package-only policy keys — they govern dependencies and the build profile, not lexical source scopes, so they deliberately have no `#Policy` mirror; the mirror law continues to hold for every scope-governing key (`copies`, `sentries`). Both keys only tighten. Explicitly decoupled from gc (owner ruling): gc is a lifetime convenience and never a safety mechanism. R9 preserved: single files need no manifest and cannot use these keys; their guarantee line reads "your code: proven; externs: trusted". Freestanding targets report "prover + audit only" honestly.
+
+**D-HARDENED1=A — named hardened execution profile** *(ratified 2026-08-28, card #1888)*: `--profile=hardened` is a reserved profile for `jet build`, `jet test`, and `jet run`. It keeps release optimization while setting the same package hardening fact as `policy: .{ harden: true }`: every dependency is fenced and every reached `#Unsafe` sentry remains active. Ordinary `release` keeps its existing unwatched behavior unless package policy enables hardening. The profile adds no user syntax, dependency, or alternate memory mechanism. It reuses D-MEM-SENTRY1's shared Prelude kernel for raw-pointer range, liveness, and alignment checks; FFI `&` edges validate the call-only exclusive reference, and raw `Ptr<T>` edges retain strict provenance checks. Runtime-visible allocations crossing a foreign boundary use the same sentry and quarantine path. Hardened faults use the registered R08xx report with source file/line, gate reason, operation/obligation, and repair detail. Safe Jet-only programs omit sentry initialization and remain on the zero-overhead generated path. Native FFI remains subject to D-FFI-CAP1; web has no native FFI surface. The accepted residual is foreign code writing through an unseen pointer into safe storage; quarantine and boundary checks narrow but do not claim to detect that case.
+
+**D-TEAMPOLICY1=A — package team policy ceilings** *(ratified 2026-08-28, card #2329)*:
+`package.jet` may carry one normalized `policy:` record for the team's
+dependency, source, and expert boundaries. The canonical fields are:
+
+```jet
+policy: .{
+    effects: .{ "src": -[IO.Read]> },
+    unsafe: .Paths(["src/ffi"]),
+    expert: .Deny,
+    deps: .List(["serde"])
+}
+```
+
+`effects` maps project-relative source paths to positive effect ceilings. The
+longest matching path wins, and an empty ceiling (`-[]>`) is pure. `unsafe` is
+absent, `.Deny`, or a normalized project-relative `.Paths([...])` allow-list
+for `#Unsafe` gates. `expert` is absent, `.Deny`, or `.Allow`; `.Deny` rejects
+expert-only constructs such as `#Shield`, `#Context`, `#Region`, `#Transact`,
+`#Live`, `#Impure`, `#FX`, `assume_deterministic`, and uninitialized bindings.
+`deps` is absent or `.List([...])`; when present it is an allow-list over the
+resolved dependency graph, and an empty list denies every dependency. Repeated
+list entries normalize to one sorted value. `.Allow` is not a valid
+`policy.unsafe` value.
+
+The parser reports malformed package policy as `E1206`. A valid policy
+violation is a compile/check error `E2960` naming the policy key, rejected
+construct or effect, and project path. `jet inspect guarantees` projects the
+same normalized values, preserving absent keys and explicit empty deny lists;
+it never infers or silently widens a boundary.
 
 **Tooling element (no ballot; owner-designed; implementation #1895)**: `jet audit memory` + `jet fix memory` — every runtime-witness step-in (gc activity in `#Policy(gc)` scopes, sentry faults in gates) writes one ledger row; the fix command applies the static repair where exactly one exists and names the options where several do. This **composes with** the ratified D-OPTGC1 receipt (`jet run --gc-trace` + `jet gc report`, which already exists): `jet gc report` stays the per-run gc detail; `jet audit memory` is the cross-witness ledger above it. The ledger covers exercised runs only, and its output says so.
 
@@ -7898,6 +7968,13 @@ scientific, percent, binary, and octal selector rows. Each selector maps one-to-
 to a `core.text.fmt` function. `:Hex(n)` accepts an `Int`, emits lowercase
 hexadecimal, and zero-pads to the requested width through `core.text.fmt.hex`; all
 execution tiers must preserve the same output.
+
+**2026-08-30 — D-FMT-PLAIN1=A** *(card #2379; ratified 2026-08-30)*: `:Fixed(n)`
+and `core.text.fmt.decimal` emit machine-plain fixed decimals for `Float` and exact
+`Int` values. `:Grouped(n)` and `core.text.fmt.grouped` are the explicit human-grouping
+forms. Grouped uses the same nonnegative precision argument and `Float`/`Int`
+validation and diagnostics as Fixed/decimal. All tiers call the shared Prelude
+formatter.
 
 **2026-08-19 — D-ERR-DECON1=A** *(card #2041; ratified 2026-08-19)*: a `??`
 fallback block ends with one bare value or one real diverging tail, so
@@ -8546,6 +8623,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-FMT-INTERP1` | A | `c0s24t6f` |
 | `D-FMT-INTERP2` | A | `c067mxf7` |
 | `D-FMT-INTERP3` | B | `card #2257` |
+| `D-FMT-PLAIN1` | A | `card #2379` |
 | `D-FMT-PRETTY1` | A | `c0wfwj5u` |
 | `D-FMT-SIMPLIFY1` | A | `c0vh9xhx` |
 | `D-FMTCOLLAPSE1` | B | `c01pcsdb` |
@@ -8559,6 +8637,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-GAME-LOOP1` | A | `c0kix3zi` |
 | `D-GAME-REPLAY1` | A | `c9q0534j` |
 | `D-GENERIC-CALL1` | A | `c0o4z47c` |
+| `D-HARDENED1` | A | `c0zywt4t` |
 | `D-HTML-NAME1` | B | `c0t5khxi` |
 | `D-HTTP-CORS1` | A | `c047avgx` |
 | `D-HTTP-JSON1` | A | `c047avgx` |

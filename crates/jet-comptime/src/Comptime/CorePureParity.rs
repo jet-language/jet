@@ -21,6 +21,14 @@ use jet_foundation::Syntax::CoreCallPureRoute;
 
 type EvalResult = Result<CtValue, Diagnostic>;
 
+fn text_error(message: String) -> CtValue {
+    structure("TextError", vec![("message", CtValue::Str(message))])
+}
+
+fn range_error(reason: String) -> CtValue {
+    structure("RangeError", vec![("reason", CtValue::Str(reason))])
+}
+
 pub(super) fn evaluate(
     row: &jet_foundation::Syntax::CoreCallRecord,
     args: &[CtValue],
@@ -51,7 +59,17 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "period_months") => period_unit(args, span, 1),
         (CoreCallPureRoute::Time, "period_years") => period_unit(args, span, 0),
         (CoreCallPureRoute::Time, "from_unix_ms") => datetime_from_unix_ms(args, span),
+        (CoreCallPureRoute::Time, "from_unix_seconds") => datetime_from_unix_seconds(args, span),
+        (CoreCallPureRoute::Time, "from_unix_microseconds") => {
+            datetime_from_unix_microseconds(args, span)
+        }
+        (CoreCallPureRoute::Time, "from_unix_nanoseconds") => {
+            datetime_from_unix_nanoseconds(args, span)
+        }
         (CoreCallPureRoute::Time, "parse_rfc3339") => datetime_parse(args, span),
+        (CoreCallPureRoute::Time, "parse_iso_week_date") => date_iso_week_parse(args, span),
+        (CoreCallPureRoute::Time, "from_iso_week") => date_from_iso_week(args, span),
+        (CoreCallPureRoute::Time, "parse_zoned") => zoned_parse(args, span),
         (CoreCallPureRoute::Time, "parse_time") => local_time_parse(args, span),
         // Pure zone constructors: UTC is deterministic. Named IANA zones need a
         // host TZif database (filesystem), so comptime keeps UTC aliases only and
@@ -77,10 +95,9 @@ pub(super) fn evaluate(
             .map(|value| CtValue::Int(super::math_lib_pure::jet_std_math_to_bits(value))),
         (CoreCallPureRoute::Math, "from_bits") => one(args, 0, "core.math", "from_bits", span)
             .and_then(|value| {
-                exact_big(value)
-                    .ok_or_else(|| {
-                        unsupported(concat!("core", ".math.from_bits expects an Int"), span)
-                    })
+                exact_big(value).ok_or_else(|| {
+                    unsupported(concat!("core", ".math.from_bits expects an Int"), span)
+                })
             })
             .map(|big| {
                 CtValue::Float(CtFloat::f64(super::math_lib_pure::jet_std_math_from_bits(
@@ -367,6 +384,8 @@ pub(super) fn evaluate_method(
         ("Date" | "LocalDate", "iso_week", 0) => {
             date_from_value(recv, type_name, span).map(|date| CtValue::Int(date.inner.iso_week()))
         }
+        ("Date" | "LocalDate", "iso_week_year", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Int(date.inner.iso_week_year())),
         ("Date" | "LocalDate", "quarter_of_year", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Int(date.inner.quarter_of_year())),
         ("Date" | "LocalDate", "days_in_month", 0) => date_from_value(recv, type_name, span)
@@ -393,8 +412,17 @@ pub(super) fn evaluate_method(
                 Ok(CtValue::Int(date.inner.diff_days(&other.inner)))
             })
         }
-        ("Date" | "LocalDate", "add_period", 1) => date_from_value(recv, type_name, span)
-            .and_then(|date| date_add_period(date, &args[0], span).map(Date::value)),
+        ("Date" | "LocalDate", "add_period" | "subtract_period", 1) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
+                let period = period_from_value(&args[0], span)?;
+                let inner = if method == "add_period" {
+                    date.inner.add_period(&period)
+                } else {
+                    date.inner.subtract_period(&period)
+                };
+                Ok(Date::from_inner(inner).value())
+            })
+        }
         ("Date" | "LocalDate", "truncate", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| Ok(date_truncate(date, string_arg(args, 0, span)?).value())),
         ("Date" | "LocalDate", "format", 1) => {
@@ -406,8 +434,107 @@ pub(super) fn evaluate_method(
                 )))
             })
         }
-        ("LocalTime", "hour" | "minute" | "second", 0) => {
+        ("Date" | "LocalDate", "format_checked", 1) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
+                Ok(match date.inner.format_checked(&string_arg(args, 0, span)?.to_string()) {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                    Err(error) => CtValue::failed(Box::new(text_error(error))),
+                })
+            })
+        }
+        ("Date" | "LocalDate", "until" | "since", 5) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
+                let other = date_from_value(&args[0], "LocalDate", span)?;
+                let largest = string_arg(args, 1, span)?;
+                let smallest = string_arg(args, 2, span)?;
+                let mode = string_arg(args, 3, span)?;
+                let increment = int_arg(args, 4, span)?;
+                let ns = if method == "until" {
+                    date.inner
+                        .until_ns(&other.inner, largest, smallest, mode, increment)
+                } else {
+                    date.inner
+                        .since_ns(&other.inner, largest, smallest, mode, increment)
+                };
+                Ok(duration_value(ns))
+            })
+        }
+        ("Date" | "LocalDate", "with", 4) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
+                let result = date.inner.with_overflow(
+                    int_arg(args, 0, span)?,
+                    int_arg(args, 1, span)?,
+                    int_arg(args, 2, span)?,
+                    string_arg(args, 3, span)?,
+                );
+                Ok(match result {
+                    Ok(value) => CtValue::Present(Box::new(Date::from_inner(value).value())),
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+                })
+            })
+        }
+        ("LocalTime", "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond", 0) => {
             value_field(recv, "LocalTime", method, span)
+        }
+        ("LocalTime", "add_duration" | "subtract_duration", 1) => {
+            local_time_from_value(recv, span).and_then(|time| {
+                let ns = duration_ns(&args[0], span)?;
+                let inner = if method == "add_duration" {
+                    time.inner.add_duration_ns(ns)
+                } else {
+                    time.inner.subtract_duration_ns(ns)
+                };
+                Ok(LocalTime::from_inner(inner).value())
+            })
+        }
+        ("LocalTime", "round", 3) => local_time_from_value(recv, span).and_then(|time| {
+            Ok(LocalTime::from_inner(time.inner.round_with(
+                string_arg(args, 0, span)?,
+                int_arg(args, 1, span)?,
+                string_arg(args, 2, span)?,
+            ))
+            .value())
+        }),
+        ("LocalTime", "truncate" | "floor" | "ceil", 2) => {
+            local_time_from_value(recv, span).and_then(|time| {
+                let unit = string_arg(args, 0, span)?;
+                let increment = int_arg(args, 1, span)?;
+                let inner = match method {
+                    "truncate" => time.inner.truncate_with(unit, increment),
+                    "floor" => time.inner.floor_with(unit, increment),
+                    "ceil" => time.inner.ceil_with(unit, increment),
+                    _ => unreachable!("local-time alignment method guard"),
+                };
+                Ok(LocalTime::from_inner(inner).value())
+            })
+        }
+        ("LocalTime", "until" | "since", 5) => {
+            local_time_from_value(recv, span).and_then(|time| {
+                let other = local_time_from_value(&args[0], span)?;
+                let largest = string_arg(args, 1, span)?;
+                let smallest = string_arg(args, 2, span)?;
+                let mode = string_arg(args, 3, span)?;
+                let increment = int_arg(args, 4, span)?;
+                let ns = if method == "until" {
+                    time.inner
+                        .until_ns(&other.inner, largest, smallest, mode, increment)
+                } else {
+                    time.inner
+                        .since_ns(&other.inner, largest, smallest, mode, increment)
+                };
+                Ok(duration_value(ns))
+            })
+        }
+        ("LocalTime", "format", 1) => local_time_from_value(recv, span).and_then(|time| {
+            Ok(CtValue::Str(time.inner.format_pattern(&string_arg(args, 0, span)?.to_string())))
+        }),
+        ("LocalTime", "format_checked", 1) => {
+            local_time_from_value(recv, span).and_then(|time| {
+                Ok(match time.inner.format_checked(&string_arg(args, 0, span)?.to_string()) {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                    Err(error) => CtValue::failed(Box::new(text_error(error))),
+                })
+            })
         }
         ("LocalTime", "to_string", 0) => {
             local_time_from_value(recv, span).map(|time| CtValue::Str(time.to_string_fmt()))
@@ -415,6 +542,20 @@ pub(super) fn evaluate_method(
         ("DateTime", "to_timestamp", 0) => value_field(recv, "DateTime", "secs", span),
         ("DateTime", "to_unix_ms", 0) => datetime_from_value(recv, span)
             .map(|date_time| CtValue::Int(date_time.inner.to_unix_ms())),
+        ("DateTime", "to_unix_s", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.inner.to_unix_seconds())),
+        ("DateTime", "to_unix_us", 0) => datetime_from_value(recv, span).map(|date_time| {
+            match date_time.inner.to_unix_microseconds() {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+                Err(error) => CtValue::failed(Box::new(range_error(error))),
+            }
+        }),
+        ("DateTime", "to_unix_ns", 0) => datetime_from_value(recv, span).map(|date_time| {
+            match date_time.inner.to_unix_nanoseconds() {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+                Err(error) => CtValue::failed(Box::new(range_error(error))),
+            }
+        }),
         ("DateTime", "to_string", 0) => datetime_string(recv, span).map(CtValue::Str),
         ("DateTime", "date", 0) => {
             datetime_from_value(recv, span).map(|date_time| date_time.date().value())
@@ -446,16 +587,65 @@ pub(super) fn evaluate_method(
                 date_time.time(),
             )))
         }),
-        ("DateTime", "plus_duration", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+        ("DateTime", "plus_duration" | "subtract_duration", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             let ns = duration_ns(&args[0], span)?;
-            Ok(date_time.plus_ns(ns).value())
+            Ok(if method == "plus_duration" {
+                date_time.plus_ns(ns).value()
+            } else {
+                date_time.plus_ns(ns.saturating_neg()).value()
+            })
         }),
+        ("DateTime", "add_period" | "subtract_period", 1) => {
+            datetime_from_value(recv, span).and_then(|date_time| {
+                let period = period_from_value(&args[0], span)?;
+                let inner = if method == "add_period" {
+                    date_time.inner.add_period(&period)
+                } else {
+                    date_time.inner.subtract_period(&period)
+                };
+                Ok(DateTime::from_inner(inner).value())
+            })
+        }
         ("DateTime", "difference", 1) => datetime_from_value(recv, span).and_then(|left| {
             let right = datetime_from_value(&args[0], span)?;
             Ok(duration_value(left.inner.difference_ns(&right.inner)))
         }),
-        ("DateTime", "truncate" | "round" | "floor" | "ceil", 1) => datetime_from_value(recv, span)
-            .and_then(|date_time| Ok(date_time.align(string_arg(args, 0, span)?, method).value())),
+        ("DateTime", "truncate" | "floor" | "ceil", 2) => {
+            datetime_from_value(recv, span).and_then(|date_time| {
+                let unit = string_arg(args, 0, span)?;
+                let increment = int_arg(args, 1, span)?;
+                let inner = match method {
+                    "truncate" => date_time.inner.truncate_with(unit, increment),
+                    "floor" => date_time.inner.floor_with(unit, increment),
+                    "ceil" => date_time.inner.ceil_with(unit, increment),
+                    _ => unreachable!("datetime alignment method guard"),
+                };
+                Ok(DateTime::from_inner(inner).value())
+            })
+        }
+        ("DateTime", "round", 3) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(DateTime::from_inner(date_time.inner.round_with(
+                string_arg(args, 0, span)?,
+                int_arg(args, 1, span)?,
+                string_arg(args, 2, span)?,
+            ))
+            .value())
+        }),
+        ("DateTime", "until" | "since", 5) => {
+            datetime_from_value(recv, span).and_then(|date_time| {
+                let other = datetime_from_value(&args[0], span)?;
+                let largest = string_arg(args, 1, span)?;
+                let smallest = string_arg(args, 2, span)?;
+                let mode = string_arg(args, 3, span)?;
+                let increment = int_arg(args, 4, span)?;
+                let ns = if method == "until" {
+                    date_time.inner.until_ns(&other.inner, largest, smallest, mode, increment)
+                } else {
+                    date_time.inner.since_ns(&other.inner, largest, smallest, mode, increment)
+                };
+                Ok(duration_value(ns))
+            })
+        }
         ("DateTime", "replace", 6) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(DateTime::from_inner(date_time.inner.replace(
                 as_int(&args[0], span)?,
@@ -467,12 +657,52 @@ pub(super) fn evaluate_method(
             ))
             .value())
         }),
+        ("DateTime", "with", 7) => datetime_from_value(recv, span).and_then(|date_time| {
+            let result = date_time.inner.with_overflow(
+                int_arg(args, 0, span)?,
+                int_arg(args, 1, span)?,
+                int_arg(args, 2, span)?,
+                int_arg(args, 3, span)?,
+                int_arg(args, 4, span)?,
+                int_arg(args, 5, span)?,
+                string_arg(args, 6, span)?,
+            );
+            Ok(match result {
+                Ok(value) => CtValue::Present(Box::new(DateTime::from_inner(value).value())),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            })
+        }),
+        ("DateTime", "format_checked", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(match date_time.inner.format_checked(&string_arg(args, 0, span)?.to_string()) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                Err(error) => CtValue::failed(Box::new(text_error(error))),
+            })
+        }),
         ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(ZonedDateTime::from_datetime(date_time, zone_from_value(&args[0], span)?).value())
         }),
         ("Instant", "elapsed_millis", 0) => instant_elapsed_millis(recv, span),
         ("Instant", "elapsed", 0) => instant_elapsed(recv, span),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
+        ("Zone", "next_transition" | "previous_transition", 1) => {
+            zone_from_value(recv, span).and_then(|zone| {
+                let seconds = int_arg(args, 0, span)?;
+                let transition = if method == "next_transition" {
+                    zone.inner.next_transition(seconds)
+                } else {
+                    zone.inner.previous_transition(seconds)
+                };
+                Ok(option_int(transition))
+            })
+        }
+        ("Zone", "start_of_day", 1) => zone_from_value(recv, span).and_then(|zone| {
+            let date = date_from_value(&args[0], "LocalDate", span)?;
+            Ok(ZonedDateTime::from_inner(zone.inner.start_of_day_zoned(&date.inner)).value())
+        }),
+        ("Zone", "hours_in_day", 1) => zone_from_value(recv, span).and_then(|zone| {
+            let date = date_from_value(&args[0], "LocalDate", span)?;
+            Ok(CtValue::Int(zone.inner.hours_in_day(&date.inner)))
+        }),
         ("Fraction", "to_string", 0) => {
             fraction_from_value(recv, span).map(|f| CtValue::Str(f.to_string_rep()))
         }
@@ -578,12 +808,119 @@ pub(super) fn evaluate_method(
             let ns = duration_ns(&args[0], span)?;
             Ok(ZonedDateTime::from_inner(zoned.inner.add_duration_ns(ns)).value())
         }),
+        ("ZonedDateTime", "subtract_duration", 1) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                let ns = duration_ns(&args[0], span)?;
+                Ok(ZonedDateTime::from_inner(zoned.inner.subtract_duration_ns(ns)).value())
+            })
+        }
         ("ZonedDateTime", "add_period", 1) => zoned_from_value(recv, span).and_then(|zoned| {
             // I9/I8: the civil-vs-absolute rule is the Prelude kernel's, not this
             // tier's. Re-deriving it here (date → add_period → from_local) was a
             // second copy of `JetZonedDateTime::add_period`'s body.
             let period = period_from_value(&args[0], span)?;
             Ok(ZonedDateTime::from_inner(zoned.inner.add_period(&period)).value())
+        }),
+        ("ZonedDateTime", "subtract_period", 1) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                let period = period_from_value(&args[0], span)?;
+                Ok(ZonedDateTime::from_inner(zoned.inner.subtract_period(&period)).value())
+            })
+        }
+        ("ZonedDateTime", "with_time", 2) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                let time = local_time_from_value(&args[0], span)?;
+                let disambiguation = string_arg(args, 1, span)?;
+                Ok(match zoned.inner.with_time(&time.inner, disambiguation) {
+                    Ok(value) => CtValue::Present(Box::new(ZonedDateTime::from_inner(value).value())),
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+                })
+            })
+        }
+        ("ZonedDateTime", "with_zone", 1) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                let zone = zone_from_value(&args[0], span)?;
+                Ok(ZonedDateTime::from_inner(zoned.inner.with_zone(&zone.inner)).value())
+            })
+        }
+        ("ZonedDateTime", "until" | "since", 5) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                let other = zoned_from_value(&args[0], span)?;
+                let largest = string_arg(args, 1, span)?;
+                let smallest = string_arg(args, 2, span)?;
+                let mode = string_arg(args, 3, span)?;
+                let increment = int_arg(args, 4, span)?;
+                let ns = if method == "until" {
+                    zoned.inner.until_ns(&other.inner, largest, smallest, mode, increment)
+                } else {
+                    zoned.inner.since_ns(&other.inner, largest, smallest, mode, increment)
+                };
+                Ok(duration_value(ns))
+            })
+        }
+        ("ZonedDateTime", "next_transition" | "previous_transition", 0) => {
+            zoned_from_value(recv, span).map(|zoned| {
+                option_int(if method == "next_transition" {
+                    zoned.inner.next_transition()
+                } else {
+                    zoned.inner.previous_transition()
+                })
+            })
+        }
+        ("ZonedDateTime", "start_of_day", 0) => {
+            zoned_from_value(recv, span).map(|zoned| {
+                ZonedDateTime::from_inner(zoned.inner.start_of_day()).value()
+            })
+        }
+        ("ZonedDateTime", "hours_in_day", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Int(zoned.inner.hours_in_day()))
+        }
+        ("ZonedDateTime", "format_rfc9557", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Str(zoned.inner.format_rfc9557()))
+        }
+        ("ZonedDateTime", "format_checked", 1) => {
+            zoned_from_value(recv, span).and_then(|zoned| {
+                Ok(match zoned.inner.format_checked(&string_arg(args, 0, span)?.to_string()) {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                    Err(error) => CtValue::failed(Box::new(text_error(error))),
+                })
+            })
+        }
+        ("Period", "years" | "months" | "days", 0) => {
+            value_field(recv, "Period", method, span)
+        }
+        ("Period", "sign", 0) => period_from_value(recv, span)
+            .map(|period| CtValue::Int(period.sign())),
+        ("Period", "is_zero", 0) => period_from_value(recv, span)
+            .map(|period| CtValue::Bool(period.is_zero())),
+        ("Period", "abs" | "negated", 0) => period_from_value(recv, span).map(|period| {
+            let value = if method == "abs" { period.abs() } else { period.negated() };
+            period_value_from_inner(value)
+        }),
+        ("Period", "add" | "sub", 1) => period_from_value(recv, span).and_then(|period| {
+            let other = period_from_value(&args[0], span)?;
+            let value = if method == "add" {
+                period.add(&other)
+            } else {
+                period.sub(&other)
+            };
+            Ok(period_value_from_inner(value))
+        }),
+        ("Period", "total_in", 2) => period_from_value(recv, span).and_then(|period| {
+            let unit = string_arg(args, 0, span)?;
+            let value = match args.get(1) {
+                Some(CtValue::Struct { type_name, .. })
+                    if type_name == "Date" || type_name == "LocalDate" => {
+                    let anchor = date_from_value(&args[1], "LocalDate", span)?;
+                    period.total_in_date(unit, &anchor.inner)
+                }
+                Some(CtValue::Struct { type_name, .. }) if type_name == "DateTime" => {
+                    let anchor = datetime_from_value(&args[1], span)?;
+                    period.total_in_datetime(unit, &anchor.inner)
+                }
+                _ => 0.0,
+            };
+            Ok(CtValue::Float(CtFloat::f64(value)))
         }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
@@ -655,6 +992,15 @@ pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 pub(super) fn display(value: &CtValue) -> Option<String> {
+    // DataTree/JSON values use the ordered JSON projection on every tier. The
+    // generic enum renderer below is for nominal enums and would expose the
+    // erased `Object(JSONObject { ... })` carrier instead.
+    if matches!(
+        value,
+        CtValue::Enum { type_name, .. } if matches!(type_name.as_str(), "DataTree" | "JSON")
+    ) {
+        return Some(crate::Comptime::render_datatree_for_tir(value));
+    }
     if let Some(text) = io_error_display(value) {
         return Some(text);
     }
@@ -2129,6 +2475,12 @@ fn option_string(value: Option<&str>) -> CtValue {
     })
 }
 
+fn option_int(value: Option<i64>) -> CtValue {
+    value.map_or(CtValue::absent(Type::Int), |value| {
+        CtValue::Present(Box::new(CtValue::Int(value)))
+    })
+}
+
 // ── Civil time: CtValue adapters for the shared Prelude kernel ──────────────
 
 #[derive(Clone)]
@@ -2203,6 +2555,9 @@ struct LocalTime {
     hour: i64,
     minute: i64,
     second: i64,
+    millisecond: i64,
+    microsecond: i64,
+    nanosecond: i64,
 }
 
 impl LocalTime {
@@ -2211,6 +2566,9 @@ impl LocalTime {
             hour: inner.hour(),
             minute: inner.minute(),
             second: inner.second(),
+            millisecond: inner.millisecond(),
+            microsecond: inner.microsecond(),
+            nanosecond: inner.nanosecond(),
             inner,
         }
     }
@@ -2238,6 +2596,9 @@ impl LocalTime {
                 ("hour", CtValue::Int(self.hour)),
                 ("minute", CtValue::Int(self.minute)),
                 ("second", CtValue::Int(self.second)),
+                ("millisecond", CtValue::Int(self.millisecond)),
+                ("microsecond", CtValue::Int(self.microsecond)),
+                ("nanosecond", CtValue::Int(self.nanosecond)),
             ],
         )
     }
@@ -2527,7 +2888,37 @@ fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
             .ok_or_else(|| unsupported("time.zoned_local expects a Zone", span))?,
         span,
     )?;
-    Ok(ZonedDateTime::from_local(date, time, zone).value())
+    let disambiguation = args
+        .get(3)
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.as_str()),
+            _ => Err(unsupported(
+                "time.zoned_local expects a disambiguation String",
+                span,
+            )),
+        })
+        .transpose()?
+        .unwrap_or("compatible");
+    Ok(
+        match super::time_kernel::JetZonedDateTime::from_local_with_disambiguation(
+            &date.inner,
+            &time.inner,
+            &zone.inner,
+            disambiguation,
+        ) {
+            Ok(zoned) => CtValue::Present(Box::new(ZonedDateTime::from_inner(zoned).value())),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        },
+    )
+}
+
+fn zoned_parse(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        match super::time_kernel::jet_time_parse_zoned(&string_arg(args, 0, span)?.to_string()) {
+            Ok(zoned) => CtValue::Present(Box::new(ZonedDateTime::from_inner(zoned).value())),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        },
+    )
 }
 
 fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
@@ -2537,15 +2928,12 @@ fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
     let field_type_name = match value {
         CtValue::Struct {
-            type_name: actual,
-            ..
+            type_name: actual, ..
         } => {
             let actual = actual
                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                 .unwrap_or(actual.as_str());
-            if matches!(type_name, "Date" | "LocalDate")
-                && matches!(actual, "Date" | "LocalDate")
-            {
+            if matches!(type_name, "Date" | "LocalDate") && matches!(actual, "Date" | "LocalDate") {
                 actual
             } else {
                 type_name
@@ -2561,10 +2949,20 @@ fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date,
 }
 
 fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagnostic> {
-    Ok(LocalTime::new(
-        int_field(value, "LocalTime", "hour", span)?,
-        int_field(value, "LocalTime", "minute", span)?,
-        int_field(value, "LocalTime", "second", span)?,
+    let nanos = match field(value, "LocalTime", "nanosecond") {
+        Some(value) => as_int(value, span)?
+            .clamp(0, 999_999_999)
+            .try_into()
+            .unwrap_or(0),
+        None => 0,
+    };
+    Ok(LocalTime::from_inner(
+        super::time_kernel::JetLocalTime::with_nanosecond(
+            int_field(value, "LocalTime", "hour", span)?,
+            int_field(value, "LocalTime", "minute", span)?,
+            int_field(value, "LocalTime", "second", span)?,
+            nanos,
+        ),
     ))
 }
 
@@ -2635,6 +3033,10 @@ fn date_parse_call(args: &[CtValue], span: Span) -> EvalResult {
 
 fn period_value(years: i64, months: i64, days: i64) -> CtValue {
     let period = super::time_kernel::JetPeriod::new(years, months, days);
+    period_value_from_inner(period)
+}
+
+fn period_value_from_inner(period: super::time_kernel::JetPeriod) -> CtValue {
     let (years, months, days) = period.components();
     structure(
         "Period",
@@ -2716,6 +3118,55 @@ fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
             args, 0, span,
         )?))
         .value(),
+    )
+}
+
+fn datetime_from_unix_seconds(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_seconds(int_arg(
+            args, 0, span,
+        )?))
+        .value(),
+    )
+}
+
+fn datetime_from_unix_microseconds(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_microseconds(
+            int_arg(args, 0, span)?,
+        ))
+        .value(),
+    )
+}
+
+fn datetime_from_unix_nanoseconds(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_nanoseconds(
+            int_arg(args, 0, span)?,
+        ))
+        .value(),
+    )
+}
+
+fn date_iso_week_parse(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        match super::time_kernel::JetDate::parse_iso_week_date(string_arg(args, 0, span)?) {
+            Ok(date) => CtValue::Present(Box::new(Date::from_inner(date).value())),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        },
+    )
+}
+
+fn date_from_iso_week(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(
+        match super::time_kernel::jet_time_from_iso_week(
+            int_arg(args, 0, span)?,
+            int_arg(args, 1, span)?,
+            int_arg(args, 2, span)?,
+        ) {
+            Ok(date) => CtValue::Present(Box::new(Date::from_inner(date).value())),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        },
     )
 }
 
@@ -3326,15 +3777,9 @@ mod tests {
                     CtValue::Str("order-1".to_string()),
                 ),
                 ("duplicate".to_string(), CtValue::Bool(false)),
-                (
-                    "authority".to_string(),
-                    CtValue::Str("orders".to_string()),
-                ),
+                ("authority".to_string(), CtValue::Str("orders".to_string())),
                 ("generation".to_string(), CtValue::Int(2)),
-                (
-                    "signature".to_string(),
-                    CtValue::Str("sig".to_string()),
-                ),
+                ("signature".to_string(), CtValue::Str("sig".to_string())),
             ],
         };
         assert_eq!(

@@ -7,7 +7,7 @@ fn run() {
     source :: Path.from(root).join("source.txt")
     destination :: Path.from(root).join("destination.txt")
     files.write(source, "fixture") ?? panic("seed")
-    files.copy(source, destination).drop("the witness only needs call completion")
+    files.copy(source, destination) ?? panic("copy")
     print(true)
     text :: files.read(destination) ?? panic("read")
     assert((text == "fixture"))

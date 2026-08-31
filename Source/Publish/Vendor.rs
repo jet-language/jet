@@ -52,7 +52,8 @@ pub fn vendor(
                 "E2604",
                 format!("failed to inspect `{name}`: {e}"),
                 "vendored dependency trees must contain real files and directories".into(),
-                "remove symlinks from the dependency source and run `jet registry vendor` again".into(),
+                "remove symlinks from the dependency source and run `jet registry vendor` again"
+                    .into(),
                 None,
             )
         })?;
@@ -156,7 +157,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         if metadata.file_type().is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                format!("refusing symlink in dependency tree: {}", src_path.display()),
+                format!(
+                    "refusing symlink in dependency tree: {}",
+                    src_path.display()
+                ),
             ));
         }
         if metadata.is_dir() {
@@ -180,7 +184,10 @@ fn safe_component(value: &str) -> bool {
         && value != ".."
         && !value.contains(['/', '\\', ':'])
         && !value.chars().any(char::is_control)
-        && matches!(Path::new(value).components().next(), Some(Component::Normal(_)))
+        && matches!(
+            Path::new(value).components().next(),
+            Some(Component::Normal(_))
+        )
         && Path::new(value).components().nth(1).is_none()
 }
 

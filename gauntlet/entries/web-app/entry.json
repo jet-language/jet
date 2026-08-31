@@ -4,7 +4,7 @@
   "cells": ["webfront.app"],
   "mode": "web-app",
   "perf": false,
-  "languages": ["jet", "js"],
+  "languages": ["jet", "js", "node"],
   "build": {
     "jet": ["build", "main.jet"]
   },
@@ -16,6 +16,12 @@
     "run": {
       "jet": ["node", "runner.mjs"],
       "js": ["node", "runner.mjs"]
+    }
+  },
+  "non_applicable": {
+    "node": {
+      "reason": "The workload contract requires browser DOM interaction replay; a Node process alone does not provide the required DOM surface.",
+      "evidence": "spec.behavior requires mounting and clicking a DOM counter, while the declared js incumbent uses runner.mjs with a DOM shim. No generic Node rail can satisfy this browser contract without changing the workload."
     }
   },
   "authoring": {

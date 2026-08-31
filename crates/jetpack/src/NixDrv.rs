@@ -131,7 +131,7 @@ fn hex_encode(bytes: &[u8]) -> String {
         })
 }
 
-fn sha256_bytes(data: &[u8]) -> [u8; 32] {
+fn sha256_digest(data: &[u8]) -> [u8; 32] {
     SHA256::sha256(data)
 }
 
@@ -143,7 +143,7 @@ pub fn make_store_path(
     name: &str,
 ) -> String {
     let fingerprint = format!("{type_str}:{hash_with_algo}:{store_dir}:{name}");
-    let digest = compress_hash(&sha256_bytes(fingerprint.as_bytes()), 20);
+    let digest = compress_hash(&sha256_digest(fingerprint.as_bytes()), 20);
     format!("{store_dir}/{}-{name}", nix32_encode(&digest))
 }
 
@@ -186,7 +186,7 @@ pub fn make_fixed_output_path(
     }
     // flat / non-sha256-nar / git: digest = sha256("fixed:out:" + methodAlgo + ":" + hex + ":")
     let payload = format!("fixed:out:{method_algo}:{hash_hex}:");
-    let digest = sha256_bytes(payload.as_bytes());
+    let digest = sha256_digest(payload.as_bytes());
     make_store_path(
         store_dir,
         "output:out",
@@ -209,7 +209,7 @@ pub fn make_text_path(
         type_str.push(':');
         type_str.push_str(r);
     }
-    let h = sha256_bytes(contents);
+    let h = sha256_digest(contents);
     make_store_path(
         store_dir,
         &type_str,
@@ -718,7 +718,7 @@ pub fn hash_derivation_modulo(
                 ));
             }
             let payload = format!("fixed:out:{}:{}:{}", o.method_algo, o.hash_hex, o.path);
-            out.insert(name.clone(), sha256_bytes(payload.as_bytes()));
+            out.insert(name.clone(), sha256_digest(payload.as_bytes()));
         }
         out
     } else {
@@ -739,7 +739,7 @@ pub fn hash_derivation_modulo(
             }
         }
         let serialized = unparse_derive(drv, mask_outputs, Some(&inputs2));
-        let h = sha256_bytes(serialized.as_bytes());
+        let h = sha256_digest(serialized.as_bytes());
         let mut out = BTreeMap::new();
         for name in drv.outputs.keys() {
             out.insert(name.clone(), h);

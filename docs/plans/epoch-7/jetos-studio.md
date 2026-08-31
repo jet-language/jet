@@ -48,6 +48,27 @@ Hybrid path: the GUI is another source editor over the same modules. There is no
 GUI database, no generated private config language, and no setting that cannot
 be reviewed as Jet source.
 
+## Install-trust surface
+
+Studio renders `D-JOS-INSTALLTRUST1=A` as a capability-first install flow:
+
+- Anyone may install software they choose or build. An owner-built local
+  install and `jet run` do not require Jet notarization, catalog approval, or a
+  category decision.
+- Third-party and foreign apps run sandboxed with deny-by-default access to
+  files, network, devices, and agents. Studio shows each requested capability
+  and records an explicit grant in Jet configuration; installing an app never
+  grants authority implicitly.
+- Hangar hashes, optional publisher signatures, provenance, and catalog
+  ranking are identity and supply-chain signals. Studio may warn about an
+  unsigned remote artifact, but those signals never become a hard gate on
+  running owner software.
+- Generation and rollback facts stay visible with the install so a bad install
+  can be repaired without hiding the recovery path.
+- Family and enterprise locks are expert opt-in tightenings. They are not the
+  beginner default, and the same law applies to future jetos device classes
+  unless a later ballot amends it.
+
 ## Target architecture
 
 ```

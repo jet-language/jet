@@ -26,6 +26,10 @@ mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
+mod process_args_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
+}
+
 mod fs_ops_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
@@ -60,7 +64,7 @@ mod io_line_stream_prelude {
 // come from the same Prelude fragments emitted by AOT and included by the
 // resident host (I9).
 mod fs_prelude {
-    use super::fs_ops_kernel::{jet_fs_glob, jet_fs_open, jet_fs_rename};
+    use super::fs_ops_kernel::{jet_fs_canonicalize, jet_fs_glob, jet_fs_open, jet_fs_rename};
     use super::process_prelude::jet_std;
     use crate::fault_injection::jet_fault_should_fail;
 
@@ -76,6 +80,10 @@ mod fs_prelude {
 
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
+}
+
+mod platform_family_prelude {
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs");
 }
 
 mod env_config_prelude {
@@ -531,6 +539,36 @@ fn ambient_line_handle(
 }
 
 fn ambient_fs_walk(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    ambient_fs_walk_with_filter(args, span, false)
+}
+
+fn ambient_fs_walk_files(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    ambient_fs_walk_with_filter(args, span, true)
+}
+
+fn ambient_process_args(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if !args.is_empty() {
+        return Err(unsupported(&format!("core.process.{method} arguments"), span));
+    }
+    let argv = jet_codegen::Comptime::runtime_argv()
+        .unwrap_or_else(|| vec!["jet".to_string()]);
+    let values = if method == "args" {
+        process_args_kernel::jet_process_args_view(argv)
+    } else {
+        argv
+    };
+    Ok(CtValue::List(values.into_iter().map(CtValue::Str).collect()))
+}
+
+fn ambient_fs_walk_with_filter(
+    args: &[CtValue],
+    span: Span,
+    files_only: bool,
+) -> Result<CtValue, Diagnostic> {
     let Some(CtValue::Str(path)) = args.first() else {
         return Err(unsupported("core.files walk path", span));
     };
@@ -542,12 +580,21 @@ fn ambient_fs_walk(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
             "fault injected: FS.Read",
         ))));
     }
-    let mut entries = fs_walk_kernel::jet_fs_walk_parallel(
-        path,
-        path,
-        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
-        |_, error| error,
-    )
+    let mut entries = if files_only {
+        fs_walk_kernel::jet_fs_walk_files_parallel(
+            path,
+            path,
+            |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+            |_, error| error,
+        )
+    } else {
+        fs_walk_kernel::jet_fs_walk_parallel(
+            path,
+            path,
+            |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+            |_, error| error,
+        )
+    }
     .map_err(|error| {
         let kind = match error.kind() {
             std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "InvalidInput",
@@ -590,6 +637,24 @@ fn ambient_fs_rename(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic
         Err(error) => CtValue::failed(Box::new(process_io_error(error))),
     })
 }
+fn ambient_fs_fsync(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files fsync path", span));
+    };
+    Ok(match fs_prelude::jet_std_fs_fsync(path) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
+fn ambient_fs_symlink(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let (Some(CtValue::Str(from)), Some(CtValue::Str(to))) = (args.first(), args.get(1)) else {
+        return Err(unsupported("core.files symlink paths", span));
+    };
+    Ok(match fs_prelude::jet_std_fs_symlink(from, to) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
 
 fn ambient_fs_glob(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let Some(CtValue::Str(pattern)) = args.first() else {
@@ -599,6 +664,59 @@ fn ambient_fs_glob(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
         Ok(paths) => CtValue::Present(Box::new(CtValue::List(
             paths.into_iter().map(CtValue::Str).collect(),
         ))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
+
+fn ambient_fs_canonicalize(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files canonicalize path", span));
+    };
+    Ok(match fs_prelude::jet_std_fs_canonicalize(path) {
+        Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
+fn ambient_fs_absolute(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files absolute path", span));
+    };
+    Ok(match fs_prelude::jet_std_fs_absolute(path) {
+        Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
+
+fn ambient_fs_stat(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files stat path", span));
+    };
+    Ok(match fs_prelude::jet_fs_stat(path) {
+        Ok(stat) => CtValue::Present(Box::new(CtValue::Struct {
+            type_name: "Stat".to_string(),
+            fields: vec![
+                ("size".to_string(), CtValue::Int(stat.size)),
+                ("modified_ms".to_string(), CtValue::Int(stat.modified_ms)),
+                ("created_ms".to_string(), CtValue::Int(stat.created_ms)),
+                ("readonly".to_string(), CtValue::Bool(stat.readonly)),
+                ("is_file".to_string(), CtValue::Bool(stat.is_file)),
+                ("is_dir".to_string(), CtValue::Bool(stat.is_dir)),
+                ("is_symlink".to_string(), CtValue::Bool(stat.is_symlink)),
+                ("kind".to_string(), CtValue::Str(stat.kind)),
+                ("mode".to_string(), CtValue::Int(stat.mode)),
+            ],
+        })),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    })
+}
+
+fn ambient_fs_set_mode(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files set_mode path", span));
+    };
+    let mode = ambient_int_arg(args, 1, "core.files set_mode", span)?;
+    Ok(match fs_prelude::jet_std_fs_set_mode(path, mode) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
         Err(error) => CtValue::failed(Box::new(process_io_error(error))),
     })
 }
@@ -768,6 +886,18 @@ pub(crate) mod process_prelude {
                     cause: super::jet_outcome_of(cause),
                 }
             }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct Stat {
+            pub size: i64,
+            pub modified_ms: i64,
+            pub created_ms: i64,
+            pub readonly: bool,
+            pub is_file: bool,
+            pub is_dir: bool,
+            pub is_symlink: bool,
+            pub kind: String,
         }
 
         #[derive(Clone, Debug, PartialEq)]
@@ -1972,13 +2102,11 @@ fn process_unit_outcome(result: Result<(), process_prelude::IOError>) -> CtValue
     }
 }
 
-fn process_line_outcome(
-    result: Result<Option<String>, process_prelude::IOError>,
-) -> CtValue {
+fn process_line_outcome(result: Result<Option<String>, process_prelude::IOError>) -> CtValue {
     match result {
-        Ok(Some(line)) => CtValue::Present(Box::new(CtValue::Present(Box::new(
-            CtValue::Str(line),
-        )))),
+        Ok(Some(line)) => {
+            CtValue::Present(Box::new(CtValue::Present(Box::new(CtValue::Str(line)))))
+        }
         Ok(None) => CtValue::Present(Box::new(CtValue::absent(Type::String))),
         Err(error) => CtValue::failed(Box::new(process_io_error(error))),
     }
@@ -2269,8 +2397,7 @@ fn ambient_process_child_handle(
     let method = op.strip_prefix("ProcessChild:")?;
     if !matches!(
         method,
-        "id"
-            | "wait"
+        "id" | "wait"
             | "exited"
             | "kill"
             | "terminate"
@@ -2513,6 +2640,13 @@ fn password_hash_value(text: String) -> CtValue {
 fn digest256_value(bytes: Vec<u8>) -> CtValue {
     CtValue::Struct {
         type_name: "Digest256".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn digest512_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "Digest512".to_string(),
         fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
     }
 }
@@ -2796,18 +2930,24 @@ fn service_delivery_from_value(value: &CtValue) -> Option<service_prelude::JetDe
         return None;
     }
     let string = |name: &str| {
-        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        fields
+            .iter()
+            .find_map(|(field, value)| match (field.as_str(), value) {
             (field, CtValue::Str(value)) if field == name => Some(value.clone()),
             _ => None,
         })
     };
     let int = |name: &str| {
-        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        fields
+            .iter()
+            .find_map(|(field, value)| match (field.as_str(), value) {
             (field, CtValue::Int(value)) if field == name => Some(*value),
             _ => None,
         })
     };
-    let duplicate = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+    let duplicate = fields
+        .iter()
+        .find_map(|(field, value)| match (field.as_str(), value) {
         ("duplicate", CtValue::Bool(value)) => Some(*value),
         _ => None,
     })?;
@@ -2825,11 +2965,20 @@ fn service_delivery_receipt_value(receipt: service_prelude::JetDeliveryReceipt) 
         type_name: "DeliveryReceipt".to_string(),
         fields: vec![
             ("id".to_string(), CtValue::Str(receipt.id)),
-            ("state".to_string(), service_delivery_state_value(receipt.state)),
+            (
+                "state".to_string(),
+                service_delivery_state_value(receipt.state),
+            ),
             ("attempts".to_string(), CtValue::Int(receipt.attempts)),
-            ("retention_until".to_string(), CtValue::Int(receipt.retention_until)),
+            (
+                "retention_until".to_string(),
+                CtValue::Int(receipt.retention_until),
+            ),
             ("deadline".to_string(), CtValue::Int(receipt.deadline)),
-            ("idempotency_key".to_string(), CtValue::Str(receipt.idempotency_key)),
+            (
+                "idempotency_key".to_string(),
+                CtValue::Str(receipt.idempotency_key),
+            ),
             ("duplicate".to_string(), CtValue::Bool(receipt.duplicate)),
             ("authority".to_string(), CtValue::Str(receipt.authority)),
             ("generation".to_string(), CtValue::Int(receipt.generation)),
@@ -2843,7 +2992,10 @@ fn service_delivery_event_value(event: service_prelude::JetDeliveryEvent) -> CtV
         type_name: "DeliveryEvent".to_string(),
         fields: vec![
             ("sequence".to_string(), CtValue::Int(event.sequence)),
-            ("state".to_string(), service_delivery_state_value(event.state)),
+            (
+                "state".to_string(),
+                service_delivery_state_value(event.state),
+            ),
             ("attempts".to_string(), CtValue::Int(event.attempts)),
             ("timestamp".to_string(), CtValue::Int(event.timestamp)),
             ("signature".to_string(), CtValue::Str(event.signature)),
@@ -3084,6 +3236,9 @@ fn ambient_int_arg(
 ) -> Result<i64, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
+        Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| {
+            unsupported(&format!("{name} expects an Int that fits the host call"), span)
+        }),
         _ => Err(unsupported(
             &format!("{name} expects an Int argument"),
             span,
@@ -3267,14 +3422,7 @@ fn ambient_time_call(
         (module, method),
         (
             "core.time",
-            "now"
-                | "now_utc"
-                | "today"
-                | "instant"
-                | "sleep"
-                | "start"
-                | "parse_rfc3339"
-                | "new"
+            "now" | "now_utc" | "today" | "instant" | "sleep" | "start" | "parse_rfc3339" | "new"
         )
     ) {
         return None;
@@ -3717,7 +3865,7 @@ fn ambient_auth_session_call(
     }
     let result = (|| {
         let value = match method {
-            "register_user" => match Crypto::runtime::auth_register_user(
+            "register_user" => match Crypto::runtime::jet_auth_register_user(
                 auth_text_arg(args, 0, "core.auth user id", span)?,
                 auth_text_arg(args, 1, "core.auth password hash", span)?,
             ) {
@@ -3748,7 +3896,7 @@ fn ambient_auth_session_call(
                 Ok(token) => CtValue::Present(Box::new(CtValue::Str(token))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             },
-            "magic_link_consume" => match Crypto::runtime::auth_magic_link_consume(
+            "magic_link_consume" => match Crypto::runtime::jet_auth_magic_link_consume(
                 auth_text_arg(args, 0, "core.auth magic token", span)?,
                 auth_int_arg(args, 1, "core.auth now_ms", span)?,
                 auth_int_arg(args, 2, "core.auth ttl_ms", span)?,
@@ -3924,6 +4072,46 @@ pub(crate) fn ambient_core_call_keys() -> &'static [(&'static str, &'static str)
     jet_foundation::Syntax::core_call_ambient_routes()
 }
 
+fn ws_outcome<T>(result: Result<T, CtValue>, map: impl FnOnce(T) -> CtValue) -> CtValue {
+    match result {
+        Ok(value) => CtValue::Present(Box::new(map(value))),
+        Err(error) => CtValue::failed(Box::new(error)),
+    }
+}
+
+fn ambient_ws_core_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    match method {
+        "connect" if args.len() == 1 => {
+            let Some(CtValue::Str(url)) = args.first() else {
+                return Err(unsupported("core.net.ws.connect URL", span));
+            };
+            Ok(ws_outcome(
+                crate::net_http_rt::runtime_ws_connect(url.clone()),
+                |handle| http_handle_value("WsConn", handle),
+            ))
+        }
+        "upgrade" if args.len() == 1 => {
+            let Some(request_value) = args.first() else {
+                return Err(unsupported("core.net.ws.upgrade request", span));
+            };
+            let request = http_handle_id(request_value, "HTTPRequest")
+                .ok_or_else(|| unsupported("core.net.ws.upgrade request", span))?;
+            Ok(ws_outcome(
+                crate::net_http_rt::runtime_ws_upgrade(request),
+                |handle| http_handle_value("WsConn", handle),
+            ))
+        }
+        _ => Err(unsupported(
+            &format!("core.net.ws.{method} arguments"),
+            span,
+        )),
+    }
+}
+
 pub fn ambient_core_call(
     module: &str,
     method: &str,
@@ -4013,23 +4201,32 @@ pub fn ambient_core_call(
     }
     // D-BENCH-KEEP1=A: the interpreter marshals through the same Prelude
     // `jet_keep` sink as generated AOT; black-boxing the CtValue prevents the
-    // ambient path from becoming an optimizer-visible identity.
     if module == "core.prelude" && method == "keep" {
         let value = args.first().cloned().unwrap_or(CtValue::Unit);
         return Some(Ok(keep_kernel::jet_keep(value)));
     }
-    if module == "core.files" {
-        match method {
-            "open" => return Some(ambient_fs_open(&args, span)),
+        if module == "core.files" {
+            match method {
+                "open" => return Some(ambient_fs_open(&args, span)),
             "rename" => return Some(ambient_fs_rename(&args, span)),
+            "fsync" => return Some(ambient_fs_fsync(&args, span)),
+            "symlink" => return Some(ambient_fs_symlink(&args, span)),
             "glob" => return Some(ambient_fs_glob(&args, span)),
+            "stat" => return Some(ambient_fs_stat(&args, span)),
+            "set_mode" => return Some(ambient_fs_set_mode(&args, span)),
+            "canonicalize" => return Some(ambient_fs_canonicalize(&args, span)),
+            "absolute" => return Some(ambient_fs_absolute(&args, span)),
             "walk" | "walk_parallel" => return Some(ambient_fs_walk(&args, span)),
-            _ => {}
+            "walk_files" => return Some(ambient_fs_walk_files(&args, span)),
+                _ => {}
+            }
         }
-    }
-    if module == "core.term" && method == "stdin" {
-        return Some(Ok(ambient_stdin()));
-    }
+        if module == "core.process" && matches!(method, "argv" | "args") {
+            return Some(ambient_process_args(method, &args, span));
+        }
+        if module == "core.term" && method == "stdin" {
+            return Some(Ok(ambient_stdin()));
+        }
     if module == "core.term" {
         match method {
             "input" => {
@@ -4044,7 +4241,9 @@ pub fn ambient_core_call(
                 return Some(Ok(io_text_outcome(io_line_stream_prelude::readline())));
             }
             "read_all_input" if args.is_empty() => {
-                return Some(Ok(io_text_outcome(io_line_stream_prelude::read_all_input())));
+                return Some(Ok(
+                    io_text_outcome(io_line_stream_prelude::read_all_input()),
+                ));
             }
             _ => {}
         }
@@ -4206,6 +4405,12 @@ pub fn ambient_core_call(
                 .map_err(|error| unsupported(&error.to_string(), span)),
         );
     }
+    // I9: WebSocket calls use the shared Prelude carrier through the same
+    // runtime handle table as the resident JIT. The route and dispatcher
+    // manifest have already been checked above.
+    if module == "core.net.ws" {
+        return Some(ambient_ws_core_call(method, &args, span));
+    }
     // D-CRYPTO-VAULT1=A / I9: the vault read rows marshal to the same
     // `jet_vault_*_impl` symbols AOT emits and the Cranelift host calls
     // (`Crypto.rs`). Without this arm `core.crypto.vault` fell past every
@@ -4226,12 +4431,6 @@ pub fn ambient_core_call(
     if module == "core.watcher" {
         return Some(Err(unsupported(
             &format!("{module}.{method} requires an interpreter watcher host marshaller"),
-            span,
-        )));
-    }
-    if module == "core.net.ws" {
-        return Some(Err(unsupported(
-            "core.net.ws requires a native WebSocket carrier marshaller",
             span,
         )));
     }
@@ -4339,6 +4538,9 @@ pub fn ambient_core_call(
                 None => CtValue::absent(Type::String),
             },
         )),
+        ("core.sys", "family") => Some(Ok(CtValue::Str(
+            platform_family_prelude::jet_std_os_family(),
+        ))),
         ("core.term", "terminal_width") => Some(Ok(CtValue::Int(
             IO::term_prelude::jet_term_width(crate::CoreHost::jit_env_value),
         ))),
@@ -5016,6 +5218,26 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_digest256_bytes_impl(&digest),
             )))
         }
+        ("core.crypto", "blake3") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let digest = Crypto::runtime::jet_crypto_blake3_typed_impl(&data);
+            Some(Ok(digest256_value(
+                Crypto::runtime::jet_crypto_digest256_bytes_impl(&digest),
+            )))
+        }
+        ("core.crypto", "sha512") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let digest = Crypto::runtime::jet_crypto_sha512_typed_impl(&data);
+            Some(Ok(digest512_value(
+                Crypto::runtime::jet_crypto_digest512_bytes_impl(&digest),
+            )))
+        }
         ("core.crypto", "sha1") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
@@ -5079,6 +5301,19 @@ pub fn ambient_core_call(
                 &data,
             ))))
         }
+        ("core.crypto", "hmac_sha256") => {
+            let key = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let data = match as_bytes(args.get(1)?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Bytes(
+                Crypto::runtime::jet_crypto_hmac_sha256(&key, &data),
+            )))
+        }
         ("core.crypto", "pbkdf2_hmac") => {
             let password = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
@@ -5137,23 +5372,19 @@ pub fn ambient_core_call(
             };
             Some(Ok(CtValue::Bytes(bytes)))
         }
-        ("core.crypto", "sha512_bytes") => {
-            let data = match as_bytes(args.first()?, span) {
+        ("core.crypto", "__digest512_hex") => {
+            let bytes = match struct_bytes(args.first()?, "Digest512", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha512_impl(
-                &data,
-            ))))
+            Some(Ok(CtValue::Str(hex_bytes(&bytes))))
         }
-        ("core.crypto", "blake3_bytes") => {
-            let data = match as_bytes(args.first()?, span) {
+        ("core.crypto", "__digest512_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "Digest512", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_blake3_impl(
-                &data,
-            ))))
+            Some(Ok(CtValue::Bytes(bytes)))
         }
         ("core.crypto", "constant_time_equal_bytes") => {
             let a = match as_bytes(args.first()?, span) {
@@ -5568,7 +5799,9 @@ fn interp_http_job(value: &CtValue) -> Option<Arc<InterpHttpJob>> {
     if type_name != "__JetInterpHttpJob" {
         return None;
     }
-    let index = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+    let index = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
         ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
         _ => None,
     })?;
@@ -5597,9 +5830,7 @@ fn interp_http_callback(
     receive.recv().unwrap_or(CtValue::Unit)
 }
 
-fn start_interp_http_job(
-    run: impl FnOnce() -> Result<(), String> + Send + 'static,
-) -> CtValue {
+fn start_interp_http_job(run: impl FnOnce() -> Result<(), String> + Send + 'static) -> CtValue {
     let pump = interp_http_pump();
     let (result_sender, result_receiver) = mpsc::channel();
     std::thread::spawn(move || {
@@ -6080,7 +6311,10 @@ pub fn ambient_handle(
             }
             "ServiceRuntimeDeadLetter" => {
                 let Some(delivery) = args.first().and_then(service_delivery_from_value) else {
-                    return Some(Err(unsupported("ServiceRuntime.dead_letter delivery", span)));
+                    return Some(Err(unsupported(
+                        "ServiceRuntime.dead_letter delivery",
+                        span,
+                    )));
                 };
                 service_prelude::jet_services_runtime_dead_letter(&runtime, &delivery)
             }
@@ -7131,10 +7365,14 @@ fn ambient_http_server_call(
                 "HTTPMux",
             )
             .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
-            Ok(match crate::net_http_rt::runtime_http_server_bind(address, mux) {
-                Ok(handle) => CtValue::Present(Box::new(http_handle_value("HTTPServer", handle))),
+            Ok(
+                match crate::net_http_rt::runtime_http_server_bind(address, mux) {
+                    Ok(handle) => {
+                        CtValue::Present(Box::new(http_handle_value("HTTPServer", handle)))
+                    }
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
+                },
+            )
         }
         "mux" if args.is_empty() => Ok(http_handle_value(
             "HTTPMux",
@@ -7276,6 +7514,135 @@ fn ambient_http_server_call(
     }
 }
 
+fn ambient_ws_handle(
+    op: &str,
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let connection_method = op
+        .strip_prefix("HTTPServer:WsConn:")
+        .or_else(|| op.strip_prefix("HTTPClient:WsConn:"));
+    if let Some(method) = connection_method {
+        let result = match method {
+            "send_text" if args.len() == 1 => {
+                let connection = http_handle_id(recv, "WsConn")
+                    .ok_or_else(|| unsupported("WsConn.send_text receiver", span));
+                let Some(CtValue::Str(text)) = args.first() else {
+                    return Some(Err(unsupported("WsConn.send_text text", span)));
+                };
+                connection.map(|connection| {
+                    ws_outcome(
+                        crate::net_http_rt::runtime_ws_send_text(connection, text.clone()),
+                        |_| CtValue::Unit,
+                    )
+                })
+            }
+            "send_bytes" if args.len() == 1 => {
+                let connection = http_handle_id(recv, "WsConn")
+                    .ok_or_else(|| unsupported("WsConn.send_bytes receiver", span));
+                let Some(bytes) = args.first().and_then(net_bytes_value) else {
+                    return Some(Err(unsupported("WsConn.send_bytes bytes", span)));
+                };
+                connection.map(|connection| {
+                    ws_outcome(
+                        crate::net_http_rt::runtime_ws_send_bytes(connection, bytes),
+                        |_| CtValue::Unit,
+                    )
+                })
+            }
+            "recv" if args.is_empty() => {
+                let connection = http_handle_id(recv, "WsConn")
+                    .ok_or_else(|| unsupported("WsConn.recv receiver", span));
+                connection.map(|connection| {
+                    ws_outcome(crate::net_http_rt::runtime_ws_recv(connection), |message| {
+                        http_handle_value("WsMessage", message)
+                    })
+                })
+            }
+            "close" if args.len() == 2 => {
+                let connection = http_handle_id(recv, "WsConn")
+                    .ok_or_else(|| unsupported("WsConn.close receiver", span));
+                let Some(CtValue::Int(code)) = args.first() else {
+                    return Some(Err(unsupported("WsConn.close code", span)));
+                };
+                let Some(CtValue::Str(reason)) = args.get(1) else {
+                    return Some(Err(unsupported("WsConn.close reason", span)));
+                };
+                connection.map(|connection| {
+                    ws_outcome(
+                        crate::net_http_rt::runtime_ws_close(connection, *code, reason.clone()),
+                        |_| CtValue::Unit,
+                    )
+                })
+            }
+            _ => Err(unsupported(
+                &format!("WebSocket connection method {method}"),
+                span,
+            )),
+        };
+        return Some(result);
+    }
+
+    let message_method = op
+        .strip_prefix("HTTPServer:WsMessage:")
+        .or_else(|| op.strip_prefix("HTTPClient:WsMessage:"));
+    let Some(method) = message_method else {
+        return None;
+    };
+    let message = http_handle_id(recv, "WsMessage")
+        .ok_or_else(|| unsupported("WsMessage receiver", span));
+    let result = match method {
+        "is_text" if args.is_empty() => message.and_then(|message| {
+            crate::net_http_rt::runtime_ws_message_is_text(message)
+                .map(CtValue::Bool)
+                .map_err(|_| unsupported("WsMessage.is_text receiver", span))
+        }),
+        "is_binary" if args.is_empty() => message.and_then(|message| {
+            crate::net_http_rt::runtime_ws_message_is_binary(message)
+                .map(CtValue::Bool)
+                .map_err(|_| unsupported("WsMessage.is_binary receiver", span))
+        }),
+        "is_close" if args.is_empty() => message.and_then(|message| {
+            crate::net_http_rt::runtime_ws_message_is_close(message)
+                .map(CtValue::Bool)
+                .map_err(|_| unsupported("WsMessage.is_close receiver", span))
+        }),
+        "text" if args.is_empty() => message.map(|message| {
+            ws_outcome(
+                crate::net_http_rt::runtime_ws_message_text(message),
+                CtValue::Str,
+            )
+        }),
+        "bytes" if args.is_empty() => message.map(|message| {
+            ws_outcome(
+                crate::net_http_rt::runtime_ws_message_bytes(message),
+                CtValue::Bytes,
+            )
+        }),
+        _ => Err(unsupported(
+            &format!("WebSocket message method {method}"),
+            span,
+        )),
+    };
+    Some(result)
+}
+
+fn interp_http_callable_arity(value: &CtValue) -> Option<usize> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetTirCallable" {
+        return None;
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("arity", CtValue::Int(arity)) => usize::try_from(*arity).ok(),
+            _ => None,
+        })
+}
+
 fn ambient_http_handle(
     op: &str,
     recv: &mut CtValue,
@@ -7293,6 +7660,9 @@ fn ambient_http_handle(
             return Some(Err(unsupported("HTTP interpreter job", span)));
         };
         return Some(interp_http_job_reply(&job, args, span));
+    }
+    if let Some(result) = ambient_ws_handle(op, recv, args, span) {
+        return Some(result);
     }
     if let Some(static_call) = op.strip_prefix("HTTPStatic:") {
         let Some((path, method)) = static_call.rsplit_once(':') else {
@@ -7356,14 +7726,22 @@ fn ambient_http_handle(
         };
         let callable = args[1].clone();
         let pump = interp_http_pump();
+        let takes_request = match &callable {
+            CtValue::Closure(data) => !data.lambda.params.is_empty(),
+            _ => interp_http_callable_arity(&callable)
+                .map(|arity| arity != 0)
+                .unwrap_or(true),
+        };
         let callback: Arc<dyn Fn(CtValue) -> Result<CtValue, String> + Send + Sync> =
-            Arc::new(move |request| {
-                Ok(interp_http_callback(
-                    &pump,
-                    callable.clone(),
-                    vec![request],
-                ))
-            });
+            if takes_request {
+                Arc::new(move |request| {
+                    Ok(interp_http_callback(&pump, callable.clone(), vec![request]))
+                })
+            } else {
+                Arc::new(move |_request| {
+                    Ok(interp_http_callback(&pump, callable.clone(), vec![]))
+                })
+            };
         let Some(mux) = http_handle_id(recv, "HTTPMux") else {
             return Some(Err(unsupported("HTTPMux route receiver", span)));
         };
@@ -7511,6 +7889,23 @@ fn ambient_http_projection(
                     .map(|body| http_handle_value("HTTPBody", body))
                     .map_err(|error| unsupported(&error, span))
             }),
+        "HTTPServer:HTTPRequest:text" if args.is_empty() => {
+            handle("HTTPRequest", "HTTPRequest.text receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_text(request)
+                    .map(http_json_text_result)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
+        "HTTPServer:HTTPRequest:text" if args.len() == 1 => {
+            let Some(CtValue::Int(limit)) = args.first() else {
+                return Some(Err(unsupported("HTTPRequest.text limit", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest.text receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_text_with_limit(request, *limit)
+                    .map(http_json_text_result)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
         "HTTPServer:HTTPRequest:method" if args.is_empty() => handle("HTTPRequest", "HTTPRequest.method receiver")
             .and_then(|request| {
                 crate::net_http_rt::runtime_http_req_method(request)
@@ -7581,6 +7976,24 @@ fn ambient_http_projection(
                 .map(CtValue::Int)
                 .map_err(|error| unsupported(&error, span))
         }),
+        "HTTPClient:HTTPResponse:text" | "HTTPServer:HTTPResponse:text"
+            if args.is_empty() => handle("HTTPResponse", "HTTPResponse.text receiver")
+        .and_then(|response| {
+            crate::net_http_rt::runtime_http_resp_text(response)
+                .map(http_json_text_result)
+                .map_err(|error| unsupported(&error, span))
+        }),
+        "HTTPClient:HTTPResponse:text" | "HTTPServer:HTTPResponse:text"
+            if args.len() == 1 => {
+            let Some(CtValue::Int(limit)) = args.first() else {
+                return Some(Err(unsupported("HTTPResponse.text limit", span)));
+            };
+            handle("HTTPResponse", "HTTPResponse.text receiver").and_then(|response| {
+                crate::net_http_rt::runtime_http_resp_text_with_limit(response, *limit)
+                    .map(http_json_text_result)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
         "HTTPClient:HTTPResponse:body" | "HTTPServer:HTTPResponse:body"
             if args.is_empty() => handle("HTTPResponse", "HTTPResponse.body receiver")
         .and_then(|response| {
@@ -7652,6 +8065,14 @@ fn ambient_http_projection(
                     ),
                 }
                 .map_err(|error| unsupported(&error, span))?;
+                Ok(http_handle_value("HTTPRequest", updated))
+            })
+        }
+        "HTTPClient:HTTPRequest:json" if args.len() == 1 => {
+            handle("HTTPRequest", "HTTPRequest.json receiver").and_then(|request| {
+                let body = jet_codegen::Comptime::render_datatree_for_tir(&args[0]);
+                let updated = crate::net_http_rt::runtime_http_request_json(request, body)
+                    .map_err(|error| unsupported(&error, span))?;
                 Ok(http_handle_value("HTTPRequest", updated))
             })
         }

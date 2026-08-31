@@ -20,10 +20,7 @@ mod webapp;
 /// production helper private to the evaluator statement module while exposing
 /// only its diagnostic-shaped result to the exact crate-level regression test.
 #[cfg(test)]
-pub(crate) fn unmatched_enum_match_guard(
-    fallthrough: bool,
-    span: Span,
-) -> Result<(), Diagnostic> {
+pub(crate) fn unmatched_enum_match_guard(fallthrough: bool, span: Span) -> Result<(), Diagnostic> {
     stmts::unmatched_enum_match(fallthrough, span)
 }
 
@@ -94,9 +91,7 @@ mod disjoint_semantics {
 
 #[allow(dead_code)]
 mod division_semantics {
-    use super::contract_semantics::{
-        JET_ARITHMETIC_DIVIDE_OVERFLOW, JET_ARITHMETIC_DIVIDE_ZERO, JET_ARITHMETIC_DIVISION_ERROR,
-    };
+    use super::contract_semantics::{JET_ARITHMETIC_DIVIDE_OVERFLOW, JET_ARITHMETIC_DIVIDE_ZERO};
 
     // Division.rs also carries AOT-only stop adapters. The evaluator uses its
     // fallible Prelude policy below, so this path must never be called here.
@@ -303,19 +298,17 @@ fn task_failure_value(error: &Diagnostic, identity: &str) -> CtValue {
     let (variant, args) = match failure {
         crate::task_group::JetTaskFailure::Cancelled => ("Cancelled", Vec::new()),
         crate::task_group::JetTaskFailure::DeadlineBlown => ("DeadlineBlown", Vec::new()),
-        crate::task_group::JetTaskFailure::Panicked(reason) => {
-            (
-                "Panicked",
-                vec![(
-                    None,
-                    CtValue::Str(
-                        crate::scheduler::jet_observe_task_failure_message_for_identity(
-                            identity, reason,
-                        ),
+        crate::task_group::JetTaskFailure::Panicked(reason) => (
+            "Panicked",
+            vec![(
+                None,
+                CtValue::Str(
+                    crate::scheduler::jet_observe_task_failure_message_for_identity(
+                        identity, reason,
                     ),
-                )],
-            )
-        }
+                ),
+            )],
+        ),
     };
     CtValue::Enum {
         type_name: crate::Syntax::TYPE_TASK_FAILURE.to_string(),
@@ -1204,6 +1197,7 @@ struct EvalRecursiveFrame<'a> {
     body: EvalRecursiveBody<'a>,
     scope: HashMap<String, CtValue>,
     continuation: EvalRecursiveContinuation<'a>,
+    sentry_frame: Option<jet_foundation::MemSentry::JetSentryFrame>,
 }
 
 fn recursive_marker(stmt: &TStmt) -> bool {
@@ -1272,7 +1266,7 @@ fn recursive_call_prelude(stmts: &[TStmt]) -> bool {
 }
 
 fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], &[TStmt], bool)> {
-    let (expr, propagate) = match &expr.kind {
+    let (expr, mut propagate) = match &expr.kind {
         TExprKind::Try {
             inner,
             note: None,
@@ -1281,9 +1275,17 @@ fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], &[TStmt], boo
         } if expr.ty.is_scalar() => (inner.as_ref(), true),
         _ => (expr, false),
     };
+    // A bare return of a fallible call carries the callee's effective
+    // `Result<scalar, error>` value even when the source function's declared
+    // return is only the scalar success type. Treat that carrier call like `?`
+    // for the heap frame: unwrap `Present` on success and pass `Failed` through.
+    let carrier = matches!(
+        &expr.ty,
+        Type::Result { ok, .. } if ok.is_scalar()
+    );
     let (call, prelude) = match &expr.kind {
-        TExprKind::Call { .. } if expr.ty.is_scalar() => (expr, &[][..]),
-        TExprKind::InlineBlock(stmts) if expr.ty.is_scalar() => {
+        TExprKind::Call { .. } if expr.ty.is_scalar() || carrier => (expr, &[][..]),
+        TExprKind::InlineBlock(stmts) if expr.ty.is_scalar() || carrier => {
             let (tail, prelude) = stmts.split_last()?;
             let TStmt::ExprStmt(call) = tail else {
                 return None;
@@ -1298,6 +1300,7 @@ fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], &[TStmt], boo
     if !recursive_call_prelude(prelude) || !recursive_call_args(args) {
         return None;
     }
+    propagate |= carrier;
     Some((name.as_str(), args.as_slice(), prelude, propagate))
 }
 
@@ -1313,9 +1316,7 @@ fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
     let TExprKind::Binary { op, lhs, rhs, .. } = &expr.kind else {
         return None;
     };
-    if matches!(op, crate::AST::BinOp::And | crate::AST::BinOp::Or)
-        || !expr.ty.is_scalar()
-    {
+    if matches!(op, crate::AST::BinOp::And | crate::AST::BinOp::Or) || !expr.ty.is_scalar() {
         return None;
     }
     if let Some((name, args, prelude, propagate)) = recursive_call(lhs) {
@@ -1348,9 +1349,8 @@ fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
 fn recursive_return_payload<'a>(expr: &'a TExpr, result_carrier: bool) -> Option<&'a TExpr> {
     if result_carrier {
         match (&expr.kind, &expr.ty) {
-            (TExprKind::Ok(inner), Type::Result { .. }) if inner.ty.is_scalar() => {
-                Some(inner)
-            }
+            (TExprKind::Ok(inner), Type::Result { .. }) if inner.ty.is_scalar() => Some(inner),
+            _ if recursive_call(expr).is_some() => Some(expr),
             _ => None,
         }
     } else if expr.ty.is_scalar() {
@@ -1385,9 +1385,8 @@ fn recursive_body<'a>(func: &'a TFunc) -> Option<EvalRecursiveBody<'a>> {
         _ => return None,
     };
     if func.params.iter().any(|(_, ty, convention)| {
-            !ty.is_scalar() || matches!(convention, crate::AST::AccessConvention::Write)
-        })
-        || !func.generics.is_empty()
+        !ty.is_scalar() || matches!(convention, crate::AST::AccessConvention::Write)
+    }) || !func.generics.is_empty()
         || func.gc_return
         || func.return_view_provenance.is_some()
         || func.unsafe_gate.is_some()
@@ -1466,12 +1465,16 @@ fn recursive_chain_supported<'a>(funcs: &HashMap<String, &'a TFunc>, root: &'a T
         current = next;
     }
 }
+/// Native dispatch must not enter a scalar recursion cycle directly: doing so
+/// skips `run_func` and its heap-frame trampoline. Keep native dispatch for
+/// programs without a supported recursive cycle.
+fn recursive_calls_need_tir(funcs: &HashMap<String, &TFunc>) -> bool {
+    funcs
+        .values()
+        .any(|func| recursive_body(func).is_some() && recursive_chain_supported(funcs, func))
+}
 
-fn bind_recursive_params(
-    func: &TFunc,
-    args: &[CtValue],
-    scope: &mut HashMap<String, CtValue>,
-) {
+fn bind_recursive_params(func: &TFunc, args: &[CtValue], scope: &mut HashMap<String, CtValue>) {
     for (index, (name, _, _)) in func.params.iter().enumerate() {
         let jet = name
             .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
@@ -1546,6 +1549,12 @@ pub(super) struct EvalCtx<'a, 'debug> {
     pub(super) reflection_fields: HashMap<String, Vec<ReflectionField>>,
     /// Canonical typeable paths for runtime reflection.
     pub(super) reflect_paths: HashMap<String, String>,
+    /// #2252: the one projection from a TIR nominal spelling to the canonical
+    /// module-qualified identity every generated codec and method is lowered
+    /// under. Built by `TIR::lower_jit_program`; a spelling two modules could
+    /// claim has no entry, so an ambiguous name misses instead of running some
+    /// other module's body.
+    pub(super) nominal_identities: HashMap<String, String>,
     /// Declared generic parameter names per reflected struct, in source order.
     pub(super) struct_type_params: HashMap<String, Vec<String>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
@@ -1882,12 +1891,14 @@ fn select_eval_tasks(
         || wait_check().map_err(EvalTaskSelectError::Wait),
         |task| task.completion_order.get().copied().map(Into::into),
         |task| match task.completion.try_recv() {
-            Ok(completion) => Some(completion.result.map_err(|error| {
-                EvalTaskSelectError::Child {
-                    error,
-                    identity: task.identity.clone(),
-                }
-            })),
+            Ok(completion) => Some(
+                completion
+                    .result
+                    .map_err(|error| EvalTaskSelectError::Child {
+                        error,
+                        identity: task.identity.clone(),
+                    }),
+            ),
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => Some(Err(EvalTaskSelectError::Child {
                 error: unsupported("task completion", span),
@@ -1920,6 +1931,7 @@ struct EvalTaskConfig<'a> {
     memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
     reflection_fields: HashMap<String, Vec<ReflectionField>>,
     reflect_paths: HashMap<String, String>,
+    nominal_identities: HashMap<String, String>,
     struct_type_params: HashMap<String, Vec<String>>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -2192,6 +2204,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             memo_dependencies: self.memo_dependencies.clone(),
             reflection_fields: self.reflection_fields.clone(),
             reflect_paths: self.reflect_paths.clone(),
+            nominal_identities: self.nominal_identities.clone(),
             struct_type_params: self.struct_type_params.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
@@ -2242,10 +2255,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         ambient_handle,
                                         ambient_extern,
                                         || match runtime_argv.as_deref() {
-                                            Some(args) => crate::Comptime::with_runtime_argv(
-                                                args,
-                                                || Self::run_eval_job(job_config, job),
-                                            ),
+                                            Some(args) => {
+                                                crate::Comptime::with_runtime_argv(args, || {
+                                                    Self::run_eval_job(job_config, job)
+                                                })
+                                            }
                                             None => Self::run_eval_job(job_config, job),
                                         },
                                     )
@@ -2277,6 +2291,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         let _permit = job.permit;
         crate::scheduler::jet_observe_task_enter(job.observe_id);
         crate::scheduler::jet_scheduler_set_task_control(Some(job.control.clone()));
+        crate::scheduler::jet_scheduler_task_panic_enter();
+        crate::scheduler::jet_scheduler_task_completion_begin();
         let _deadline = job
             .context_deadline
             .map(crate::scheduler::jet_ctx_push_deadline);
@@ -2313,6 +2329,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             memo_dependencies: config.memo_dependencies,
             reflection_fields: config.reflection_fields,
             reflect_paths: config.reflect_paths,
+            nominal_identities: config.nominal_identities,
             struct_type_params: config.struct_type_params,
             struct_field_types: config.struct_field_types,
             codec_migrations: config.codec_migrations,
@@ -2337,7 +2354,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             loan_scopes: Vec::new(),
         };
         let mut scope = job.captured;
-        let result = match &job.lambda.body {
+        let _sentry_frame = job
+            .lambda
+            .uses_stack_sentry
+            .then(jet_foundation::MemSentry::jet_sentry_frame);
+        let unwind = crate::scheduler::jet_scheduler_catch_task_unwind(|| match &job.lambda.body {
             TJitSpawnBody::Expr(expr) => ctx.eval_expr(expr, &mut scope),
             TJitSpawnBody::Block { prefix, tail } => match ctx.exec_stmts(prefix, &mut scope) {
                 Ok(Flow::Return(value)) => Ok(value),
@@ -2381,8 +2402,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                 }
             }
-        };
+        });
+        crate::scheduler::jet_scheduler_task_completion_drain();
+        crate::scheduler::jet_scheduler_task_completion_end();
+        crate::scheduler::jet_scheduler_task_panic_leave();
         crate::scheduler::jet_scheduler_set_task_control(None);
+        let result = match unwind {
+            Ok(result) => result,
+            Err(payload) if crate::scheduler::jet_scheduler_is_cancel_unwind(&*payload) => {
+                Err(crate::Sema::Diagnostics::task_cancelled(Some(ctx.span())))
+            }
+            Err(payload) => std::panic::resume_unwind(payload),
+        };
         crate::scheduler::jet_observe_task_finish(job.observe_id);
         let order = config
             .runtime
@@ -2401,6 +2432,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         &mut self,
         site: usize,
         group: Option<&'a TExpr>,
+        label: Option<&str>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let group = match group {
@@ -2471,6 +2503,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             site,
             Some(&control),
         );
+        if let Some(label) = label {
+            crate::scheduler::jet_observe_task_set_label(observe_id, label);
+        }
         let identity = crate::scheduler::jet_observe_task_identity(observe_id);
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
@@ -3260,9 +3295,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Ok(CtValue::Present(Box::new(value)))
             }
             Err(EvalTaskSelectError::Wait(error)) => Err(error),
-            Err(EvalTaskSelectError::Child { error, identity }) => {
-                Ok(CtValue::failed(Box::new(task_failure_value(&error, &identity))))
-            }
+            Err(EvalTaskSelectError::Child { error, identity }) => Ok(CtValue::failed(Box::new(
+                task_failure_value(&error, &identity),
+            ))),
         }
     }
 
@@ -3413,14 +3448,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     ) -> Result<T, Diagnostic> {
         match result {
             Err(diagnostic) if self.runtime_execution && diagnostic.code == "E0953" => {
-                let message = diagnostic
-                    .why
-                    .strip_prefix(
-                        "while computing this value at compile time, the program panicked: ",
-                    )
-                    .unwrap_or(diagnostic.what.as_str())
-                    .to_string();
-                Err(self.runtime_stop(code, line, &message))
+                // E0953 is legacy transport from the shared comptime evaluator.
+                // Decode its borrowed payload once; the registered runtime row
+                // remains the sole owner of What/Why/Fix.
+                let message = jet_foundation::Outcome::jet_comptime_panic_message(
+                    &diagnostic.why,
+                    &diagnostic.what,
+                );
+                Err(self.runtime_stop(code, line, message))
             }
             result => result,
         }
@@ -3606,6 +3641,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 body,
                 scope: root_scope,
                 continuation: EvalRecursiveContinuation::Root,
+                sentry_frame: func
+                    .uses_stack_sentry
+                    .then(jet_foundation::MemSentry::jet_sentry_frame),
             }];
             let mut completed = None;
 
@@ -3614,10 +3652,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     let completed_frame = frames
                         .pop()
                         .expect("recursive evaluator completion without a frame");
+                    let result_carrier = completed_frame.body.result_carrier;
                     let continuation = completed_frame.continuation;
-                    let value = if completed_frame.body.result_carrier
-                        && !matches!(&value, CtValue::Failed(_))
-                    {
+                    // Expire the child before evaluating the parent's
+                    // continuation. A returned address must not remain live
+                    // merely because the worklist still owns the child frame.
+                    drop(completed_frame.sentry_frame);
+                    let value = if result_carrier && !matches!(&value, CtValue::Failed(_)) {
                         CtValue::Present(Box::new(value))
                     } else {
                         value
@@ -3627,9 +3668,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             EvalRecursiveContinuation::Root => Ok(value),
                             EvalRecursiveContinuation::Return { .. }
                             | EvalRecursiveContinuation::BinaryLeft { .. }
-                            | EvalRecursiveContinuation::BinaryRight { .. } => {
-                                Err(unsupported("recursive evaluator root continuation", self.span()))
-                            }
+                            | EvalRecursiveContinuation::BinaryRight { .. } => Err(unsupported(
+                                "recursive evaluator root continuation",
+                                self.span(),
+                            )),
                         };
                     }
 
@@ -3657,12 +3699,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             right,
                             propagate,
                         } => {
-                            let value =
-                                recursive_unwrap_result(value, propagate, self.span())?;
-                            let right = self.eval_expr_child(
-                                right,
-                                &mut frames[parent_index].scope,
-                            )?;
+                            let value = recursive_unwrap_result(value, propagate, self.span())?;
+                            let right =
+                                self.eval_expr_child(right, &mut frames[parent_index].scope)?;
                             self.eval_runtime_binop(op, value, right, self.span())?
                         }
                         EvalRecursiveContinuation::BinaryRight {
@@ -3670,8 +3709,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             left,
                             propagate,
                         } => {
-                            let value =
-                                recursive_unwrap_result(value, propagate, self.span())?;
+                            let value = recursive_unwrap_result(value, propagate, self.span())?;
                             self.eval_runtime_binop(op, left, value, self.span())?
                         }
                     };
@@ -3690,9 +3728,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Err(self.runtime_stop(
                             "E3012",
                             frame_func.line as u32,
-                            &jet_foundation::Outcome::jet_stack_overflow_message(
-                                &frame_func.name,
-                            ),
+                            &jet_foundation::Outcome::jet_stack_overflow_message(&frame_func.name),
                         ));
                     }
                     self.fuel = 0;
@@ -3722,14 +3758,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         args,
                         prelude,
                         propagate,
-                    } => {
-                        (
-                            name,
-                            args,
-                            prelude,
-                            EvalRecursiveContinuation::Return { propagate },
-                        )
-                    }
+                    } => (
+                        name,
+                        args,
+                        prelude,
+                        EvalRecursiveContinuation::Return { propagate },
+                    ),
                     EvalRecursiveStep::BinaryLeft {
                         op,
                         name,
@@ -3755,10 +3789,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         prelude,
                         propagate,
                     } => {
-                        let left = self.eval_expr_child(
-                            left,
-                            &mut frames[frame_index].scope,
-                        )?;
+                        let left = self.eval_expr_child(left, &mut frames[frame_index].scope)?;
                         (
                             name,
                             args,
@@ -3785,19 +3816,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 let mut child_args = Vec::with_capacity(call_args.len());
                 for arg in call_args {
-                    child_args.push(self.eval_expr_child(
-                        &arg.value,
-                        &mut call_scope,
-                    )?);
+                    child_args.push(self.eval_expr_child(&arg.value, &mut call_scope)?);
                 }
                 let child_func = self
                     .funcs
                     .get(name)
                     .copied()
                     .ok_or_else(|| unsupported(&format!("call `{name}`"), self.span()))?;
-                let child_body = recursive_body(child_func).ok_or_else(|| {
-                    unsupported("recursive evaluator frame shape", self.span())
-                })?;
+                let child_body = recursive_body(child_func)
+                    .ok_or_else(|| unsupported("recursive evaluator frame shape", self.span()))?;
                 let mut child_scope = HashMap::new();
                 bind_recursive_params(child_func, &child_args, &mut child_scope);
                 frames.push(EvalRecursiveFrame {
@@ -3805,6 +3832,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     body: child_body,
                     scope: child_scope,
                     continuation,
+                    sentry_frame: child_func
+                        .uses_stack_sentry
+                        .then(jet_foundation::MemSentry::jet_sentry_frame),
                 });
             }
         })();
@@ -3822,35 +3852,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        if func.name == "recurse" && self.call_depth < 3 {
-            let stmt_shapes: Vec<_> = func
-                .body
-                .iter()
-                .map(std::mem::discriminant)
-                .collect();
-            let return_shapes: Vec<_> = func
-                .body
-                .iter()
-                .filter_map(|stmt| match stmt {
-                    TStmt::Return(Some(expr)) => Some((
-                        expr.ty.clone(),
-                        std::mem::discriminant(&expr.kind),
-                    )),
-                    _ => None,
-                })
-                .collect();
-            eprintln!(
-                "[DEBUG-card2358] run_func depth={} body={} chain={} ret={:?} params={} body_len={} stmts={:?} returns={:?}",
-                self.call_depth,
-                recursive_body(func).is_some(),
-                recursive_chain_supported(&self.funcs, func),
-                func.ret,
-                func.params.len(),
-                func.body.len(),
-                stmt_shapes,
-                return_shapes,
-            );
-        }
         // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the
         // same Prelude store used by emitted Rust. Sema has already proved the
         // tuple safe to cache; this path never rechecks purity or hashability.
@@ -3861,12 +3862,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 .entry(func.name.clone())
                 .or_insert_with(|| crate::memo::JetMemo::with_bound(bound));
             if let Some(value) = memo.get(&args) {
-                return Ok(value);
+                return Ok(match func.ret.as_ref() {
+                    Some(ret) => Self::normalize_eval_value(value, ret),
+                    None => value,
+                });
             }
         }
         if let Some(body) = recursive_body(func) {
             if recursive_chain_supported(&self.funcs, func) {
-                return self.run_recursive_scalar(func, body, args, scope);
+                return self
+                    .run_recursive_scalar(func, body, args, scope)
+                    .map(|value| match func.ret.as_ref() {
+                        Some(ret) => Self::normalize_eval_value(value, ret),
+                        None => value,
+                    });
             }
         }
         if self.call_depth >= jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT {
@@ -3904,6 +3913,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 )
             }
         });
+        let _sentry_frame = func
+            .uses_stack_sentry
+            .then(jet_foundation::MemSentry::jet_sentry_frame);
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
@@ -3933,6 +3945,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
         }
         let result = result.map(|mut value| {
+            if let Some(ret) = func.ret.as_ref() {
+                value = Self::normalize_eval_value(value, ret);
+            }
             if let (
                 Some(Type::Named(expected)),
                 CtValue::Enum { type_name, .. } | CtValue::Struct { type_name, .. },
@@ -3950,8 +3965,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     // resolves through `jit::types_meta::core_alias_leaf`. A user
                     // record owns its spelling and keeps the annotated one, which
                     // is what its own method keys use.
+                    // #2252: an imported user record's shape row is registered
+                    // under its declaring module's identity, so ask the
+                    // projection before concluding the leaf is Core's.
+                    let user_record = self.struct_fields.contains_key(leaf)
+                        || self
+                            .canonical_nominal(leaf)
+                            .is_some_and(|key| self.struct_fields.contains_key(&key));
                     let core_leaf = expected.contains('.')
-                        && !self.struct_fields.contains_key(leaf)
+                        && !user_record
                         && crate::Codegen::core_rust_type_name(leaf).is_some();
                     let resolved = if core_leaf {
                         leaf.to_string()
@@ -4013,12 +4035,22 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
+        let arity = match &callable {
+            EvalCallable::Lambda { lambda, .. } => Some(lambda.params.len()),
+            EvalCallable::Named(name) => self.funcs.get(*name).map(|func| func.params.len()),
+            EvalCallable::Policy { callee, .. } => Self::callable_arity(callee),
+            EvalCallable::ComputeHandle { .. } => None,
+        };
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.callables.len() as i64;
         runtime.callables.push(callable);
+        let mut fields = vec![("index".to_string(), CtValue::Int(index))];
+        if let Some(arity) = arity {
+            fields.push(("arity".to_string(), CtValue::Int(arity as i64)));
+        }
         CtValue::Struct {
             type_name: "__JetTirCallable".to_string(),
-            fields: vec![("index".to_string(), CtValue::Int(index))],
+            fields,
         }
     }
 
@@ -4040,6 +4072,21 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             .iter()
             .find_map(|(name, value)| match (name.as_str(), value) {
                 ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                _ => None,
+            })
+    }
+
+    fn callable_arity(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirCallable" {
+            return None;
+        }
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("arity", CtValue::Int(arity)) => usize::try_from(*arity).ok(),
                 _ => None,
             })
     }
@@ -5183,6 +5230,8 @@ fn run_program_with_structs_on_stack(
         )
     })?;
     let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
+    let prefer_tir_calls = recursive_calls_need_tir(&funcs);
+
     let mut ctx = EvalCtx {
         funcs,
         base_dir: base_dir.to_path_buf(),
@@ -5205,7 +5254,7 @@ fn run_program_with_structs_on_stack(
             0
         },
         runtime_execution: matches!(stage, Comptime::PurityStage::RunTime),
-        prefer_tir_calls: false,
+        prefer_tir_calls,
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -5224,6 +5273,7 @@ fn run_program_with_structs_on_stack(
         memo_dependencies: program.memo_dependencies.clone(),
         reflection_fields: program.reflection_fields.clone(),
         reflect_paths: program.reflect_paths.clone(),
+        nominal_identities: program.nominal_identities.clone(),
         struct_type_params: program.struct_type_params.clone(),
         struct_field_types,
         codec_migrations: program.codec_migrations.clone(),
@@ -5335,6 +5385,9 @@ fn run_named_func_on_program_edition(
     let core_imports = HashMap::new();
     let task_control = crate::scheduler::jet_scheduler_current_task_control();
     let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
+    let prefer_tir_calls =
+        program.canonical_calls.contains(name) || recursive_calls_need_tir(&funcs);
+
     let mut ctx = EvalCtx {
         funcs,
         base_dir: PathBuf::from("."),
@@ -5352,7 +5405,7 @@ fn run_named_func_on_program_edition(
         // parity: guard tests/dev_default_parity.rs::dev_default_matches_compiled_binary
         impure_depth: 1,
         runtime_execution: true,
-        prefer_tir_calls: program.canonical_calls.contains(name),
+        prefer_tir_calls,
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -5371,6 +5424,7 @@ fn run_named_func_on_program_edition(
         memo_dependencies: program.memo_dependencies.clone(),
         reflection_fields: program.reflection_fields.clone(),
         reflect_paths: program.reflect_paths.clone(),
+        nominal_identities: program.nominal_identities.clone(),
         struct_type_params: program.struct_type_params.clone(),
         struct_field_types: program_struct_field_types(program),
         codec_migrations: program.codec_migrations.clone(),
@@ -5586,24 +5640,20 @@ fn eval_expr_hook(
                                 {
                                     TIR::lower_method(f, owner, &cx)
                                 }
-                                Some((owner, "encode")) => {
-                                    TIR::lower_trait_method(
-                                        f,
-                                        owner,
-                                        &cx,
-                                        crate::Generics::ENCODE,
-                                        f.compiler_generated,
-                                    )
-                                }
-                                Some((owner, "decode")) => {
-                                    TIR::lower_trait_method(
-                                        f,
-                                        owner,
-                                        &cx,
-                                        crate::Generics::DECODE,
-                                        f.compiler_generated,
-                                    )
-                                }
+                                Some((owner, "encode")) => TIR::lower_trait_method(
+                                    f,
+                                    owner,
+                                    &cx,
+                                    crate::Generics::ENCODE,
+                                    f.compiler_generated,
+                                ),
+                                Some((owner, "decode")) => TIR::lower_trait_method(
+                                    f,
+                                    owner,
+                                    &cx,
+                                    crate::Generics::DECODE,
+                                    f.compiler_generated,
+                                ),
                                 _ => TIR::lower_func(f, &cx),
                             };
                             lowered.name = name.clone();
@@ -5644,6 +5694,8 @@ fn eval_expr_hook(
         .as_deref_mut()
         .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
     let embed_inputs = req.embed_inputs.take();
+    let prefer_tir_calls = recursive_calls_need_tir(&funcs);
+
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
@@ -5658,7 +5710,7 @@ fn eval_expr_hook(
         gates,
         impure_depth,
         runtime_execution: false,
-        prefer_tir_calls: false,
+        prefer_tir_calls,
         repl_mode,
         repl_grants,
         repl_authorizer,
@@ -5677,6 +5729,7 @@ fn eval_expr_hook(
         memo_dependencies: HashMap::new(),
         reflection_fields: HashMap::new(),
         reflect_paths: HashMap::new(),
+        nominal_identities: HashMap::new(),
         struct_type_params: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
@@ -5796,6 +5849,8 @@ fn eval_block_hook(
         .as_deref_mut()
         .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
     let embed_inputs = req.embed_inputs.take();
+    let prefer_tir_calls = debugger_enabled || recursive_calls_need_tir(&funcs);
+
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
@@ -5810,7 +5865,7 @@ fn eval_block_hook(
         gates,
         impure_depth,
         runtime_execution: false,
-        prefer_tir_calls: debugger_enabled,
+        prefer_tir_calls,
         repl_mode,
         repl_grants,
         repl_authorizer,
@@ -5829,6 +5884,7 @@ fn eval_block_hook(
         memo_dependencies: HashMap::new(),
         reflection_fields: HashMap::new(),
         reflect_paths: HashMap::new(),
+        nominal_identities: HashMap::new(),
         struct_type_params: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
@@ -5877,11 +5933,19 @@ fn eval_block_hook(
 #[cfg(test)]
 mod tests {
     use super::{
-        mpsc, select_eval_tasks, unsupported, Arc, CtValue, EvalTask, EvalTaskCompletion, OnceLock,
-        Span,
+        mpsc, recursive_body, recursive_call, recursive_calls_need_tir, recursive_chain_supported,
+        recursive_return_payload, select_eval_tasks, unsupported, Arc, CtValue, EvalCtx,
+        EvalRuntime, EvalTask, EvalTaskCompletion, OnceLock, Span,
     };
     use crate::scheduler::JetTaskControl;
     use crate::task_group::JetTaskSelectMode;
+    use crate::Codegen::TIR::{
+        TCallArg, TExpr, TExprKind, TFunc, TFuncKind, TIfCond, TLocal, TStmt,
+    };
+    use crate::AST::{AccessConvention, BinOp, Type};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
 
     fn ready_task(order: u64, result: Result<CtValue, crate::Diagnostics::Diagnostic>) -> EvalTask {
         let (sender, completion) = mpsc::sync_channel(1);
@@ -5925,5 +5989,238 @@ mod tests {
         )
         .unwrap();
         assert_eq!(race, [CtValue::Int(22)]);
+    }
+    fn result_type() -> Type {
+        Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("Err".to_string())),
+        }
+    }
+
+    fn direct_result_call_expr(name: &str, step: i64) -> TExpr {
+        TExpr {
+            ty: result_type(),
+            kind: TExprKind::Call {
+                name: name.to_string(),
+                type_args: Vec::new(),
+                args: vec![TCallArg {
+                    value: TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::Binary {
+                            op: BinOp::Add,
+                            overflow: false,
+                            line: 1,
+                            lhs: Box::new(TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::Local(TLocal::user("n")),
+                            }),
+                            rhs: Box::new(TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::IntLit(step, None),
+                            }),
+                        },
+                    },
+                    template_items: None,
+                    borrow: false,
+                    mut_borrow: false,
+                    clone: false,
+                    arc_clone: false,
+                    fn_coerce: None,
+                    widen_to_vec: false,
+                    widen_to_union: None,
+                    box_as_trait: None,
+                }],
+            },
+        }
+    }
+
+    fn recursive_test_func(name: &str, callee: &str, step: i64, with_base: bool) -> TFunc {
+        let result_ty = result_type();
+        let mut body = Vec::new();
+        if with_base {
+            body.push(TStmt::If {
+                cond: TIfCond::Plain(TExpr {
+                    ty: Type::Bool,
+                    kind: TExprKind::Binary {
+                        op: BinOp::Eq,
+                        overflow: false,
+                        line: 1,
+                        lhs: Box::new(TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::Local(TLocal::user("n")),
+                        }),
+                        rhs: Box::new(TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::IntLit(0, None),
+                        }),
+                    },
+                }),
+                then_body: vec![TStmt::Return(Some(TExpr {
+                    ty: result_ty.clone(),
+                    kind: TExprKind::Ok(Box::new(TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::IntLit(0, None),
+                    })),
+                }))],
+                else_body: None,
+                else_is_elseif: false,
+            });
+        }
+        body.push(TStmt::Return(Some(direct_result_call_expr(callee, step))));
+        TFunc {
+            name: name.to_string(),
+            source_span: Span::new(0, 0),
+            params: vec![("n".to_string(), Type::Int, AccessConvention::Read)],
+            web_param_reconstructions: Vec::new(),
+            ret: Some(result_ty),
+            gc_return: false,
+            return_view_provenance: None,
+            generics: String::new(),
+            clone_types: Vec::new(),
+            is_main: false,
+            line: 1,
+            synthetic: false,
+            is_unsafe: false,
+            unsafe_gate: None,
+            is_pure: false,
+            memo_bound: None,
+            is_reactive: false,
+            reactive_upgrades: Vec::new(),
+            is_inline: false,
+            is_inline_always: false,
+            is_scalar: false,
+            kernel_proof: None,
+            memo_field: None,
+            uses_stack_sentry: false,
+            body,
+            kind: TFuncKind::TopLevel,
+        }
+    }
+
+    fn test_eval_ctx<'a>(
+        funcs: HashMap<String, &'a TFunc>,
+        core_imports: &'a HashMap<String, String>,
+        source_text: &str,
+    ) -> EvalCtx<'a, 'static> {
+        EvalCtx {
+            funcs,
+            base_dir: PathBuf::from("."),
+            source_file: "runtime_e3012.jet".to_string(),
+            source_text: source_text.to_string(),
+            fuel: 1_000,
+            sink: None,
+            core_imports,
+            globals: HashMap::new(),
+            sentry_places: HashMap::new(),
+            next_sentry_allocator: 1,
+            gates: jet_foundation::Policy::GateSet::allow(
+                jet_foundation::Policy::PolicyKey::Impure,
+            ),
+            impure_depth: 1,
+            runtime_execution: true,
+            prefer_tir_calls: true,
+            repl_mode: false,
+            repl_grants: Vec::new(),
+            repl_authorizer: None,
+            pending_return: None,
+            preserve_allocator_view: false,
+            deferred_closes: Vec::new(),
+            pending_flow: None,
+            collecting_items: Vec::new(),
+            call_depth: 0,
+            source_nesting: 0,
+            current_span: Span::new(0, 0),
+            current_fn: String::new(),
+            debugger: None,
+            embed_inputs: None,
+            struct_fields: HashMap::new(),
+            memo_dependencies: HashMap::new(),
+            reflection_fields: HashMap::new(),
+            reflect_paths: HashMap::new(),
+            nominal_identities: HashMap::new(),
+            struct_type_params: HashMap::new(),
+            struct_field_types: HashMap::new(),
+            codec_migrations: HashMap::new(),
+            distinct_bases: HashMap::new(),
+            distinct_ranges: HashMap::new(),
+            switch_subject: None,
+            runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+            local_cells: super::local_cell::EvalLocalCells::new(),
+            shared_transactions: Vec::new(),
+            spawn_lambdas: &[],
+            task_sender: None,
+            task_cancel: None,
+            task_paused: None,
+            context_deadline: None,
+            shield_depth: 0,
+            yield_consumer: None,
+            yield_scope: None,
+            scope_guards: Vec::new(),
+            shared_guards: Vec::new(),
+            txn_stack: Vec::new(),
+            place_loans: Vec::new(),
+            loan_scopes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn direct_result_carrier_recursion_unwraps_and_accepts_inline_tail() {
+        let direct = direct_result_call_expr("recurse", -1);
+        let (name, _, _, propagate) =
+            recursive_call(&direct).expect("direct effective carrier call is recursive");
+        assert_eq!(name, "recurse");
+        assert!(
+            propagate,
+            "carrier recursion must unwrap its successful payload"
+        );
+        assert!(recursive_return_payload(&direct, true).is_some());
+
+        let inline = TExpr {
+            ty: result_type(),
+            kind: TExprKind::InlineBlock(vec![TStmt::LineMarker(1), TStmt::ExprStmt(direct)]),
+        };
+        let (_, _, prelude, propagate) =
+            recursive_call(&inline).expect("carrier inline block tail is recursive");
+        assert_eq!(prelude.len(), 1);
+        assert!(propagate);
+        assert!(recursive_return_payload(&inline, true).is_some());
+
+        let recurse = recursive_test_func("recurse", "recurse", -1, true);
+        let funcs = HashMap::from([("recurse".to_string(), &recurse)]);
+        let core_imports = HashMap::new();
+        let mut ctx = test_eval_ctx(funcs, &core_imports, "fn recurse(n: Int) Int -> { ... }");
+        let value = ctx
+            .run_func(&recurse, vec![CtValue::Int(3)], &mut HashMap::new())
+            .expect("direct carrier recursion returns its declared scalar payload");
+        assert_eq!(value, CtValue::Present(Box::new(CtValue::Int(0))));
+    }
+
+    #[test]
+    fn mutual_direct_result_carrier_calls_form_one_heap_cycle() {
+        let left = recursive_test_func("left", "right", 1, false);
+        let right = recursive_test_func("right", "left", 1, false);
+        let funcs = HashMap::from([("left".to_string(), &left), ("right".to_string(), &right)]);
+        assert!(recursive_body(&left).is_some());
+        assert!(recursive_body(&right).is_some());
+        assert!(recursive_chain_supported(&funcs, &left));
+        assert!(recursive_chain_supported(&funcs, &right));
+        assert!(recursive_calls_need_tir(&funcs));
+    }
+
+    #[test]
+    fn direct_result_carrier_cycle_stops_with_e3012_at_frame_limit() {
+        let recurse = recursive_test_func("recurse", "recurse", 1, false);
+        let funcs = HashMap::from([("recurse".to_string(), &recurse)]);
+        let core_imports = HashMap::new();
+        let mut ctx = test_eval_ctx(
+            funcs,
+            &core_imports,
+            "fn recurse(n: Int) Int -> { return recurse(n + 1) }",
+        );
+        ctx.call_depth = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT - 1;
+        let error = ctx
+            .run_func(&recurse, vec![CtValue::Int(0)], &mut HashMap::new())
+            .expect_err("recursive frame limit must be a runtime diagnostic");
+        assert_eq!(error.code, "E3012");
     }
 }

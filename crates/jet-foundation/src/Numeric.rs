@@ -481,6 +481,33 @@ impl CtBigInt {
         Ok(value)
     }
 
+    /// Parse an exact integer in an explicit base.
+    pub fn from_radix(text: &str, radix: u32) -> Result<Self, String> {
+        if !(2..=36).contains(&radix) {
+            return Err(format!("integer radix must be between 2 and 36, got {radix}"));
+        }
+        let text = text.trim();
+        let (negative, digits) = if let Some(rest) = text.strip_prefix('-') {
+            (true, rest)
+        } else if let Some(rest) = text.strip_prefix('+') {
+            (false, rest)
+        } else {
+            (false, text)
+        };
+        if digits.is_empty() {
+            return Err("integer radix text is empty".to_string());
+        }
+        let mut value = Self::from_int(0);
+        for digit in digits.chars() {
+            let digit = digit
+                .to_digit(radix)
+                .ok_or_else(|| format!("invalid base-{radix} integer `{text}`"))?;
+            value = value.mul_small(radix).add_small(digit);
+        }
+        value.negative = negative && !value.is_zero();
+        Ok(value)
+    }
+
     fn normalize(mut self) -> Self {
         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
             self.limbs.pop();
@@ -1079,6 +1106,30 @@ impl CtBigInt {
             negative: false,
             limbs: self.limbs.clone(),
         }
+    }
+
+    /// Render this exact integer in an explicit base.
+    pub fn to_radix(&self, radix: u32) -> Result<String, String> {
+        if !(2..=36).contains(&radix) {
+            return Err(format!("integer radix must be between 2 and 36, got {radix}"));
+        }
+        let mut value = self.abs();
+        let mut digits = Vec::new();
+        while !value.is_zero() {
+            let (next, digit) = value.div_rem_small(radix);
+            digits.push(
+                char::from_digit(digit, radix)
+                    .expect("div_rem_small remainder is below the radix"),
+            );
+            value = next;
+        }
+        if digits.is_empty() {
+            digits.push('0');
+        } else {
+            digits.reverse();
+        }
+        let body = digits.into_iter().collect::<String>();
+        Ok(if self.negative { format!("-{body}") } else { body })
     }
 
     pub fn to_string_rep(&self) -> String {

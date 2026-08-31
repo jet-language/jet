@@ -109,6 +109,7 @@ const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
         &[
             ("CSVReader", CoreLeafKind::Plain),
             ("CSVWriter", CoreLeafKind::Plain),
+            ("CSVRow", CoreLeafKind::Plain),
         ],
     ),
     (

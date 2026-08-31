@@ -1347,3 +1347,11 @@ fn data_bind_cli_writes_visible_output_and_regeneration_diff() {
 
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn semantic_corpus_policy_runs_with_bindgen_outputs() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("bindgen")
+        .expect("bindgen corpus semantic policy");
+}

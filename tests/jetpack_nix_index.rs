@@ -13,9 +13,13 @@ mod jetpack_fixtures;
 mod nix_index_cache_server;
 
 use jetpack_fixtures::{
-    assert_jetos_stderr_snapshot_normalized, jetpack, Scratch,
+    assert_jetos_stderr_snapshot_normalized, copy_dir_recursive, jetpack, Scratch,
 };
 use nix_index_cache_server::{NixIndexCacheServer, LIB_PATH, RUNTIME_PATH};
+
+#[path = "support/static_file_server.rs"]
+mod static_file_server;
+use static_file_server::StaticFileServer;
 
 const REVISION: &str = nix_index_cache_server::REVISION;
 
@@ -128,6 +132,129 @@ fn index_backed_nixpkgs_records_complete_closure_and_both_proofs() {
         .facts
         .get("nix.index.proof.v1")
         .is_some_and(|proof| proof.contains("fixture-index-signer-v1")));
+}
+
+// Card #2200: the client must resolve the same signed layout from a
+// disk-backed static publication root.
+#[test]
+fn static_publication_resolves_signed_index_and_nix_objects() {
+    let project_root = Scratch::new("static-nix-index-project");
+    let hangar_root = Scratch::new("static-nix-index-hangar");
+    let publication = Scratch::new("static-nix-index-publication");
+    let server = NixIndexCacheServer::start_static_ripgrep(&project_root.path, &publication.path);
+    server.install(&hangar_root.path);
+    project(&project_root);
+
+    let output = build(&project_root, &hangar_root, false);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(publication.join("v1/nixpkgs-unstable/manifest.json").is_file());
+    assert!(publication
+        .join("v1/nixpkgs-unstable/manifest.json.sig.json")
+        .is_file());
+    assert!(publication.join("index-v1").is_dir());
+    assert!(publication.join("nar").is_dir());
+}
+
+// Card #2200: native cache objects remain content-addressed and untrusted
+// bytes never cross the normal verification boundary.
+#[test]
+fn static_jetpack_cache_admits_content_addressed_objects_only_after_verification() {
+    let root = Scratch::new("static-cache-root");
+    let source = Scratch::new("static-cache-source");
+    let local_cache = Scratch::new("static-cache-local");
+    let publication = Scratch::new("static-cache-publication");
+    let restored = Scratch::new("static-cache-restored");
+    let roots = Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    fs::write(source.join("payload"), "static cache bytes\n").expect("cache source");
+    let entry = Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "static-cache-demo".into(),
+            version: "1".into(),
+            reference: "./static-cache-demo".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256:static-cache-source".into(),
+                recipe_fingerprint: "sha256:static-cache-recipe".into(),
+                policy_fingerprint: "sha256:static-cache-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+            signature: String::new(),
+            provenance: "static cache test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .expect("ingest static cache entry")
+    .entry;
+    Store::bind_cache(
+        &roots,
+        "public",
+        vec![local_cache.path.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .expect("bind local cache publisher");
+    let published = Store::publish_cache_entry(&roots, &entry.id, "public")
+        .expect("publish signed local cache objects");
+    copy_dir_recursive(&local_cache.path, &publication.path);
+    assert!(publication
+        .join("nar")
+        .join(format!("{}.nar", entry.envelope.output_hash))
+        .is_file());
+    assert!(publication
+        .join(&format!("{}-{}.narinfo", entry.envelope.output_hash, entry.id))
+        .is_file());
+    assert!(publication
+        .join("trust")
+        .join(format!("{}-{}.receipt", entry.envelope.output_hash, entry.id))
+        .is_file());
+    assert!(!publication.join("cache-public.key").exists());
+
+    let server = StaticFileServer::start(&publication.path);
+    let trust_key = root.join("trust/cache-public.key");
+    Store::bind_cache(
+        &roots,
+        "public",
+        vec![server.endpoint.clone()],
+        Some(&trust_key),
+        None,
+        false,
+    )
+    .expect("bind read-only static cache");
+    let verified = Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .expect("verify static cache objects");
+    assert_eq!(verified.mirror, server.endpoint);
+    assert_eq!(verified.output_hash, published.output_hash);
+    assert_eq!(verified.witness, published.witness);
+    Store::substitute_cache_entry(&roots, &entry.id, "public", &restored.join("out"))
+        .expect("substitute from verified static cache");
+    assert_eq!(fs::read_to_string(restored.join("out/payload")).unwrap(), "static cache bytes\n");
+
+    let info_path = publication.join(&format!(
+        "{}-{}.narinfo",
+        entry.envelope.output_hash, entry.id
+    ));
+    let signed_info = fs::read(&info_path).expect("signed static narinfo");
+    let unsigned_info = String::from_utf8(signed_info.clone())
+        .expect("narinfo UTF-8")
+        .lines()
+        .filter(|line| !line.starts_with("Sig: "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&info_path, unsigned_info).expect("remove static narinfo signature");
+    assert!(Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    fs::write(info_path, signed_info).expect("restore signed static narinfo");
 }
 
 #[test]

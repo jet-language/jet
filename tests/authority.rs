@@ -128,6 +128,50 @@ fn run() {
 }
 
 #[test]
+fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
+    if !common::have_rustc() {
+        eprintln!(
+            "note: skipping plugin resource-bound integration test (need rustc)"
+        );
+        return;
+    }
+    let params = std::iter::repeat("\"x\"")
+        .take(1025)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        r#"
+use core.plugin as plugin
+
+fn run() {{
+    mathkit :: plugin.load("examples/features/packages/sandbox_mathkit/mathkit.wasm")
+    greeting :: mathkit.call_text("greet", ["Ada"]) ?? panic("plugin fixture")
+    print(greeting)
+    if mathkit.call_text("greet", [{params}]) == {{
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("rejected")
+        else -> print("unexpected")
+    }}
+}}
+"#,
+        params = params
+    );
+    let (code, stdout, stderr) = common::build_and_run("jet_plugin_limits", "wire_limit", &source);
+    assert_eq!(code, 0, "plugin resource test failed: {stderr}");
+    assert_eq!(stdout, "hello, Ada!\nrejected\n");
+    let runtime = include_str!("../crates/jet-pkg-model/src/Prelude/Plugin.rs");
+    for marker in [
+        "config.consume_fuel(true)",
+        "epoch_interruption(true)",
+        "memory_size(PLUGIN_MAX_MEMORY_BYTES)",
+        "table_elements(PLUGIN_MAX_TABLE_ELEMENTS)",
+        "PLUGIN_TIMEOUT_MS",
+    ] {
+        assert!(runtime.contains(marker), "plugin sandbox guard disappeared: {marker}");
+    }
+}
+
+#[test]
 fn authority_process_boundary_runs_on_all_hosted_tiers() {
     let source = r#"
 use core.process as process

@@ -53,8 +53,12 @@ fn content_keys_reuse_without_timestamps_and_invalidate_only_dependents() {
     let unrelated_claim = store
         .claim("check", &args, std::slice::from_ref(&unrelated))
         .unwrap();
-    store.write(&source_claim, 0, b"source", b"").unwrap();
-    store.write(&unrelated_claim, 0, b"unrelated", b"").unwrap();
+    store
+        .write(&source_claim, &args, 0, b"source", b"")
+        .unwrap();
+    store
+        .write(&unrelated_claim, &args, 0, b"unrelated", b"")
+        .unwrap();
 
     // Rewriting identical bytes changes ordinary filesystem metadata, but not
     // the receipt identity.
@@ -130,7 +134,7 @@ fn result_payloads_share_one_receipt_codec_and_store() {
             .record(kind, &args, std::slice::from_ref(&source), 0, payload, b"")
             .unwrap();
         let bytes = std::fs::read(store.object_path(&receipt.claim.key)).unwrap();
-        assert!(bytes.starts_with(b"jet-receipt-v1\0"));
+        assert!(bytes.starts_with(b"jet-receipt-v2\0"));
     }
 
     assert_eq!(store.list().unwrap().len(), payloads.len());

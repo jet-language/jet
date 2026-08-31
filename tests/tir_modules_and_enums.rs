@@ -9,6 +9,7 @@ use std::fs;
 
 use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi,
+    run_interpret_multi,
 };
 
 #[test]
@@ -481,6 +482,233 @@ fn message(value: Int) => String {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "10\nx:5\n7\n-2\n");
+}
+
+/// A direct result handler must preserve the imported module's Result carrier
+/// and canonical error identity on every execution tier.
+#[test]
+fn imported_module_direct_result_match_uses_error_identity() {
+    let main_src = "\
+module worker
+fn run() {
+    if worker.checked(-1) == {
+        .Ok(value) -> print(\"unexpected:{value}\")
+        .Err(error) -> print(\"failure:{error.message}\")
+    }
+    if worker.checked(7) == {
+        .Ok(value) -> print(\"success:{value}\")
+        .Err(error) -> print(\"unexpected:{error.message}\")
+    }
+}
+";
+    let worker_src = "\
+#Error
+pub struct WorkerError {
+    pub message: String
+}
+pub fn checked(value: Int) Int !WorkerError -> {
+    if value < 0 {
+        return Err(WorkerError{message: \"negative\"})
+    }
+    return Ok(value)
+}
+";
+    let files = [("main.jet", main_src), ("worker.jet", worker_src)];
+    let expected = "failure:negative\nsuccess:7\n";
+    let (code, stdout, stderr) =
+        run_default_multi("imported_direct_result_match", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    let (code, stdout, stderr) =
+        run_interpret_multi("imported_direct_result_match", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_direct_result_match", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// Returning a second fallible call from a `?? {}` handler must flatten that
+/// call's carrier. Otherwise the caller can select `.Ok` with an `Err` payload
+/// and fail later as an invalid struct field receiver.
+#[test]
+fn imported_fallible_handler_return_flattens_before_result_match() {
+    let main_src = "\
+module worker
+fn wire(value: worker.Value) String -> {
+    return value.id
+}
+fn run() {
+    if worker.checked() == {
+        .Err(error) -> print(\"failure:{error.message}\")
+        .Ok(value) -> print(wire(value))
+    }
+}
+";
+    let worker_src = "\
+#Error
+pub struct WorkerError {
+    pub message: String
+}
+pub struct Value {
+    pub id: String
+}
+fn inner() Bool !WorkerError -> {
+    return Err(WorkerError{message: \"inner\"})
+}
+fn fail_after(error: WorkerError) Value !WorkerError -> {
+    return Err(error)
+}
+pub fn checked() Value !WorkerError -> {
+    inner() ?? {
+        return fail_after(err)
+    }
+    return Ok(Value{id: \"unreachable\"})
+}
+";
+    let files = [("main.jet", main_src), ("worker.jet", worker_src)];
+    let expected = "failure:inner\n";
+    let (code, stdout, stderr) =
+        run_default_multi("imported_fallible_handler_return", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    let (code, stdout, stderr) =
+        run_interpret_multi("imported_fallible_handler_return", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    if have_rustc() {
+        let (code, stdout) =
+            build_and_run_multi("tir_imported_fallible_handler_return", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// Imported-module AOT must qualify generated root helpers from the nested
+/// emitter scope. This combines String trimming, outcome fallback/recovery,
+/// and an assertion inside a helper with a declared Jet error family.
+#[test]
+fn imported_module_aot_root_helpers() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+module helper
+fn run() {
+    trimmed :: helper.trimmed(\"  ok  \")
+    print(trimmed)
+    print(helper.checked(7) ?? -1)
+    print(helper.failed(-1) ?? -2)
+    recovered :: helper.recover()
+    print(recovered)
+    empty :: helper.empty_strings()
+    print(empty.len())
+    reset :: helper.reset_strings()
+    print(reset.len())
+}
+";
+    let helper_src = "\
+#Error
+pub enum HelperError {
+    Negative
+}
+pub fn trimmed(value: String) String -> {
+    return value.trim()
+}
+pub fn checked(value: Int) Int !HelperError -> {
+    assert(value >= 0)
+    return Ok(value)
+}
+pub fn failed(value: Int) Int !HelperError -> {
+    if value < 0 {
+        return Err(HelperError.Negative)
+    }
+    return Ok(value)
+}
+fn fallback_message() String -> {
+    return \"recovered\"
+}
+pub fn recover() String -> {
+    values := \"\".split(\",\").to_list()
+    return values.get(1) ?? fallback_message()
+}
+pub fn empty_strings() [String] -> {
+    return [String]{}
+}
+pub fn reset_strings() [String] -> {
+    values := [String]{}
+    values = [String]{}
+    return values
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_imported_module_aot_root_helpers",
+        "main.jet",
+        &[("main.jet", main_src), ("helper.jet", helper_src)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n7\n-2\nrecovered\n0\n0\n");
+}
+
+/// A taken `?? panic(...)` in an imported module must compile with the nested
+/// emitter's root-helper prefix and reach Jet's runtime stop.
+#[test]
+fn imported_module_aot_panic_fallback_uses_root_helper() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+module helper
+fn run() {
+    print(helper.panic_fallback())
+}
+";
+    let helper_src = "\
+pub fn panic_fallback() String -> {
+    values := \"\".split(\",\").to_list()
+    return values.get(1) ?? panic(\"imported fallback\")
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_imported_module_aot_panic_fallback",
+        "main.jet",
+        &[("main.jet", main_src), ("helper.jet", helper_src)],
+    );
+    assert_eq!(code, 70);
+    assert!(stdout.is_empty());
+}
+
+#[test]
+fn fallible_string_call_chain_dispatches_split() {
+    let source = r#"
+fn text() String !Err -> {
+    return Ok("a,b")
+}
+fn run() !Err {
+    print(text().split(",").to_list())
+}
+"#;
+    assert_tiers_agree("tir_fallible_string_split_chain", source, "[a, b]\n");
+}
+
+#[test]
+fn fallible_string_explicit_try_chain_dispatches_split() {
+    let source = r#"
+fn text() String !Err -> {
+    return Ok("a,b")
+}
+fn run() !Err {
+    print((text()?).split(",").to_list())
+}
+"#;
+    assert_tiers_agree(
+        "tir_fallible_string_explicit_try_split_chain",
+        source,
+        "[a, b]\n",
+    );
 }
 
 #[test]

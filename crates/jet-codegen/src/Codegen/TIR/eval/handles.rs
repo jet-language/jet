@@ -7,7 +7,7 @@ use crate::Codegen::TIR::THandleOp;
 use crate::Comptime::Builtins::{
     apply_method, apply_mutating, apply_mutating_with_type, exact_big, exact_int_value,
 };
-use crate::Comptime::{CtValue, DevSink};
+use crate::Comptime::{CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Type;
 use jet_foundation::Reflection::ReflectionField;
@@ -23,6 +23,7 @@ mod duration_kernel {
 #[allow(dead_code)]
 mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
+    include!("../../../Prelude/Core/Duration.rs");
     include!("../../../Prelude/Core/Time.rs");
 }
 
@@ -72,7 +73,12 @@ fn duration_scaled_value(
     } else {
         duration_kernel::jet_duration_kernel_scale(value, factor)
     }
-    .ok_or_else(|| unsupported(duration_kernel::jet_duration_kernel_scale_error_reason(), span))?;
+    .ok_or_else(|| {
+        unsupported(
+            duration_kernel::jet_duration_kernel_scale_error_reason(),
+            span,
+        )
+    })?;
     Ok(CtValue::Struct {
         type_name: crate::Syntax::DURATION_TYPE.to_string(),
         fields: vec![("ns".to_string(), CtValue::Int(value))],
@@ -95,10 +101,11 @@ fn civil_time_date(value: &CtValue) -> Option<time_kernel::JetDate> {
 }
 
 fn civil_time_local_time(value: &CtValue) -> Option<time_kernel::JetLocalTime> {
-    Some(time_kernel::JetLocalTime::new(
+    Some(time_kernel::JetLocalTime::with_nanosecond(
         civil_time_int(value, "hour")?,
         civil_time_int(value, "minute")?,
         civil_time_int(value, "second")?,
+        civil_time_int(value, "nanosecond").unwrap_or(0) as u32,
     ))
 }
 
@@ -140,13 +147,7 @@ fn civil_time_kind(value: &CtValue) -> Option<&str> {
         .unwrap_or(type_name);
     matches!(
         type_name,
-        "Date"
-            | "LocalDate"
-            | "LocalTime"
-            | "DateTime"
-            | "Instant"
-            | "ZonedDateTime"
-            | "Duration"
+        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime" | "Duration"
     )
     .then_some(type_name)
 }
@@ -219,28 +220,21 @@ fn civil_time_kernel_order(
         (CivilTimeKernelValue::Date(left), CivilTimeKernelValue::Date(right)) => {
             Ok(left.cmp(&right))
         }
-        (
-            CivilTimeKernelValue::LocalTime(left),
-            CivilTimeKernelValue::LocalTime(right),
-        ) => Ok(left.cmp(&right)),
-        (
-            CivilTimeKernelValue::DateTime(left),
-            CivilTimeKernelValue::DateTime(right),
-        ) => Ok(left.cmp(&right)),
-        (
-            CivilTimeKernelValue::Instant(left),
-            CivilTimeKernelValue::Instant(right),
-        ) => Ok(jet_time_instant_ordering(
-            time_kernel::jet_time_instant_compare(left, right),
-        )),
-        (
-            CivilTimeKernelValue::Zoned(left),
-            CivilTimeKernelValue::Zoned(right),
-        ) => Ok(left.cmp(&right)),
-        (
-            CivilTimeKernelValue::Duration(left),
-            CivilTimeKernelValue::Duration(right),
-        ) => Ok(left.cmp(&right)),
+        (CivilTimeKernelValue::LocalTime(left), CivilTimeKernelValue::LocalTime(right)) => {
+            Ok(left.cmp(&right))
+        }
+        (CivilTimeKernelValue::DateTime(left), CivilTimeKernelValue::DateTime(right)) => {
+            Ok(left.cmp(&right))
+        }
+        (CivilTimeKernelValue::Instant(left), CivilTimeKernelValue::Instant(right)) => Ok(
+            jet_time_instant_ordering(time_kernel::jet_time_instant_compare(left, right)),
+        ),
+        (CivilTimeKernelValue::Zoned(left), CivilTimeKernelValue::Zoned(right)) => {
+            Ok(left.cmp(&right))
+        }
+        (CivilTimeKernelValue::Duration(left), CivilTimeKernelValue::Duration(right)) => {
+            Ok(left.cmp(&right))
+        }
         _ => Err(unsupported(
             &format!("cannot compare civil-time `{kind}` values"),
             span,
@@ -257,26 +251,21 @@ fn civil_time_kernel_equal(
     let (left, right) = civil_time_kernel_pair(kind, left, right, span)?;
     match (left, right) {
         (CivilTimeKernelValue::Date(left), CivilTimeKernelValue::Date(right)) => Ok(left == right),
-        (
-            CivilTimeKernelValue::LocalTime(left),
-            CivilTimeKernelValue::LocalTime(right),
-        ) => Ok(left == right),
-        (
-            CivilTimeKernelValue::DateTime(left),
-            CivilTimeKernelValue::DateTime(right),
-        ) => Ok(left == right),
-        (
-            CivilTimeKernelValue::Instant(left),
-            CivilTimeKernelValue::Instant(right),
-        ) => Ok(left == right),
-        (
-            CivilTimeKernelValue::Zoned(left),
-            CivilTimeKernelValue::Zoned(right),
-        ) => Ok(left == right),
-        (
-            CivilTimeKernelValue::Duration(left),
-            CivilTimeKernelValue::Duration(right),
-        ) => Ok(left == right),
+        (CivilTimeKernelValue::LocalTime(left), CivilTimeKernelValue::LocalTime(right)) => {
+            Ok(left == right)
+        }
+        (CivilTimeKernelValue::DateTime(left), CivilTimeKernelValue::DateTime(right)) => {
+            Ok(left == right)
+        }
+        (CivilTimeKernelValue::Instant(left), CivilTimeKernelValue::Instant(right)) => {
+            Ok(left == right)
+        }
+        (CivilTimeKernelValue::Zoned(left), CivilTimeKernelValue::Zoned(right)) => {
+            Ok(left == right)
+        }
+        (CivilTimeKernelValue::Duration(left), CivilTimeKernelValue::Duration(right)) => {
+            Ok(left == right)
+        }
         _ => Err(unsupported(
             &format!("cannot compare civil-time `{kind}` values"),
             span,
@@ -432,6 +421,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::PathToString => "PathToString",
         THandleOp::PathJoin => "PathJoin",
         THandleOp::PathNormalize => "PathNormalize",
+        THandleOp::PathIsWithin => "PathIsWithin",
         THandleOp::DBValueInt => "DBValueInt",
         THandleOp::DBValueFloat => "DBValueFloat",
         THandleOp::DBValueText => "DBValueText",
@@ -780,9 +770,7 @@ fn db_value_result(recv: &CtValue, want: &str, span: Span) -> Result<CtValue, Di
 fn datatree_int_result(recv: &CtValue) -> CtValue {
     let result = match recv {
         CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.as_slice()) {
-            ("Int", [(_, value @ (CtValue::Int(_) | CtValue::BigInt(_)))]) => {
-                Ok(value.clone())
-            }
+            ("Int", [(_, value @ (CtValue::Int(_) | CtValue::BigInt(_)))]) => Ok(value.clone()),
             // Typed-JSON lexical `Number` carrier: same projection as the
             // Prelude accessor (DataTree.rs `int()`), so a hand `decode`
             // reads one protocol on every tier.
@@ -938,6 +926,20 @@ fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue 
     }
 }
 
+fn datatree_to_text_result(recv: &CtValue) -> CtValue {
+    match crate::Comptime::SyncLite::datatree_to_text(recv) {
+        Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+        None => CtValue::absent(Type::String),
+    }
+}
+
+fn datatree_equal_unordered_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
+    CtValue::Bool(
+        args.first()
+            .is_some_and(|other| crate::Comptime::SyncLite::datatree_equal_unordered(recv, other)),
+    )
+}
+
 fn stream_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
     match value {
         CtValue::Bytes(bytes) => Ok(bytes.clone()),
@@ -1007,6 +1009,69 @@ fn stream_flush(
     Ok(CtValue::Present(Box::new(CtValue::Unit)))
 }
 
+fn eval_args_parse_or_exit(
+    spec: &mut CtValue,
+    argv: &mut [CtValue],
+    span: Span,
+    sink: &Arc<Mutex<DevSink>>,
+) -> Result<CtValue, Diagnostic> {
+    // I9: parsing, help text, and error text stay in the embedded Args Prelude.
+    // This adapter only turns its result into the in-process sink/exit boundary;
+    // it must not reimplement any CLI policy here.
+    let parsed = crate::Comptime::eval_args_handle("ArgsSpecParse", spec, argv, span)
+        .ok_or_else(|| unsupported("ArgsSpec.parse_or_exit", span))??;
+    match parsed {
+        CtValue::Present(value) => {
+            let mut parsed = *value;
+            let mut help_args = [CtValue::Str("help".to_string())];
+            let help = crate::Comptime::eval_args_handle(
+                "ParsedArgsFlag",
+                &mut parsed,
+                &mut help_args,
+                span,
+            )
+            .ok_or_else(|| unsupported("ParsedArgs.help", span))??;
+            let CtValue::Bool(help) = help else {
+                return Err(unsupported("ParsedArgs.help", span));
+            };
+            if !help {
+                return Ok(parsed);
+            }
+
+            let mut no_args: [CtValue; 0] = [];
+            let help = crate::Comptime::eval_args_handle("ArgsSpecHelp", spec, &mut no_args, span)
+                .ok_or_else(|| unsupported("ArgsSpec.help", span))??;
+            let CtValue::Str(help) = help else {
+                return Err(unsupported("ArgsSpec.help", span));
+            };
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stdout.push_str(&help);
+            sink.stdout.push('\n');
+            sink.exit_code = Some(0);
+            Err(crate::Sema::Diagnostics::soft_exit(
+                String::new(),
+                String::new(),
+                Some(span),
+            ))
+        }
+        CtValue::Failed(CtReport::Told(error)) => {
+            let CtValue::Str(error) = *error else {
+                return Err(unsupported("ArgsSpec.parse_or_exit error", span));
+            };
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&error);
+            sink.stderr.push('\n');
+            sink.exit_code = Some(2);
+            Err(crate::Sema::Diagnostics::soft_exit(
+                String::new(),
+                String::new(),
+                Some(span),
+            ))
+        }
+        _ => Err(unsupported("ArgsSpec.parse_or_exit result", span)),
+    }
+}
+
 pub(super) fn eval_handle_with_type_and_sink(
     op: &THandleOp,
     recv: &mut CtValue,
@@ -1015,6 +1080,11 @@ pub(super) fn eval_handle_with_type_and_sink(
     resolved_ret: Option<&Type>,
     sink: Option<&Arc<Mutex<DevSink>>>,
 ) -> Result<CtValue, Diagnostic> {
+    if matches!(op, THandleOp::ArgsSpecParseOrExit) {
+        if let Some(sink) = sink {
+            return eval_args_parse_or_exit(recv, args, span, sink);
+        }
+    }
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
     }
@@ -1249,7 +1319,9 @@ pub(super) fn eval_handle_with_type_and_sink(
         {
             eval_civil_time_comparison(kind, method, recv, args, span)
         }
-        THandleOp::CivilTimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
+        THandleOp::CivilTimeMethod { method, .. } => {
+            apply_method(recv, method, args.to_vec(), span)
+        }
         THandleOp::PreciseMethod { type_name, method } => {
             apply_method(recv, method, args.to_vec(), span).or_else(|_| {
                 Err(unsupported(
@@ -1320,6 +1392,66 @@ pub(super) fn eval_handle_with_type_and_sink(
                     "ns".to_string(),
                     CtValue::Int(duration_kernel::jet_duration_kernel_difference(a, b)),
                 )],
+            })
+        }
+        THandleOp::DurationAbs => {
+            let ns = duration_ns_value(recv)
+                .ok_or_else(|| unsupported("Duration.abs receiver", span))?;
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![(
+                    "ns".to_string(),
+                    CtValue::Int(duration_kernel::jet_duration_kernel_abs(ns)),
+                )],
+            })
+        }
+        THandleOp::DurationNegated => {
+            let ns = duration_ns_value(recv)
+                .ok_or_else(|| unsupported("Duration.negated receiver", span))?;
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![(
+                    "ns".to_string(),
+                    CtValue::Int(duration_kernel::jet_duration_kernel_negated(ns)),
+                )],
+            })
+        }
+        THandleOp::DurationSign => {
+            let ns = duration_ns_value(recv)
+                .ok_or_else(|| unsupported("Duration.sign receiver", span))?;
+            Ok(CtValue::Int(duration_kernel::jet_duration_kernel_sign(ns)))
+        }
+        THandleOp::DurationTotalIn => {
+            let ns = duration_ns_value(recv)
+                .ok_or_else(|| unsupported("Duration.total_in receiver", span))?;
+            let unit = match args.first() {
+                Some(CtValue::Str(unit)) => unit.as_str(),
+                _ => return Err(unsupported("Duration.total_in expects a unit", span)),
+            };
+            let total = duration_kernel::jet_duration_kernel_total_in(ns, unit);
+            Ok(CtValue::Float(crate::AST::CtFloat::f64(total)))
+        }
+        THandleOp::DurationRound => {
+            let ns = duration_ns_value(recv)
+                .ok_or_else(|| unsupported("Duration.round receiver", span))?;
+            let unit = match args.first() {
+                Some(CtValue::Str(unit)) => unit.as_str(),
+                _ => return Err(unsupported("Duration.round expects a unit", span)),
+            };
+            let increment = args
+                .get(1)
+                .and_then(exact_big)
+                .and_then(|value| value.try_i64())
+                .unwrap_or(1);
+            let mode = match args.get(2) {
+                Some(CtValue::Str(mode)) => mode.as_str(),
+                _ => "half_expand",
+            };
+            let rounded =
+                duration_kernel::jet_duration_kernel_round(ns, unit, increment, mode).unwrap_or(ns);
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![("ns".to_string(), CtValue::Int(rounded))],
             })
         }
         THandleOp::DurationSecondsValue => {
@@ -1680,37 +1812,63 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::DataTreeText => Ok(datatree_scalar_result(recv, "Text", "text")),
         THandleOp::DataTreeBool => Ok(datatree_scalar_result(recv, "Bool", "bool")),
         THandleOp::DataTreeFloat => Ok(datatree_scalar_result(recv, "Float", "float")),
+        THandleOp::DataTreeToText => Ok(datatree_to_text_result(recv)),
+        THandleOp::DataTreeEqualUnordered => Ok(datatree_equal_unordered_result(recv, args)),
         THandleOp::DataTreeDecode(_) => Err(unsupported("handle `DataTreeDecode`", span)),
         THandleOp::SerdeEncode => Err(unsupported("handle `SerdeEncode`", span)),
-        THandleOp::JSONField => Err(unsupported("handle `JSONField`", span)),
-        THandleOp::JSONAt => Err(unsupported("handle `JSONAt`", span)),
-        THandleOp::JSONText => Err(unsupported("handle `JSONText`", span)),
-        THandleOp::JSONBool => Err(unsupported("handle `JSONBool`", span)),
-        THandleOp::JSONFloat => Err(unsupported("handle `JSONFloat`", span)),
+        THandleOp::JSONField => Ok(datatree_field_result(recv, args)),
+        THandleOp::JSONAt => Ok(datatree_at_result(recv, args)),
+        THandleOp::JSONText => Ok(datatree_scalar_result(recv, "Text", "text")),
+        THandleOp::JSONBool => Ok(datatree_scalar_result(recv, "Bool", "bool")),
+        THandleOp::JSONFloat => Ok(datatree_scalar_result(recv, "Float", "float")),
+        THandleOp::JSONToText => Ok(datatree_to_text_result(recv)),
+        THandleOp::JSONEqualUnordered => Ok(datatree_equal_unordered_result(recv, args)),
         THandleOp::PathParent => {
             let path = path_string(recv).ok_or_else(|| unsupported("Path.parent", span))?;
             Ok(match path_kernel::jet_std_path_parent_opt(&path) {
                 Some(parent) => CtValue::Present(Box::new(path_value(parent))),
-                None => CtValue::failed(Box::new(CtValue::Unit)),
+                None => CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Path.parent needs a resolved element type", span)
+                    })?,
+                ),
             })
         }
         THandleOp::PathExtension => {
             let path = path_string(recv).ok_or_else(|| unsupported("Path.extension", span))?;
             Ok(match path_kernel::jet_std_path_extension_opt(&path) {
                 Some(extension) => CtValue::Present(Box::new(CtValue::Str(extension))),
-                None => CtValue::failed(Box::new(CtValue::Unit)),
+                None => CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Path.extension needs a resolved element type", span)
+                    })?,
+                ),
             })
         }
         THandleOp::PathStem => {
             let path = path_string(recv).ok_or_else(|| unsupported("Path.stem", span))?;
             Ok(match path_kernel::jet_std_path_stem_opt(&path) {
                 Some(stem) => CtValue::Present(Box::new(CtValue::Str(stem))),
-                None => CtValue::failed(Box::new(CtValue::Unit)),
+                None => CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Path.stem needs a resolved element type", span)
+                    })?,
+                ),
             })
         }
         THandleOp::PathNormalize => {
             let path = path_string(recv).ok_or_else(|| unsupported("Path.normalize", span))?;
             Ok(path_value(path_kernel::jet_std_path_normalize(&path)))
+        }
+        THandleOp::PathIsWithin => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.is_within", span))?;
+            let base = args
+                .first()
+                .and_then(path_string)
+                .ok_or_else(|| unsupported("Path.is_within base", span))?;
+            Ok(CtValue::Bool(path_kernel::jet_std_path_is_within(
+                &path, &base,
+            )))
         }
         THandleOp::PathWalk => {
             let path = path_string(recv).ok_or_else(|| unsupported("Path.walk", span))?;

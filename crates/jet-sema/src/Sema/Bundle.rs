@@ -312,12 +312,80 @@ fn fold_multi_head_function(
 }
 
 fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen = HashSet::new();
+    let mut seen_unknown = HashSet::new();
+    let mut seen_exact = HashSet::new();
     diagnostics.retain(|diagnostic| {
-        diagnostic.code != "E0107"
-            || diagnostic
+        if diagnostic.code == "E0107" {
+            return diagnostic
                 .span
-                .is_none_or(|span| seen.insert((span.start, span.end)))
+                .is_none_or(|span| seen_unknown.insert((span.start, span.end)));
+        }
+        // E0119/E0354 can be raised once while materializing a marker and
+        // again while checking its ordinary use-site. Keep distinct messages
+        // at one span, but remove only byte-identical repeats.
+        if matches!(diagnostic.code.as_str(), "E0119" | "E0354") {
+            let Some(span) = diagnostic.span else {
+                return true;
+            };
+            return seen_exact.insert((
+                diagnostic.code.clone(),
+                diagnostic.what.clone(),
+                diagnostic.why.clone(),
+                diagnostic.fix.clone(),
+                span.start,
+                span.end,
+            ));
+        }
+        true
+    });
+}
+
+/// A rejected operation must not also report its conversion failure at the
+/// same source expression. Pair each primary with only its known cascade.
+fn prune_conversion_cascades(diagnostics: &mut Vec<Diagnostic>) {
+    let impure_spans = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E3401")
+        .filter_map(|diagnostic| diagnostic.span)
+        .collect::<Vec<_>>();
+    let vault_spans = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0510")
+        .filter_map(|diagnostic| diagnostic.span)
+        .collect::<Vec<_>>();
+    if !impure_spans.is_empty() || !vault_spans.is_empty() {
+        diagnostics.retain(|diagnostic| match diagnostic.code.as_str() {
+            // A spanless report has no proven relationship to the primary;
+            // retain it rather than treating `None` as a wildcard.
+            "E2404" => diagnostic
+                .span
+                .is_none_or(|span| !impure_spans.contains(&span)),
+            "E2402" => diagnostic
+                .span
+                .is_none_or(|span| !vault_spans.contains(&span)),
+            _ => true,
+        });
+    }
+    // One helper failure domain is one root report. Include the checker-known
+    // declaration provenance so same-named helpers in separate scopes remain
+    // independent roots.
+    let mut seen_failure_domains = HashSet::new();
+    diagnostics.retain(|diagnostic| {
+        let Some(detail) = diagnostic.detail.as_deref() else {
+            return true;
+        };
+        let Some(detail) = detail.strip_prefix("failure-domain:") else {
+            return true;
+        };
+        let Some(domain) = detail.lines().next() else {
+            return true;
+        };
+        let definition = detail
+            .lines()
+            .find_map(|line| line.strip_prefix("definition: "))
+            .unwrap_or_default();
+        let key = (domain.to_string(), definition.to_string());
+        diagnostic.code != "E2404" || seen_failure_domains.insert(key)
     });
 }
 
@@ -743,7 +811,11 @@ impl IncrementalSemaCache {
         self.measurement_recomputed_items.clear();
     }
 
-    fn begin_bundle(&mut self, bundle: &ProgramBundle) {
+    fn begin_bundle(
+        &mut self,
+        bundle: &ProgramBundle,
+        name_ledger: &jet_foundation::Names::NameLedger,
+    ) {
         // D-INCR-UNIT1=A: dirty the module interface and its reverse import
         // closure only. Private body edits are handled by the per-function
         // input below and do not fan out to unrelated modules.
@@ -758,7 +830,7 @@ impl IncrementalSemaCache {
             .iter()
             .map(|module| (module.display.clone(), incremental_module_interface(module)))
             .collect::<HashMap<_, _>>();
-        let dependencies = incremental_module_dependencies(bundle);
+        let dependencies = incremental_module_dependencies_with_ledger(bundle, name_ledger);
         let mut dirty = self
             .module_interfaces
             .iter()
@@ -766,6 +838,16 @@ impl IncrementalSemaCache {
             .collect::<HashSet<_>>();
         dirty.extend(interfaces.iter().filter_map(|(module, fingerprint)| {
             (self.module_interfaces.get(module) != Some(fingerprint)).then_some(module.clone())
+        }));
+        // Resolved import targets are semantic input too. The source import
+        // can stay unchanged while the ledger maps it to a different module
+        // (for example after a file/module move), so invalidate that owner's
+        // bodies before propagating the change through the current graph.
+        dirty.extend(self.module_dependencies.iter().filter_map(|(module, previous)| {
+            (dependencies.get(module) != Some(previous)).then_some(module.clone())
+        }));
+        dirty.extend(dependencies.iter().filter_map(|(module, current)| {
+            (self.module_dependencies.get(module) != Some(current)).then_some(module.clone())
         }));
         if environment_changed {
             dirty.extend(interfaces.keys().cloned());
@@ -824,6 +906,24 @@ impl IncrementalSemaCache {
 }
 
 fn incremental_global_environment(bundle: &ProgramBundle) -> Vec<u8> {
+    // These package facts can change between batch requests without changing
+    // the source modules. Keep the sema cache keyed by the inputs that affect
+    // body checking. `required_effects` is deliberately absent: completion
+    // derives it from the checked bodies and writes it back to the bundle.
+    let package_policy = (
+        &bundle.package_guarantees.contain,
+        bundle.package_guarantees.harden,
+        &bundle.package_guarantees.dependency_names,
+        &bundle.package_guarantees.effects,
+        &bundle.package_guarantees.unsafe_paths,
+        &bundle.package_guarantees.expert,
+        &bundle.package_guarantees.deps,
+        &bundle.package_guarantees.lints_deny,
+        &bundle.package_guarantees.memory_denials,
+        &bundle.package_guarantees.application_authority.granted_effects,
+        &bundle.package_guarantees.application_authority.denied_effects,
+        &bundle.package_guarantees.application_authority.authority,
+    );
     let mut out = crate::CanonicalAST::canonical_fragment(&(
         bundle.entry,
         &bundle.project_root,
@@ -831,6 +931,8 @@ fn incremental_global_environment(bundle: &ProgramBundle) -> Vec<u8> {
         bundle.web_partition_enforced,
         &bundle.build_facts,
         bundle.layer_ceiling,
+        &bundle.edition,
+        package_policy,
     ));
     out.extend(format!("{:?}", bundle.project_root).into_bytes());
     out
@@ -873,15 +975,29 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 fn incremental_module_dependencies(bundle: &ProgramBundle) -> HashMap<String, Vec<String>> {
+    incremental_module_dependencies_with_ledger(bundle, &bundle.name_ledger)
+}
+
+fn incremental_module_dependencies_with_ledger(
+    bundle: &ProgramBundle,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> HashMap<String, Vec<String>> {
     bundle
         .modules
         .iter()
-        .map(|module| {
-            let mut dependencies = module
-                .imports
-                .iter()
-                .filter_map(|import| incremental_import_target(bundle, module, import))
+        .enumerate()
+        .map(|(module_idx, module)| {
+            // D-NAME-WALK1=A: an inline or generic module can import an
+            // already-loaded file module without adding a top-level import.
+            // Track every scope or its cached callable may outlive the
+            // dependency interface that it resolves.
+            let mut dependencies = crate::AST::walk_imports(module)
+                .into_iter()
+                .filter_map(|(_, import)| {
+                    incremental_import_target(bundle, name_ledger, module_idx, module, import)
+                })
                 .collect::<Vec<_>>();
             dependencies.sort();
             dependencies.dedup();
@@ -892,9 +1008,22 @@ fn incremental_module_dependencies(bundle: &ProgramBundle) -> HashMap<String, Ve
 
 fn incremental_import_target(
     bundle: &ProgramBundle,
+    name_ledger: &jet_foundation::Names::NameLedger,
+    source_idx: usize,
     source: &crate::AST::LoadedModule,
     import: &crate::AST::ImportDecl,
 ) -> Option<String> {
+    // Loader/sema already resolved top-level imports against the loaded
+    // bundle. Preserve that exact edge for invalidation; aliases and display
+    // paths are projections and can collide across packages. Nested imports
+    // are not seeded in the ledger yet, so they use the structural fallback
+    // below.
+    if let Some(target) = name_ledger.import_target(source_idx, import.span) {
+        return bundle
+            .modules
+            .get(target)
+            .map(|module| module.display.clone());
+    }
     let requested = match &import.kind {
         ImportKind::File(path, _) | ImportKind::Module(path, _) => path.as_str(),
         ImportKind::Unqualified { module_alias, .. } => module_alias.as_str(),
@@ -921,6 +1050,17 @@ fn incremental_import_target(
         .iter()
         .filter(|candidate| candidate.display != source.display)
         .find(|candidate| {
+            let directory_module = candidate
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some(Syntax::DEFAULT_ENTRY_FILE)
+                && candidate
+                    .path
+                    .parent()
+                    .and_then(|parent| parent.file_name())
+                    .and_then(|name| name.to_str())
+                    == Some(requested_stem);
             requested_path
                 .as_ref()
                 .is_some_and(|path| normalize_incremental_path(&candidate.path) == *path)
@@ -931,6 +1071,7 @@ fn incremental_import_target(
                 || candidate
                     .display
                     .ends_with(&format!("/{requested_stem}.jet"))
+                || directory_module
         })
         .map(|candidate| candidate.display.clone())
 }
@@ -2231,6 +2372,7 @@ pub fn strip_build_only_entries(bundle: &mut ProgramBundle) {
     }
 }
 
+/// Canonical batch sema entry with reusable per-function checking.
 pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
@@ -2564,6 +2706,38 @@ mod structure_tests {
                 .divide(&dimension(0, "Time"))
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn incremental_dependencies_include_nested_module_imports() {
+        let mut bundle = incremental_bundle(
+            "module api {\n    use dep.[value]\n    pub fn call() Int -> { return value() }\n}\n",
+        );
+        let mut dependency = incremental_bundle("pub fn value() Int -> { return 1 }\n")
+            .modules
+            .remove(0);
+        dependency.path = "dep.jet".into();
+        dependency.display = "dep.jet".to_string();
+        dependency.alias = "dep".to_string();
+        bundle.modules.push(dependency);
+
+        let dependencies = incremental_module_dependencies(&bundle);
+        assert_eq!(dependencies["cache-accounting.jet"], vec!["dep.jet"]);
+    }
+
+    #[test]
+    fn incremental_dependencies_match_directory_module_imports() {
+        let mut bundle = incremental_bundle("use archive\nfn run() Int -> { return archive.value() }\n");
+        let mut dependency = incremental_bundle("pub fn value() Int -> { return 1 }\n")
+            .modules
+            .remove(0);
+        dependency.path = "archive/run.jet".into();
+        dependency.display = "archive/run.jet".to_string();
+        dependency.alias = "run".to_string();
+        bundle.modules.push(dependency);
+
+        let dependencies = incremental_module_dependencies(&bundle);
+        assert_eq!(dependencies["cache-accounting.jet"], vec!["archive/run.jet"]);
     }
 
     #[test]

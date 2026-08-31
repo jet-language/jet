@@ -1424,7 +1424,7 @@ impl DevServer {
             command
                 .arg("--canvas")
                 .arg("--target=web")
-                .arg(format!("--port={port}"));
+                .arg(format!("--canvas-port={port}"));
         }
         let mut child = command
             .stdout(Stdio::piped())

@@ -1,134 +1,62 @@
-Error [E0102]: `Address` has no method `compare`
-  --> tests/ui/core_consuming_borrowed_field.jet:5:8
-    |
-  5 | struct Email {
-    |        ^^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Address` or `impl Address`
-More: jet-lang.dev/e/E0102
-
-Error [E0209]: implicit clone of `e.addr`
+Error [E0209]: Implicit clone of `e.addr`
   --> tests/ui/core_consuming_borrowed_field.jet:11:48
     |
  11 | fn shallow(e: Email) DataTree -> DataTree.Text(e.addr)
     |                                                ^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~e.addr` to copy explicitly
+ Fix: Write `~e.addr` to copy explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of `e.addr`
-  --> tests/ui/core_consuming_borrowed_field.jet:11:48
-    |
- 11 | fn shallow(e: Email) DataTree -> DataTree.Text(e.addr)
-    |                                                ^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~e.addr` to copy explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of `e.nested.text`
+Error [E0209]: Implicit clone of `e.nested.text`
   --> tests/ui/core_consuming_borrowed_field.jet:13:47
     |
  13 | fn nested(e: Email) DataTree -> DataTree.Text(e.nested.text)
     |                                               ^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~e.nested.text` to copy explicitly
+ Fix: Write `~e.nested.text` to copy explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of `e.nested.text`
-  --> tests/ui/core_consuming_borrowed_field.jet:13:47
-    |
- 13 | fn nested(e: Email) DataTree -> DataTree.Text(e.nested.text)
-    |                                               ^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~e.nested.text` to copy explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of `e.items[0].text`
+Error [E0209]: Implicit clone of `e.items[0].text`
   --> tests/ui/core_consuming_borrowed_field.jet:15:48
     |
  15 | fn indexed(e: Email) DataTree -> DataTree.Text(e.items[0].text)
     |                                                ^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~e.items[0].text` to copy explicitly
+ Fix: Write `~e.items[0].text` to copy explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of `e.items[0].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:15:48
-    |
- 15 | fn indexed(e: Email) DataTree -> DataTree.Text(e.items[0].text)
-    |                                                ^^^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~e.items[0].text` to copy explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of `e.items[i + 1].text`
+Error [E0209]: Implicit clone of `e.items[i + 1].text`
   --> tests/ui/core_consuming_borrowed_field.jet:17:63
     |
  17 | fn computed_index(e: Email, i: Int) DataTree -> DataTree.Text(e.items[i + 1].text)
     |                                                               ^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~e.items[i + 1].text` to copy explicitly
+ Fix: Write `~e.items[i + 1].text` to copy explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of `e.items[i + 1].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:17:63
-    |
- 17 | fn computed_index(e: Email, i: Int) DataTree -> DataTree.Text(e.items[i + 1].text)
-    |                                                               ^^^^^^^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~e.items[i + 1].text` to copy explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of this consumed expression
+Error [E0209]: Implicit clone of this consumed expression
   --> tests/ui/core_consuming_borrowed_field.jet:21:51
     |
  21 | fn call_index(e: Email) DataTree -> DataTree.Text(e.items[pick()].text)
     |                                                   ^^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~` before the highlighted expression to copy it explicitly
+ Fix: Write `~` before the highlighted expression to copy it explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of this consumed expression
-  --> tests/ui/core_consuming_borrowed_field.jet:21:51
-    |
- 21 | fn call_index(e: Email) DataTree -> DataTree.Text(e.items[pick()].text)
-    |                                                   ^^^^^^^^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~` before the highlighted expression to copy it explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of `e.items[-(-i)].text`
+Error [E0209]: Implicit clone of `e.items[-(-i)].text`
   --> tests/ui/core_consuming_borrowed_field.jet:23:74
     |
  23 | fn unary_parenthesized_index(e: Email, i: Int) DataTree -> DataTree.Text(e.items[-(-i)].text)
     |                                                                          ^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~e.items[-(-i)].text` to copy explicitly
+ Fix: Write `~e.items[-(-i)].text` to copy explicitly
 More: jet-lang.dev/e/E0209
 
-Error [E0209]: implicit clone of `e.items[-(-i)].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:23:74
-    |
- 23 | fn unary_parenthesized_index(e: Email, i: Int) DataTree -> DataTree.Text(e.items[-(-i)].text)
-    |                                                                          ^^^^^^^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~e.items[-(-i)].text` to copy explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of this consumed expression
+Error [E0209]: Implicit clone of this consumed expression
   --> tests/ui/core_consuming_borrowed_field.jet:26:26
     |
  26 |     return DataTree.Text(e.items[if choose_first -> 0 else -> 1].text)
     |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
- Fix: write `~` before the highlighted expression to copy it explicitly
-More: jet-lang.dev/e/E0209
-
-Error [E0209]: implicit clone of this consumed expression
-  --> tests/ui/core_consuming_borrowed_field.jet:26:26
-    |
- 26 |     return DataTree.Text(e.items[if choose_first -> 0 else -> 1].text)
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `Text` stores its own copy of this value
- Fix: write `~` before the highlighted expression to copy it explicitly
+ Fix: Write `~` before the highlighted expression to copy it explicitly
 More: jet-lang.dev/e/E0209

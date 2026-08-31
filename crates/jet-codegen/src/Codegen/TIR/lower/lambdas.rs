@@ -37,6 +37,39 @@ use std::sync::Arc;
 fn lambda_jit_name(start: usize, end: usize) -> String {
     mangle_generated(&format!("lambda_{start}_{end}"))
 }
+/// Return the statically known identity for a task body, when it is a direct
+/// named function call or function reference. Arbitrary expressions stay
+/// unlabeled so the runtime owns the single `task@<site>` fallback.
+pub(crate) fn spawn_label(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
+    let body = match &lam.body {
+        LambdaBody::Expr(expr) => expr.as_ref(),
+        LambdaBody::Block(stmts) => {
+            let [stmt] = stmts.as_slice() else {
+                return None;
+            };
+            match stmt {
+                Stmt::Expr(expr) | Stmt::Return(Some(expr), _) => expr,
+                _ => return None,
+            }
+        }
+    };
+    let mut expr = body;
+    while let Expr::Paren(inner, _) | Expr::Try(inner, _, _, _) = expr {
+        expr = inner;
+    }
+    match expr {
+        Expr::Call(call) if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) => {
+            Some(call.name.clone())
+        }
+        Expr::Ident(name, _)
+            if !env.locals.contains_key(name)
+                && matches!(cx.fn_types.get(name), Some(Type::Fn { .. })) =>
+        {
+            Some(name.clone())
+        }
+        _ => None,
+    }
+}
 
 fn reactive_capture_name(name: &str) -> String {
     mangle_generated(&format!(
@@ -352,6 +385,7 @@ fn lower_lambda_expecting_with_host_borrow(
             // closure's successful expression must construct that carrier
             // before rustc sees the closure return type.
             let lowered = fallible_lambda_value(lowered, lam, env);
+            body_ty = lowered.ty.clone();
             (
                 emit_tir_expr(&lowered, cx),
                 TLambdaBody::Expr(Box::new(lowered)),
@@ -369,13 +403,16 @@ fn lower_lambda_expecting_with_host_borrow(
                 prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
                 // The source tail is value position even when the probe could
                 // not resolve a name declared by an earlier statement.
-                let lowered = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
+                let mut lowered = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
                     lower_value_block(stmts, cx, &mut lam_env)
                 } else if return_type_has_value(&body_ty) {
                     lower_value_block(stmts, cx, &mut lam_env)
                 } else {
                     lower_stmts(stmts, cx, &mut lam_env)
                 };
+                if lam.meta.fallible_propagation {
+                    lift_fallible_lambda_returns(&mut lowered, lam, env);
+                }
                 body_ty = lowered_block_return_ty(&lowered);
                 let mut inner = String::new();
                 emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
@@ -384,6 +421,7 @@ fn lower_lambda_expecting_with_host_borrow(
         }
     });
     cx.in_stm_transact.set(prev_in_stm);
+    let uses_stack_sentry = lam_env.stack_sentry_needed();
     TLambda {
         prep,
         params,
@@ -408,6 +446,7 @@ fn lower_lambda_expecting_with_host_borrow(
         captures,
         materialized_captures: lam.meta.materialized_captures.clone(),
         frozen_captures: lam.meta.frozen_captures.clone(),
+        uses_stack_sentry,
     }
 }
 
@@ -418,18 +457,158 @@ fn fallible_lambda_value(value: TExpr, lam: &Lambda, env: &LowerEnv) -> TExpr {
     if !lam.meta.fallible_propagation {
         return value;
     }
-    match env.ret_ty.as_ref() {
-        Some(return_ty @ Type::Result { .. }) if !matches!(value.ty, Type::Result { .. }) => {
-            TExpr {
-                ty: return_ty.clone(),
-                kind: TExprKind::Ok(Box::new(value)),
-            }
-        }
-        Some(return_ty @ Type::Option(_)) if !matches!(value.ty, Type::Option(_)) => TExpr {
-            ty: return_ty.clone(),
+    let carrier = lam.meta.fallible_carrier.as_ref().or(env.ret_ty.as_ref());
+    match carrier {
+        Some(Type::Result { err, .. }) if !matches!(&value.ty, Type::Result { .. }) => TExpr {
+            ty: Type::Result {
+                ok: Box::new(value.ty.clone()),
+                err: err.clone(),
+            },
+            kind: TExprKind::Ok(Box::new(value)),
+        },
+        Some(Type::Option(_)) if !matches!(&value.ty, Type::Option(_)) => TExpr {
+            ty: Type::Option(Box::new(value.ty.clone())),
             kind: TExprKind::Present(Box::new(value)),
         },
         _ => value,
+    }
+}
+
+/// A block callback may return through a tail, an explicit return, or a
+/// nested control-flow arm. Every such route belongs to the callback, so a
+/// propagated failure must leave the callback through its own carrier rather
+/// than a raw success value.
+fn lift_fallible_lambda_returns(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &LowerEnv) {
+    lift_fallible_lambda_return_block(stmts, lam, env);
+    if matches!(stmts.last(), Some(TStmt::Return(_))) {
+        return;
+    }
+    if let Some(TStmt::ExprStmt(value)) = stmts.last_mut() {
+        let return_value = std::mem::replace(
+            value,
+            TExpr {
+                ty: unit_type(),
+                kind: TExprKind::Unit,
+            },
+        );
+        *value = fallible_lambda_value(return_value, lam, env);
+        return;
+    }
+    stmts.push(TStmt::Return(Some(fallible_lambda_value(
+        TExpr {
+            ty: unit_type(),
+            kind: TExprKind::Unit,
+        },
+        lam,
+        env,
+    ))));
+}
+
+fn lift_fallible_lambda_return_block(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &LowerEnv) {
+    for stmt in stmts {
+        lift_fallible_lambda_return_stmt(stmt, lam, env);
+    }
+}
+
+fn lift_fallible_lambda_return_stmt(stmt: &mut TStmt, lam: &Lambda, env: &LowerEnv) {
+    match stmt {
+        TStmt::Return(value) => {
+            let return_value = value.take().unwrap_or_else(|| TExpr {
+                ty: unit_type(),
+                kind: TExprKind::Unit,
+            });
+            *value = Some(fallible_lambda_value(return_value, lam, env));
+        }
+        TStmt::ContractScope { body, .. }
+        | TStmt::TaskGroup { body, .. }
+        | TStmt::Loop { body, .. }
+        | TStmt::While { body, .. }
+        | TStmt::Range { body, .. }
+        | TStmt::ForIn { body, .. }
+        | TStmt::Inline(body)
+        | TStmt::DebugOnly(body)
+        | TStmt::Unsafe { body, .. }
+        | TStmt::SentryPolicy { body, .. }
+        | TStmt::Impure(body)
+        | TStmt::Region(body)
+        | TStmt::Layout { body, .. }
+        | TStmt::ContextBlock { body, .. }
+        | TStmt::Live { body }
+        | TStmt::Shield { body }
+        | TStmt::ScopeMember { body, .. }
+        | TStmt::Transact { body, .. } => lift_fallible_lambda_return_block(body, lam, env),
+        TStmt::RefutableBind { fallback, .. } => {
+            lift_fallible_lambda_return_block(fallback, lam, env)
+        }
+        TStmt::GcEdit { stmt, .. } => lift_fallible_lambda_return_stmt(stmt, lam, env),
+        TStmt::CountedLoop {
+            init, step, body, ..
+        } => {
+            lift_fallible_lambda_return_stmt(init, lam, env);
+            if let Some(step) = step {
+                lift_fallible_lambda_return_stmt(step, lam, env);
+            }
+            lift_fallible_lambda_return_block(body, lam, env);
+        }
+        TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            lift_fallible_lambda_return_block(then_body, lam, env);
+            if let Some(else_body) = else_body {
+                lift_fallible_lambda_return_block(else_body, lam, env);
+            }
+        }
+        TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            for arm in arms {
+                lift_fallible_lambda_return_block(&mut arm.body, lam, env);
+            }
+            if let Some(else_body) = else_body {
+                lift_fallible_lambda_return_block(else_body, lam, env);
+            }
+        }
+        TStmt::RangeSwitch {
+            arms, else_body, ..
+        } => {
+            for (_, _, body) in arms {
+                lift_fallible_lambda_return_block(body, lam, env);
+            }
+            lift_fallible_lambda_return_block(else_body, lam, env);
+        }
+        TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
+            for (_, body) in arms {
+                lift_fallible_lambda_return_block(body, lam, env);
+            }
+            if let Some(else_body) = else_body {
+                lift_fallible_lambda_return_block(else_body, lam, env);
+            }
+        }
+        // A reactive body owns a separate closure and therefore has its
+        // own return carrier metadata.
+        TStmt::Reactive { .. }
+        | TStmt::Let { .. }
+        | TStmt::ExprStmt(_)
+        | TStmt::Contract { .. }
+        | TStmt::SplitViews { .. }
+        | TStmt::TupleDestructure { .. }
+        | TStmt::StructDestructure { .. }
+        | TStmt::ListDestructure { .. }
+        | TStmt::Assign { .. }
+        | TStmt::DeferClose { .. }
+        | TStmt::Break(_)
+        | TStmt::BreakValue { .. }
+        | TStmt::Continue(_)
+        | TStmt::IndexAssign { .. }
+        | TStmt::IndexFieldAssign(_)
+        | TStmt::IndexHookAssign { .. }
+        | TStmt::MathSwizzleAssign { .. }
+        | TStmt::LineMarker(_)
+        | TStmt::SourceSpan(_) => {}
     }
 }
 
@@ -600,6 +779,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             }
         }
     });
+    let uses_stack_sentry = lam_env.stack_sentry_needed();
 
     TJitSpawnLambda {
         params: lam
@@ -619,6 +799,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
         frozen_captures: lam.meta.frozen_captures.clone(),
         body,
         ret,
+        uses_stack_sentry,
     }
 }
 
@@ -731,6 +912,11 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     });
     *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
     *cx.jit_spawn_sites.borrow_mut() = saved_spawn_sites;
+    let body = if lam_env.stack_sentry_needed() {
+        format!("{{ let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame(); {body} }}")
+    } else {
+        body
+    };
     let closure = format!("move |{}| {}", params.join(", "), body);
     if prep.is_empty() {
         closure
@@ -793,7 +979,15 @@ pub(super) fn render_reactive_block_closure(
     let (prep, _) = reactive_capture_setup(stmts, outer_env);
     let mut inner = String::new();
     emit_tir_stmts(lowered, _cx, &mut inner, 1);
-    let closure = format!("move || {{ {} }}", inner);
+    let body = if outer_env.stack_sentry_needed() {
+        format!(
+            "{{ let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame(); {{ {} }} }}",
+            inner
+        )
+    } else {
+        format!("{{ {} }}", inner)
+    };
+    let closure = format!("move || {body}");
     if prep.is_empty() {
         closure
     } else {
@@ -856,9 +1050,21 @@ fn render_spawn_block_body(
     format!("{{ {} }}", inner)
 }
 
+pub(crate) fn render_lowered_lambda_body(tl: &TLambda) -> String {
+    if tl.uses_stack_sentry {
+        format!(
+            "{{ let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame(); {} }}",
+            tl.body
+        )
+    } else {
+        tl.body.clone()
+    }
+}
+
 fn wrap_lowered_lambda(tl: &TLambda) -> String {
     let move_kw = if tl.is_move { "move " } else { "" };
-    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
+    let body = render_lowered_lambda_body(tl);
+    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), body);
     let wrapped = if tl.arc {
         format!("std::sync::Arc::new({closure})")
     } else if tl.rc {

@@ -23,8 +23,10 @@ const PORT_B = 7962;
 let serverB = null;
 after(() => serverB?.close());
 
-const post = async (port, route, body) => {
-  const r = await fetch(`http://localhost:${port}/api/${route}`, { method: 'POST', body: JSON.stringify(body) });
+const post = async (port, route, body, headers = {}) => {
+  const r = await fetch(`http://localhost:${port}/api/${route}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers }, body: JSON.stringify(body),
+  });
   return { status: r.status, json: await r.json() };
 };
 
@@ -73,7 +75,10 @@ test('#1738: CLI writes behind a serve session are refused-then-honored, never o
 
 test('#1738: whole-board replaces require rev proof', async () => {
   // /api/undo with no expectRev is refused before it can touch the store
-  const bare = await post(PORT_B, 'undo', {});
+  const page = await fetch(`http://localhost:${PORT_B}/`, { headers: { accept: 'text/html' } });
+  const cookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(cookie, 'owner navigation must establish an in-memory session');
+  const bare = await post(PORT_B, 'undo', {}, { cookie, 'sec-fetch-site': 'same-origin' });
   assert.equal(bare.status, 400);
   assert.equal(bare.json.error, 'E_USAGE');
 

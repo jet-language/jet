@@ -232,6 +232,9 @@ impl Provider for NativeProvider {
         table: &SourceTable,
         ctx: &Ctx,
     ) -> Option<crate::Store::CacheExpectation> {
+        if super::cc_toolchain::is_reference(spec) {
+            return super::cc_toolchain::cache_expectation(spec, ctx);
+        }
         cache_expectation(spec, table, ctx)
     }
 
@@ -243,6 +246,13 @@ impl Provider for NativeProvider {
     ) -> Result<DownloadPlan, ProviderError> {
         let mut plan = DownloadPlan::default();
         for spec in specs {
+            if super::cc_toolchain::is_reference(spec) {
+                plan.extend(super::cc_toolchain::plan_downloads(
+                    std::slice::from_ref(spec),
+                    ctx,
+                )?);
+                continue;
+            }
             plan.add_item(PlanItem {
                 package: spec.raw.clone(),
                 state: PlanState::New,
@@ -259,6 +269,9 @@ impl Provider for NativeProvider {
         table: &SourceTable,
         ctx: &Ctx,
     ) -> Result<Realized, ProviderError> {
+        if super::cc_toolchain::is_reference(spec) {
+            return super::cc_toolchain::realize(spec, ctx);
+        }
         let facts = release_facts(spec, table, ctx)?;
         let source = source_fingerprint(&facts);
         let identity = cache_identity(&source, RECIPE_ID, ctx);
@@ -529,7 +542,8 @@ fn fetch_release_metadata(tag: Option<&str>) -> Result<ReleaseFacts, ProviderErr
         Some(tag) => format!("{API_ROOT}/tags/{tag}"),
         None => format!("{API_ROOT}/latest"),
     };
-    let bytes = http_get_bounded(&url, MAX_METADATA_BYTES)?;
+    let bytes = fetch_bounded_bytes(&url, MAX_METADATA_BYTES, "native release metadata")
+        .map_err(native_error)?;
     let value = JSON::parse(
         std::str::from_utf8(&bytes)
             .map_err(|_| native_error("GitHub release metadata is not UTF-8"))?,
@@ -737,28 +751,41 @@ fn copy_bounded_file(source: &Path, destination: &Path) -> Result<(), ProviderEr
     Ok(())
 }
 
-fn http_get_bounded(url: &str, limit: u64) -> Result<Vec<u8>, ProviderError> {
+/// Fetch one bounded remote payload through the native provider's network
+/// policy. Toolchain channel metadata and artifacts use this same seam so the
+/// updater does not grow a second HTTP client with different redirect,
+/// timeout, size, or offline behavior.
+pub(crate) fn fetch_bounded_bytes(
+    url: &str,
+    limit: u64,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    ensure_network_allowed(label).map_err(|error| match error {
+        ProviderError::Offline(detail) => detail,
+        other => format!("{other:?}"),
+    })?;
     let response = jet_net::get_stream_follow_redirects(url, Duration::from_secs(120), 5)
-        .map_err(|error| native_error(format!("could not fetch release metadata: {error}")))?;
+        .map_err(|error| format!("could not fetch {label}: {error}"))?;
     if !(200..300).contains(&response.status()) {
-        return Err(native_error(format!(
-            "release metadata URL returned HTTP {}",
+        return Err(format!(
+            "{label} URL returned HTTP {}",
             response.status()
-        )));
+        ));
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit)
-    {
-        return Err(native_error("release metadata exceeds its size bound"));
+    let content_length = response.content_length();
+    if content_length.is_some_and(|length| length > limit) {
+        return Err(format!("{label} exceeds its size bound"));
     }
     let mut body = Vec::new();
     response
         .take(limit.saturating_add(1))
         .read_to_end(&mut body)
-        .map_err(|error| native_error(format!("could not read release metadata: {error}")))?;
+        .map_err(|error| format!("could not read {label}: {error}"))?;
     if body.len() as u64 > limit {
-        return Err(native_error("release metadata exceeds its size bound"));
+        return Err(format!("{label} exceeds its size bound"));
+    }
+    if content_length.is_some_and(|length| length != body.len() as u64) {
+        return Err(format!("{label} Content-Length disagrees"));
     }
     Ok(body)
 }

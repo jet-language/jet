@@ -6,8 +6,8 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, have_rustc,
-    jit_run_with_env,
+    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, compile_source,
+    have_rustc, jit_run_with_env,
 };
 
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
@@ -21,37 +21,37 @@ struct Vec2 { x: Int y: Int }
 struct Holder { value: Vec2 }
 struct EqBox<T: Equatable> { value: T }
 #Comparable
-struct Rank<T: Comparable> { value: T }
+struct Tier<T: Comparable> { value: T }
 #Comparable
-struct NestedRank<T: Comparable> {
+struct NestedTier<T: Comparable> {
     head: ?T
     tail: [T]
 }
 struct Adder<T: Add> { value: T }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) Vec2 {
+    fn add(self, rhs: Vec2) Vec2 -> {
         return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 
 impl Vec2.Equatable {
-    fn equal(self, rhs: Vec2) Bool { return self.x == rhs.x && self.y == rhs.y }
+    fn equal(self, rhs: Vec2) Bool -> { return self.x == rhs.x && self.y == rhs.y }
 }
 
 impl Vec2.Comparable {
-    fn compare(self, rhs: Vec2) Ordering {
+    fn compare(self, rhs: Vec2) Ordering -> {
         if self.x < rhs.x { return Ordering.Less }
         if self.x > rhs.x { return Ordering.Greater }
         return Ordering.Equal
     }
 }
 
-fn add_generic<T: Add>(left: T, right: T) T { return left + right }
-fn equal_generic<T: Equatable>(left: T, right: T) Bool { return left == right }
-fn less_generic<T: Comparable>(left: T, right: T) Bool { return left < right }
+fn add_generic<T: Add>(left: T, right: T) T -> { return left + right }
+fn equal_generic<T: Equatable>(left: T, right: T) Bool -> { return left == right }
+fn less_generic<T: Comparable>(left: T, right: T) Bool -> { return left < right }
 
-fn marked(x: Int) Vec2 {
+fn marked(x: Int) Vec2 -> {
     print("marked {x}")
     return Vec2{ x: x, y: 0 }
 }
@@ -70,10 +70,10 @@ fn run() {
     box = { value: 7 }
     chain :: marked(1) < marked(2) < marked(3)
     boxes_equal :: equal_generic(EqBox<Int>{ value: 7 }, EqBox<Int>{ value: 7 })
-    ranks_ordered :: less_generic(Rank<Int>{ value: 1 }, Rank<Int>{ value: 2 })
+    ranks_ordered :: less_generic(Tier<Int>{ value: 1 }, Tier<Int>{ value: 2 })
     nested_ordered :: less_generic(
-        NestedRank<Int>{ head: Val(1), tail: [2, 3] },
-        NestedRank<Int>{ head: Val(1), tail: [2, 4] }
+        NestedTier<Int>{ head: Val(1), tail: [2, 3] },
+        NestedTier<Int>{ head: Val(1), tail: [2, 4] }
     )
     cell := Adder<Int>{ value: 4 }
     cell.value += 3
@@ -99,7 +99,7 @@ fn spaceship_and_ordering_route_through_tir() {
 struct Score { points: Int }
 
 impl Score.Comparable {
-    fn compare(self, rhs: Score) Ordering {
+    fn compare(self, rhs: Score) Ordering -> {
         if self.points < rhs.points { return Ordering.Less }
         if self.points > rhs.points { return Ordering.Greater }
         return Ordering.Equal
@@ -150,7 +150,7 @@ fn show(msg: String) {
 fn bump(n: &Int) {
     n += 1
 }
-fn archive(name: ^String) String {
+fn archive(name: ^String) String -> {
     return name
 }
 fn run() {
@@ -175,7 +175,7 @@ fn list_destructure() {
         return;
     }
     let src = "\
-fn double(n: Int) Int {
+fn double(n: Int) Int -> {
     return (n * 2)
 }
 fn run() {
@@ -198,10 +198,10 @@ fn fn_value_and_struct_fn_field() {
         return;
     }
     let src = "\
-fn apply_twice(f: fn(Int) Int, x: Int) Int {
+fn apply_twice(f: fn(Int) Int, x: Int) Int -> {
     return f(f(x))
 }
-fn double(x: Int) Int {
+fn double(x: Int) Int -> {
     return (x * 2)
 }
 struct Worker {
@@ -210,7 +210,7 @@ struct Worker {
 struct TextWorker {
     step: fn(String) Int
 }
-fn text_len(text: String) Int {
+fn text_len(text: String) Int -> {
     return text.len()
 }
 fn run() {
@@ -275,6 +275,67 @@ fallback :: U8{ 0 }
     );
 }
 
+/// D-INT-WIDEN1: sized integer locals passed to exact `Int` parameters use
+/// the canonical widening path, including both 64-bit representation limits.
+#[test]
+fn sized_integer_locals_widen_to_int_at_i64_u64_boundaries() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn accept(value: Int) Int -> { return value }
+fn pick(values: [U8], slot: I64) U8 -> { return values[slot] }
+
+fn run() {
+    i64_min :: I64.MIN
+    i64_max :: I64.MAX
+    u64_zero :: U64{0}
+    u64_max :: U64.MAX
+    values :: [U8]{7}
+    print(accept(i64_min))
+    print(accept(i64_max))
+    print(accept(u64_zero))
+    print(accept(u64_max))
+    print(pick(values, I64{0}))
+}
+"#;
+    assert_tiers_agree(
+        "tir_sized_integer_argument_boundaries",
+        src,
+        "-9223372036854775808\n9223372036854775807\n0\n18446744073709551615\n7\n",
+    );
+
+    for (name, bad_source) in [
+        (
+            "tir_reject_negative_to_unsigned",
+            r#"
+fn accept(value: U64) U64 -> { return value }
+fn run() {
+    negative :: I64{-1}
+    print(accept(negative))
+}
+"#,
+        ),
+        (
+            "tir_reject_i64_to_i8",
+            r#"
+fn accept(value: I8) I8 -> { return value }
+fn run() {
+    wide :: I64{128}
+    print(accept(wide))
+}
+"#,
+        ),
+    ] {
+        let diagnostics = compile_source(name, bad_source)
+            .expect_err("incompatible sized integer argument must be rejected");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+            "{name} produced unexpected diagnostics: {diagnostics:#?}"
+        );
+    }
+}
+
 /// D-WRAP-SCOPE1=A / I9: one lexical policy covers functions, methods, and
 /// blocks. It changes only fixed-width add/subtract/multiply/power; division
 /// remains the checked operation inside the wrapping block.
@@ -282,19 +343,19 @@ fallback :: U8{ 0 }
 fn lexical_arithmetic_policy_covers_fixed_width_operations_on_every_tier() {
     let src = r#"
 #Arithmetic(.Wrapping)
-fn wrapped(left: U8, right: U8) U8 {
+fn wrapped(left: U8, right: U8) U8 -> {
     return left + right
 }
 
 #Arithmetic(.Saturating)
-fn saturated(left: U8, right: U8) U8 {
+fn saturated(left: U8, right: U8) U8 -> {
     return left + right
 }
 
 struct Accumulator { value: U8 }
 impl Accumulator {
     #Arithmetic(.Wrapping)
-    fn step(self, right: U8) U8 {
+    fn step(self, right: U8) U8 -> {
         return self.value + right
     }
 }

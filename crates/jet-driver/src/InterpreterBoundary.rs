@@ -222,13 +222,15 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
 fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
     match (module, item) {
         // Run by the shared evaluator itself: `process.argv` reads the argv
-        // installed for this run, and `process.exit` / `sys.atexit` /
-        // `sys.stop` drive its own exit and cleanup path.
+        // installed for this run and `process.args` projects that same list
+        // through the shared `jet_process_args_view` kernel, and
+        // `process.exit` / `sys.atexit` / `sys.stop` drive its own exit and
+        // cleanup path.
         // `process.run` is marshalled by the interpreter ambient through the
         // same Process Prelude as AOT and Cranelift. The authority argument
         // is ordinary data at this boundary; sema has already checked it is
         // the named `Authority` carrier.
-        ("core.process", "argv" | "cmd" | "exit" | "run" | "pipeline" | "workspace")
+        ("core.process", "argv" | "args" | "cmd" | "exit" | "run" | "pipeline" | "workspace")
         | ("core.sys", "atexit" | "stop") => None,
         // #2003: the interpreter ambient marshals these three through the one
         // CoreHost accessor over Jet's logical environment table — the same
@@ -237,6 +239,9 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         // the `EnvSet` host call, which the TIR evaluator marshals to that
         // same `core.sys.set` adapter.
         ("core.sys", "get" | "set" | "home_dir") => None,
+        // The platform-family fact is the one OS fact implemented by the
+        // ambient interpreter; other core.sys facts remain native-only below.
+        ("core.sys", "family") => None,
         // Environment surfaces with no ambient arm. Without one the evaluator
         // falls through to the comptime host-env effect, which reads the
         // compiler's own `std::env` instead of Jet's table — so these must

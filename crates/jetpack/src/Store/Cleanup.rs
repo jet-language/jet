@@ -1097,9 +1097,7 @@ fn same_file_inode(a: &Path, b: &Path) -> bool {
 
 /// Run the cas-pool hardlink optimizer (also invoked from `clean`).
 pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
-    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        optimize_objects_cas_pool(roots)
-    })
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || optimize_objects_cas_pool(roots))
 }
 
 /// Re-hash a hangar object with cas-peer hardlink law (hangar-internal OK).
@@ -1420,14 +1418,14 @@ fn scan_doctor_objects(
             Ok((_actual, status)) => {
                 record_doctor_status(report, status);
                 report.findings.push(HangarDoctorFinding {
-                kind: "drift".to_string(),
-                subject: doctor_subject(hangar, &path),
-                detail: "content digest differs from the object name".to_string(),
-                fixed: false,
-                repair: DoctorRepair::Refresh {
-                    path: path.clone(),
-                    digest: name.clone(),
-                },
+                    kind: "drift".to_string(),
+                    subject: doctor_subject(hangar, &path),
+                    detail: "content digest differs from the object name".to_string(),
+                    fixed: false,
+                    repair: DoctorRepair::Refresh {
+                        path: path.clone(),
+                        digest: name.clone(),
+                    },
                 })
             }
             Err(error) => report.findings.push(HangarDoctorFinding {
@@ -1646,14 +1644,8 @@ fn doctor_object_digest(
     hangar: &Path,
     write_seal: bool,
 ) -> Result<(String, Ingest::VerificationStatus), String> {
-    Ingest::verified_output_hash_with_options(
-        path,
-        Some(hangar),
-        false,
-        false,
-        write_seal,
-    )
-    .map_err(|error| error.to_string())
+    Ingest::verified_output_hash_with_options(path, Some(hangar), false, false, write_seal)
+        .map_err(|error| error.to_string())
 }
 
 fn record_doctor_status(report: &mut HangarDoctorReport, status: Ingest::VerificationStatus) {

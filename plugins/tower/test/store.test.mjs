@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty, laneOf, TowerError, nextCards, project } from '../app/store.mjs';
@@ -34,7 +34,7 @@ test('lane derivation follows phases and decisions', () => {
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
   st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
@@ -56,7 +56,7 @@ test('deciding card auto-advances when last decision ratifies', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'B',
     recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' },
     hybrid: { result: 'B', synthesis: 'B combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
@@ -64,6 +64,41 @@ test('deciding card auto-advances when last decision ratifies', () => {
   st.mutate((s) => db.ratify(s, 'D-X', 'B', null, 'owner'));
   const s = st.load();
   assert.equal(db.findCard(s, '#1').phase, 'ready');
+});
+
+test('ratified decisions cannot be mutated by agent attribution', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Protected decision' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b.' } }));
+  st.mutate((s) => db.ratify(s, 'D-PROTECTED', 'keep', null, 'owner'));
+
+  for (const action of [
+    (s) => db.reopenDecision(s, 'D-PROTECTED', 'agent'),
+    (s) => db.deleteDecision(s, 'D-PROTECTED', 'agent'),
+    (s) => db.updateDecision(s, 'D-PROTECTED', { title: 'forged' }, 'agent'),
+  ]) assert.throws(
+    () => st.mutate(action),
+    (e) => e instanceof TowerError && e.code === 'E_OWNER_ONLY',
+  );
+  assert.equal(st.load().decisions[0].status, 'ratified');
+  assert.equal(st.load().decisions[0].title, 'keep');
+});
+
+test('question attribution must be explicit', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Question target' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addQuestion(s, { cardId: '#1', text: 'forged owner question' })),
+    (e) => e instanceof TowerError && e.code === 'E_INVALID',
+  );
+  assert.equal(st.load().questions.length, 0);
+});
+
+test('hostile tracked priority is escaped at every HTML sink', () => {
+  const ui = readFileSync(new URL('../app/ui/tower.js', import.meta.url), 'utf8');
+  assert.equal((ui.match(/prio-\$\{c\.priority\}/g) || []).length, 0);
+  assert.equal((ui.match(/prio-\$\{esc\(c\.priority\)\}/g) || []).length, 2);
+  assert.equal((ui.match(/>\$\{c\.priority\}</g) || []).length, 0);
 });
 
 test('validation: bad enums and dangling refs are rejected, state unchanged', () => {
@@ -268,8 +303,8 @@ test('deleteCard cascades decisions/questions and clears blockedBy refs', () => 
   st.mutate((s, cfg) => {
     const a = db.addCard(s, { title: 'A' }, cfg);
     db.addCard(s, { title: 'B', blockedBy: [a.id] }, cfg);
-    db.addDecision(s, { cardId: a.id, title: 'd', draft: true });
-    db.addQuestion(s, { cardId: a.id, text: 'q?' });
+    db.addDecision(s, { cardId: a.id, title: 'd', draft: true, ballotMode: 'full', reviewPasses: { adversarial: 'Author model family: family-a. Adversarial model family: family-b.' } });
+    db.addQuestion(s, { cardId: a.id, text: 'q?', by: 'owner' });
   });
   st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' }));
   const s = st.load();

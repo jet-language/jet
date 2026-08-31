@@ -5,10 +5,13 @@ fn frame(body: String) String -> {
     return "Content-Length: {body.len()}\n\n{body}"
 }
 
-fn run() {
-    args :: process.argv()
-    if args.len() != 2 -> panic("usage: mcp_resource INPUT_ROOT")
-    root :: args.get(1) ?? panic("missing input root")
+#CLI
+struct WorkloadArgs {
+    root: String
+}
+
+fn run(args: WorkloadArgs) {
+    root :: args.root
     case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
     jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet binary")
     project := "{root}/readonly"

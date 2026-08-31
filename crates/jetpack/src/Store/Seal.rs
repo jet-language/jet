@@ -89,7 +89,6 @@ pub fn census_report() -> Option<String> {
     Some(out)
 }
 
-
 thread_local! {
     /// Per-command seal memo (D-JPK-VERIFYONCE1=A). One CLI command holds one
     /// coherent view of the Hangar: an object whose seal matched once in this
@@ -275,7 +274,10 @@ pub(crate) fn recover_unlocked(hangar: &Path) -> io::Result<usize> {
     let mut swept = 0;
     for entry in fs::read_dir(&seals)? {
         let path = entry?.path();
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
         if !name.starts_with('.') || !name.ends_with(PARTIAL_SUFFIX) {
             continue;
         }
@@ -283,7 +285,10 @@ pub(crate) fn recover_unlocked(hangar: &Path) -> io::Result<usize> {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Hangar seal partial is not a regular file: {}", path.display()),
+                format!(
+                    "Hangar seal partial is not a regular file: {}",
+                    path.display()
+                ),
             ));
         }
         fs::remove_file(path)?;
@@ -318,7 +323,9 @@ fn read_record(path: &Path) -> io::Result<Option<SealRecord>> {
     if bytes.len() as u64 > MAX_SEAL_BYTES {
         return Ok(None);
     }
-    Ok(parse_record(std::str::from_utf8(&bytes).ok().unwrap_or_default()))
+    Ok(parse_record(
+        std::str::from_utf8(&bytes).ok().unwrap_or_default(),
+    ))
 }
 
 fn parse_record(text: &str) -> Option<SealRecord> {
@@ -373,9 +380,11 @@ fn valid_digest(value: &str) -> bool {
     let Some(hex) = value.strip_prefix("sha256-") else {
         return false;
     };
-    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
-
 
 fn ensure_real_directory(path: &Path, label: &str) -> io::Result<()> {
     match fs::symlink_metadata(path) {

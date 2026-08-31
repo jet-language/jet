@@ -1,14 +1,31 @@
 // D-SERDE-ACCESS=B: dynamic DataTree/JSON accessor methods
 use core.encoding.json as json
 
-fn run() !(JSONError | [FieldError]) {
+fn run() {
     raw :: "{{\"user\":{{\"name\":\"Alice\",\"score\":42,\"active\":true}}}}"
-    tree :: json.parse(raw)
-    user :: tree.field("user")
-    name :: user.field("name")
-    score :: user.field("score")
-    active :: user.field("active")
-    print(name.text())
-    print(score.int())
-    print(active.bool())
+    tree :: json.parse(raw) ?? panic("parse")
+    user :: tree.field("user") ?? panic("user")
+    name :: user.field("name") ?? panic("name")
+    score :: user.field("score") ?? panic("score")
+    active :: user.field("active") ?? panic("active")
+    print(name.text() ?? panic("name text"))
+    print(score.int() ?? panic("score int"))
+    print(active.bool() ?? panic("active bool"))
+    print(DataTree.Text("Alice").to_text() ?? "none")
+    print(DataTree.Int(42).to_text() ?? "none")
+    print(DataTree.Float(2.5).to_text() ?? "none")
+    print(DataTree.Float(1.0).to_text() ?? "none")
+    print(DataTree.Bool(true).to_text() ?? "none")
+    print(DataTree.Null.to_text() ?? "none")
+    empty_array :: [DataTree]{}
+    print(DataTree.Array(empty_array).to_text() ?? "none")
+    empty_object :: [String:DataTree]{}
+    print(DataTree.Object(empty_object).to_text() ?? "none")
+    left :: json.parse("{{\"a\":1,\"nested\":[true,\"x\"]}}") ?? panic("left")
+    right :: json.parse("{{\"nested\":[true,\"x\"],\"a\":1}}") ?? panic("right")
+    print(left.equal_unordered(right))
+    print(DataTree.Null.equal_unordered(DataTree.Null))
+    print(DataTree.Array([DataTree.Int(1), DataTree.Int(2)]).equal_unordered(DataTree.Array([DataTree.Int(2), DataTree.Int(1)])))
+    print(DataTree.Int(1).equal_unordered(DataTree.Float(1.0)))
+    print(DataTree.Float(Float.NAN).equal_unordered(DataTree.Float(Float.NAN)))
 }

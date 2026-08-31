@@ -66,6 +66,44 @@ fn positional_bare_form_fills_required_field() {
 }
 
 #[test]
+fn surplus_bare_arguments_are_parse_errors_with_usage() {
+    let dir = scratch("surplus");
+    fs::write(
+        dir.join("typed.jet"),
+        r#"#CLI
+struct Args {
+    name: String{"world"}
+    count: Int{1}
+}
+
+fn run(args: Args) {
+    print("{args.name} {args.count}")
+}
+"#,
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .args([
+            "run",
+            "--profile=debug",
+            "typed.jet",
+            "--",
+            "alice",
+            "bob",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("unexpected arguments"), "{stderr}");
+    assert!(stderr.contains("`alice`"), "{stderr}");
+    assert!(stderr.contains("`bob`"), "{stderr}");
+    assert!(stderr.contains("Usage:"), "{stderr}");
+    assert!(out.stdout.is_empty(), "stdout={}", String::from_utf8_lossy(&out.stdout));
+}
+
+#[test]
 fn named_form_still_works_and_optional_stays_flag() {
     let dir = scratch("named");
     write_todo(&dir);

@@ -548,6 +548,16 @@ pub(super) fn prepare(
         }
         let structure = find_struct(items, type_name)
             .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
+        let selected_function = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+            let Item::Const(value) = item else {
+                return None;
+            };
+            value
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected && output.params.len() == 1)
+                .map(|output| output.lowered_name.clone())
+        });
         let help = spec_help(&mut spec, span)?;
         let value_type_name = nominal_name(type_name);
         return decode_struct(
@@ -558,7 +568,13 @@ pub(super) fn prepare(
             &help,
             span,
         )
-        .map(Dispatch::Run)
+        .map(|args| match selected_function {
+            Some(function) => Dispatch::Direct {
+                function,
+                args: vec![args],
+            },
+            None => Dispatch::Run(args),
+        })
         .map_err(|error| {
             crate::Sema::Diagnostics::render_registered(
                 "E2201",

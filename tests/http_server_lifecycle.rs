@@ -219,6 +219,13 @@ fn jet_observe_register_exit_drain(_drain: fn()) {}
 fn jet_observe_task_failure_message(_id: usize, reason: String) -> String {
     reason
 }
+fn jet_observe_task_set_label(_id: usize, _label: &str) {}
+fn jet_observe_task_identity(id: usize) -> String {
+    format!("task #{id}")
+}
+fn jet_observe_task_failure_message_for_identity(identity: &str, reason: String) -> String {
+    format!("{identity}: {reason}")
+}
 fn jet_observe_has_parked_tasks() -> bool {
     false
 }
@@ -536,6 +543,19 @@ fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
         observed.extend(chunk.unwrap());
     }
     assert_eq!(observed, b"abcdef");
+    let capped = JetHTTPBody::from_reader_with_length(
+        JetFileReader {
+            inner: Box::new(std::io::Cursor::new(b"abcdef".to_vec())),
+        },
+        3,
+    )
+    .unwrap();
+    let capped = capped
+        .chunks(8)
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(capped, vec![b"abc".to_vec()]);
 }
 
 #[test]
@@ -3636,6 +3656,52 @@ fn header_and_body_reads_have_bounded_timeouts() {
         timeout_for(b"POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 4\r\n\r\nx").status,
         408
     );
+}
+
+#[test]
+fn body_deadline_rejects_a_successful_byte_trickle() {
+    use std::io::Write;
+
+    const BODY_LEN: usize = 64;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let client = std::thread::spawn(move || {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        write!(
+            stream,
+            "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: {BODY_LEN}\r\n\r\n"
+        )
+        .expect("request head");
+        stream.flush().expect("request head flush");
+        for _ in 0..BODY_LEN {
+            if stream.write_all(b"x").is_err() || stream.flush().is_err() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    });
+    let (mut stream, _) = listener.accept().expect("accept");
+    let options = JetHTTPServerOptions {
+        read_header_timeout: std::time::Duration::from_secs(1),
+        read_idle_timeout: std::time::Duration::from_secs(1),
+        read_body_timeout: std::time::Duration::from_millis(40),
+        ..JetHTTPServerOptions::safe()
+    };
+    let started = std::time::Instant::now();
+    let (request, _) = jet_http_srv_read_streaming(&mut stream, &options, false, None)
+        .expect("request head")
+        .expect("request");
+    let error = request
+        .body
+        .bytes(BODY_LEN)
+        .expect_err("a byte trickle must not renew the body deadline");
+    assert!(matches!(error, JetHTTPError::IO { .. }));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(200),
+        "absolute body deadline was not enforced: {:?}",
+        started.elapsed()
+    );
+    client.join().expect("client");
 }
 
 #[test]

@@ -1,55 +1,49 @@
-use core.files as files
-use core.process as process
-use core.time as time
+use core.[files, time]
 
-fn run() !IOError {
-    path :: process.argv().get(1) ?? "app.log"
-    input :: files.open(~path) ?? panic("open log")
-    levels :: ["DEBUG", "INFO", "WARN", "ERROR"]
-    components :: ["api", "auth", "cache", "db", "jobs", "mailer", "payments", "queue", "search", "storage", "worker", "web"]
+struct LogLine { timestamp: String, level: String, component: String, millis: Int }
+
+#CLI
+struct Args {
+    input: String
+}
+
+fn parse_line(line: String) LogLine -> {
+    fields :: line.split(" ").take(3).to_list()
+    timestamp_text :: fields.get(0) ?? panic("bad log line")
+    level :: fields.get(1) ?? panic("bad log line")
+    component :: fields.get(2) ?? panic("bad log line")
+    timestamp :: time.parse_rfc3339(timestamp_text) ?? panic("bad timestamp")
+    LogLine{timestamp: timestamp_text, level, component, millis: timestamp.to_unix_ms()}
+}
+
+fn run(args: Args) !IOError -> {
+    input :: (files.open(~args.input) ?? panic("open log"))
     level_counts := [String:Int]{}
     error_components := [String:Int]{}
-    first_text := ""
-    last_text := ""
-    first_ms := 0
-    last_ms := 0
+    first_timestamp := ""
+    last_timestamp := ""
+    first_millis := 0
+    last_millis := 0
     total := 0
-
     loop line in input.lines() {
-        fields :: line.split(" ").to_list()
-        timestamp_text :: fields.get(0) ?? panic("bad log line")
-        level :: fields.get(1) ?? panic("bad log line")
-        component :: fields.get(2) ?? panic("bad log line")
-        timestamp :: time.parse_rfc3339(timestamp_text) ?? panic("bad timestamp")
-        timestamp_ms :: timestamp.to_unix_ms()
+        record :: parse_line(line) ?? panic("bad log line")
+        last_timestamp = record.timestamp
+        last_millis = record.millis
         if total == 0 {
-            first_text = timestamp_text.copy()
-            first_ms = timestamp_ms
+            first_timestamp = ~last_timestamp
+            first_millis = last_millis
         }
-        last_text = timestamp_text.copy()
-        last_ms = timestamp_ms
-        level_counts[level] = (level_counts.get(level) ?? 0) + 1
-        if level == "ERROR" -> error_components[component] = (error_components.get(component) ?? 0) + 1
+        level_counts[record.level] = (level_counts.get(record.level) ?? 0) + 1
+        if record.level == "ERROR" {
+            error_components[record.component] = (error_components.get(record.component) ?? 0) + 1
+        }
         total += 1
     }
 
-    loop level in levels {
+    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] {
         print("{level} {level_counts.get(level) ?? 0}")
     }
     print("top-error-components:")
-    top := [String]{}
-    loop _ in 0..<3 {
-        best_name := ""
-        best_count := -1
-        loop component in components {
-            count :: error_components.get(component) ?? 0
-            if !top.contains(component) && (count > best_count || (count == best_count && (best_name == "" || component < best_name))) {
-                best_name = component
-                best_count = count
-            }
-        }
-        print("{best_count} {best_name}")
-        top.push(best_name)
-    }
-    print("span {first_text} .. {last_text} ({(last_ms - first_ms) / 1000}s)")
+    loop item in error_components.top_n(3) -> print("{item.value} {item.key}")
+    print("span {first_timestamp} .. {last_timestamp} ({(last_millis - first_millis) / 1000}s)")
 }

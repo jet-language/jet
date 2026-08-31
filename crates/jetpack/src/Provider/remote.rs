@@ -6,7 +6,6 @@ use crate::RefSpec::Source;
 use crate::SHA256;
 use jet_pkg_model::Package::PackageFacts;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// D-ILE1: infer a package's kind from its source. A top-level `fn run` in any
 /// of the package's `.jet` files means `executable`; otherwise `library`. The
@@ -110,7 +109,7 @@ fn fetch_remote_repo_indexed(
     ctx: &Ctx,
 ) -> Result<PathBuf, ProviderError> {
     let cache = source_cache_dir(ctx.store_dir, remote);
-    if cache.is_dir() {
+    if cache_is_real_directory(&cache)? {
         return Ok(cache);
     }
     if ctx.offline {
@@ -163,25 +162,22 @@ fn try_sparse_member_fetch(
     want_package: &str,
     cache: &Path,
 ) -> SparseOutcome {
-    if Command::new("git").arg("--version").output().is_err() {
+    if super::hardened_git_command()
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         // No git at all: let the full-clone path produce the "need git" error.
         return SparseOutcome::NotMonorepo;
     }
-    let tmp = std::env::temp_dir().join(format!(
-        "jetpack-sparse-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = std::fs::remove_dir_all(&tmp);
-    if std::fs::create_dir_all(&tmp).is_err() {
-        return SparseOutcome::SparseFailed;
-    }
-    let _guard = TmpDirGuard(tmp.clone());
+    let tmp = match super::exclusive_temp_dir(&std::env::temp_dir(), "jetpack-sparse") {
+        Ok(path) => path,
+        Err(_) => return SparseOutcome::SparseFailed,
+    };
+    let _guard = super::TempDirGuard(tmp.clone());
 
     let git_ok = |args: &[&str]| -> bool {
-        Command::new("git")
+        super::hardened_git_command()
             .arg("-C")
             .arg(&tmp)
             .args(args)
@@ -190,7 +186,7 @@ fn try_sparse_member_fetch(
             .unwrap_or(false)
     };
     let git_out = |args: &[&str]| -> Option<String> {
-        let o = Command::new("git")
+        let o = super::hardened_git_command()
             .arg("-C")
             .arg(&tmp)
             .args(args)
@@ -286,24 +282,28 @@ fn try_sparse_member_fetch(
         return SparseOutcome::SparseFailed;
     }
 
-    // Publish into the source cache. Rename can cross the temp/cache boundary; a
-    // copy fallback covers a cross-filesystem rename failure.
-    if let Some(parent) = cache.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if std::fs::rename(&tmp, cache).is_err() {
-        if copy_tree(&tmp, cache).is_err() {
-            return SparseOutcome::SparseFailed;
-        }
+    // Validate before the fast rename too. A successful same-filesystem rename
+    // would otherwise publish Git symlinks without reaching the checked copy
+    // fallback.
+    if publish_remote_checkout(&tmp, cache).is_err() {
+        return SparseOutcome::SparseFailed;
     }
     SparseOutcome::Materialized(cache.to_path_buf())
 }
 
-/// A temp dir removed on drop, so a sparse fetch that returns early never leaks.
-struct TmpDirGuard(PathBuf);
-impl Drop for TmpDirGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+fn publish_remote_checkout(tmp: &Path, cache: &Path) -> Result<(), String> {
+    if let Some(parent) = cache.parent() {
+        ensure_real_directory(parent).map_err(|error| error.to_string())?;
+    }
+    // Validate the complete checkout before the fast rename. Git can materialize
+    // symlinks from an untrusted remote, and rename would otherwise publish them
+    // without reaching the checked copy fallback.
+    tree_fingerprint(tmp)?;
+    match std::fs::rename(tmp, cache) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => copy_tree(tmp, cache).map_err(|copy_error| {
+            format!("rename failed: {rename_error}; checked copy failed: {copy_error}")
+        }),
     }
 }
 
@@ -416,6 +416,11 @@ pub(super) struct RemoteSource {
 }
 
 pub(super) fn parse_remote_source(upstream: &str) -> Result<RemoteSource, ProviderError> {
+    if !remote_text_is_safe(upstream) {
+        return Err(ProviderError::CoreBuild(
+            "remote source is empty or contains unsafe control characters".to_string(),
+        ));
+    }
     let (base, rev) = split_ref(upstream);
     if let Some(rest) = base.strip_prefix("github:") {
         let mut parts = rest.split('/');
@@ -469,29 +474,39 @@ pub(super) fn remote_revision_is_safe(revision: Option<&str>) -> bool {
     match revision {
         None => true,
         Some(revision) => {
-            !revision.is_empty()
-                && !revision.chars().any(char::is_control)
-                && !revision.starts_with('-')
+            remote_text_is_safe(revision) && !revision.starts_with('-')
         }
     }
 }
 
 fn validate_remote_source(remote: &RemoteSource) -> Result<(), ProviderError> {
-    if remote_revision_is_safe(remote.rev.as_deref()) {
-        return Ok(());
+    if !remote_text_is_safe(&remote.url) || remote.url.starts_with('-') {
+        return Err(ProviderError::CoreBuild(
+            "remote URL is empty or contains unsafe control characters".to_string(),
+        ));
     }
-    Err(ProviderError::CoreBuild(format!(
-        "remote revision `{}` is not allowed; use a branch, tag, or commit name without leading `-`",
-        remote.rev.as_deref().unwrap_or_default()
-    )))
+    if !remote_text_is_safe(&remote.label) || !remote_revision_is_safe(remote.rev.as_deref()) {
+        return Err(ProviderError::CoreBuild(
+            "remote revision is not allowed; use a branch, tag, or commit name without leading `-`"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn remote_text_is_safe(value: &str) -> bool {
+    !value.is_empty()
+        && !value.chars().any(char::is_control)
+        && !value.contains(['\u{2028}', '\u{2029}'])
 }
 
 pub(super) fn fetch_remote_repo(
     remote: &RemoteSource,
     ctx: &Ctx,
 ) -> Result<PathBuf, ProviderError> {
+    validate_remote_source(remote)?;
     let cache = source_cache_dir(ctx.store_dir, remote);
-    if cache.is_dir() {
+    if cache_is_real_directory(&cache)? {
         return Ok(cache);
     }
     if ctx.offline {
@@ -501,27 +516,26 @@ pub(super) fn fetch_remote_repo(
         )));
     }
     ensure_network_allowed("fetch source repo")?;
-    if Command::new("git").arg("--version").output().is_err() {
+    if super::hardened_git_command()
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         return Err(ProviderError::CoreBuild(
             "remote `core` sources need the `git` command to fetch source repos".to_string(),
         ));
     }
 
     let parent = cache.parent().unwrap_or(ctx.store_dir);
-    std::fs::create_dir_all(parent)
+    ensure_real_directory(parent)
         .map_err(|e| ProviderError::CoreBuild(format!("could not create source cache: {e}")))?;
-    let tmp = parent.join(format!(
-        ".tmp-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    if tmp.exists() {
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
+    let tmp_root = super::exclusive_temp_dir(parent, "jetpack-source").map_err(|e| {
+        ProviderError::CoreBuild(format!("could not create temporary source checkout: {e}"))
+    })?;
+    let _guard = super::TempDirGuard(tmp_root.clone());
+    let tmp = tmp_root.join("checkout");
 
-    let output = Command::new("git")
+    let output = super::hardened_git_command()
         .args(["clone", "--quiet", "--", &remote.url])
         .arg(&tmp)
         .output()
@@ -533,7 +547,6 @@ pub(super) fn fetch_remote_repo(
             .last()
             .unwrap_or("git clone failed")
             .to_string();
-        let _ = std::fs::remove_dir_all(&tmp);
         return Err(ProviderError::CoreBuild(format!(
             "failed to fetch `{}`: {reason}",
             remote.label
@@ -542,12 +555,11 @@ pub(super) fn fetch_remote_repo(
 
     if let Some(rev) = &remote.rev {
         if !remote_revision_is_safe(Some(rev)) {
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err(ProviderError::CoreBuild(
                 "remote revision is not allowed".to_string(),
             ));
         }
-        let output = Command::new("git")
+        let output = super::hardened_git_command()
             .args(["-C"])
             .arg(&tmp)
             .args(["checkout", "--quiet", rev])
@@ -560,7 +572,6 @@ pub(super) fn fetch_remote_repo(
                 .last()
                 .unwrap_or("git checkout failed")
                 .to_string();
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err(ProviderError::CoreBuild(format!(
                 "failed to check out `{rev}` from `{}`: {reason}",
                 remote.label
@@ -568,9 +579,8 @@ pub(super) fn fetch_remote_repo(
         }
     }
 
-    std::fs::rename(&tmp, &cache).map_err(|e| {
-        let _ = std::fs::remove_dir_all(&tmp);
-        ProviderError::CoreBuild(format!("could not place fetched source in cache: {e}"))
+    publish_remote_checkout(&tmp, &cache).map_err(|error| {
+        ProviderError::CoreBuild(format!("could not place fetched source in cache: {error}"))
     })?;
     Ok(cache)
 }
@@ -588,6 +598,26 @@ pub(super) fn source_cache_dir(store_dir: &Path, remote: &RemoteSource) -> PathB
     root.join(&key[..16])
 }
 
+fn cache_is_real_directory(cache: &Path) -> Result<bool, ProviderError> {
+    if let Some(parent) = cache.parent() {
+        validate_existing_directory(parent).map_err(|error| {
+            ProviderError::CoreBuild(format!(
+                "source cache parent must contain only real directories: {error}"
+            ))
+        })?;
+    }
+    match std::fs::symlink_metadata(cache) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(ProviderError::CoreBuild(
+            format!("source cache must not be a symlink: {}", cache.display()),
+        )),
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(ProviderError::CoreBuild(format!(
+            "could not inspect source cache: {error}"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,7 +627,9 @@ mod tests {
         assert!(remote_revision_is_safe(None));
         assert!(remote_revision_is_safe(Some("main")));
         assert!(!remote_revision_is_safe(Some("--upload-pack=touch pwned")));
+        assert!(!remote_revision_is_safe(Some("main\u{2028}forged")));
         assert!(parse_remote_source("file:///workspace/repo#--upload-pack=touch").is_err());
+        assert!(parse_remote_source("https://example.invalid/repo.git\nforged").is_err());
     }
 
     #[test]
@@ -668,8 +700,88 @@ mod tests {
             "must not be read or copied"
         );
 
+        let safe_source = root.join("safe-source");
+        std::fs::create_dir_all(&safe_source).unwrap();
+        std::fs::write(safe_source.join("safe.txt"), "safe").unwrap();
+        let destination_outside = root.with_file_name(format!(
+            "jetpack-package-tree-destination-outside-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&destination_outside).unwrap();
+        std::fs::write(destination_outside.join("sentinel"), "must stay").unwrap();
+        let destination_link = root.with_file_name(format!(
+            "jetpack-package-tree-destination-link-{}",
+            std::process::id()
+        ));
+        symlink(&destination_outside, &destination_link).unwrap();
+        assert!(copy_tree(&safe_source, &destination_link).is_err());
+        assert!(!destination_outside.join("safe.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(destination_outside.join("sentinel")).unwrap(),
+            "must stay"
+        );
+
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&copy);
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&destination_outside);
+        let _ = std::fs::remove_file(&destination_link);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_cache_rejects_symlinked_root_and_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-source-cache-symlink-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jetpack-source-cache-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let cache_link = root.join("cache");
+        symlink(&outside, &cache_link).unwrap();
+        assert!(cache_is_real_directory(&cache_link).is_err());
+
+        let parent_link = root.join("parent");
+        symlink(&outside, &parent_link).unwrap();
+        assert!(cache_is_real_directory(&parent_link.join("cache")).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_publish_rejects_symlink_before_fast_rename() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-sparse-publish-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("checkout")).unwrap();
+        let outside = root.with_file_name(format!(
+            "jetpack-sparse-publish-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "must not be published").unwrap();
+        symlink(&outside, root.join("checkout/escape.txt")).unwrap();
+        let cache = root.join("cache");
+
+        assert!(publish_remote_checkout(&root.join("checkout"), &cache).is_err());
+        assert!(!cache.exists());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be published");
+
+        let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
     }
 }
@@ -743,7 +855,40 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 /// Recursively copy a directory tree, preserving Unix file modes (so `bin/`
 /// executables stay executable). std-only (I6).
 pub(super) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
+    let source_metadata = std::fs::symlink_metadata(src)?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("copy source must be a real directory: {}", src.display()),
+        ));
+    }
+    let source_root = std::fs::canonicalize(src)?;
+    ensure_real_directory(dst)?;
+    let destination_root = std::fs::canonicalize(dst)?;
+    copy_tree_contents(src, dst, &source_root, &destination_root)
+}
+
+fn copy_tree_contents(
+    src: &Path,
+    dst: &Path,
+    source_root: &Path,
+    destination_root: &Path,
+) -> std::io::Result<()> {
+    let real_source = std::fs::canonicalize(src)?;
+    if !real_source.starts_with(source_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("copy source escapes its root: {}", src.display()),
+        ));
+    }
+    ensure_real_directory(dst)?;
+    let real_destination = std::fs::canonicalize(dst)?;
+    if !real_destination.starts_with(destination_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("copy destination escapes its root: {}", dst.display()),
+        ));
+    }
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
@@ -755,21 +900,193 @@ pub(super) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
                 from.display()
             )));
         }
+        let real_from = std::fs::canonicalize(&from)?;
+        if !real_from.starts_with(source_root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("copy source escapes its root: {}", from.display()),
+            ));
+        }
         if metadata.is_dir() {
-            copy_tree(&from, &to)?;
+            ensure_real_directory(&to)?;
+            copy_tree_contents(&from, &to, source_root, destination_root)?;
         } else if metadata.is_file() {
-            std::fs::copy(&from, &to)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = metadata.permissions().mode();
-                std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
-            }
+            copy_regular_file_nofollow(&from, &to, &metadata)?;
         } else {
             return Err(std::io::Error::other(format!(
                 "refusing non-file in copied package tree: {}",
                 from.display()
             )));
+        }
+    }
+    Ok(())
+}
+
+fn copy_regular_file_nofollow(
+    src: &Path,
+    dst: &Path,
+    expected: &std::fs::Metadata,
+) -> std::io::Result<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(dst) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("copy destination must be a regular file: {}", dst.display()),
+            ));
+        }
+    }
+    let mut source_options = std::fs::OpenOptions::new();
+    source_options.read(true);
+    add_nofollow_flags(&mut source_options);
+    let mut source = source_options.open(src)?;
+    let opened = source.metadata()?;
+    if !opened.is_file() || !same_file_identity(expected, &opened) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("copy source file changed before copy: {}", src.display()),
+        ));
+    }
+
+    let mut destination_options = std::fs::OpenOptions::new();
+    destination_options
+        .write(true)
+        .create(true)
+        .truncate(true);
+    add_nofollow_flags(&mut destination_options);
+    let mut destination = destination_options.open(dst)?;
+    std::io::copy(&mut source, &mut destination)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        destination.set_permissions(std::fs::Permissions::from_mode(
+            expected.permissions().mode(),
+        ))?;
+    }
+    destination.sync_all()?;
+    let after = std::fs::symlink_metadata(src)?;
+    if !same_file_identity(expected, &after) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("copy source file changed while copying: {}", src.display()),
+        ));
+    }
+    Ok(())
+}
+
+fn add_nofollow_flags(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_CLOEXEC: i32 = 0o2000000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_CLOEXEC: i32 = 0x01000000;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_NOFOLLOW: i32 = 0o400000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+}
+
+fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
+    }
+}
+
+fn validate_existing_directory(path: &Path) -> std::io::Result<()> {
+    if path.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        if component == std::path::Component::ParentDir {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path contains a parent component",
+            ));
+        }
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("directory must be real: {}", current.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn ensure_real_directory(path: &Path) -> std::io::Result<()> {
+    let components = path.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory path is empty",
+        ));
+    }
+    let mut current = PathBuf::new();
+    for component in components {
+        if component == std::path::Component::ParentDir {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path contains a parent component",
+            ));
+        }
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("directory must not be a symlink: {}", current.display()),
+                ));
+            }
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("directory path is not a directory: {}", current.display()),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir(&current) {
+                    Ok(()) => {}
+                    Err(create_error)
+                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(create_error) => return Err(create_error),
+                }
+                let metadata = std::fs::symlink_metadata(&current)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!("directory must be real: {}", current.display()),
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
         }
     }
     Ok(())

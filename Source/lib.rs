@@ -17,6 +17,7 @@ pub use jet_driver::{
     boot_tir_eval,
     development_receipt,
     program_allocator,
+    scheduler,
     AdaBind,
     Authority,
     CBind,
@@ -48,7 +49,11 @@ pub use jet_driver::{
     GoBind,
     JavaBind,
     JavaScriptBind,
+    JetLib,
+    JetLibAccess,
     JetLibArtifact,
+    JetLibExport,
+    JetLibScalar,
     JetLibStamp,
     Lexer,
     LibraryExport,
@@ -70,7 +75,6 @@ pub use jet_driver::{
     RBind,
     RubyBind,
     ScriptDeps,
-    scheduler,
     Sema,
     Store as PkgStore,
     Syntax,
@@ -93,6 +97,7 @@ pub use jet_canvas as CanvasUi;
 pub use jet_cli::{Explain, Help, CLI};
 pub use jet_devserver as DevServer;
 pub use jet_foundation::ExitCodes;
+pub use jetpack::MCP;
 // D-FAIL-CARRIER1=A: the one outcome carrier. It is embedded as the first
 // prelude part, and it is a real module here too, so the compiler's own
 // interpreters call the same functions the generated program calls.
@@ -506,6 +511,42 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     package_scope: bool,
     build_override: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        None,
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -522,8 +563,11 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         prepared,
         package_scope,
         build_override,
+        entry_fn,
+        false,
         false,
     )
+    .map(|output| output.compile)
 }
 
 /// Compile a native cache hit after its checked front end has completed. The
@@ -544,6 +588,42 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     package_scope: bool,
     build_override: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        None,
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -560,8 +640,11 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         prepared,
         package_scope,
         build_override,
+        entry_fn,
         true,
+        false,
     )
+    .map(|output| output.compile)
 }
 
 /// D-BUILDGEN1 / #1040: compile a programmable build and copy the exact
@@ -692,6 +775,42 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     package_scope: bool,
     build_override: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        None,
+    )
+}
+
+pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -708,8 +827,11 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         prepared,
         package_scope,
         build_override,
+        entry_fn,
+        false,
         false,
     )
+    .map(|output| output.compile)
 }
 
 /// #2083: run the programmable build front end once, up front.
@@ -760,6 +882,32 @@ pub fn prepare_programmable_build_front_end_scoped(
     package_scope: bool,
     build_override: bool,
 ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    prepare_programmable_build_front_end_scoped_with_entry(
+        file,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        profile,
+        setting_overrides,
+        package_scope,
+        build_override,
+        None,
+    )
+}
+
+pub fn prepare_programmable_build_front_end_scoped_with_entry(
+    file: &str,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let inputs = Driver::FrontEndInputs {
         file: file.to_string(),
         profile: profile.to_string(),
@@ -770,6 +918,7 @@ pub fn prepare_programmable_build_front_end_scoped(
         cross_target: cross_target.map(str::to_string),
         package_scope,
         build_override,
+        entry_fn: entry_fn.map(str::to_string),
     };
     with_compiler_stack(move || {
         let mut prepared = Driver::prepare_build_front_end(inputs)?;
@@ -835,11 +984,94 @@ pub fn check_programmable_build_for_tier(
                 remote: None,
                 package_scope: true,
                 build_override: true,
+                entry_fn: None,
             },
             Some(prepared),
         )
         .map(|_| ())
     }))
+}
+
+/// Check a project-scoped programmable build without executing its actions or
+/// emitting native code. The returned output contains the final runtime bundle
+/// and the effect facts from its in-memory generated-source re-check.
+pub fn check_project_build_for_tier(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    target: Option<&str>,
+    entry_fn: Option<&str>,
+) -> Result<Option<Driver::BuildCompileOutput>, Vec<Diagnostic>> {
+    let selects_build = file_selects_programmable_build(file)
+        || workspace_build_authority(file)?.is_some();
+    if !selects_build {
+        return Ok(None);
+    }
+    let output = compile_programmable_build_opts_inner(
+        file,
+        &[],
+        false,
+        gates,
+        false,
+        target == Some(Syntax::BUILD_TARGET_WEB),
+        false,
+        target,
+        false,
+        None,
+        profile,
+        setting_overrides,
+        None,
+        true,
+        true,
+        entry_fn,
+        false,
+        true,
+    )?;
+    Ok(Some(output))
+}
+
+/// Compile a programmable build and retain the checked runtime bundle for a
+/// backend that emits a native artifact directly from TIR.
+pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    emit_generated: bool,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+    without_codegen: bool,
+) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_inner(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        emit_generated,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        entry_fn,
+        without_codegen,
+        false,
+    )
 }
 
 fn compile_programmable_build_opts_inner(
@@ -858,8 +1090,10 @@ fn compile_programmable_build_opts_inner(
     prepared: Option<Driver::PreparedBuildFrontEnd>,
     package_scope: bool,
     build_override: bool,
+    entry_fn: Option<&str>,
     without_codegen: bool,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
+    project_check: bool,
+) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
             .map(Comptime::Build::RemoteBuildBinding::load_host)
@@ -894,12 +1128,13 @@ fn compile_programmable_build_opts_inner(
                 setting_overrides,
                 package_scope,
                 build_override,
+                project_check,
                 checked_workspace,
             );
         }
         let mut prepared = prepared;
         if prepared.is_none() {
-            prepared = Some(prepare_programmable_build_front_end_scoped(
+            prepared = Some(prepare_programmable_build_front_end_scoped_with_entry(
                 file,
                 locked,
                 web_target,
@@ -909,6 +1144,7 @@ fn compile_programmable_build_opts_inner(
                 setting_overrides,
                 package_scope,
                 build_override,
+                entry_fn,
             )?);
         }
         let grants = resolve_build_grants(file, grants)?;
@@ -919,7 +1155,7 @@ fn compile_programmable_build_opts_inner(
         let options = Driver::BuildRunOptions {
             grants,
             policy: production_build_policy(),
-            execute: true,
+            execute: !project_check,
             gates,
             inspect_only: false,
             emit_generated,
@@ -933,8 +1169,13 @@ fn compile_programmable_build_opts_inner(
             remote,
             package_scope,
             build_override,
+            entry_fn: entry_fn.map(str::to_string),
         };
-        let output = if without_codegen {
+        let output = if project_check {
+            Driver::compile_bundle_path_build_with_front_end_for_project_check(
+                file, options, prepared,
+            )?
+        } else if without_codegen {
             Driver::compile_bundle_path_build_with_front_end_without_codegen(
                 file, options, prepared,
             )?
@@ -944,7 +1185,7 @@ fn compile_programmable_build_opts_inner(
         if emit_generated {
             export_generated_sources(file, &output)?;
         }
-        Ok(output.compile)
+        Ok(output)
     })
 }
 
@@ -967,11 +1208,12 @@ fn compile_workspace_build_opts(
     setting_overrides: &BTreeMap<String, String>,
     package_scope: bool,
     build_override: bool,
+    project_check: bool,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
     ),
-) -> Result<CompileOutput, Vec<Diagnostic>> {
+) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     let (workspace_resolver, workspace_source) = checked_workspace;
     workspace_resolver
         .revalidate_source(&workspace_source)
@@ -1034,14 +1276,10 @@ fn compile_workspace_build_opts(
         entry
             .revalidate(&workspace_resolver)
             .map_err(|error| vec![error.diagnostic()])?;
-        let output = Driver::compile_bundle_path_build_as_dependency_with_overlay(
-            &entry_path,
-            &source_file.path,
-            &entry_source,
-            Driver::BuildRunOptions {
+        let options = Driver::BuildRunOptions {
                 grants: member_grants,
                 policy: production_build_policy(),
-                execute: true,
+                execute: !project_check,
                 gates,
                 inspect_only: false,
                 emit_generated: false,
@@ -1055,8 +1293,23 @@ fn compile_workspace_build_opts(
                 remote: remote.clone(),
                 package_scope: true,
                 build_override: true,
-            },
-        )?;
+                entry_fn: entry.entry_fn.clone(),
+            };
+        let output = if project_check {
+            Driver::compile_bundle_path_build_as_dependency_with_overlay_for_project_check(
+                &entry_path,
+                &source_file.path,
+                &entry_source,
+                options,
+            )?
+        } else {
+            Driver::compile_bundle_path_build_as_dependency_with_overlay(
+                &entry_path,
+                &source_file.path,
+                &entry_source,
+                options,
+            )?
+        };
         if emit_generated {
             export_generated_sources(&entry_path, &output)?;
         }
@@ -1111,14 +1364,10 @@ fn compile_workspace_build_opts(
     } else {
         workspace_source.source.clone()
     };
-    let output = Driver::compile_bundle_path_build_with_overlay(
-        &workspace_path.to_string_lossy(),
-        &workspace_source.path,
-        &workspace_entry_source,
-        Driver::BuildRunOptions {
+    let options = Driver::BuildRunOptions {
             grants: workspace_grants,
             policy: production_build_policy(),
-            execute: true,
+            execute: !project_check,
             gates,
             inspect_only: false,
             emit_generated: false,
@@ -1132,12 +1381,27 @@ fn compile_workspace_build_opts(
             remote,
             package_scope,
             build_override,
-        },
-    )?;
+            entry_fn: None,
+        };
+    let output = if project_check {
+        Driver::compile_bundle_path_build_with_overlay_for_project_check(
+            &workspace_path.to_string_lossy(),
+            &workspace_source.path,
+            &workspace_entry_source,
+            options,
+        )?
+    } else {
+        Driver::compile_bundle_path_build_with_overlay(
+            &workspace_path.to_string_lossy(),
+            &workspace_source.path,
+            &workspace_entry_source,
+            options,
+        )?
+    };
     if emit_generated {
         export_generated_sources(&workspace_path.to_string_lossy(), &output)?;
     }
-    Ok(output.compile)
+    Ok(output)
 }
 
 fn export_generated_sources(
@@ -1378,6 +1642,7 @@ fn absolute_source_path(file: &str) -> std::path::PathBuf {
 struct CheckedBuildEntry {
     package: jet_driver::Authority::CheckedPackage,
     file: Option<jet_driver::Authority::CheckedFile>,
+    entry_fn: Option<String>,
 }
 
 impl CheckedBuildEntry {
@@ -1429,7 +1694,8 @@ fn workspace_member_entry(
     {
         return Ok(Some(CheckedBuildEntry {
             package: checked_package,
-            file: Some(entry),
+            file: Some(entry.file),
+            entry_fn: Some(entry.callable),
         }));
     }
     for candidate in [
@@ -1441,6 +1707,7 @@ fn workspace_member_entry(
                 return Ok(Some(CheckedBuildEntry {
                     package: checked_package,
                     file: Some(file),
+                    entry_fn: None,
                 }))
             }
             Err(error) if error.is_missing() => {}
@@ -1457,6 +1724,7 @@ fn workspace_member_entry(
             return Ok(Some(CheckedBuildEntry {
                 package: checked_package,
                 file: Some(file),
+                entry_fn: None,
             }))
         }
         Err(error) if error.is_missing() => {}
@@ -1484,6 +1752,7 @@ fn workspace_member_entry(
         return Ok(Some(CheckedBuildEntry {
             package: checked_package,
             file,
+            entry_fn: None,
         }));
     }
     Ok(None)
@@ -1981,6 +2250,7 @@ pub fn compile_library_with_gates_and_settings(
     file: &str,
     output: Option<&str>,
     gates: Policy::GateSet,
+    locked: bool,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
@@ -1989,6 +2259,7 @@ pub fn compile_library_with_gates_and_settings(
             Sema::CompileMode::Check,
             gates,
             output,
+            locked,
             setting_overrides,
         )
     })

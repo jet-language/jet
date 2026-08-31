@@ -388,6 +388,17 @@ fn materialize_test_faults(items: &mut [Item], diags: &mut Vec<Diagnostic>) {
     }
 }
 
+fn push_diagnostic_once(diags: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+    if diags.iter().any(|existing| {
+        existing.code == diagnostic.code
+            && existing.span == diagnostic.span
+            && existing.what == diagnostic.what
+    }) {
+        return;
+    }
+    diags.push(diagnostic);
+}
+
 pub(crate) fn resolve_static_rule_products(
     module: &mut crate::AST::LoadedModule,
     base_dir: &std::path::Path,
@@ -524,7 +535,7 @@ pub(crate) fn resolve_static_rule_products(
         }) {
             Ok(arguments) => arguments,
             Err(diagnostic) => {
-                diags.push(diagnostic);
+                push_diagnostic_once(diags, diagnostic);
                 invalid.insert(marker.name_span.start);
                 continue;
             }
@@ -614,7 +625,7 @@ pub(crate) fn resolve_static_rule_products(
             ) {
                 Ok((value, _)) => field.default_ct = Some(value),
                 Err(_) if needs_baked_default => {
-                    diags.push(crate::Sema::e2414(&field.name, expr.span()));
+                    push_diagnostic_once(diags, crate::Sema::e2414(&field.name, expr.span()));
                 }
                 Err(_) => {}
             }
@@ -830,7 +841,7 @@ impl<'a> crate::Sema::Checker<'a> {
                 ));
                 return;
             }
-            if !crate::Collections::is_hashable_type(&ty) {
+            if matches!(ty, crate::AST::Type::List(_)) || !self.hashable_type_eligible(&ty) {
                 self.diags.push(Diagnostic::error(
                     "E0939",
                     format!("`#Memo` parameter `{}` is not hashable", parameter.name),
@@ -1134,6 +1145,17 @@ pub(crate) fn check_marker_vocabulary(
         if crate::Policy::applied_rule(&marker.name)
             .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Retired { .. }))
         {
+            continue;
+        }
+        let marker_site = rule_facts
+            .iter()
+            .find(|fact| fact.marker.name_span == marker.name_span)
+            .and_then(|fact| fact.site);
+        // D-ADOPT-GUEST1=A: these existing decision-ID spellings are sema's
+        // guest boundary, not Prelude marker rules. Only the exact C form at
+        // its callable/module site bypasses the closed-rule lookup; malformed
+        // arguments and other attachment sites stay unknown diagnostics.
+        if super::Guest::is_guest_marker_at(marker, marker_site) {
             continue;
         }
         // A name known on the OTHER plane already got E0062/E0063 from the

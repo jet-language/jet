@@ -170,10 +170,7 @@ impl<'a> AdmissionTransaction<'a> {
 
     /// Queue one adapter-verified object and return its deterministic CAS
     /// path. No bytes become visible until `commit`.
-    pub(crate) fn stage_object(
-        &mut self,
-        object: AdmissionObject,
-    ) -> std::io::Result<PathBuf> {
+    pub(crate) fn stage_object(&mut self, object: AdmissionObject) -> std::io::Result<PathBuf> {
         validate_digest(&object.digest)?;
         fs::symlink_metadata(&object.source).map_err(|error| {
             std::io::Error::new(
@@ -205,7 +202,9 @@ impl<'a> AdmissionTransaction<'a> {
         fresh_action_key: Option<&str>,
     ) -> std::io::Result<bool> {
         if self.committed {
-            return Err(std::io::Error::other("Hangar admission transaction already committed"));
+            return Err(std::io::Error::other(
+                "Hangar admission transaction already committed",
+            ));
         }
         self.publish_objects(excluded)?;
         injected_failure(AdmissionFailurePoint::AfterObjectPublication)?;
@@ -280,18 +279,16 @@ impl<'a> AdmissionTransaction<'a> {
         let mut counted = BTreeSet::new();
         for object in &self.objects {
             if object.repair_corrupt {
-                Ingest::invalidate_verified_digest(
-                    &objects_dir.join(&object.digest),
-                );
+                Ingest::invalidate_verified_digest(&objects_dir.join(&object.digest));
             }
             if !counted.insert(object.digest.clone()) {
                 continue;
             }
             let destination = objects_dir.join(&object.digest);
             if !self.object_is_verified(&destination, object)? {
-                incoming = incoming.checked_add(object.bytes).ok_or_else(|| {
-                    std::io::Error::other("Hangar admission size overflowed")
-                })?;
+                incoming = incoming
+                    .checked_add(object.bytes)
+                    .ok_or_else(|| std::io::Error::other("Hangar admission size overflowed"))?;
             }
             if object.source != destination
                 && self.source_is_internal(&object.source)?
@@ -303,11 +300,7 @@ impl<'a> AdmissionTransaction<'a> {
             }
         }
         incoming = incoming.saturating_sub(already_counted);
-        ensure_hangar_capacity(
-            self.roots,
-            admission_reservation(incoming),
-            excluded,
-        )?;
+        ensure_hangar_capacity(self.roots, admission_reservation(incoming), excluded)?;
         for index in 0..self.objects.len() {
             self.publish_object(index)?;
         }
@@ -423,10 +416,7 @@ impl<'a> AdmissionTransaction<'a> {
             sync_store_directory(&objects_dir)?;
         }
 
-        let partial = objects_dir.join(format!(
-            "{}{}",
-            object.digest, PARTIAL_SUFFIX
-        ));
+        let partial = objects_dir.join(format!("{}{}", object.digest, PARTIAL_SUFFIX));
         if fs::symlink_metadata(&partial).is_ok() {
             remove_node(&partial)?;
         }
@@ -527,7 +517,10 @@ impl<'a> AdmissionTransaction<'a> {
                     if existing != receipt.bytes {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("Hangar receipt `{}` changed during publication", receipt.digest),
+                            format!(
+                                "Hangar receipt `{}` changed during publication",
+                                receipt.digest
+                            ),
                         ));
                     }
                     Ok(false)

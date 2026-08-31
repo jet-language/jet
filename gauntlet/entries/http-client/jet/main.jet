@@ -1,32 +1,27 @@
-use core.encoding.json as json
-use core.http.client as http_client
+use core.[encoding.json, http.client]
 
-fn run() !(HTTPError | JSONError | [FieldError]) {
-    base :: "http://127.0.0.1:18400"
-    list_response :: http_client.request("GET", "{base}/items").send()
-    list_body :: list_response.body().text(1048576)
-    list :: json.parse(list_body)
-    items :: list.field("items")
-    if items == .Array(values) {
-        print("items {values.len()}")
+struct Item { id: Int, name: String, qty: Int }
+struct Listing { items: [Item] }
 
-        loop id in [2, 5, 99] {
-            response :: http_client.request("GET", "{base}/items/{id}").send()
-            if {
-                response.status() == 404 -> print("item {id} missing")
-                else -> {
-                    body :: response.body().text(1048576)
-                    item :: json.parse(body)
-                    item_id :: item.field("id").int()
-                    name :: item.field("name").text()
-                    qty :: item.field("qty").int()
-                    print("item {item_id} {name} qty={qty}")
-                }
+#CLI
+struct Args {
+    base: String
+}
+
+fn run(args: Args) !(HTTPError | [FieldError]) -> {
+    base :: args.base
+    listing :: json.decode<Listing>(client.get("{base}/items").body().text(1048576))
+    print("items {listing.items.len()}")
+
+    loop id in [2, 5, 99] {
+        response :: client.get("{base}/items/{id}")
+        if {
+            response.status() == 404 -> print("item {id} missing")
+            else -> {
+                item :: json.decode<Item>(response.body().text(1048576))
+                print("item {item.id} {item.name} qty={item.qty}")
             }
         }
-
-        total := 0
-        loop item in values -> total += item.field("qty").int()
-        print("total-qty {total}")
     }
+    print("total-qty {listing.items.map(item -> item.qty).sum()}")
 }

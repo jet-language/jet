@@ -2,134 +2,45 @@
 // Pure-Rust, zero external crates (I6). CSV, TOML, YAML, log, time, crypto.
 
 // ── jet.csv ───────────────────────────────────────────────────────────────────
-fn jet_ring_csv_parse(text: &String) -> Result<Vec<Vec<String>>, String> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    let mut field = String::new();
-    let mut chars = text.chars().peekable();
-    let mut quoted = false;
-    let mut closed_quote = false;
-    let mut record = 1usize;
-    let mut line = 1usize;
-    let mut column = 0usize;
-    let mut ended_record = false;
+fn jet_ring_csv_records(
+    text: &String,
+    delimiter: &String,
+    header: bool,
+    skip_blank: bool,
+) -> Result<Vec<jet_csv_kernel::CsvRecord>, String> {
+    jet_csv_kernel::parse(text, jet_csv_options(delimiter, header, skip_blank)?)
+}
 
-    while let Some(ch) = chars.next() {
-        column += 1;
-        ended_record = false;
-        if quoted {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    column += 1;
-                    field.push('"');
-                } else {
-                    quoted = false;
-                    closed_quote = true;
-                }
-            } else {
-                field.push(ch);
-                if ch == '\n' {
-                    line += 1;
-                    column = 0;
-                }
-            }
-            continue;
-        }
+fn jet_ring_csv_parse(
+    text: &String,
+    delimiter: &String,
+    header: bool,
+    skip_blank: bool,
+) -> Result<Vec<Vec<String>>, String> {
+    jet_ring_csv_records(text, delimiter, header, skip_blank)
+        .map(|records| records.into_iter().map(|record| record.fields).collect())
+}
 
-        if closed_quote {
-            match ch {
-                ',' => {
-                    row.push(std::mem::take(&mut field));
-                    closed_quote = false;
-                }
-                '\r' if chars.peek() == Some(&'\n') => {
-                    chars.next();
-                    row.push(std::mem::take(&mut field));
-                    rows.push(std::mem::take(&mut row));
-                    closed_quote = false;
-                    ended_record = true;
-                    record += 1;
-                    line += 1;
-                    column = 0;
-                }
-                '\n' => {
-                    row.push(std::mem::take(&mut field));
-                    rows.push(std::mem::take(&mut row));
-                    closed_quote = false;
-                    ended_record = true;
-                    record += 1;
-                    line += 1;
-                    column = 0;
-                }
-                _ => return Err(format!(
-                    "E2701: CSV row {record}, line {line}, column {column} — only quote, comma, CRLF, LF, or EOF may follow a closing quote"
-                )),
-            }
-            continue;
-        }
-
-        match ch {
-            '"' if field.is_empty() => quoted = true,
-            '"' => return Err(format!(
-                "E2701: CSV row {record}, line {line}, column {column} — quote inside an unquoted field"
-            )),
-            ',' => row.push(std::mem::take(&mut field)),
-            '\r' if chars.peek() == Some(&'\n') => {
-                chars.next();
-                row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
-                ended_record = true;
-                record += 1;
-                line += 1;
-                column = 0;
-            }
-            '\r' => return Err(format!(
-                "E2701: CSV row {record}, line {line}, column {column} — bare CR is not a record ending"
-            )),
-            '\n' => {
-                row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
-                ended_record = true;
-                record += 1;
-                line += 1;
-                column = 0;
-            }
-            _ => field.push(ch),
-        }
-    }
-    if quoted {
-        return Err(format!(
-            "E2701: CSV row {record}, line {line}, column {} — quoted field ended before its closing quote",
-            column + 1
-        ));
-    }
-    if !ended_record {
-        row.push(field);
-        rows.push(row);
-    }
-    Ok(rows)
+fn jet_ring_csv_rows(
+    text: &String,
+    delimiter: &String,
+    header: bool,
+    skip_blank: bool,
+) -> Result<Vec<jet_std::CSVRow>, String> {
+    jet_ring_csv_records(text, delimiter, header, skip_blank)
+        .map(|records| {
+            records
+                .into_iter()
+                .map(|record| jet_std::CSVRow {
+                    fields: record.fields,
+                    line: record.line,
+                })
+                .collect()
+        })
 }
 
 fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
-    rows.iter()
-        .map(|row| {
-            row.iter()
-                .map(|field| {
-                    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
-                        format!("\"{}\"", field.replace('"', "\"\""))
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    jet_csv_kernel::render(rows)
 }
 
 // ── core.log ───────────────────────────────────────────────────────────────────
@@ -179,7 +90,10 @@ fn jet_ring_log_flush() {
         if path.is_empty() {
             return;
         }
-        if let Ok(mut file) = std::fs::OpenOptions::new().append(true).create(true).open(path.as_str())
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path.as_str())
         {
             let _ = std::io::Write::flush(&mut file);
         }
@@ -343,7 +257,11 @@ fn jet_log_fields_json(fields: &[jet_std::LogField]) -> String {
         out.push_str(",\"");
         out.push_str(&jet_log_json_escape(&field.key));
         out.push_str("\":");
-        if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
+        if field.kind == "int"
+            || field.kind == "float"
+            || field.kind == "bool"
+            || field.kind == "counter"
+        {
             out.push_str(&field.value);
         } else {
             out.push('"');
@@ -373,7 +291,11 @@ fn jet_log_write(line: &str) {
     let path = JET_LOG_SINK_PATH.with(|p| p.borrow().clone());
     if path.is_empty() {
         eprintln!("{}", line);
-    } else if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    } else if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "{}", line);
     }
@@ -386,12 +308,21 @@ fn jet_log_emit_json(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogFiel
     let line = if trace.is_empty() {
         format!(
             "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}{}{} }}",
-            level, jet_log_json_escape(msg), ts, fields_json, spans_json
+            level,
+            jet_log_json_escape(msg),
+            ts,
+            fields_json,
+            spans_json
         )
     } else {
         format!(
             "{{\"level\":\"{}\",\"body\":\"{}\",\"trace_id\":\"{}\",\"ts\":{}{}{} }}",
-            level, jet_log_json_escape(msg), jet_log_json_escape(&trace), ts, fields_json, spans_json
+            level,
+            jet_log_json_escape(msg),
+            jet_log_json_escape(&trace),
+            ts,
+            fields_json,
+            spans_json
         )
     };
     jet_log_write(&line.replace(" }", "}"));
@@ -423,9 +354,15 @@ fn jet_log_emit_text(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogFiel
         )
     };
     let line = if trace.is_empty() {
-        format!("[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z | {}{}", level_tag, y, mo, d, h, mi, s, msg, field_text)
+        format!(
+            "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z | {}{}",
+            level_tag, y, mo, d, h, mi, s, msg, field_text
+        )
     } else {
-        format!("[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z trace={} | {}{}", level_tag, y, mo, d, h, mi, s, trace, msg, field_text)
+        format!(
+            "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z trace={} | {}{}",
+            level_tag, y, mo, d, h, mi, s, trace, msg, field_text
+        )
     };
     jet_log_write(&line);
 }
@@ -542,19 +479,6 @@ fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
 
 fn is_leap(y: i32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-}
-
-// ── core.crypto ────────────────────────────────────────────────────────────────
-// SHA-256 of a UTF-8 string, returned as a lowercase hex string.
-fn jet_ring_crypto_sha256(s: &String) -> String {
-    let hash = jet_sha256_raw(s.as_bytes());
-    hash.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-// SHA-256 of a byte list (Vec<u8>), returned as lowercase hex.
-fn jet_ring_crypto_sha256_bytes(bs: &Vec<u8>) -> String {
-    let hash = jet_sha256_raw(bs.as_slice());
-    hash.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 // D-SHAPE-CTORVERB1=C: generic TTL uses ExpiringValue.new.

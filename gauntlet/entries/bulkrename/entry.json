@@ -4,7 +4,7 @@
   "cells": ["files.script"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "python", "rust"],
+  "languages": ["jet", "python", "rust", "node"],
   "spec": {
     "behavior": "Find direct children matching IMG_<digits>.jpeg in the given directory, sort them by numeric suffix, rename them to photo-<0001..>.jpg in that order, leave all other files unchanged, and print each rename followed by renamed/skipped totals.",
     "args": ["photos"],
@@ -14,6 +14,7 @@
   "authoring": {
     "jet": {"author": "luna-max", "turns": 10, "retries": 9, "diagnosticsHit": ["E1803: application authority is undecided for `Exec, Mem.Alloc, Panic`", "E3001: `panic: usage: bulkrename DIR`", "E3001: `panic: cannot list directory`", "E0956: ``core.files.absolute()`` isn't supported by the current evaluator yet", "E1803: application authority is undecided for `Env`", "E0956: ``core.files.rename()`` isn't supported by the current evaluator yet", "rustc E0308: generated Args equal/compare/encode returned Result where plain values were expected", "rustc E0308: generated Photo equal/compare/encode returned Result where plain values were expected", "rustc E0308: generated Path join expected `&String`, found `&JetPath`", "E0505: only lists and maps can be indexed, not `Iter<String>`"], "notes": "AOT passes after replacing user-struct sortable records with padded string records. Default evaluator reaches rename then reports E0956 because core.files.rename is unsupported; raw process.argv exposes no trailing args there, so fixed canonical fallback is photos."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""}
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node rail using fs/promises for the same direct-child rename contract and deterministic output."}
   }
 }

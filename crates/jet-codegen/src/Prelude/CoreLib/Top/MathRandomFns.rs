@@ -5,6 +5,7 @@
 // symbols that were never included, which rustc rejected as an I2 violation.
 // They are gated on `needs_math` here, beside the rest of the math surface.
 
+#[inline(always)]
 fn jet_std_math_sqrt(x: f64) -> f64 {
     x.sqrt()
 }

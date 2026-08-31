@@ -436,30 +436,35 @@ fn resolve_run_authority_before_execution(
     mode: OutputMode,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
 ) -> Option<jet_foundation::Authority::ApplicationAuthority> {
-    let checked = match crate::CmdInspect::check_projection_for_run(
-        Path::new(file),
+    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        file,
         profile,
         setting_overrides,
-    ) {
-        Ok(checked) => checked,
-        Err(diags) => {
-            report_problems(mode, file, src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
+        entry_fn,
+    );
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        report_problems(mode, file, src, &diagnostics);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let Some(bundle) = bundle else {
+        report_problems(mode, file, src, &diagnostics);
+        exit(ExitCodes::USER_ERROR);
     };
     let (mut projection, delegations) = native_effect_projection(
-        &checked.bundle,
-        &checked.facts.summaries,
+        &bundle,
+        &facts.summaries,
+        entry_fn,
         package_manifest.as_ref().map(|(_, manifest)| manifest),
     );
-    let lints = crate::CmdDevTools::visible_lints(&checked.diagnostics);
-    let entries = jet::EffectBudget::compute_package_effects(
-        &checked.bundle,
-        &checked.facts.solved,
-        &checked.facts.summaries,
-    );
+    let lints = crate::CmdDevTools::visible_lints(&diagnostics);
+    let entries =
+        jet::EffectBudget::compute_package_effects(&bundle, &facts.solved, &facts.summaries);
     apply_native_effect_policy(
         "run",
         file,
@@ -468,7 +473,7 @@ fn resolve_run_authority_before_execution(
         false,
         &lints,
         &entries,
-        &checked.facts.fact_registry,
+        &facts.fact_registry,
         &mut projection,
         package_manifest,
         &delegations,
@@ -535,7 +540,8 @@ fn resolve_application_authority(
         return None;
     }
     if !authority_prompt_is_interactive(mode) {
-        let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
+        let diagnostic =
+            jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
@@ -555,10 +561,8 @@ fn resolve_application_authority(
         "once" | "1" => ("invocation", "interactive.once"),
         "project" | "2" => {
             let Some(manifest_path) = jet::Loader::manifest_path(&root) else {
-                let diagnostic = jet::EffectBudget::application_policy_diagnostic(
-                    projection,
-                    &BTreeSet::new(),
-                );
+                let diagnostic =
+                    jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
                 report_problems(mode, file, src, &[diagnostic]);
                 exit(ExitCodes::USER_ERROR);
             };
@@ -567,7 +571,10 @@ fn resolve_application_authority(
                 Err(error) => {
                     let diagnostic = jet::Diagnostics::Diagnostic::error(
                         "E2105",
-                        format!("can't read `{}` for project approval", manifest_path.display()),
+                        format!(
+                            "can't read `{}` for project approval",
+                            manifest_path.display()
+                        ),
                         "project approval must edit the canonical package manifest".to_string(),
                         format!("fix the manifest permissions and retry: {error}"),
                         None,
@@ -588,9 +595,13 @@ fn resolve_application_authority(
                 Err(error) => {
                     let diagnostic = jet::Diagnostics::Diagnostic::error(
                         "E1221",
-                        format!("project approval produced an invalid `{}`", manifest_path.display()),
+                        format!(
+                            "project approval produced an invalid `{}`",
+                            manifest_path.display()
+                        ),
                         error.to_string(),
-                        "edit `authority.holds.allow` with the canonical manifest editor".to_string(),
+                        "edit `authority.holds.allow` with the canonical manifest editor"
+                            .to_string(),
                         None,
                     );
                     report_problems(mode, file, src, &[diagnostic]);
@@ -600,7 +611,10 @@ fn resolve_application_authority(
             if let Err(error) = fs::write(&manifest_path, updated) {
                 let diagnostic = jet::Diagnostics::Diagnostic::error(
                     "E2105",
-                    format!("can't write project authority to `{}`", manifest_path.display()),
+                    format!(
+                        "can't write project authority to `{}`",
+                        manifest_path.display()
+                    ),
                     "project approval must update the canonical package manifest".to_string(),
                     format!("fix the manifest permissions and retry: {error}"),
                     None,
@@ -609,10 +623,8 @@ fn resolve_application_authority(
                 exit(ExitCodes::USER_ERROR);
             }
             let Some((_, manifest)) = package_manifest.as_mut() else {
-                let diagnostic = jet::EffectBudget::application_policy_diagnostic(
-                    projection,
-                    &BTreeSet::new(),
-                );
+                let diagnostic =
+                    jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
                 report_problems(mode, file, src, &[diagnostic]);
                 exit(ExitCodes::USER_ERROR);
             };
@@ -629,14 +641,8 @@ fn resolve_application_authority(
         }
     };
     projection.granted_effects.extend(undecided);
-    if let Err(error) = write_authority_receipt(
-        &root,
-        file,
-        cmd,
-        scope,
-        projection,
-        policy_source,
-    ) {
+    if let Err(error) = write_authority_receipt(&root, file, cmd, scope, projection, policy_source)
+    {
         let diagnostic = jet::Diagnostics::Diagnostic::error(
             "E2105",
             "could not record the application authority receipt".to_string(),
@@ -647,13 +653,9 @@ fn resolve_application_authority(
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
-    if let Err(error) = write_authority_delegation_receipts(
-        &root,
-        file,
-        projection,
-        delegations,
-        policy_source,
-    ) {
+    if let Err(error) =
+        write_authority_delegation_receipts(&root, file, projection, delegations, policy_source)
+    {
         let diagnostic = jet::Diagnostics::Diagnostic::error(
             "E2105",
             "could not record the Authority delegation receipt".to_string(),
@@ -873,6 +875,21 @@ fn load_pkg_manifest(source_file: &str) -> Option<(PathBuf, jet::Package::Packag
     Some((root, manifest))
 }
 
+fn load_pkg_library_output_names(source_file: &str) -> Option<Vec<String>> {
+    let source_path = Path::new(source_file);
+    let search_from = source_path.parent().unwrap_or(Path::new("."));
+    let root = jet::Loader::find_manifest_root(search_from)?;
+    let facts = jet::Package::PackageFacts::load(&root)?.ok()?;
+    Some(
+        facts
+            .outputs
+            .iter()
+            .filter(|(_, output)| output.kind == jet::Package::PackageOutputKind::Library)
+            .map(|(name, _)| name.clone())
+            .collect(),
+    )
+}
+
 /// Find the project's declared environment without realizing or mutating it.
 /// `jet` may inspect this boundary, but acquisition and activation belong to
 /// `jetpack` (D-VERDICT-2188-1).
@@ -917,6 +934,7 @@ fn same_environment_root(left: &Path, right: &Path) -> bool {
 fn native_effect_projection(
     bundle: &jet::AST::ProgramBundle,
     summaries: &HashMap<String, jet::Sema::EffectSummary>,
+    entry_fn: Option<&str>,
     package_manifest: Option<&jet::Package::PackageFacts>,
 ) -> (
     jet::EffectBudget::EffectProjection,
@@ -925,7 +943,7 @@ fn native_effect_projection(
     let projection = jet::EffectBudget::project_program_effects(
         bundle,
         summaries,
-        jet::Codegen::ENTRY_FN,
+        entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
         package_manifest,
     );
     let delegations = summaries
@@ -1149,6 +1167,8 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) mode: OutputMode,
     pub(crate) record: Option<&'a str>,
     pub(crate) interpret: bool,
+    pub(crate) entry_fn: Option<&'a str>,
+    pub(crate) check_project_scope: bool,
     pub(crate) package_scope: bool,
     pub(crate) build_override: bool,
 }
@@ -1337,6 +1357,7 @@ fn run_native_lens(
     gates: jet::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     profile: &BuildProfile,
+    entry_fn: Option<&str>,
     program_args: &[&String],
     mode: OutputMode,
     record: Option<&crate::ProveReplay::NamedCapture>,
@@ -1348,6 +1369,7 @@ fn run_native_lens(
         mode,
         profile.budget_name(),
         setting_overrides,
+        entry_fn,
         package_manifest,
     );
 
@@ -1366,21 +1388,23 @@ fn run_native_lens(
         .map(|arg| arg.as_str())
         .collect::<Vec<_>>();
     let run = match tier {
-        NativeTier::Interpreter => jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
+        NativeTier::Interpreter => jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority_and_entry(
             file,
             &args,
             gates,
             profile.budget_name(),
             setting_overrides,
             application_authority.as_ref(),
+            entry_fn,
         ),
-        NativeTier::Jit => jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
+        NativeTier::Jit => jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
             file,
             &args,
             mode.json,
             gates,
             setting_overrides,
             application_authority.as_ref(),
+            entry_fn,
         ),
         NativeTier::Aot => unreachable!("AOT does not use the engine lens"),
     };
@@ -1420,19 +1444,14 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         mode,
         record: record_name,
         interpret: force_interpreter,
+        entry_fn,
+        check_project_scope,
         package_scope,
         build_override,
     } = request;
     require_project_environment(cmd, Path::new(file), mode);
-    let profile = select_native_profile(
-        cmd,
-        file,
-        freestanding,
-        small,
-        release,
-        profile_name,
-        mode,
-    );
+    let profile =
+        select_native_profile(cmd, file, freestanding, small, release, profile_name, mode);
     let release_profile = profile.is_release();
     let progress = BuildProgress::new(cmd, emit_rust, verbose, mode);
     progress.major("Reading", file);
@@ -1501,11 +1520,18 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     }
 
     if cmd == "check" {
-        let checked = match crate::CmdInspect::check_projection_with_options(
+        let mut checked = match crate::CmdInspect::check_projection_for_command(
             Path::new(file),
             gates,
             profile.budget_name(),
             setting_overrides,
+            if check_project_scope {
+                crate::CmdInspect::CheckScope::Project
+            } else {
+                crate::CmdInspect::CheckScope::ExplicitFile
+            },
+            entry_fn,
+            cross_target,
         ) {
             Ok(checked) => Some(checked),
             Err(diagnostics) => {
@@ -1521,10 +1547,17 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                 None
             }
         };
-        let all_diags = checked
+        let mut all_diags = checked
             .as_ref()
             .map(|projection| projection.diagnostics.clone())
             .unwrap_or_default();
+        if let Some(projection) = checked.as_ref() {
+            if let Err(error) =
+                crate::CmdDevTools::merge_cost_diagnostics(&projection.bundle, &mut all_diags)
+            {
+                crate::CmdDevTools::exit_cost_projection_error(file, &error);
+            }
+        }
         let errors: Vec<_> = all_diags
             .iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -1539,17 +1572,24 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             report_problems(mode, file, &src, &lints);
         }
         if !mode.json && !mode.quiet {
-            if let Some(mut checked) = checked {
+            if let Some(projection) = checked.as_ref() {
+                print!("{}", crate::CmdInspect::check_result_text(&projection.check));
+            }
+            if let Some(checked) = checked.as_mut() {
                 if let Some(report) =
-                    crate::CmdFill::render_goal_report(&mut checked, None, None, false, false)
+                    crate::CmdFill::render_goal_report(checked, None, None, false, false)
                 {
                     print!("{report}");
                 }
             }
         }
         if mode.json && lints.is_empty() {
-            let machine_file = crate::machine_report_path_for_process(file);
-            print!("{}", jet::Diagnostics::render_success_json(&machine_file));
+            if let Some(projection) = checked.as_ref() {
+                print!("{}", crate::CmdInspect::check_result_json(&projection.check));
+            } else {
+                let machine_file = crate::machine_report_path_for_process(file);
+                print!("{}", jet::Diagnostics::render_success_json(&machine_file));
+            }
         } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
@@ -1637,6 +1677,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             gates,
             setting_overrides,
             &profile,
+            entry_fn,
             program_args,
             mode,
             record.as_ref(),
@@ -1699,7 +1740,8 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     // A selected `fn build` also stays on the full path: replaying a binary
     // would skip staging the build entry, so nothing would execute the action
     // graph or record the computed writers in this project's `.jet/lock`.
-    if cmd == "run" && mode_tag == "run" && !emit_rust && !selects_build_entry {
+    if cmd == "run" && mode_tag == "run" && !emit_rust && !selects_build_entry && entry_fn.is_none()
+    {
         if let Some(ref key) = native_key {
             let out = bin_path(file);
             if jet::BuildCache::try_copy_cached(key, &out) {
@@ -1709,6 +1751,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                     mode,
                     profile.budget_name(),
                     setting_overrides,
+                    entry_fn,
                     &mut package_manifest,
                 );
                 if verbose {
@@ -1741,32 +1784,35 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         }
     }
 
+    let library_output_names = if cmd == "build" && !is_web && !is_plugin {
+        load_pkg_library_output_names(file)
+    } else {
+        None
+    };
     let library_output =
         if cmd == "build" && !is_web && !is_plugin && (library_flag || output_name.is_none()) {
-            package_manifest.as_ref().and_then(|(_, manifest)| {
-                let selected = output_name
-                    .and_then(|name| manifest.outputs.get(name).map(|_| name.to_string()))
-                    .or_else(|| {
-                        let names = manifest
-                            .outputs
-                            .iter()
-                            .filter(|(_, output)| {
-                                output.kind == jet::Package::PackageOutputKind::Library
-                            })
-                            .map(|(name, _)| name.clone())
-                            .collect::<Vec<_>>();
-                        (names.len() == 1).then(|| names[0].clone())
-                    })?;
-                manifest
-                    .outputs
-                    .get(&selected)
-                    .filter(|output| output.kind == jet::Package::PackageOutputKind::Library)
-                    .map(|_| selected)
+            output_name.map(str::to_owned).or_else(|| {
+                library_output_names
+                    .as_ref()
+                    .and_then(|names| (names.len() == 1).then(|| names[0].clone()))
             })
         } else {
             None
         };
     let is_library = library_flag || library_output.is_some();
+    if is_library {
+        if let Some(target) = cross_target {
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E1341",
+                format!("a Library output cannot select target `{target}`"),
+                "native Library artifacts use the host ABI and do not have a cross-target projection".to_string(),
+                "remove `--target`; build the Library for the host ABI".to_string(),
+                None,
+            );
+            report_problems(mode, file, &src, &[diagnostic]);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
     progress.major("Checking", "program and build plan");
 
     // #2083: one front end per build. A `jet build` used to load and
@@ -1783,7 +1829,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     // stage and reports the real diagnostic through the one problem reporter.
     let mut build_front_end =
         if !is_library && output_name.is_none() && (cmd == "build" || selects_build_entry) {
-            jet::prepare_programmable_build_front_end_scoped(
+            jet::prepare_programmable_build_front_end_scoped_with_entry(
                 file,
                 locked,
                 is_web,
@@ -1793,6 +1839,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                 setting_overrides,
                 package_scope,
                 build_override,
+                entry_fn,
             )
             .ok()
         } else {
@@ -1806,7 +1853,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             "using direct compilation"
         },
     );
-    if cmd == "build" && output_name.is_none() && !is_web && cross_target.is_none() {
+    if cmd == "build" && output_name.is_none() && !is_library && !is_web && cross_target.is_none() {
         native_key = match build_front_end
             .as_ref()
             .and_then(|prepared| prepared.runtime_program())
@@ -1846,6 +1893,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         let (projection, delegations) = native_effect_projection(
             program,
             &facts.summaries,
+            entry_fn,
             package_manifest.as_ref().map(|(_, manifest)| manifest),
         );
         Some((
@@ -1854,13 +1902,13 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             jet::EffectBudget::summary_line_for_program_with_authority(
                 program,
                 &facts.summaries,
-                jet::Codegen::ENTRY_FN,
+                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
             jet::EffectBudget::summary_json_for_program_with_authority(
                 program,
                 &facts.summaries,
-                jet::Codegen::ENTRY_FN,
+                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
             projection,
@@ -1895,11 +1943,11 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         && build_front_end
             .as_ref()
             .and_then(|prepared| prepared.runtime_program())
-            .is_some_and(jet::FFI::native_cacheable)
+            .is_some_and(native_cacheable_program)
     {
-        native_key.as_ref().is_some_and(|key| {
-            jet::BuildCache::try_copy_cached(key, &bin_path(file))
-        })
+        native_key
+            .as_ref()
+            .is_some_and(|key| jet::BuildCache::try_copy_cached(key, &bin_path(file)))
     } else {
         false
     };
@@ -1911,6 +1959,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
     let execution_lints: Vec<jet::Diagnostics::Diagnostic>;
+    let mut checked_runtime: Option<jet::AST::ProgramBundle> = None;
     progress.major("Generating", "native code");
 
     let compile_result = if is_library {
@@ -1918,6 +1967,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             file,
             library_output.as_deref(),
             gates,
+            locked,
             setting_overrides,
         )
     } else if let Some(output) = output_name {
@@ -1932,7 +1982,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             setting_overrides,
         )
     } else if cmd == "build" && emit_generated {
-        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
             file,
             build_grants,
             freestanding,
@@ -1941,15 +1991,24 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             is_web,
             is_plugin,
             cross_target,
+            true,
             remote_builder,
             profile.budget_name(),
             setting_overrides,
             build_front_end.take(),
             package_scope,
             build_override,
-        )
+            entry_fn,
+            false,
+        ) {
+            Ok(output) => {
+                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                Ok(output.compile)
+            }
+            Err(diags) => Err(diags),
+        }
     } else if native_cache_hit {
-        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
             file,
             build_grants,
             freestanding,
@@ -1958,15 +2017,24 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             is_web,
             is_plugin,
             cross_target,
+            false,
             remote_builder,
             profile.budget_name(),
             setting_overrides,
             build_front_end.take(),
             package_scope,
             build_override,
-        )
+            entry_fn,
+            true,
+        ) {
+            Ok(output) => {
+                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                Ok(output.compile)
+            }
+            Err(diags) => Err(diags),
+        }
     } else if cmd == "build" || selects_build_entry {
-        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
             file,
             build_grants,
             freestanding,
@@ -1975,17 +2043,38 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             is_web,
             is_plugin,
             cross_target,
+            false,
             remote_builder,
             profile.budget_name(),
             setting_overrides,
             build_front_end.take(),
             package_scope,
             build_override,
-        )
+            entry_fn,
+            false,
+        ) {
+            Ok(output) => {
+                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                Ok(output.compile)
+            }
+            Err(diags) => Err(diags),
+        }
     } else if is_web {
         jet::compile_web_with_gates_and_settings(file, gates, setting_overrides)
     } else if is_plugin {
         jet::compile_plugin_with_gates_and_settings(file, gates, setting_overrides)
+    } else if let Some(entry_fn) = entry_fn {
+        jet::Driver::compile_bundle_path_opts_with_profile_and_settings_and_entry(
+            file,
+            jet::Sema::CompileMode::Run,
+            freestanding,
+            gates,
+            false,
+            cross_target,
+            profile.budget_name(),
+            setting_overrides,
+            Some(entry_fn),
+        )
     } else if freestanding {
         jet::compile_freestanding_with_gates_and_settings(file, gates, setting_overrides)
     } else if !gates.is_empty() {
@@ -2072,43 +2161,71 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         let effect_view = match reused_package_effects {
             Some(view) => Some(view),
             None => {
-                let projection = match output_name {
-                    Some(output) => crate::CmdInspect::check_projection_for_output_effects(
-                        Path::new(file),
-                        output,
-                        profile.budget_name(),
-                        setting_overrides,
-                    ),
-                    None => crate::CmdInspect::check_projection_for_effects(
+                let checked = if is_library {
+                    crate::CmdInspect::check_projection_for_effects(
                         Path::new(file),
                         profile.budget_name(),
                         setting_overrides,
-                    ),
+                    )
+                    .map(|checked| (checked.bundle, checked.facts))
+                } else {
+                    match output_name {
+                        Some(output) => crate::CmdInspect::check_projection_for_output_effects(
+                            Path::new(file),
+                            output,
+                            profile.budget_name(),
+                            setting_overrides,
+                        )
+                        .map(|checked| (checked.bundle, checked.facts)),
+                        None if entry_fn.is_some() => {
+                            let (diagnostics, bundle, facts) =
+                                jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+                                    file,
+                                    profile.budget_name(),
+                                    setting_overrides,
+                                    entry_fn,
+                                );
+                            if diagnostics.iter().any(|diagnostic| {
+                                diagnostic.severity == jet::Diagnostics::Severity::Error
+                            }) {
+                                Err(diagnostics)
+                            } else {
+                                bundle.map(|bundle| (bundle, facts)).ok_or(diagnostics)
+                            }
+                        }
+                        None => crate::CmdInspect::check_projection_for_effects(
+                            Path::new(file),
+                            profile.budget_name(),
+                            setting_overrides,
+                        )
+                        .map(|checked| (checked.bundle, checked.facts)),
+                    }
                 };
-                match projection {
-                    Ok(checked) => {
+                match checked {
+                    Ok((bundle, facts)) => {
                         let (projection, delegations) = native_effect_projection(
-                            &checked.bundle,
-                            &checked.facts.summaries,
+                            &bundle,
+                            &facts.summaries,
+                            entry_fn,
                             package_manifest.as_ref().map(|(_, manifest)| manifest),
                         );
                         Some((
                             jet::EffectBudget::compute_package_effects(
-                                &checked.bundle,
-                                &checked.facts.solved,
-                                &checked.facts.summaries,
+                                &bundle,
+                                &facts.solved,
+                                &facts.summaries,
                             ),
-                            checked.facts.fact_registry.clone(),
+                            facts.fact_registry.clone(),
                             jet::EffectBudget::summary_line_for_program_with_authority(
-                                &checked.bundle,
-                                &checked.facts.summaries,
-                                jet::Codegen::ENTRY_FN,
+                                &bundle,
+                                &facts.summaries,
+                                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
                                 package_manifest.as_ref().map(|(_, manifest)| manifest),
                             ),
                             jet::EffectBudget::summary_json_for_program_with_authority(
-                                &checked.bundle,
-                                &checked.facts.summaries,
-                                jet::Codegen::ENTRY_FN,
+                                &bundle,
+                                &facts.summaries,
+                                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
                                 package_manifest.as_ref().map(|(_, manifest)| manifest),
                             ),
                             projection,
@@ -2153,7 +2270,6 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                 }
             }
         }
-
     }
 
     match cmd {
@@ -2182,8 +2298,29 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                     );
                     exit(ExitCodes::ICE);
                 });
-                let paths =
-                    build_library(file, &rust_code, library, config, profile, verbose, mode);
+                let paths = match build_library(&rust_code, library, config, profile, verbose, mode)
+                {
+                    Ok(paths) => paths,
+                    Err(LibraryBuildError::GeneratedCode(stderr)) => {
+                        eprintln!(
+                            "{}",
+                            jet::Diagnostics::render_ice_report(
+                                "rustc rejected generated Library code",
+                                &stderr,
+                                true,
+                            )
+                        );
+                        exit(ExitCodes::ICE);
+                    }
+                    Err(error) => {
+                        crate::cli_error!(
+                            "E2105",
+                            "couldn't publish the Library output: {}",
+                            error
+                        );
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                };
                 if !mode.quiet && !mode.json {
                     if let Some(shared) = &paths.shared {
                         println!("built: {}", shared.display());
@@ -2205,9 +2342,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
                 if mode.json {
                     println!(
                         "{}",
-                        build_effect_json
-                            .as_deref()
-                            .unwrap_or("{\"effects\":[]}")
+                        build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
                     );
                 }
                 return;
@@ -2217,6 +2352,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             build(
                 file,
                 &rust_code,
+                checked_runtime.as_ref(),
                 artifact_path.clone(),
                 profile,
                 ffi_link.as_ref(),
@@ -2282,9 +2418,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             if mode.json {
                 println!(
                     "{}",
-                    build_effect_json
-                        .as_deref()
-                        .unwrap_or("{\"effects\":[]}")
+                    build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
                 );
             }
         }
@@ -2298,6 +2432,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
             build(
                 file,
                 &rust_code,
+                checked_runtime.as_ref(),
                 out.clone(),
                 profile,
                 ffi_link.as_ref(),
@@ -2407,6 +2542,7 @@ pub(crate) fn run_dev_entry(
     build(
         file,
         &out.rust,
+        None,
         bin.clone(),
         profile,
         out.ffi.as_ref(),
@@ -3135,7 +3271,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     let run_src = if web {
         "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\", on_click: () -> {\n                count.set(count.get() + 1)\n            })\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
     } else {
-        "use core.process as process\n\nfn greeting() String -> \"hello, world\"\n\nfn run() {\n    args :: process.argv()\n    print(args.get(1) ?? greeting())\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(), \"hello, world\")\n}\n"
+        "#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) String -> \"hello, {name}\"\n\nfn run(args: GreetingArgs) { print(greeting(args.name)) }\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n"
     };
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
         crate::cli_error!(
@@ -3235,6 +3371,10 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     }
     if p.is_dir() {
         let root = jet::Loader::find_manifest_root(p).unwrap_or_else(|| p.to_path_buf());
+        if p.join(jet::Syntax::PACKAGE_FILE).is_file() {
+            run_test_package(&root, opts, mode);
+            return;
+        }
         if !opts.show_default {
             if let Some(override_file) =
                 crate::resolve_package_command_override(&root, "test", mode)
@@ -3477,12 +3617,7 @@ fn run_test_target(
             profile.budget_name(),
         )
     } else {
-        jet::compile_tests_with_path_cov_and_profile(
-            &src,
-            &shown,
-            coverage,
-            profile.budget_name(),
-        )
+        jet::compile_tests_with_path_cov_and_profile(&src, &shown, coverage, profile.budget_name())
     } {
         Ok(r) => r,
         Err(diags) => {
@@ -3518,6 +3653,7 @@ fn run_test_target(
     build(
         &shown,
         &rust_code,
+        None,
         bin.clone(),
         profile,
         ffi_link.as_ref(),
@@ -3690,6 +3826,7 @@ fn run_doctests(
         build(
             &tmp_shown,
             &rust_code,
+            None,
             bin.clone(),
             profile.clone(),
             ffi_link.as_ref(),
@@ -5396,6 +5533,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
     build(
         file,
         &rust_code,
+        None,
         bin.clone(),
         BuildProfile::Default,
         ffi_link.as_ref(),
@@ -5448,24 +5586,52 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
     exit(child_exit_code(status));
 }
 
-/// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing Package root's bytes, or
-/// an empty identity when the file has no project manifest. An unreadable
-/// manifest returns `None`, disabling cache reuse rather than guessing. The
-/// fingerprint is folded into the cache-key salt so a manifest edit — including
-/// a tightened `authority.holds` budget or a changed build profile — invalidates old
-/// cache entries. That is what keeps skipping the pipeline on a cache hit sound:
-/// a policy the manifest enforces (effect budgets, D-EFFBUDGET1) can never be
-/// masked by an unchanged program AST, because changing the manifest changes
-/// the key.
+/// D-BUILDNORM1=A (Tower #85): a semantic SHA-256 of the enclosing Package root's typed facts and selected build entry.
+///
+/// Comments and formatting are not Package meaning, so they do not change this identity. The selected `fn build` is loaded as its own AST when it lives outside the runtime bundle; its parsed import closure is included so compiler-host edits cannot reuse a stale native artifact.
+/// An unreadable or invalid manifest/build entry returns `None`, disabling cache reuse rather than guessing. A manifest-less file uses an empty identity.
+fn package_build_fingerprint(file: &str) -> Result<Option<String>, ()> {
+    let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
+    let Some(root) = jet::Loader::find_manifest_root(search_from) else {
+        return Ok(None);
+    };
+    let resolver = jet::Authority::AuthorityResolver::open(&root).map_err(|_| ())?;
+    let checked = resolver.checked_manifest(Path::new(".")).map_err(|_| ())?;
+    let entry = checked
+        .facts
+        .resolve_build_entry_checked(&resolver)
+        .map_err(|_| ())?;
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    let raw = entry.text().map_err(|_| ())?;
+    let source = if entry.path.file_name().and_then(|name| name.to_str())
+        == Some(jet::Syntax::PACKAGE_FILE)
+    {
+        jet::Package::build_entry_source(&raw).unwrap_or(raw)
+    } else {
+        raw
+    };
+    let entry_path = entry.path.to_string_lossy().into_owned();
+    let bundle =
+        jet::Loader::load_entry_with_overlay(&entry_path, Some((&entry.path, &source)), false)
+            .map_err(|_| ())?;
+    Ok(Some(jet::SHA256::sha256_hex(
+        &jet::CanonicalAST::canonical_bytes(&bundle),
+    )))
+}
+
 fn manifest_fingerprint(file: &str) -> Option<String> {
     let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
-    if let Some(root) = jet::Loader::find_manifest_root(search_from) {
-        let pack = jet::Loader::manifest_path(&root)?;
-        return fs::read(&pack)
-            .ok()
-            .map(|raw| jet::SHA256::sha256_hex(&raw));
-    }
-    Some(String::new())
+    let Some(root) = jet::Loader::find_manifest_root(search_from) else {
+        return Some(String::new());
+    };
+    let facts = jet::Package::PackageFacts::load(&root)?.ok()?;
+    let build = package_build_fingerprint(file).ok()?;
+    let mut bytes = b"jet.package-semantic.v2\0".to_vec();
+    append_cache_field(&mut bytes, &facts.semantic_digest());
+    append_cache_field(&mut bytes, build.as_deref().unwrap_or_default());
+    Some(jet::SHA256::sha256_hex(&bytes))
 }
 
 fn debug_native_cache_event(event: impl AsRef<str>) {
@@ -5495,6 +5661,8 @@ fn native_cache_salt(
     mode: &str,
     target: &str,
     instance_fingerprints: &[String],
+    bridge_identity: Option<&str>,
+    comptime_inputs: &[jet::AST::ComptimeInput],
 ) -> String {
     native_cache_salt_with_schema(
         NATIVE_CACHE_SALT_SCHEMA,
@@ -5505,6 +5673,8 @@ fn native_cache_salt(
         mode,
         target,
         instance_fingerprints,
+        bridge_identity,
+        comptime_inputs,
     )
 }
 
@@ -5517,9 +5687,18 @@ fn native_cache_salt_with_schema(
     mode: &str,
     target: &str,
     instance_fingerprints: &[String],
+    bridge_identity: Option<&str>,
+    comptime_inputs: &[jet::AST::ComptimeInput],
 ) -> String {
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
+    let mut inputs = comptime_inputs
+        .iter()
+        .map(|input| (&input.path, &input.hash))
+        .collect::<Vec<_>>();
+    inputs.sort_unstable();
+    // Package-view reads carry a package-relative path and content hash. Sort
+    // them so query order cannot change identity, while either field can.
     let mut bytes = Vec::new();
     bytes.extend_from_slice(schema);
     for value in [
@@ -5529,6 +5708,7 @@ fn native_cache_salt_with_schema(
         corelib_fingerprint,
         mode,
         target,
+        bridge_identity.unwrap_or("none"),
     ] {
         append_cache_field(&mut bytes, value);
     }
@@ -5536,10 +5716,15 @@ fn native_cache_salt_with_schema(
     for instance in instances {
         append_cache_field(&mut bytes, &instance);
     }
+    bytes.extend_from_slice(&(inputs.len() as u64).to_be_bytes());
+    for (path, hash) in inputs {
+        append_cache_field(&mut bytes, path);
+        append_cache_field(&mut bytes, hash);
+    }
     jet::SHA256::sha256_hex(&bytes)
 }
 
-const NATIVE_CACHE_SALT_SCHEMA: &[u8] = b"jet-native-cache-salt-v5";
+const NATIVE_CACHE_SALT_SCHEMA: &[u8] = b"jet-native-cache-salt-v7";
 const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v5";
 
 fn command_identity(program: &str, args: &[&str]) -> String {
@@ -5684,7 +5869,8 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 ///
 /// `mode_tag` keeps binaries built from the same AST under different pipelines in
 /// separate key spaces (a `jet test` harness binary can never be served for a
-/// `jet run`). The toolchain version and `package.jet` fingerprint ride the salt.
+/// `jet run`). The toolchain version, `package.jet` fingerprint, and any FFI
+/// bridge identity ride the salt.
 fn setting_overrides_tag(settings: &BTreeMap<String, String>) -> String {
     if settings.is_empty() {
         return "settings=default".to_string();
@@ -5770,8 +5956,9 @@ fn native_cache_key_with_toolchain(
 /// a second time and trusted the two passes to agree — a divergence there (a
 /// source edit racing the build, a fact snapshot taken twice, a differing sema
 /// mode) would have stored a binary under a key describing a different program.
-/// The inputs are unchanged: canonical AST + instance identities + dependency
-/// interfaces + runtime/corelib/manifest fingerprints + toolchain salt.
+/// The inputs are canonical AST, instance identities, dependency interfaces,
+/// runtime/Core fingerprints, bridge identity, manifest, toolchain, profile,
+/// and recorded compile-time package inputs.
 fn native_cache_key_for_program(
     file: &str,
     bundle: &jet::AST::ProgramBundle,
@@ -5798,6 +5985,17 @@ fn native_cache_key_for_program(
         debug_native_cache_event("program-key-none embed");
         return None;
     }
+    if !native_cacheable_program(bundle) {
+        return None;
+    }
+    // The bridge is an input to the final executable, not merely a codegen
+    // detail. Its content-addressed identity covers foreign declarations,
+    // bridge dependencies, target tools, and link inputs.
+    let bridge_identity = match jet::FFI::prepare(bundle) {
+        Ok(Some(link)) => Some(link.cache_identity),
+        Ok(None) => None,
+        Err(_) => return None,
+    };
     let instances: Vec<String> = bundle
         .modules
         .iter()
@@ -5828,13 +6026,15 @@ fn native_cache_key_for_program(
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         &instances,
+        bridge_identity.as_deref(),
+        &bundle.comptime_inputs,
     );
     let canonical = jet::CanonicalAST::canonical_bytes(bundle);
     let canonical_fingerprint = jet::SHA256::sha256_hex(&canonical);
-    let key = jet::CanonicalAST::ast_cache_key(bundle, profile_tag, &salt);
+    let key = jet::CanonicalAST::ast_cache_key(bundle, profile_tag, &salt, &bundle.build_facts);
     if let Ok(path) = std::env::var("JET_DEBUG_NATIVE_CACHE_LOG") {
         let line = format!(
-            "pid={} file={} profile={} mode={} canonical={} toolchain={} dependency={} runtime={} corelib={} manifest={} salt={} key={} instances={:?}\n",
+            "pid={} file={} profile={} mode={} canonical={} toolchain={} dependency={} runtime={} corelib={} manifest={} salt={} key={} instances={:?} comptime_inputs={:?}\n",
             std::process::id(),
             file,
             profile_tag,
@@ -5848,6 +6048,7 @@ fn native_cache_key_for_program(
             salt,
             key,
             instances,
+            bundle.comptime_inputs,
         );
         if let Ok(mut log) = std::fs::OpenOptions::new()
             .create(true)
@@ -5874,6 +6075,15 @@ fn program_uses_embed(bundle: &jet::AST::ProgramBundle) -> bool {
         module.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)
             || module.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
     })
+}
+/// Rust FFI bridges are cacheable once their content-addressed identity is in
+/// the native key. Explicit C ABI links remain uncached because system library
+/// contents are not represented by the Jet AST or the resolved argument list.
+fn native_cacheable_program(bundle: &jet::AST::ProgramBundle) -> bool {
+    !bundle.cffi.links_c()
+        && !jet::FFI::collect_externs(bundle)
+            .iter()
+            .any(|entry| entry.c_abi)
 }
 
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
@@ -5954,12 +6164,7 @@ pub(crate) fn run_dev_web(
 
     let host = match if canvas {
         let options = canvas_options.as_ref().cloned().unwrap_or_default();
-        jet_devserver::WebHost::WebHost::bind_web_with_canvas_options(
-            file,
-            verbose,
-            port,
-            &options,
-        )
+        jet_devserver::WebHost::WebHost::bind_web_with_canvas_options(file, verbose, port, &options)
     } else {
         jet_devserver::WebHost::WebHost::bind(file, verbose, port)
     } {
@@ -5969,7 +6174,8 @@ pub(crate) fn run_dev_web(
                 crate::emit_cli_diagnostic_with_fix(
                     "E2105",
                     message,
-                    "close the existing Canvas session or choose another `--canvas-port`".to_string(),
+                    "close the existing Canvas session or choose another `--canvas-port`"
+                        .to_string(),
                 );
             } else {
                 eprintln!("{message}");
@@ -6007,20 +6213,7 @@ pub(crate) fn run_dev_web(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
-            let mut txn = jet_devserver::HotReplaceTxn::begin(jet_devserver::SessionSnapshot {
-                generation: receipt.generation.saturating_sub(1),
-                artifact_token: format!("web-gen-{}", receipt.generation.saturating_sub(1)),
-                persist: jet_devserver::PersistStore::new(),
-            });
-            let ok = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
-            if ok {
-                txn.mark_server_ready();
-                txn.mark_client_ready();
-                let _ = txn.commit();
-            } else {
-                txn.fail("web rebuild failed; prior session kept");
-                let _ = txn.commit();
-            }
+            rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
             if let Err(diagnostic) = watch.acknowledge(&receipt) {
                 eprint!(
                     "{}",
@@ -6040,6 +6233,7 @@ fn rebuild_dev_web(
     host: &jet_devserver::WebHost::WebHost,
     setting_overrides: &BTreeMap<String, String>,
 ) -> bool {
+    let _source_transaction = host.lock_source_transaction();
     let started = Instant::now();
     host.mark_building();
     let src = fs::read_to_string(file).unwrap_or_default();
@@ -6328,6 +6522,12 @@ fn validate_web_output_file(path: &Path, root: &Path) -> Result<(), String> {
                 path.display()
             ));
         }
+        if web_output_has_multiple_links(&metadata) {
+            return Err(format!(
+                "error: web output `{}` must not be a hard link",
+                path.display()
+            ));
+        }
     }
     let parent = path.parent().unwrap_or(Path::new("."));
     let real_parent = fs::canonicalize(parent)
@@ -6339,6 +6539,24 @@ fn validate_web_output_file(path: &Path, root: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn web_output_has_multiple_links(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return metadata.is_file() && metadata.nlink() > 1;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return metadata.is_file() && metadata.number_of_links() > 1;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        false
+    }
 }
 
 fn ensure_web_directory(path: &Path) -> std::io::Result<()> {
@@ -6561,6 +6779,237 @@ struct LibraryBuildPaths {
     bindings: Vec<PathBuf>,
 }
 
+#[derive(Debug)]
+enum LibraryBuildError {
+    Io(String),
+    Tool(String),
+    GeneratedCode(String),
+}
+
+impl std::fmt::Display for LibraryBuildError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) | Self::Tool(error) => formatter.write_str(error),
+            Self::GeneratedCode(stderr) => formatter.write_str(stderr),
+        }
+    }
+}
+
+impl From<std::io::Error> for LibraryBuildError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error.to_string())
+    }
+}
+
+struct LibraryStage {
+    path: PathBuf,
+}
+
+impl Drop for LibraryStage {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn library_reparse_point(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn validate_library_output_root(root: &Path) -> Result<(), LibraryBuildError> {
+    match fs::symlink_metadata(root) {
+        Ok(metadata) => {
+            if library_reparse_point(&metadata) || !metadata.is_dir() {
+                return Err(LibraryBuildError::Io(format!(
+                    "Library output root `{}` is not a real directory",
+                    root.display()
+                )));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(root)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let first = fs::canonicalize(root)?;
+    let second = fs::canonicalize(root)?;
+    if first != second {
+        return Err(LibraryBuildError::Io(format!(
+            "Library output root `{}` changed while it was being resolved",
+            root.display()
+        )));
+    }
+    let metadata = fs::symlink_metadata(root)?;
+    if library_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err(LibraryBuildError::Io(format!(
+            "Library output root `{}` changed to a symlink or reparse point",
+            root.display()
+        )));
+    }
+    Ok(())
+}
+
+fn library_owned_paths(target: &Path, stem: &str) -> Vec<PathBuf> {
+    [
+        format!("lib{stem}.a"),
+        format!("lib{stem}.so"),
+        format!("lib{stem}.dylib"),
+        format!("lib{stem}.dll"),
+        format!("{stem}.h"),
+        format!("{stem}.jetlib"),
+        format!("{stem}.rs"),
+        format!(".{stem}.jet-library.complete"),
+    ]
+    .into_iter()
+    .map(|name| target.join(name))
+    .chain(
+        ["h", "py", "swift"]
+            .into_iter()
+            .map(|extension| target.join("bindings").join(format!("{stem}.{extension}"))),
+    )
+    .collect()
+}
+
+fn remove_library_owned_path(path: &Path) -> Result<(), LibraryBuildError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if library_reparse_point(&metadata) {
+        return Err(LibraryBuildError::Io(format!(
+            "refusing to remove symlink or reparse point `{}`",
+            path.display()
+        )));
+    }
+    if metadata.is_dir() {
+        return Err(LibraryBuildError::Io(format!(
+            "refusing to remove directory where a Library file belongs: `{}`",
+            path.display()
+        )));
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+fn validate_library_bindings_root(target: &Path) -> Result<(), LibraryBuildError> {
+    let root = target.join("bindings");
+    let metadata = match fs::symlink_metadata(&root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if library_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err(LibraryBuildError::Io(format!(
+            "Library bindings root `{}` is not a real directory",
+            root.display()
+        )));
+    }
+    let first = fs::canonicalize(&root)?;
+    let second = fs::canonicalize(&root)?;
+    if first != second {
+        return Err(LibraryBuildError::Io(format!(
+            "Library bindings root `{}` changed while it was being resolved",
+            root.display()
+        )));
+    }
+    let metadata = fs::symlink_metadata(&root)?;
+    if library_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err(LibraryBuildError::Io(format!(
+            "Library bindings root `{}` changed to a symlink or reparse point",
+            root.display()
+        )));
+    }
+    Ok(())
+}
+
+fn clean_library_outputs(target: &Path, stem: &str) -> Result<(), LibraryBuildError> {
+    // Validate both parents before inspecting any owned output. A swapped or
+    // symlinked root would otherwise make stale-output cleanup leave the
+    // target tree and remove an unrelated path.
+    validate_library_output_root(target)?;
+    validate_library_bindings_root(target)?;
+    for path in library_owned_paths(target, stem) {
+        remove_library_owned_path(&path)?;
+    }
+    let stage_prefix = format!(".jet-library-stage-{stem}-{}-", std::process::id());
+    for entry in fs::read_dir(target)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with(&stage_prefix) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if library_reparse_point(&metadata) || !metadata.is_dir() {
+            return Err(LibraryBuildError::Io(format!(
+                "refusing to remove invalid Library staging path `{}`",
+                entry.path().display()
+            )));
+        }
+        fs::remove_dir_all(entry.path())?;
+    }
+    Ok(())
+}
+
+fn new_library_stage(target: &Path, stem: &str) -> Result<LibraryStage, LibraryBuildError> {
+    for serial in 0..64u32 {
+        let path = target.join(format!(
+            ".jet-library-stage-{stem}-{}-{serial}",
+            std::process::id()
+        ));
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(LibraryStage { path }),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(LibraryBuildError::Io(
+        "could not allocate a unique Library staging directory".to_string(),
+    ))
+}
+
+fn write_library_staged(path: &Path, bytes: &[u8]) -> Result<(), LibraryBuildError> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn publish_library_file(staged: &Path, final_path: &Path) -> Result<(), LibraryBuildError> {
+    if let Ok(metadata) = fs::symlink_metadata(final_path) {
+        if library_reparse_point(&metadata) {
+            return Err(LibraryBuildError::Io(format!(
+                "refusing to replace symlink or reparse point `{}`",
+                final_path.display()
+            )));
+        }
+        if metadata.is_dir() {
+            return Err(LibraryBuildError::Io(format!(
+                "refusing to replace directory `{}`",
+                final_path.display()
+            )));
+        }
+        #[cfg(windows)]
+        fs::remove_file(final_path)?;
+    }
+    fs::rename(staged, final_path)?;
+    Ok(())
+}
+
 fn library_stem(name: &str) -> String {
     let mut stem = name
         .chars()
@@ -6587,7 +7036,8 @@ fn library_rustc(
     output: &Path,
     profile: BuildProfile,
     verbose: bool,
-) {
+    linker: &crate::NativeLinker::Selection,
+) -> Result<(), LibraryBuildError> {
     let mut command = Command::new("rustc");
     command
         .arg("--edition")
@@ -6609,7 +7059,6 @@ fn library_rustc(
         command.arg("--cfg").arg("jet_release");
     }
     command.args(config.rustc_args_for_target(false, true));
-    let linker = crate::NativeLinker::for_target(None);
     command.args(linker.rustc_args());
     if verbose {
         eprintln!(
@@ -6619,104 +7068,87 @@ fn library_rustc(
             linker.label()
         );
     }
-    let result = command.output().unwrap_or_else(|error| {
-        crate::cli_error!(
-            "E2105",
-            "couldn't start rustc for the Library output: {}",
-            error
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let result = command
+        .output()
+        .map_err(|error| LibraryBuildError::Tool(format!("couldn't start rustc: {error}")))?;
     if !result.status.success() {
-        eprintln!(
-            "{}",
-            jet::Diagnostics::render_ice_report(
-                "rustc rejected generated Library code",
-                &String::from_utf8_lossy(&result.stderr),
-                true,
-            )
-        );
-        exit(ExitCodes::ICE);
+        return Err(LibraryBuildError::GeneratedCode(
+            String::from_utf8_lossy(&result.stderr).into_owned(),
+        ));
     }
+    Ok(())
 }
 
 fn build_library(
-    file: &str,
     rust_code: &str,
     artifacts: &jet::Codegen::LibraryArtifacts,
     config: &jet::LibraryExport::LibraryConfig,
     profile: BuildProfile,
     verbose: bool,
     _mode: OutputMode,
-) -> LibraryBuildPaths {
+) -> Result<LibraryBuildPaths, LibraryBuildError> {
     let stem = library_stem(&config.name);
     let target = PathBuf::from("target");
+    validate_library_output_root(&target)?;
+    clean_library_outputs(&target, &stem)?;
+    let stage = new_library_stage(&target, &stem)?;
     let needs_shared = config.native || config.loadable;
-    let shared = needs_shared.then(|| {
-        target.join(format!(
-            "lib{stem}.{}",
-            if cfg!(target_os = "macos") {
-                "dylib"
-            } else if cfg!(target_os = "windows") {
-                "dll"
-            } else {
-                "so"
-            }
-        ))
-    });
+    let shared_name = format!(
+        "lib{stem}.{}",
+        if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        }
+    );
+    let shared = needs_shared.then(|| target.join(&shared_name));
+    let staged_shared = needs_shared.then(|| stage.path.join(&shared_name));
     let staticlib = config.native.then(|| target.join(format!("lib{stem}.a")));
+    let staged_staticlib = config
+        .native
+        .then(|| stage.path.join(format!("lib{stem}.a")));
     let header = config.native.then(|| target.join(format!("{stem}.h")));
+    let staged_header = config.native.then(|| stage.path.join(format!("{stem}.h")));
     let bindings_dir = config.native.then(|| target.join("bindings"));
+    let staged_bindings_dir = config.native.then(|| stage.path.join("bindings"));
+    let linker = crate::NativeLinker::for_target(None);
 
     if needs_shared {
-        fs::create_dir_all(&target).unwrap_or_else(|error| {
-            crate::cli_error!(
-                "E2105",
-                "couldn't create the Library output directory: {}",
-                error
-            );
-            exit(ExitCodes::USER_ERROR);
-        });
-        let source = target.join(format!("{stem}.rs"));
-        fs::write(&source, rust_code).unwrap_or_else(|error| {
-            crate::cli_error!("E2105", "couldn't write {}: {}", source.display(), error);
-            exit(ExitCodes::USER_ERROR);
-        });
-        let shared_path = shared.as_ref().expect("shared path for native Library");
-        library_rustc(&source, "cdylib", shared_path, profile.clone(), verbose);
-        if let Some(staticlib_path) = &staticlib {
+        let source = stage.path.join(format!("{stem}.rs"));
+        write_library_staged(&source, rust_code.as_bytes())?;
+        let shared_path = staged_shared
+            .as_ref()
+            .expect("shared path for native Library");
+        library_rustc(
+            &source,
+            "cdylib",
+            shared_path,
+            profile.clone(),
+            verbose,
+            &linker,
+        )?;
+        if let Some(staticlib_path) = &staged_staticlib {
             library_rustc(
                 &source,
                 "staticlib",
                 staticlib_path,
                 profile.clone(),
                 verbose,
-            );
+                &linker,
+            )?;
         }
     }
 
-    if let Some(header_path) = &header {
-        fs::write(header_path, &artifacts.header).unwrap_or_else(|error| {
-            crate::cli_error!(
-                "E2105",
-                "couldn't write {}: {}",
-                header_path.display(),
-                error
-            );
-            exit(ExitCodes::USER_ERROR);
-        });
+    if let Some(staged_header) = &staged_header {
+        write_library_staged(staged_header, artifacts.header.as_bytes())?;
     }
 
     let mut binding_paths = Vec::new();
-    if let Some(bindings_dir) = bindings_dir {
-        fs::create_dir_all(&bindings_dir).unwrap_or_else(|error| {
-            crate::cli_error!(
-                "E2105",
-                "couldn't create the Library bindings directory: {}",
-                error
-            );
-            exit(ExitCodes::USER_ERROR);
-        });
+    let mut staged_binding_paths = Vec::new();
+    if let Some(staged_bindings_dir) = &staged_bindings_dir {
+        fs::create_dir(staged_bindings_dir)?;
         for (language, text) in &artifacts.bindings {
             let extension = match language.as_str() {
                 "c" => "h",
@@ -6724,50 +7156,133 @@ fn build_library(
                 "swift" => "swift",
                 _ => continue,
             };
-            let path = bindings_dir.join(format!("{stem}.{extension}"));
-            fs::write(&path, text).unwrap_or_else(|error| {
-                crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
-                exit(ExitCodes::USER_ERROR);
-            });
+            let path = target.join("bindings").join(format!("{stem}.{extension}"));
+            let staged_path = staged_bindings_dir.join(format!("{stem}.{extension}"));
+            write_library_staged(&staged_path, text.as_bytes())?;
             binding_paths.push(path);
+            staged_binding_paths.push(staged_path);
         }
     }
 
-    let loadable = if config.loadable {
-        let path = target.join(format!("{stem}.jetlib"));
-        let shared_path = shared
+    let loadable = config
+        .loadable
+        .then(|| target.join(format!("{stem}.jetlib")));
+    let staged_loadable = if config.loadable {
+        let path = stage.path.join(format!("{stem}.jetlib"));
+        let shared_path = staged_shared
             .as_ref()
             .expect("loadable Library has shared payload");
-        let payload = fs::read(shared_path).unwrap_or_else(|error| {
-            crate::cli_error!(
-                "E2105",
-                "couldn't read {}: {}",
-                shared_path.display(),
-                error
-            );
-            exit(ExitCodes::USER_ERROR);
-        });
-        let artifact = jet::JetLibArtifact {
-            stamp: jet::JetLibStamp::for_this_compiler(config.declared_effects.clone()),
-            payload,
-        };
-        fs::write(&path, artifact.encode()).unwrap_or_else(|error| {
-            crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
-            exit(ExitCodes::USER_ERROR);
-        });
+        let payload = fs::read(shared_path)?;
+        let exports = artifacts
+            .exports
+            .iter()
+            .map(|export| {
+                let scalar = match export.scalar {
+                    jet::Codegen::LibraryScalar::Int => jet::JetLibScalar::Int,
+                    jet::Codegen::LibraryScalar::Float => jet::JetLibScalar::Float,
+                    jet::Codegen::LibraryScalar::Bool => jet::JetLibScalar::Bool,
+                    jet::Codegen::LibraryScalar::Text => jet::JetLibScalar::Text,
+                };
+                let conventions = export
+                    .conventions
+                    .iter()
+                    .map(|convention| match convention {
+                        jet::AST::AccessConvention::Read => jet::JetLibAccess::Read,
+                        jet::AST::AccessConvention::Write => jet::JetLibAccess::Write,
+                        jet::AST::AccessConvention::Move => jet::JetLibAccess::Move,
+                    })
+                    .collect();
+                jet::JetLibExport::with_conventions(export.name.clone(), scalar, conventions)
+            })
+            .collect();
+        let mut stamp = jet::JetLibStamp::for_library_with_identity(
+            config.name.clone(),
+            exports,
+            config.declared_effects.clone(),
+            env!("JET_COMPILER_BUILD_ID"),
+            env!("JET_BUILD_TARGET"),
+            native_toolchain_identity(),
+        );
+        stamp.entry = config.entry.clone();
+        stamp.seal_payload(&payload);
+        let artifact = jet::JetLibArtifact { stamp, payload };
+        write_library_staged(&path, &artifact.encode())?;
         Some(path)
     } else {
         None
     };
 
-    let _ = file;
-    LibraryBuildPaths {
+    validate_library_output_root(&target)?;
+    if let Some(bindings_dir) = &bindings_dir {
+        validate_library_bindings_root(&target)?;
+        match fs::symlink_metadata(bindings_dir) {
+            Ok(metadata) if library_reparse_point(&metadata) || !metadata.is_dir() => {
+                return Err(LibraryBuildError::Io(format!(
+                    "Library bindings root `{}` is not a real directory",
+                    bindings_dir.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(bindings_dir)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    let mut publications = Vec::new();
+    if let (Some(shared), Some(staged_shared)) = (&shared, &staged_shared) {
+        publications.push((staged_shared.clone(), shared.clone()));
+    }
+    if let (Some(staticlib), Some(staged_staticlib)) = (&staticlib, &staged_staticlib) {
+        publications.push((staged_staticlib.clone(), staticlib.clone()));
+    }
+    if let (Some(header), Some(staged_header)) = (&header, &staged_header) {
+        publications.push((staged_header.clone(), header.clone()));
+    }
+    publications.extend(
+        staged_binding_paths
+            .into_iter()
+            .zip(binding_paths.iter().cloned()),
+    );
+    if let (Some(loadable), Some(staged_loadable)) = (&loadable, &staged_loadable) {
+        publications.push((staged_loadable.clone(), loadable.clone()));
+    }
+    let completion = target.join(format!(".{stem}.jet-library.complete"));
+    let staged_completion = stage.path.join(format!(".{stem}.jet-library.complete"));
+    let mut completion_text = String::from("jet-library-set-v1\n");
+    for (staged_path, final_path) in &publications {
+        let relative = final_path.strip_prefix(&target).map_err(|_| {
+            LibraryBuildError::Io(format!(
+                "Library publication path `{}` escaped target root",
+                final_path.display()
+            ))
+        })?;
+        let digest = jet::SHA256::sha256_hex(&fs::read(staged_path)?);
+        completion_text.push_str(&format!("{}\tsha256-{digest}\n", relative.display()));
+    }
+    write_library_staged(&staged_completion, completion_text.as_bytes())?;
+    publications.push((staged_completion, completion));
+    validate_library_output_root(&target)?;
+    validate_library_bindings_root(&target)?;
+    for (staged_path, final_path) in publications {
+        if let Err(error) = publish_library_file(&staged_path, &final_path) {
+            let _ = clean_library_outputs(&target, &stem);
+            return Err(error);
+        }
+    }
+
+    if let Err(error) = validate_library_output_root(&target) {
+        let _ = clean_library_outputs(&target, &stem);
+        return Err(error);
+    }
+    Ok(LibraryBuildPaths {
         shared,
         staticlib,
         header,
         loadable,
         bindings: binding_paths,
-    }
+    })
 }
 
 fn write_backend_timing(timer: &jet::PhaseTiming::PhaseTimer) {
@@ -6783,6 +7298,7 @@ fn write_backend_timing(timer: &jet::PhaseTiming::PhaseTimer) {
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
+    runtime_bundle: Option<&jet::AST::ProgramBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -6794,11 +7310,11 @@ pub(crate) fn build(
     mode: OutputMode,
     restored_cache: bool,
     // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
-    // the caller from the *pre-sema* canonical AST bytes (+ profile + toolchain
-    // salt). `None` when this build must not be cached (e.g. an `embed_file`
-    // build, whose output depends on external file bytes not captured by the
-    // AST, or a caller that couldn't parse a bundle). `build` still applies its
-    // own `use_cache` gate (FFI/C-link/cross builds never cache) on top of this.
+    // the caller from the checked canonical AST, profile, toolchain, manifest,
+    // runtime/Core, dependency-interface, instance, and optional Rust FFI bridge
+    // identities. `None` when external bytes are not represented by the key,
+    // such as `embed_file` or explicit C links. `build` also rejects cross-target
+    // and explicit C-link caching.
     cache_key: Option<String>,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
@@ -6809,8 +7325,8 @@ pub(crate) fn build(
         }
     };
 
-    fs::create_dir_all("build").unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't create the build/ folder: {}", e);
+    let output_root = ensure_web_output_dir(Path::new("build")).unwrap_or_else(|message| {
+        eprintln!("{message}");
         exit(ExitCodes::USER_ERROR);
     });
     let mut compile_timer = jet::PhaseTiming::enabled().then(jet::PhaseTiming::PhaseTimer::new);
@@ -6829,6 +7345,10 @@ pub(crate) fn build(
         return;
     }
     let rs_path = PathBuf::from("build").join(format!("{}.rs", stem(file)));
+    if let Err(message) = validate_web_output_file(&rs_path, &output_root) {
+        eprintln!("{message}");
+        exit(ExitCodes::USER_ERROR);
+    }
     step(format!("emit Rust  -> {}", rs_path.display()));
     fs::write(&rs_path, rust_code).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", rs_path.display(), e);
@@ -6905,8 +7425,6 @@ pub(crate) fn build(
                 exit(ExitCodes::USER_ERROR);
             }
         };
-        let _ = rust_code;
-        let _ = bin;
         let _ = profile;
         let _ = ffi;
         let _ = clinks;
@@ -6922,13 +7440,10 @@ pub(crate) fn build(
         return;
     }
 
-    // Cross-compiled or freestanding builds bypass the host binary cache
-    // (the binary is not executable on this host, and the target triple
-    // affects codegen choices that aren't captured by the source hash), as do
-    // FFI- and C-linked builds (link inputs aren't in the AST key) and builds
-    // the caller marked un-cacheable by passing `cache_key = None` (embed_file).
-    let use_cache =
-        ffi.is_none() && clinks.is_empty() && cross_target.is_none() && cache_key.is_some();
+    // Cross-compiled and explicit C-linked builds bypass the host binary cache.
+    // Rust FFI bridges are cacheable because their content-addressed identity
+    // is folded into the caller's native key.
+    let use_cache = clinks.is_empty() && cross_target.is_none() && cache_key.is_some();
     // D-BUILDNORM1=A: the key is the caller's pre-sema canonical-AST key
     // (D-BUILDPROFILE1's profile tag is already folded into it). Kept only when
     // this build is cacheable.
@@ -7245,6 +7760,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
     build(
         file,
         &out.rust,
+        None,
         bin.clone(),
         BuildProfile::Debug,
         out.ffi.as_ref(),
@@ -7376,8 +7892,8 @@ mod profile_tests {
 mod missing_c_lib_tests {
     use super::{
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
-        native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
-        render_internal_fault,
+        native_cache_key_for_program, native_cache_key_with_toolchain, native_cache_salt,
+        native_cache_salt_with_schema, render_internal_fault,
     };
 
     struct ScratchProject(std::path::PathBuf);
@@ -7398,11 +7914,49 @@ mod missing_c_lib_tests {
         }
 
         fn write(&self, name: &str, source: &str) {
-            std::fs::write(self.0.join(name), source).expect("write generic-module cache fixture");
+            let path = self.0.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create cache fixture input directory");
+            }
+            std::fs::write(path, source).expect("write generic-module cache fixture");
         }
 
         fn main(&self) -> String {
             self.0.join("main.jet").to_string_lossy().into_owned()
+        }
+        fn native_cache_key_with_input(&self, relative: &str) -> String {
+            let mut bundle =
+                jet::Loader::load_entry_with_overlay(&self.main(), None, false)
+                    .expect("load consumed-input cache fixture");
+            jet::Driver::seed_build_facts(
+                &mut bundle,
+                "dev",
+                false,
+                &std::collections::BTreeMap::new(),
+            )
+            .expect("seed consumed-input cache fixture");
+            let diagnostics =
+                jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+                "consumed-input cache fixture must check"
+            );
+            let bytes =
+                std::fs::read(self.0.join(relative)).expect("read consumed-input cache fixture");
+            bundle.comptime_inputs = vec![jet::AST::ComptimeInput {
+                path: relative.replace(std::path::MAIN_SEPARATOR, "/"),
+                hash: jet::SHA256::sha256_hex(&bytes),
+            }];
+            native_cache_key_for_program(
+                &self.main(),
+                &bundle,
+                "default",
+                "run",
+                "comptime-input-test-toolchain",
+            )
+            .expect("consumed-input cache key")
         }
     }
 
@@ -7430,12 +7984,66 @@ mod missing_c_lib_tests {
             .expect("launch signal fixture");
         assert_eq!(child_exit_code(status), jet::ExitCodes::USER_ERROR);
     }
+    #[test]
+    fn native_cache_ignores_comments_and_tracks_bridge_identity() {
+        let project = ScratchProject::new();
+        project.write("main.jet", "fn run() { print(1) }\n");
+        let base =
+            native_cache_key(&project.main(), "dev", "default", "run").expect("base cache key");
+        project.write("main.jet", "// cache-only comment\nfn run() { print(1) }\n");
+        let comment =
+            native_cache_key(&project.main(), "dev", "default", "run").expect("comment cache key");
+        assert_eq!(base, comment, "comments must not invalidate native cache");
+
+        let instances = Vec::new();
+        let no_bridge = native_cache_salt(
+            "tool",
+            "dependencies",
+            "runtime",
+            "core",
+            "run",
+            "linux-x86_64",
+            &instances,
+            None,
+            &[],
+        );
+        let bridge_a = native_cache_salt(
+            "tool",
+            "dependencies",
+            "runtime",
+            "core",
+            "run",
+            "linux-x86_64",
+            &instances,
+            Some("bridge-a"),
+            &[],
+        );
+        let bridge_b = native_cache_salt(
+            "tool",
+            "dependencies",
+            "runtime",
+            "core",
+            "run",
+            "linux-x86_64",
+            &instances,
+            Some("bridge-b"),
+            &[],
+        );
+        assert_ne!(
+            no_bridge, bridge_a,
+            "a bridge must have its own cache identity"
+        );
+        assert_ne!(
+            bridge_a, bridge_b,
+            "bridge input changes must invalidate cache"
+        );
+    }
 
     #[test]
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
         let salt = |tool, deps, runtime, core, mode, target, instances: &[String]| {
-            native_cache_salt(tool, deps, runtime, core, mode, target, instances)
+            native_cache_salt(tool, deps, runtime, core, mode, target, instances, None, &[])
         };
         let base = salt(
             "tool-a",
@@ -7555,25 +8163,38 @@ mod missing_c_lib_tests {
         };
         let base_identity = identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-a");
         let key = |toolchain: &str, profile: &str| {
-            native_cache_key_with_toolchain(
-                &project.main(),
-                "dev",
-                profile,
-                "run",
-                toolchain,
-            )
-            .expect("hostile cache fixture key")
+            native_cache_key_with_toolchain(&project.main(), "dev", profile, "run", toolchain)
+                .expect("hostile cache fixture key")
         };
         let base = key(&base_identity, "default");
         let identities = [
-            ("compiler", identity("compiler-b", "schema-a", "backend-a", "flags-a", "linker-a")),
-            ("schema", identity("compiler-a", "schema-b", "backend-a", "flags-a", "linker-a")),
-            ("backend", identity("compiler-a", "schema-a", "backend-b", "flags-a", "linker-a")),
-            ("flags", identity("compiler-a", "schema-a", "backend-a", "flags-b", "linker-a")),
-            ("linker", identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-b")),
+            (
+                "compiler",
+                identity("compiler-b", "schema-a", "backend-a", "flags-a", "linker-a"),
+            ),
+            (
+                "schema",
+                identity("compiler-a", "schema-b", "backend-a", "flags-a", "linker-a"),
+            ),
+            (
+                "backend",
+                identity("compiler-a", "schema-a", "backend-b", "flags-a", "linker-a"),
+            ),
+            (
+                "flags",
+                identity("compiler-a", "schema-a", "backend-a", "flags-b", "linker-a"),
+            ),
+            (
+                "linker",
+                identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-b"),
+            ),
         ];
         for (input, changed) in identities {
-            assert_ne!(base, key(&changed, "default"), "{input} must miss final cache");
+            assert_ne!(
+                base,
+                key(&changed, "default"),
+                "{input} must miss final cache"
+            );
         }
         assert_ne!(
             base,
@@ -7591,9 +8212,16 @@ mod missing_c_lib_tests {
                 "run",
                 target,
                 &instances,
+                None,
+                &[],
             )
         };
-        let base_salt = salt("dependency-a", "generated-runtime-a", "core-a", "linux-x86_64");
+        let base_salt = salt(
+            "dependency-a",
+            "generated-runtime-a",
+            "core-a",
+            "linux-x86_64",
+        );
         assert_ne!(
             base_salt,
             native_cache_salt_with_schema(
@@ -7605,14 +8233,43 @@ mod missing_c_lib_tests {
                 "run",
                 "linux-x86_64",
                 &instances,
+                None,
+                &[],
             ),
             "cache-schema change must miss final work"
         );
         for (input, changed) in [
-            ("dependency", salt("dependency-b", "generated-runtime-a", "core-a", "linux-x86_64")),
-            ("generated code", salt("dependency-a", "generated-runtime-b", "core-a", "linux-x86_64")),
-            ("Core artifact", salt("dependency-a", "generated-runtime-a", "core-b", "linux-x86_64")),
-            ("target", salt("dependency-a", "generated-runtime-a", "core-a", "wasm32")),
+            (
+                "dependency",
+                salt(
+                    "dependency-b",
+                    "generated-runtime-a",
+                    "core-a",
+                    "linux-x86_64",
+                ),
+            ),
+            (
+                "generated code",
+                salt(
+                    "dependency-a",
+                    "generated-runtime-b",
+                    "core-a",
+                    "linux-x86_64",
+                ),
+            ),
+            (
+                "Core artifact",
+                salt(
+                    "dependency-a",
+                    "generated-runtime-a",
+                    "core-b",
+                    "linux-x86_64",
+                ),
+            ),
+            (
+                "target",
+                salt("dependency-a", "generated-runtime-a", "core-a", "wasm32"),
+            ),
         ] {
             assert_ne!(base_salt, changed, "{input} must miss affected final work");
         }
@@ -7631,6 +8288,19 @@ mod missing_c_lib_tests {
 
         let base =
             native_cache_key(&project.main(), "dev", "default", "run").expect("base cache key");
+
+        project.write(
+            "package.jet",
+            "// semantic no-op\nname: \"cache-proof\"\nversion: \"1.0.0\"\n",
+        );
+        let manifest_comment = native_cache_key(&project.main(), "dev", "default", "run")
+            .expect("comment-only manifest cache key");
+        assert_eq!(
+            base, manifest_comment,
+            "comment-only package manifest edit must reuse the native cache",
+        );
+        project.write("package.jet", manifest_v1);
+
         let toolchain_a = native_cache_key_with_toolchain(
             &project.main(),
             "dev",
@@ -7706,6 +8376,60 @@ mod missing_c_lib_tests {
     }
 
     #[test]
+    fn native_cache_key_invalidates_when_consumed_lock_changes() {
+        let project = ScratchProject::new();
+        project.write("main.jet", "fn run() { print(1) }\n");
+        project.write(".jet/lock", "version = 1\n");
+        let base = project.native_cache_key_with_input(".jet/lock");
+
+        project.write(".jet/lock", "version = 2\n");
+        let changed = project.native_cache_key_with_input(".jet/lock");
+
+        assert_ne!(
+            base, changed,
+            "a consumed package lock edit must invalidate native cache"
+        );
+    }
+
+    #[test]
+    fn native_cache_key_invalidates_when_consumed_profile_changes() {
+        let project = ScratchProject::new();
+        project.write("main.jet", "fn run() { print(1) }\n");
+        project.write("env.jet", "module dev {}\n");
+        let base = project.native_cache_key_with_input("env.jet");
+
+        project.write("env.jet", "// changed profile\nmodule dev {}\n");
+        let changed = project.native_cache_key_with_input("env.jet");
+
+        assert_ne!(
+            base, changed,
+            "a consumed profile edit must invalidate native cache"
+        );
+    }
+
+    #[test]
+    fn native_cache_key_invalidates_when_consumed_config_changes() {
+        let project = ScratchProject::new();
+        project.write("main.jet", "fn run() { print(1) }\n");
+        project.write(
+            "config/release.jet",
+            "pub release :: Config.{ version: \"1\" }\n",
+        );
+        let base = project.native_cache_key_with_input("config/release.jet");
+
+        project.write(
+            "config/release.jet",
+            "// changed config\npub release :: Config.{ version: \"1\" }\n",
+        );
+        let changed = project.native_cache_key_with_input("config/release.jet");
+
+        assert_ne!(
+            base, changed,
+            "a consumed package config edit must invalidate native cache"
+        );
+    }
+
+    #[test]
     fn detects_ld_cannot_find() {
         // GNU ld / lld phrasing — must be routed to E3209, not the I2 ICE banner.
         let stderr = "  = note: /usr/bin/ld: cannot find -lraylib: No such file or directory\n  collect2: error: ld returned 1 exit status\n";
@@ -7760,7 +8484,7 @@ mod missing_c_lib_tests {
 
 #[cfg(test)]
 mod web_output_boundary_tests {
-    use super::validate_web_output_file;
+    use super::{ensure_web_output_dir, validate_web_output_file};
 
     #[cfg(unix)]
     #[test]
@@ -7783,5 +8507,58 @@ mod web_output_boundary_tests {
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn web_artifact_writer_rejects_hardlink_output() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-web-output-hardlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            ".jet-web-output-hardlink-target-{}",
+            std::process::id()
+        ));
+        let output = root.join("app.js");
+        std::fs::write(&outside, "must survive").unwrap();
+        std::fs::hard_link(&outside, &output).unwrap();
+
+        let error = validate_web_output_file(&output, &root)
+            .expect_err("web artifact writes must not follow hardlinks");
+        assert!(error.contains("must not be a hard link"), "{error}");
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn web_build_rejects_symlinked_output_root_before_creation() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-web-build-root-symlink-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "jet-web-build-root-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, &root).unwrap();
+
+        let error = ensure_web_output_dir(&root)
+            .expect_err("web builds must reject a symlinked output root");
+        assert!(error.contains("must not be a symlink"), "{error}");
+        assert!(!outside.join("created-by-build").exists());
+
+        let _ = std::fs::remove_file(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

@@ -83,6 +83,8 @@ fn run() {
         }
     };
     assert!(snapshot.contains("\"parent\":1"));
+    assert!(snapshot.contains("\"label\":\"task@"));
+    assert!(snapshot.contains("\"spawn_site\":"));
     assert!(snapshot.contains("\"effects\":"));
     assert!(snapshot.contains("\"arena_bytes\":"));
     assert!(!snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"));

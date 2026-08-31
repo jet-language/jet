@@ -23,7 +23,7 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 - String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`
   `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
   embeds any printable expression; format selectors use the closed `:` rail
-  (`{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Unit(name|bare)}`); `{{` and
+  (`{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Unit(name|bare)}`); `{{` and
   `}}` write literal braces; a lone `{` or `}` is E0001.
 - Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
   and interpolation. The newline right after the opening `"""` and the one right
@@ -61,20 +61,32 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 - Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A,
   D-TIMERES1=A) use
   `Duration.nanoseconds|microseconds|milliseconds|seconds|minutes|hours(number)`;
-  non-finite and
-  out-of-range values fail with `RangeError`. A Duration stores a whole-nanosecond
-  count. `duration.in(.Unit)` reads a whole `Int` unit, truncating toward zero.
-  `is_zero()`, `total_seconds()`, and `difference(other)` are Duration facts.
-  Time literals (`ns`, `us`, `ms`, `s`, `min`, `h`, `d`) resolve through the
-  in-scope canonical Time family and produce the checked Duration delta.
-- Civil time (D-TIMEDEPTH1 / D-TIME-CALENDAR1): `LocalDate` adds
-  `quarter_of_year`, `days_in_month`, `is_leap_year`, and `replace(y, m, d)`.
-  `DateTime` adds sub-second accessors (`millisecond` / `microsecond` /
-  `nanosecond`), `floor` / `ceil` beside `truncate` / `round`, `replace(...)`,
-  and `difference(other) -> Duration`. `ZonedDateTime` adds `is_dst()`.
-  `core.time(...)`, `core.time.time(...)` / `local_time(...)`,
-  `days_in_month(y, m)`, and `is_leap_year(y)` construct or query the same
-  values. `Instant.elapsed()` returns a `Duration`.
+  non-finite and out-of-range values fail with `RangeError`. A `Duration` is a
+  signed whole-nanosecond `i64` carrier. `duration.in(.Unit)` reads a whole
+  unit, truncating toward zero; `total_in(unit)` keeps the fractional value.
+  `round(unit, increment, rounding_mode)` uses the nine canonical rounding
+  modes, while `abs()`, `negated()`, `sign()`, `is_zero()`, and
+  `difference(other)` are exact carrier operations. Time literals (`ns`, `us`,
+  `ms`, `s`, `min`, `h`, `d`) resolve through the in-scope canonical Time
+  family and produce the checked Duration delta.
+- Civil time (D-TIMEDEPTH1 / D-TIME-CALENDAR1) keeps exact calendar and elapsed
+  planes separate. `LocalDate` exposes ISO week fields and construction,
+  calendar replacement, period arithmetic, checked formatting, and
+  `until`/`since` with explicit rounding options. `LocalTime` preserves
+  nanoseconds, supports Duration arithmetic, rounding, difference, and checked
+  formatting. `DateTime` exposes Unix seconds/microseconds/nanoseconds,
+  sub-second fields, Duration and Period arithmetic, rounding, replacement,
+  checked formatting, and `until`/`since`; `in_zone` changes its view without
+  changing the instant. `ZonedDateTime` adds explicit DST disambiguation,
+  RFC 9557 round-trip text, transition queries, `start_of_day`,
+  `hours_in_day`, `with_time`, `with_zone`, and the same difference family.
+  `Period` exposes its components, sign, absolute/negated/add/sub operations,
+  and anchor-dependent fractional `total_in`. `Instant.elapsed()` returns a
+  Duration. The `largest_unit` option is accepted for the Temporal-shaped
+  difference calls; Jet's canonical return remains an exact Duration, while
+  calendar totals require an explicit Date, LocalDate, or DateTime anchor.
+  Jet does not add separate YearMonth or MonthDay types without a later
+  owner-ratified type decision.
 - `true` and `false` are `Bool` literals.
 - Source has no visible statement separators. The lexer inserts internal
   terminators at line ends after statement-ending tokens (S6-R).
@@ -1226,8 +1238,11 @@ mode (structural check).
   `jet test` runs it once as correctness evidence; `jet test --measure` selects
   only claims with this member and reports their samples.
 
-**`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
-(hello world), plus `<name>/package.jet` and `<name>/.gitignore` (`build/`).
+**`jet new <name>`** creates `<name>/run.jet` with a `#CLI` typed entry whose
+default `name` is `world`, plus `<name>/package.jet` and `<name>/.gitignore`
+(`build/`). The generated source is the canonical fixed-shape CLI recipe
+(D-CLI-RECIPE1=A): use a typed entry for fixed inputs, `core.args` for a
+dynamic grammar, and raw `core.process.argv()` only for an explicit passthrough.
 Inside that package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
 `jet test` use the shared entry resolver: `run.jet`, then `src/run.jet`, then
 `<package>.jet`. An explicit file or directory remains an explicit target;
@@ -1290,13 +1305,24 @@ to `jet-lsp-timing.json`. Other values do not enable timing. All gated by the
 env var (zero cost otherwise; I6 hand-rolled JSON, no external crate).
 **`tools/perf/corpus.tsv`** pins representative source and golden-output
 digests. **`tools/perf/dashboard.sh`** drives that corpus through the production
-default JIT and optimized AOT paths, with clean and incremental rows, isolated
-caches, exact output parity, wall latency, peak RSS, phase totals, and sample
-variance. It records the compiler/toolchain, target, host, kernel, CPU,
-memory, governor, and stage identity. **`tools/perf/ci-perf-check.sh`** fails on
-changed or missing corpus/identity/timing evidence, output drift, variance over
-100%, or latency/peak-RSS regression over the pinned 15% threshold;
+default JIT and optimized AOT paths, with six clean/no-change/edit rows per
+corpus entry, isolated caches, exact output parity, wall latency, peak RSS,
+phase totals, and sample dispersion. Report version 4 records the
+compiler/toolchain and machine identity, workload identity, and verified
+semantic/diagnostic/effect/tier parity receipts. `variance_pct` is the
+interquartile spread relative to the median; the dashboard rejects more than
+five 1.5-IQR Tukey-fence outliers. It records the compiler/toolchain, target,
+host, kernel, CPU, memory, governor, and stage identity. **`tools/perf/ci-perf-check.sh`** fails on
+changed or missing corpus/identity/timing evidence, output drift, unverified
+parity, variance over 100%, or latency/peak-RSS regression over the pinned 15%
+threshold;
 **`tools/perf/update-baseline.sh`** refreshes the pinned baseline.
+The five active corpus rows are ordered
+`examples/features/basics/hello.jet`,
+`examples/features/collections/wordcount.jet`,
+`examples/features/serde/json.jet`,
+`examples/features/basics/pattern_matching.jet`, and
+`examples/features/devloop/job_runner.jet`; `job_runner` is fifth.
 
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
 and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
@@ -1857,8 +1883,11 @@ members through `IDispatch::Invoke`, and launders HRESULT/EXCEPINFO into
 `ComError` variants without exposing vendor text. `close(^object)` consumes the
 handle, calls `Release`, and balances `CoUninitialize`; stale, cross-thread,
 and double-close handles fail before invocation. Frames and DataTree recursion
-are capped at 1 MiB and depth 64. Provenance hashes the extracted type-library
-schema and generated surface.
+are capped at 1 MiB and depth 64. Both dispatch type infos and dual automation
+interfaces are inspected. Provenance hashes the extracted type-library schema
+and generated surface; a released file-backed binding may omit the original
+`.tlb`, but if that input remains available its bytes must still match the
+recorded hash.
 
 ## Data-schema binders (D-BOUND-BIND1=A)
 
@@ -1898,7 +1927,9 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
   **E3103**.
 - **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
   dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
-  legal outside a gate. `mem.volatile_read(p)` and
+  legal outside a gate. When the address names a current-frame place, its
+  runtime sentry registration expires with that Jet frame; heap, static, and
+  foreign storage keep their own lifetime rules. `mem.volatile_read(p)` and
   `mem.volatile_write(p, value)` perform explicit volatile/MMIO access through a
   typed pointer. Using a low-level op outside `#Unsafe` → **E3101**.
 
@@ -2705,6 +2736,23 @@ returns the first successful result and cancels the losers. `any` returns the
 first completed result and cancels the remaining children. The combinators
 consume their children; there are no list twins or handle-list spellings.
 
+For `task.all`, branches may instead be named:
+
+```jet
+results :: (task.all {
+    text: load_text(),
+    count: count_items()
+}) ?? panic("task.all failed")
+print(results.text, results.count)
+```
+
+The named form returns the existing anonymous named tuple/record, so fields
+may have different types and are read by name. All branches must use the same
+style: mixing a named branch with a positional branch is **E1117** and does
+not lower. Tuple field naming and canonicalization remain authoritative; child
+evaluation and result assembly retain source order. `task.race` and `task.any`
+remain positional.
+
 `task.group name { … }` opens a lexical group. `task.group name(limit: n) { … }`
 also bounds the number of active children; an `n` below one is clamped to one
 before child admission. The group owns every child created in its body and
@@ -2778,7 +2826,7 @@ Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { a(), b() }` | Returns `[T] !TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
+| `task.all { a(), b() }` | Returns `[T] !TaskFailure`; waits for every child and fail-fast cancels the remaining children. The named form `task.all { a: f(), b: g() }` returns an anonymous named tuple/record with heterogeneous fields; mixed styles are **E1117**. |
 | `task.race { a(), b() }` | Returns `T !TaskFailure`; the first successful result wins and cancels the losers. |
 | `task.any { a(), b() }` | Returns `T !TaskFailure`; the first completed result wins and cancels the remaining children. |
 | `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
@@ -4638,6 +4686,13 @@ The production proof is the fixed corpus in `tests/fixtures/source_import`:
 `tests/source_import.rs` runs the imported Jet against Python 3, compares the
 oracle output, and pins the generated bytes. It also proves a second import is
 byte-identical and that a three-way conflict writes no conflicted file.
+
+The enterprise language boundary is published in the
+[migration tier map](../reference/migration-tier-map.md). D-ADOPT-TIER1=A
+promises source import for Python, Java, C#, TypeScript/JavaScript, and Go;
+C and C++ have the explicit binder-plus-overlay verdict. The importer wave
+uses one scalar-function subset and keeps the foreign source authoritative
+until every JT0101 omission is resolved.
 
 ## Deliberately absent
 

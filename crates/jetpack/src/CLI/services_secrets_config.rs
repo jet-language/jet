@@ -24,6 +24,16 @@ pub(super) fn validate_declared_secrets(
     specs: &[ModuleEval::SecretSpec],
     active_environment: Option<&str>,
 ) -> Result<(), i32> {
+    validate_declared_secrets_with_reuse(theme, project_dir, specs, active_environment, false)
+}
+
+pub(super) fn validate_declared_secrets_with_reuse(
+    theme: &Theme,
+    project_dir: &Path,
+    specs: &[ModuleEval::SecretSpec],
+    active_environment: Option<&str>,
+    reuse_verified_store: bool,
+) -> Result<(), i32> {
     let environment = active_environment.unwrap_or("dynamic");
     if let Err(message) = Secrets::write_runtime_plan(project_dir, specs) {
         theme.error(
@@ -48,15 +58,19 @@ pub(super) fn validate_declared_secrets(
             );
             return Err(2);
         }
-        let missing = match secret_activation_missing(project_dir, spec, specs, &mut Vec::new()) {
-            Ok(missing) => missing,
-            Err(message) => {
-                theme.error(
-                    &format!("couldn't read secret named {}", spec.name),
-                    &message,
-                    "",
-                );
-                return Err(2);
+        let missing = if reuse_verified_store {
+            None
+        } else {
+            match secret_activation_missing(project_dir, spec, specs, &mut Vec::new()) {
+                Ok(missing) => missing,
+                Err(message) => {
+                    theme.error(
+                        &format!("couldn't read secret named {}", spec.name),
+                        &message,
+                        "",
+                    );
+                    return Err(2);
+                }
             }
         };
         if let Some(name) = missing {
@@ -1277,7 +1291,7 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
     };
     if let Some(package) = &package {
         match package.facts.resolve_run_entry_checked(&resolver) {
-            Ok(Some(entry)) => return entry.path,
+            Ok(Some(entry)) => return entry.file.path,
             Ok(None) => {}
             Err(error) => {
                 Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(

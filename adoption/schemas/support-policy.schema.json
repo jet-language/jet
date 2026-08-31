@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jet-lang.dev/adoption/schemas/support-policy-v1.json",
+  "title": "Jet adoption support policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "release_version", "decision", "status", "calendar_ref"],
+  "properties": {
+    "schema": { "const": "jet.adoption.support-policy/v1" },
+    "release_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "decision": { "const": "D-ADOPT-LTS1" },
+    "status": { "enum": ["preview-no-lts-claim", "published"] },
+    "calendar_ref": { "type": "string", "minLength": 1 },
+    "lts": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["cadence", "active_months", "maintenance_months", "total_months", "maximum_overlapping_lines", "start", "active_until", "maintenance_until", "eol", "replacement", "supported_editions", "supported_hosts", "notice_rule", "backport_rule"],
+      "properties": {
+        "cadence": { "$ref": "#/$defs/ownerOrText" },
+        "active_months": { "$ref": "#/$defs/ownerOrInteger" },
+        "maintenance_months": { "$ref": "#/$defs/ownerOrInteger" },
+        "total_months": { "$ref": "#/$defs/ownerOrInteger" },
+        "maximum_overlapping_lines": { "$ref": "#/$defs/ownerOrInteger" },
+        "start": { "$ref": "#/$defs/ownerOrDate" },
+        "active_until": { "$ref": "#/$defs/ownerOrDate" },
+        "maintenance_until": { "$ref": "#/$defs/ownerOrDate" },
+        "eol": { "$ref": "#/$defs/ownerOrDate" },
+        "replacement": { "$ref": "#/$defs/ownerOrText" },
+        "supported_editions": { "$ref": "#/$defs/ownerOrText" },
+        "supported_hosts": { "$ref": "#/$defs/ownerOrText" },
+        "notice_rule": { "$ref": "#/$defs/ownerOrText" },
+        "backport_rule": { "$ref": "#/$defs/ownerOrText" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "preview-no-lts-claim" } } },
+      "then": { "properties": { "lts": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "published" } } },
+      "then": { "required": ["lts"], "properties": { "lts": { "type": "object" } } }
+    }
+  ],
+  "$defs": {
+    "owner": { "type": "string", "pattern": "^\\{owner:D-ADOPT-LTS1\\.[a-z0-9_.-]+\\}$" },
+    "ownerOrText": { "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/owner" }] },
+    "ownerOrInteger": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/owner" }] },
+    "ownerOrDate": { "anyOf": [{ "type": "string", "format": "date" }, { "$ref": "#/$defs/owner" }] }
+  }
+}

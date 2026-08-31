@@ -27,11 +27,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=scripts/agent/clean-nix-tmp.sh; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/$f\"; [ -f \"$f\" ] && bash \"$f\"; exit 0"
+            "command": "[ -n \"${CLAUDE_PROJECT_DIR:-}\" ] || exit 0; f=\"$CLAUDE_PROJECT_DIR/scripts/agent/clean-nix-tmp.sh\"; [ -f \"$f\" ] && bash \"$f\"; exit 0"
           },
           {
             "type": "command",
-            "command": "f=scripts/agent/check-worktree-layout.sh; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/$f\"; [ -f \"$f\" ] && bash \"$f\"; exit 0"
+            "command": "[ -n \"${CLAUDE_PROJECT_DIR:-}\" ] || exit 0; f=\"$CLAUDE_PROJECT_DIR/scripts/agent/check-worktree-layout.sh\"; [ -f \"$f\" ] && bash \"$f\"; exit 0"
           }
         ]
       }
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=scripts/agent/require-clean-tree.sh; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/$f\"; [ -f \"$f\" ] && exec bash \"$f\"; exit 0"
+            "command": "[ -n \"${CLAUDE_PROJECT_DIR:-}\" ] || exit 0; f=\"$CLAUDE_PROJECT_DIR/scripts/agent/require-clean-tree.sh\"; [ -f \"$f\" ] && exec bash \"$f\"; exit 0"
           }
         ]
       }

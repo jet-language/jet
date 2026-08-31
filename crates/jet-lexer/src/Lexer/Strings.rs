@@ -7,7 +7,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
 use super::Lexer;
-use super::Scan::{lex_raw, lex_raw_generated};
+use super::Scan::{lex_raw_at_depth, lex_raw_generated_at_depth};
 use super::Tokens::{StrTokPart, TokKind, Token};
 
 impl<'a> Lexer<'a> {
@@ -127,6 +127,26 @@ impl<'a> Lexer<'a> {
                     lit.push('}');
                     self.i += 2;
                 }
+                // A backslash-dollar-brace sequence is data intended for a
+                // downstream template language (for example JS `${...}`).
+                // The first two backslashes have already decoded to one
+                // literal backslash, so keep the balanced braced payload out
+                // of Jet's own interpolation parser.
+                '{' if lit.ends_with("\\$") => {
+                    lit.push('{');
+                    self.i += 1;
+                    let mut depth = 1usize;
+                    while self.i < self.chars.len() && depth > 0 {
+                        let value = self.at(self.i);
+                        lit.push(value);
+                        self.i += 1;
+                        match value {
+                            '{' => depth += 1,
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                }
                 '}' => {
                     self.diags.push(Diagnostic::error(
                         "E0001",
@@ -201,25 +221,13 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
-                    // Lex the inner expression; shift spans to absolute.
-                    let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
-                        lex_raw_generated(inner)
-                    } else {
-                        lex_raw(inner)
-                    };
-                    for t in &mut inner_toks {
-                        t.span = Span::new(
-                            t.span.start + inner_start_byte,
-                            t.span.end + inner_start_byte,
-                        );
-                    }
-                    for mut d in inner_diags {
-                        if let Some(s) = d.span.as_mut() {
-                            *s = Span::new(s.start + inner_start_byte, s.end + inner_start_byte);
-                        }
-                        self.diags.push(d);
-                    }
-                    parts.push(StrTokPart::Interp(inner_toks));
+                    parts.push(StrTokPart::Interp(
+                        self.lex_interpolation(
+                            inner_start_byte,
+                            inner_end_byte,
+                            Span::new(open_pos, self.pos(self.i)),
+                        ),
+                    ));
                 }
                 _ => {
                     lit.push(ch);
@@ -429,6 +437,21 @@ impl<'a> Lexer<'a> {
                     lit.push('}');
                     k += 2;
                 }
+                '{' if lit.ends_with("\\$") => {
+                    lit.push('{');
+                    k += 1;
+                    let mut depth = 1usize;
+                    while k < content_end && depth > 0 {
+                        let value = self.at(k);
+                        lit.push(value);
+                        k += 1;
+                        match value {
+                            '{' => depth += 1,
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                }
                 '}' => {
                     self.diags.push(Diagnostic::error(
                         "E0001",
@@ -498,24 +521,13 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
-                    let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
-                        lex_raw_generated(inner)
-                    } else {
-                        lex_raw(inner)
-                    };
-                    for t in &mut inner_toks {
-                        t.span = Span::new(
-                            t.span.start + inner_start_byte,
-                            t.span.end + inner_start_byte,
-                        );
-                    }
-                    for mut d in inner_diags {
-                        if let Some(s) = d.span.as_mut() {
-                            *s = Span::new(s.start + inner_start_byte, s.end + inner_start_byte);
-                        }
-                        self.diags.push(d);
-                    }
-                    parts.push(StrTokPart::Interp(inner_toks));
+                    parts.push(StrTokPart::Interp(
+                        self.lex_interpolation(
+                            inner_start_byte,
+                            inner_end_byte,
+                            Span::new(open_pos, self.pos(k)),
+                        ),
+                    ));
                 }
                 _ => {
                     lit.push(ch);
@@ -532,6 +544,40 @@ impl<'a> Lexer<'a> {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),
         })
+    }
+
+    fn lex_interpolation(
+        &mut self,
+        inner_start_byte: usize,
+        inner_end_byte: usize,
+        span: Span,
+    ) -> Vec<Token> {
+        let next_depth = self.interpolation_depth.saturating_add(1);
+        if self.interpolation_depth >= crate::Diagnostics::MAX_SOURCE_NESTING {
+            self.diags
+                .push(Diagnostic::source_nesting_exceeded(next_depth, span));
+            return Vec::new();
+        }
+
+        let inner = &self.src[inner_start_byte..inner_end_byte];
+        let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
+            lex_raw_generated_at_depth(inner, next_depth)
+        } else {
+            lex_raw_at_depth(inner, next_depth)
+        };
+        for t in &mut inner_toks {
+            t.span = Span::new(
+                t.span.start + inner_start_byte,
+                t.span.end + inner_start_byte,
+            );
+        }
+        for mut d in inner_diags {
+            if let Some(s) = d.span.as_mut() {
+                *s = Span::new(s.start + inner_start_byte, s.end + inner_start_byte);
+            }
+            self.diags.push(d);
+        }
+        inner_toks
     }
 
     fn invalid_byte_escape(&mut self, at: usize) {

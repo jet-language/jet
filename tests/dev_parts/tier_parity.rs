@@ -457,6 +457,7 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
         "text/dates",
         "text/datetime",
         "text/decimal",
+        "text/format_selectors",
         "text/regex",
         "text/time_calendar",
     ];

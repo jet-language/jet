@@ -11,7 +11,7 @@ fn run() !(HTTPError | RangeError | TaskFailure) {
     print(addr.starts_with("127.0.0.1:"))
     serving :: task { server.serve() }
     time.sleep(20ms)
-    grace :: Duration.milliseconds(100)
+    grace :: 100ms
     report :: server.shutdown(grace)
     print(report.cancelled)
     serving.join()

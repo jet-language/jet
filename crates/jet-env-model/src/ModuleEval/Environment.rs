@@ -5,6 +5,7 @@
 //! inventing a second policy language.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::path::Path;
 
 use crate::Comptime::CtValue;
@@ -377,7 +378,7 @@ pub enum FileConflict {
     Refuse,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct ManagedFile {
     pub destination: String,
     /// A project-relative source path, when the declaration names one.
@@ -393,6 +394,28 @@ pub struct ManagedFile {
     /// bytes before applying a path-backed entry.
     pub source_digest: String,
     pub conflict: FileConflict,
+}
+
+impl fmt::Debug for ManagedFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("ManagedFile");
+        debug
+            .field("destination", &self.destination)
+            .field("source", &self.source);
+        if self.sensitive {
+            debug.field("content", &"<redacted>");
+        } else {
+            debug.field("content", &self.content);
+        }
+        debug
+            .field("mode", &self.mode)
+            .field("permissions", &self.permissions)
+            .field("sensitive", &self.sensitive)
+            .field("generation", &self.generation)
+            .field("source_digest", &self.source_digest)
+            .field("conflict", &self.conflict)
+            .finish()
+    }
 }
 
 impl ManagedFile {
@@ -1824,14 +1847,14 @@ fn extended_language_pack(name: &str) -> LanguagePack {
             "GPL-3.0-or-later",
         ),
         "C" => (
-            vec!["gcc@nixpkgs", "gnumake@nixpkgs"],
-            vec!["gcc", "make"],
+            vec!["cc-toolchain@jetpack"],
+            vec!["cc"],
             "GPL-3.0-or-later",
         ),
         "Clojure" => (vec!["clojure@nixpkgs"], vec!["clojure"], "EPL-1.0"),
         "Cplusplus" => (
-            vec!["gcc@nixpkgs", "cmake@nixpkgs"],
-            vec!["g++", "cmake"],
+            vec!["cc-toolchain@jetpack"],
+            vec!["c++"],
             "GPL-3.0-or-later",
         ),
         "Crystal" => (vec!["crystal@nixpkgs"], vec!["crystal"], "Apache-2.0"),
@@ -3147,6 +3170,17 @@ mod tests {
             .projections
             .iter()
             .all(|projection| projection.missing_tools.is_empty()));
+    }
+
+    #[test]
+    fn c_language_packs_share_the_hermetic_toolchain_package() {
+        let catalog = LanguagePackCatalog::builtin();
+        for (name, command) in [("C", "cc"), ("Cplusplus", "c++")] {
+            let pack = catalog.get(name).expect("built-in C pack");
+            assert_eq!(pack.packages, vec!["cc-toolchain@jetpack"]);
+            assert_eq!(pack.required_tools, vec![command.to_string()]);
+            assert_eq!(pack.commands.get(command).map(String::as_str), Some(command));
+        }
     }
 
     #[test]

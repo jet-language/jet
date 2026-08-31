@@ -156,8 +156,8 @@ pub mod test_report {
 }
 
 pub(crate) use CModule::*;
-pub(crate) use Context::*;
 pub use Context::CodegenPhaseTiming;
+pub(crate) use Context::*;
 pub use Embedding::{export_shape, export_surface, ExportFunction, ExportScalar};
 pub(crate) use Imports::*;
 pub(crate) use Items::*;
@@ -207,6 +207,8 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Columns.rs"),
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
+    include_str!("../Prelude/Core/Ascii.rs"),
+    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
@@ -214,6 +216,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ViewCopy.rs"),
     include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
+    include_str!("../Prelude/Core/TextValues.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/InlineRange.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
@@ -459,7 +462,8 @@ const COMPARABLE_PRIMITIVES: &[&str] = &[
 ///
 /// `__jet_Ordering` and `__jet_Comparable` are runtime-owned for the same
 /// reason `__jet_Display` is: the Prelude itself names them — `jet_list_sort_by`
-/// and `jet_ordering_then` in `Prelude/Core.rs`, the `Duration`/`Instant`
+/// and `jet_ordering_then` in `Prelude/Core.rs`, the fixed-runtime date/time
+/// comparisons in that same file, and the Core-local `Duration`/`Instant`
 /// comparisons in `Prelude/CoreLib/Top/MathRandomTime.rs`. Leaving them to the
 /// program crate made the cached runtime crate unbuildable (E0425 on
 /// `__jet_Ordering`), so #1785's rlib cache stored nothing and every native
@@ -1263,6 +1267,58 @@ pub fn corelib_emission_fingerprint(bundle: &ProgramBundle, test_harness: bool) 
     fingerprint
 }
 
+/// The exact Core closure selected for one checked bundle.  `used_calls` is
+/// the sema-owned direct-call set; `synthesized_calls` is the set of actual
+/// Prelude function symbols present in the assembled closure.  The adapter
+/// labels are descriptive evidence only — they do not execute any adapter or
+/// re-implement Core policy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoreClosureProof {
+    pub used_calls: Vec<String>,
+    pub synthesized_calls: Vec<String>,
+    pub adapter_routes: Vec<String>,
+    pub fingerprint: String,
+}
+
+/// Project the same Core source closure used by emission and cache identity.
+/// This is intentionally side-effect free and does not compile or link the
+/// assembled Rust body.
+pub fn core_closure_proof(bundle: &ProgramBundle, test_harness: bool) -> CoreClosureProof {
+    let mut used_calls = bundle.used_core.iter().cloned().collect::<Vec<_>>();
+    used_calls.sort_unstable();
+    let body = core_runtime_body(bundle, test_harness);
+    let mut synthesized_calls = body
+        .lines()
+        .filter_map(|line| {
+            let name = line
+                .trim_start()
+                .strip_prefix("pub fn ")
+                .or_else(|| line.trim_start().strip_prefix("fn "))?
+                .split('(')
+                .next()?;
+            name.starts_with("jet_").then(|| name.to_string())
+        })
+        .collect::<Vec<_>>();
+    synthesized_calls.sort_unstable();
+    synthesized_calls.dedup();
+    let imports = core_imports_for_bundle(bundle);
+    let adapter_routes = if body.is_empty() && imports.is_empty() {
+        vec!["none".to_string()]
+    } else {
+        vec![
+            "aot:embedded-prelude".to_string(),
+            "jit:core-import-map".to_string(),
+            "interpreter:core-import-map".to_string(),
+        ]
+    };
+    CoreClosureProof {
+        used_calls,
+        synthesized_calls,
+        adapter_routes,
+        fingerprint: corelib_emission_fingerprint(bundle, test_harness),
+    }
+}
+
 fn push_corelib_prelude_body(
     out: &mut String,
     used_core: &std::collections::HashSet<String>,
@@ -1290,6 +1346,9 @@ fn push_corelib_prelude_body(
     );
     out.push_str("\nmod jet_cbor_kernel {\n");
     out.push_str(include_str!("../../../jet-foundation/src/CborKernel.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_csv_kernel {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/CsvKernel.rs"));
     out.push_str("\n}\n");
     out.push_str("\nmod jet_base_encoding_strict {\n");
     out.push_str(include_str!(
@@ -1346,9 +1405,7 @@ fn push_corelib_prelude_body(
         impl JetDebug for jet_std::JetTaskFailure {\n\
             fn jet_debug(&self) -> String { self.jet_show() }\n\
         }\n\
-        impl JetDebug for jet_std::DataTree {\n\
-            fn jet_debug(&self) -> String { self.jet_show() }\n\
-        }\n",
+",
     );
     // NEVER add `JetTaskFailure` here. `jet-foundation/src/Outcome.rs` declares
     // it and rides in `PRELUDE_PARTS`, so it is already a flat top-level item in
@@ -1625,6 +1682,9 @@ fn push_corelib_prelude_body(
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
         // Vetted region: OsExtra carries POSIX `unsafe` at crate root (not only
         // inside `mod jet_os_sys`); golden I1 strips this delimiter.
+        out.push_str(include_str!(
+            "../Prelude/CoreLib/Top/PlatformFamily.rs"
+        ));
         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_os_extra\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
         out.push_str("// JET_VETTED_UNSAFE_END: jet_os_extra\n");
@@ -3321,6 +3381,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn simd_core_marker_selects_shared_lane_closure_without_selecting_plain_programs() {
+        let mut plain = String::new();
+        push_corelib_prelude(&mut plain, &HashSet::new(), false);
+        assert!(
+            plain.is_empty(),
+            "a program with no Core reachability must not emit the SIMD closure"
+        );
+
+        let simd = HashSet::from(["core.math::__mathtypes__".to_string()]);
+        let mut simd_out = String::new();
+        push_corelib_prelude(&mut simd_out, &simd, false);
+        assert!(
+            simd_out.contains("fn jet_scalar_loop_barrier"),
+            "SIMD reachability must emit the shared scalar-loop barrier"
+        );
+        assert!(
+            simd_out.contains("jet_lane_type!(F32x8"),
+            "SIMD reachability must emit the lane type closure"
+        );
+    }
+
     /// #1451: the `suite.run()` / `suite.result` handle ops are emitted
     /// unqualified at crate root and are not gated on `used_core` — a
     /// `fn test(suite: TestSuite)` body reaches them with no `core.testing`
@@ -3371,20 +3453,23 @@ mod tests {
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
-        let fixed_arithmetic = std::fs::read_to_string(
-            root.join("src/Prelude/Core/FixedArithmetic.rs"),
-        )
-        .unwrap();
+        let fixed_arithmetic =
+            std::fs::read_to_string(root.join("src/Prelude/Core/FixedArithmetic.rs")).unwrap();
         let columns = std::fs::read_to_string(root.join("src/Prelude/Core/Columns.rs")).unwrap();
         let column_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/ColumnList.rs")).unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
+        let ascii = std::fs::read_to_string(root.join("src/Prelude/Core/Ascii.rs")).unwrap();
+        let process_args =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ProcessArgs.rs")).unwrap();
         let string_concat =
             std::fs::read_to_string(root.join("src/Prelude/Core/StringConcat.rs")).unwrap();
         let view_copy = std::fs::read_to_string(root.join("src/Prelude/Core/ViewCopy.rs")).unwrap();
         let loadable = std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
+        let text_values =
+            std::fs::read_to_string(root.join("src/Prelude/Core/TextValues.rs")).unwrap();
         let range_bounds =
             std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
         let inline_range =
@@ -3452,10 +3537,16 @@ mod tests {
             ("src/Prelude/Core/Columns.rs", columns.as_str()),
             ("src/Prelude/Core/ColumnList.rs", column_list.as_str()),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
+            ("src/Prelude/Core/Ascii.rs", ascii.as_str()),
+            (
+                "src/Prelude/Core/ProcessArgs.rs",
+                process_args.as_str(),
+            ),
             ("src/Prelude/Core/StringConcat.rs", string_concat.as_str()),
             ("src/Prelude/Core/ViewCopy.rs", view_copy.as_str()),
             ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
+            ("src/Prelude/Core/TextValues.rs", text_values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
             ("src/Prelude/Core/InlineRange.rs", inline_range.as_str()),
             ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
@@ -3550,6 +3641,12 @@ mod tests {
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
             .unwrap();
+        let ascii_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Ascii.rs\")")
+            .unwrap();
+        let process_args_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ProcessArgs.rs\")")
+            .unwrap();
         let string_concat_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/StringConcat.rs\")")
             .unwrap();
@@ -3561,6 +3658,9 @@ mod tests {
             .unwrap();
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
+            .unwrap();
+        let text_values_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/TextValues.rs\")")
             .unwrap();
         let range_bounds_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
@@ -3654,12 +3754,16 @@ mod tests {
                 && fixed_list_pos < columns_pos
                 && columns_pos < column_list_pos
                 && column_list_pos < unicode_pos
+                && unicode_pos < ascii_pos
+                && ascii_pos < process_args_pos
+                && ascii_pos < string_concat_pos
                 && unicode_pos < loadable_pos
                 && unicode_pos < string_concat_pos
                 && string_concat_pos < view_copy_pos
                 && view_copy_pos < loadable_pos
                 && loadable_pos < values_pos
-                && values_pos < range_bounds_pos
+                && values_pos < text_values_pos
+                && text_values_pos < range_bounds_pos
                 && range_bounds_pos < inline_range_pos
                 && inline_range_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
@@ -3727,10 +3831,13 @@ mod tests {
                 columns.as_str(),
                 column_list.as_str(),
                 unicode.as_str(),
+                ascii.as_str(),
+                process_args.as_str(),
                 string_concat.as_str(),
                 view_copy.as_str(),
                 loadable.as_str(),
                 values.as_str(),
+                text_values.as_str(),
                 range_bounds.as_str(),
                 inline_range.as_str(),
                 disjoint.as_str(),
@@ -3785,10 +3892,13 @@ mod tests {
                     columns.as_str(),
                     column_list.as_str(),
                     unicode.as_str(),
+                    ascii.as_str(),
+                    process_args.as_str(),
                     string_concat.as_str(),
                     view_copy.as_str(),
                     loadable.as_str(),
                     values.as_str(),
+                    text_values.as_str(),
                     range_bounds.as_str(),
                     inline_range.as_str(),
                     disjoint.as_str(),
@@ -4784,14 +4894,20 @@ fn emit_command_override_main(
     out.push_str("}\n");
 }
 
-fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
+fn emit_output_check_fns(cx: &Cx, checks: &[&ResolvedOutput], out: &mut String) {
     for (i, check) in checks.iter().enumerate() {
         out.push_str(&format!(
             "fn jet_output_check_{i}() -> Result<(), String> {{\n"
         ));
-        let fallible = matches!(check.return_type, Some(Type::Result { .. }));
-        if fallible {
-            out.push_str(&format!("    {}()\n", check.lowered_name));
+        let return_type = check.failure_contract().effective_type();
+        let check_error = mangle_generated("check_error");
+        if let Some(error_text) =
+            Items::entry_error_text_expr(cx, &return_type, &check_error)
+        {
+            out.push_str(&format!(
+                "    {}().map_err(|{check_error}| {error_text})\n",
+                check.lowered_name
+            ));
         } else {
             out.push_str(&format!("    {}();\n    Ok(())\n", check.lowered_name));
         }
@@ -5584,7 +5700,7 @@ fn emit_bundle_tests_cov_inner(
 
     emit_test_fns(&cx, &tests, None, &mut out);
     coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
-    emit_output_check_fns(&checks, &mut out);
+    emit_output_check_fns(&cx, &checks, &mut out);
     emit_test_main_cov_mode(
         &tests,
         &checks,

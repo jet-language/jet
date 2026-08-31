@@ -77,6 +77,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         )),
         compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
+        task_labels: Vec::new(),
         zip_plans: Vec::new(),
         invocations: 0,
         memo_values: std::collections::HashMap::new(),
@@ -281,6 +282,9 @@ pub(crate) fn resident_teardown() {
     // that registry before dropping the module so a dispatcher wake cannot call
     // code from the previous resident image.
     crate::CoreHost::reset_jit_interrupts();
+    // A loaded `.jetlib` is owned by the run that loaded it. Drop those Prelude
+    // handles before replacing the resident image or runtime state.
+    crate::Mod::clear();
     clear_deopt_state();
     crate::Collections::clear_packed_enum_show();
     crate::Watcher::clear_watcher_state();

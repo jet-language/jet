@@ -119,6 +119,38 @@ fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &String) -> JetHT
     req
 }
 
+fn jet_http_client_request_json_body(
+    mut req: JetHTTPRequest,
+    body: JetHTTPBody,
+) -> JetHTTPRequest {
+    req.body = body;
+    req.body_set = true;
+    if req.headers.set("content-type", "application/json").is_err() {
+        req.header_error = Some(JetHTTPError::InvalidHeader);
+    }
+    req
+}
+
+fn jet_http_client_request_json<T: __jet_Encode>(
+    req: JetHTTPRequest,
+    value: T,
+) -> JetHTTPRequest {
+    jet_http_client_request_json_body(req, JetHTTPBody::from_json(value))
+}
+
+fn jet_http_client_request_json_text(
+    req: JetHTTPRequest,
+    body: &String,
+) -> JetHTTPRequest {
+    jet_http_client_request_json_body(
+        req,
+        JetHTTPBody::from_bytes_with_content_type(
+            body.clone().into_bytes(),
+            Some("application/json".to_string()),
+        ),
+    )
+}
+
 fn jet_http_client_request_body_stream(mut req: JetHTTPRequest, body: JetHTTPBody) -> JetHTTPRequest {
     req.body = body;
     req.body_set = true;

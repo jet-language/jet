@@ -100,6 +100,207 @@ fn core_files_depth_example_runs() {
     assert_eq!(release.stdout, out.stdout);
 }
 
+#[cfg(unix)]
+#[test]
+fn core_files_stat_mode_matches_across_tiers() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_stat_mode_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let regular = dir.join("regular.txt");
+    fs::write(&regular, "regular").unwrap();
+    let executable = dir.join("executable.sh");
+    write_executable(&executable, "#!/bin/sh\nexit 0\n");
+    let directory = dir.join("directory");
+    fs::create_dir(&directory).unwrap();
+    let symlink = dir.join("regular.link");
+
+    let source_path = dir.join("stat_mode.jet");
+    let source = r#"
+use core.files as fs
+use core.process as process
+use core.sys as sys
+
+fn run() {
+    args :: process.argv().skip(1).to_list()
+    family :: sys.family()
+    absolute :: fs.absolute("regular.txt") ?? panic("absolute")
+    fs.set_mode(args[0], 0o644) ?? panic("regular mode setup")
+    fs.set_mode(args[2], 0o755) ?? panic("directory mode setup")
+    fs.symlink(args[0], args[3]) ?? panic("symlink setup")
+    regular :: fs.stat(args[0]) ?? panic("regular stat")
+    executable :: fs.stat(args[1]) ?? panic("executable stat")
+    directory :: fs.stat(args[2]) ?? panic("directory stat")
+    symlink :: fs.stat(args[3]) ?? panic("symlink stat")
+    fs.set_mode(args[0], 0o600) ?? panic("regular mode mutation")
+    fs.set_mode(args[2], 0o700) ?? panic("directory mode mutation")
+    regular_after :: fs.stat(args[0]) ?? panic("regular after stat")
+    directory_after :: fs.stat(args[2]) ?? panic("directory after stat")
+    print("family:{family}")
+    print("absolute:{absolute}")
+    print("{regular.mode},{executable.mode},{directory.mode},{symlink.mode},{regular_after.mode},{directory_after.mode}")
+}
+"#;
+    fs::write(&source_path, source).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"stat_mode\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Env, Exec, FS, IO, Mem.Alloc, Panic] } }\n",
+    )
+    .unwrap();
+    let source_arg = source_path.to_string_lossy().into_owned();
+    let path_args = [
+        regular.to_string_lossy().into_owned(),
+        executable.to_string_lossy().into_owned(),
+        directory.to_string_lossy().into_owned(),
+        symlink.to_string_lossy().into_owned(),
+    ];
+
+    let run_tier = |extra: &[&str]| {
+        let _ = fs::remove_file(&symlink);
+        let mut command = Command::new(&jet);
+        command.current_dir(&dir);
+        command
+            .arg("run")
+            .args(extra)
+            .arg(&source_arg)
+            .arg("--");
+        for path in &path_args {
+            command.arg(path);
+        }
+        command.output().expect("run stat mode fixture")
+    };
+    let default = run_tier(&[]);
+    let interpreted = run_tier(&["--interpret"]);
+    let release = run_tier(&["--release"]);
+
+    let observations = |output: &std::process::Output, tier: &str| {
+        assert!(
+            output.status.success(),
+            "{tier} stat mode failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut lines = stdout.lines();
+        let family = lines
+            .next()
+            .and_then(|line| line.strip_prefix("family:"))
+            .expect("platform family observation")
+            .to_string();
+        let absolute = lines
+            .next()
+            .and_then(|line| line.strip_prefix("absolute:"))
+            .expect("absolute path observation")
+            .to_string();
+        let modes = lines
+            .next()
+            .expect("stat mode observation")
+            .trim()
+            .split(',')
+            .map(|mode| mode.parse::<i64>().expect("numeric stat mode"))
+            .collect::<Vec<_>>();
+        (family, absolute, modes)
+    };
+    let (default_family, default_absolute, default_modes) = observations(&default, "default");
+    let (interpreted_family, interpreted_absolute, interpreted_modes) =
+        observations(&interpreted, "interpreter");
+    let (release_family, release_absolute, release_modes) = observations(&release, "release");
+    let expected_absolute = regular.to_string_lossy().into_owned();
+    let expected_family = std::env::consts::FAMILY;
+    assert_eq!(default_family, expected_family);
+    assert_eq!(interpreted_family, expected_family);
+    assert_eq!(release_family, expected_family);
+    assert_eq!(default_absolute, expected_absolute);
+    assert_eq!(interpreted_absolute, expected_absolute);
+    assert_eq!(release_absolute, expected_absolute);
+    assert_eq!(default_modes.len(), 6);
+    assert_eq!(interpreted_modes, default_modes);
+    assert_eq!(release_modes, default_modes);
+
+    assert_eq!(default_modes[0] & 0o170000, 0o100000);
+    assert_eq!(default_modes[0] & 0o777, 0o644);
+    assert_eq!(default_modes[1] & 0o170000, 0o100000);
+    assert_eq!(default_modes[1] & 0o777, 0o755);
+    assert_eq!(default_modes[2] & 0o170000, 0o040000);
+    assert_eq!(default_modes[2] & 0o777, 0o755);
+    assert_eq!(default_modes[3] & 0o170000, 0o120000);
+    assert_ne!(default_modes[3] & 0o111, 0);
+    assert_eq!(default_modes[4] & 0o170000, 0o100000);
+    assert_eq!(default_modes[4] & 0o777, 0o600);
+    assert_eq!(default_modes[5] & 0o170000, 0o040000);
+    assert_eq!(default_modes[5] & 0o777, 0o700);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_files_fsync_is_consumed_across_tiers() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_fsync_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let journal = dir.join("owned").join("closure.journal");
+    let source_path = dir.join("fsync.jet");
+    let source = r#"
+use core.files as fs
+
+fn run() {
+    fs.create_dir_all("owned") ?? panic("mkdir")
+    fs.write("owned/closure.journal", "closure") ?? panic("write")
+    fs.fsync("owned/closure.journal") ?? panic("fsync")
+    contents :: fs.read("owned/closure.journal") ?? panic("read")
+    print(contents)
+}
+"#;
+    fs::write(&source_path, source).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"fsync\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [FS, IO, Mem.Alloc, Panic] } }\n",
+    )
+    .unwrap();
+    let source_arg = source_path.to_string_lossy().into_owned();
+    let run_tier = |extra: &[&str]| {
+        let _ = fs::remove_file(&journal);
+        let mut command = Command::new(&jet);
+        command.current_dir(&dir);
+        command
+            .arg("run")
+            .args(extra)
+            .arg(&source_arg);
+        command.output().expect("run fsync fixture")
+    };
+
+    let default = run_tier(&[]);
+    let interpreted = run_tier(&["--interpret"]);
+    let release = run_tier(&["--release"]);
+    for (tier, output) in [
+        ("default", &default),
+        ("interpreter", &interpreted),
+        ("release", &release),
+    ] {
+        assert!(
+            output.status.success(),
+            "{tier} fsync failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"closure\n", "{tier} fsync output");
+    }
+    assert_eq!(interpreted.stdout, default.stdout);
+    assert_eq!(release.stdout, default.stdout);
+    assert!(journal.exists(), "fsync fixture did not leave the owned file");
+    assert_eq!(fs::read_to_string(&journal).unwrap(), "closure");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn core_watcher_example_runs() {
     let jet = jet_bin();
@@ -274,6 +475,47 @@ fn run() {{
     );
     assert_eq!(rerun.status.code(), Some(0));
     assert_eq!(rerun.stdout, b"true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn core_process_pipeline_limits_intermediate_stdout_without_deadlock() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_pipeline_output_limit_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let flood = dir.join("flood.sh");
+    write_executable(
+        &flood,
+        "#!/bin/sh\ndd if=/dev/zero bs=8192 count=32 2>/dev/null | tr '\\000' x\n",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    bounded :: process.cmd(["{flood}"]).output_limit(1024)
+    result :: process.pipeline([bounded, process.cmd(["cat"])])
+    if result == {{
+        .Ok(_) -> {{ print("limit:accepted") }}
+        .Err(_) -> {{ print("limit:refused") }}
+    }}
+}}
+"#,
+        flood = jet_string_path(&flood),
+    );
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "process_pipeline_output_limit",
+        &src,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "limit:refused\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1001,7 +1243,7 @@ use core.time as date
 
 fn run() {
     zone :: time.zone("America/New_York") ?? panic("missing zone")
-    local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone)
+    local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone) ?? panic("local time")
     print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     civil :: local.add_period(time.period_days(1))
     day :: Duration.hours(24) ?? panic("duration")

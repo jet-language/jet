@@ -5,6 +5,9 @@
 
 #![allow(dead_code)]
 
+#[path = "../support/corpus_policy.rs"]
+pub mod corpus_policy;
+
 use std::fs;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
@@ -484,14 +487,14 @@ pub fn have_rustc() -> bool {
 }
 
 /// Write generated Rust and add the one canonical cached-runtime dependency to
-/// a raw rustc command. The caller still compiles and links the user program.
+/// a raw rustc command. Keep the returned lease alive until that command exits.
 pub fn add_generated_rust(
     command: &mut Command,
     path: &Path,
     generated: &str,
     has_rust_ffi: bool,
     rustc_flags: &[&str],
-) {
+) -> jet::RuntimeCache::PreparedRuntime {
     let flags = rustc_flags
         .iter()
         .map(|flag| std::ffi::OsString::from(*flag))
@@ -540,9 +543,11 @@ pub fn add_generated_rust(
         ))
         .arg(path);
     prepared.add_rustc_args(command);
+    prepared
 }
 
-/// A throwaway directory under the system temp dir, removed on drop.
+/// A throwaway directory under the shared disk-backed test scratch root,
+/// removed on drop.
 ///
 /// `tag` names the case. The path also carries the pid, a nanosecond stamp and
 /// the thread id, so concurrent tests never share a directory — in one binary
@@ -557,7 +562,7 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
+        let path = test_scratch_root("scratch").join(format!(
             "jet-it-{tag}-{}-{nanos}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -574,7 +579,7 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         // Store trees are realized read-only; chmod first or the directory
-        // leaks in the temp dir.
+        // leaks in the test scratch root.
         make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
@@ -1001,7 +1006,7 @@ fn build_and_run_with_cwd(
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     let mut rustc_cmd = Command::new("rustc");
-    add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &out.ffi {
         rustc_cmd

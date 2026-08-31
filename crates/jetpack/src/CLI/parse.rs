@@ -438,6 +438,9 @@ pub fn main(args: Vec<String>) -> i32 {
         // keeps the status-summary floor for pipes, CI, and redirected output.
         return super::dashboard::run_dashboard();
     };
+    if matches!(verb.as_str(), "cc" | "c++") {
+        return super::cc::main(verb, rest);
+    }
     let parsed = parse_args_for(verb, rest);
     let color = if parsed.flags.json {
         ColorChoice::Never
@@ -528,12 +531,13 @@ pub fn main(args: Vec<String>) -> i32 {
             .any(|argument| argument == "--repair");
     let read_only_hangar_list = verb == "hangar"
         && parsed.positional.first().map(String::as_str) == Some("list");
-    let read_only_command = matches!(verb.as_str(), "doctor" | "audit")
+    let read_only_command = read_only_shared_store_status
+        || matches!(verb.as_str(), "doctor" | "audit")
         || verb == Syntax::JETPACK_WHY
         || verb == Syntax::JETPACK_LOCK_VERB
         || read_only_hangar_doctor
         || read_only_hangar_list;
-    if !read_only_command && !read_only_shared_store_status {
+    if !read_only_command {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {
             Store::report_integrity(
@@ -553,8 +557,10 @@ pub fn main(args: Vec<String>) -> i32 {
             return 2;
         }
     }
-
-    let drift_code = if verb == Syntax::JETPACK_LOCK_VERB {
+    let drift_code = if read_only_command {
+        // Read-only commands observe state without repairing the user-tools
+        // profile. In particular, `hangar list` must not create its profile
+        // lock or rewrite a drifted pin before it reads the Hangar.
         0
     } else {
         check_user_tools_drift(&theme, &parsed)

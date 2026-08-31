@@ -1,11 +1,13 @@
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TExclusivity;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TLetTy;
@@ -18,13 +20,115 @@ use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStrPart;
+use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::AST::Type;
+/// Qualify a generated root helper while preserving paths already rooted by a
+/// lowering seam. Host-call lowering can run before the final module prefix is
+/// known, so this keeps both root-level and imported-module output valid.
+pub(crate) fn root_path(cx: &Cx, path: &str) -> String {
+    let root = cx.root_prefix.as_str();
+    if root.is_empty()
+        || path.starts_with("crate::")
+        || path.starts_with("self::")
+        || path.starts_with("super::")
+        || path.starts_with("::")
+        || path.starts_with("std::")
+        || path.starts_with("core::")
+        || path.starts_with("alloc::")
+        || path.starts_with(root)
+    {
+        path.to_string()
+    } else {
+        format!("{root}{path}")
+    }
+}
+
+/// Test failures use the generated `String` ABI only in the harness entry
+/// points. `Cx::test_mode` is a build-wide flag, so imported helper bodies must
+/// not use it to select their error representation.
+pub(crate) fn is_test_harness_fn(cx: &Cx) -> bool {
+    let current_fn = cx.current_fn.borrow();
+    current_fn.starts_with("jet_test_") || current_fn.starts_with("jet_prop_")
+}
+
+/// The error family a `?` propagates once its total conversion has run. Sema
+/// resolved that conversion at lowering, so this reads the recorded fact and
+/// never re-infers a type (I3).
+pub(crate) fn try_carrier_error_type(inner: &TExpr, convert: &TTryConvert) -> Option<Type> {
+    match convert {
+        TTryConvert::DefaultErr => Some(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+        TTryConvert::Typed { target, .. } => Some(target.clone()),
+        TTryConvert::WidenUnion { enum_name, .. } => Some(Type::Named(enum_name.clone())),
+        TTryConvert::None | TTryConvert::Never => match &inner.ty {
+            Type::Result { err, .. } => Some((**err).clone()),
+            _ => None,
+        },
+    }
+}
+
+/// The Prelude renderer that turns one error family into report text. This is
+/// `entry_error`'s classification (Items.rs) - the shipped answer for an error
+/// crossing a reporting boundary, reused verbatim so both boundaries render one
+/// family the same way: the ambient `Err` family owns a `Display` report, a
+/// declared `#Display` family renders through `JetDisplay`, and a codegen
+/// printable family (`auto_printable`, the same fact that emits its `JetShow`)
+/// through `JetShow`.
+fn harness_error_renderer(cx: &Cx, err_ty: Option<&Type>) -> &'static str {
+    // An implicitly fallible callee (`panic`/`assert` inside an otherwise plain
+    // signature) never spells an error family, so lowering carries no `Result`
+    // type for it. That is exactly the ambient `Err` family - `JetErr` - which
+    // owns a `Display` report.
+    let Some(err_ty) = err_ty else {
+        return "jet_entry_error_text";
+    };
+    if matches!(err_ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
+        return "jet_entry_error_text";
+    }
+    if matches!(
+        err_ty,
+        Type::List(inner)
+            if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
+    ) {
+        return "jet_entry_error_text_show";
+    }
+    let uses_jet_display = match err_ty {
+        Type::Named(name) | Type::Apply { name, .. } => cx.has_display_type(name),
+        _ => false,
+    };
+    if uses_jet_display {
+        "jet_entry_error_text_jet"
+    } else if crate::Codegen::jet_showable_type(cx, err_ty) {
+        "jet_entry_error_text_show"
+    } else {
+        "jet_entry_error_text"
+    }
+}
+
+/// #2350: a harness entry (`jet_test_N`/`jet_prop_N`) returns the generated
+/// `String` failure ABI, so a carrier crossing that boundary becomes that report
+/// before `?` propagates it. Ordinary functions - including every imported
+/// helper - keep their own declared family, so this adapter is emitted only
+/// inside a harness entry. An already-`String` family needs no adapter.
+pub(crate) fn emit_harness_carrier_report(cx: &Cx, err_ty: Option<&Type>) -> String {
+    if matches!(err_ty, Some(Type::String)) {
+        return String::new();
+    }
+    let error = mangle_generated("harness_error");
+    format!(
+        ".map_err(|{error}| {}{}(&{error}))",
+        cx.root_prefix,
+        harness_error_renderer(cx, err_ty)
+    )
+}
 
 /// A chain rooted at `#Todo` diverges before any adapter can run. Emit that
 /// carrier directly so Rust does not try to type-check collection wrappers
 /// around its never value.
 pub(crate) fn emit_tir_stopping_receiver(recv: &TExpr, cx: &Cx) -> Option<String> {
+    if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER) {
+        return Some(emit_tir_expr(recv, cx));
+    }
     match &recv.kind {
         TExprKind::Todo { .. } => Some(emit_tir_expr(recv, cx)),
         TExprKind::BuiltinMethod { recv, .. } | TExprKind::ClosureMethod { recv, .. } => {
@@ -114,13 +218,16 @@ pub(crate) fn emit_static_owner(owner: &TStaticOwner, cx: &Cx) -> String {
 pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
     args.iter()
         .map(|a| {
+            let access = a.fact_channel().exclusivity;
             let uninit_borrow = match &a.value.kind {
                 crate::Codegen::TIR::TExprKind::Local(local)
-                    if local.uninit_fixed && a.mut_borrow =>
+                    if local.uninit_fixed && matches!(access, TExclusivity::Exclusive) =>
                 {
                     Some(format!("({}).as_array_mut()", local.rust_place()))
                 }
-                crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed && a.borrow => {
+                crate::Codegen::TIR::TExprKind::Local(local)
+                    if local.uninit_fixed && matches!(access, TExclusivity::Shared) =>
+                {
                     Some(format!("({}).as_array()", local.rust_place()))
                 }
                 _ => None,
@@ -176,9 +283,9 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                     s = format!("{wrap}({s}) as {rust_ty}");
                 }
             }
-            if a.borrow && uninit_borrow.is_none() {
+            if matches!(access, TExclusivity::Shared) && uninit_borrow.is_none() {
                 s = format!("&({})", s);
-            } else if a.mut_borrow && uninit_borrow.is_none() {
+            } else if matches!(access, TExclusivity::Exclusive) && uninit_borrow.is_none() {
                 s = format!("&mut ({})", s);
             }
             s
@@ -227,6 +334,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     }
                     crate::AST::StrFormat::Fixed(_) => {
                         unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
+                    }
+                    crate::AST::StrFormat::Grouped(_) => {
+                        unreachable!("Grouped interpolation lowers to core.text.fmt.grouped")
                     }
                     crate::AST::StrFormat::Hex(_) => {
                         unreachable!("Hex interpolation lowers to core.text.fmt.hex")
@@ -479,8 +589,10 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
             };
             let annotated = match wrapper {
                 TLetWrapper::None => base,
-                TLetWrapper::Resource => format!("JetResource<{base}>"),
-                TLetWrapper::AutomaticRoot => format!("jet_gc::AutomaticRoot<{base}>"),
+                TLetWrapper::Resource => format!("{}JetResource<{base}>", cx.root_prefix),
+                TLetWrapper::AutomaticRoot => {
+                    format!("{}jet_gc::AutomaticRoot<{base}>", cx.root_prefix)
+                }
             };
             format!(": {annotated}")
         }
@@ -526,8 +638,9 @@ pub(crate) fn emit_panic_locals(loc: &TPanicLoc, _cx: &Cx) -> String {
 
 fn emit_panic_rich_stmt(cond: &str, msg: &str, loc: &TPanicLoc, cx: &Cx) -> String {
     format!(
-        "{{ if !({cond}) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        "{{ if !({cond}) {{ {cleanup} {root}jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
         cleanup = RESOURCE_CLEANUP_MARKER,
+        root = cx.root_prefix,
         file = escape_rust_str(&loc.file),
         line = loc.line,
         fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -543,13 +656,14 @@ pub(crate) fn emit_require_stop(kind: &TRequireKind, loc: &TPanicLoc, cx: &Cx) -
     match kind {
         TRequireKind::Require { cond, msg } => {
             let cond_s = emit_tir_expr(cond, cx);
-            if cx.test_mode {
+            if cx.test_mode && is_test_harness_fn(cx) {
                 let msg_s = match msg {
                     Some(m) => emit_panic_message_expr(m, cx),
                     None => "\"condition failed\".to_string()".to_string(),
                 };
                 return jet_format!(
-                    "{{ if !({cond_s}) {{ let {jet_prefix}msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
+                    "{{ if !({cond_s}) {{ let {jet_prefix}msg = {msg_s}; return Err({root}jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
+                    root = cx.root_prefix,
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -567,9 +681,16 @@ pub(crate) fn emit_require_stop(kind: &TRequireKind, loc: &TPanicLoc, cx: &Cx) -
         TRequireKind::RequireEq { left, right } => {
             let left_s = emit_tir_expr(left, cx);
             let right_s = emit_tir_expr(right, cx);
-            if cx.test_mode {
+            // Both operands are only compared and rendered, so bind them as
+            // read windows. A borrowed non-scalar parameter emits `(*__jet_p)`,
+            // and binding that by value would move out of a shared reference
+            // (E0507); `&` keeps the caller's access convention intact and
+            // copies nothing. `==` and `jet_debug` both work through the
+            // reference, so the reported text is unchanged.
+            if cx.test_mode && is_test_harness_fn(cx) {
                 return jet_format!(
-                    "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ let {jet_prefix}msg = format!(\"expected {{}}, got {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
+                    "{{ let {jet_prefix}left = &({left_s}); let {jet_prefix}right = &({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ let {jet_prefix}msg = format!(\"expected {{}}, got {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()); return Err({root}jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
+                    root = cx.root_prefix,
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -579,8 +700,9 @@ pub(crate) fn emit_require_stop(kind: &TRequireKind, loc: &TPanicLoc, cx: &Cx) -
                 );
             }
             jet_format!(
-                "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"expected: {{}}, got: {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                "{{ let {jet_prefix}left = &({left_s}); let {jet_prefix}right = &({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ {cleanup} {root}jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"expected: {{}}, got: {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
+                root = cx.root_prefix,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,
                 fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -596,8 +718,9 @@ pub(crate) fn emit_require_stop(kind: &TRequireKind, loc: &TPanicLoc, cx: &Cx) -
             // runtime stop (E3001 / exit 70) even inside `#Test`. Only
             // `assert` / `assert_eq` are caught harness assertions.
             format!(
-                "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg_s}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+                "{{ {cleanup} {root}jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg_s}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
+                root = cx.root_prefix,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,
                 fn_name_esc = escape_rust_str(&loc.fn_name),

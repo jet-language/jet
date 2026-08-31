@@ -53,6 +53,10 @@ mod float_ordering {
     include!("../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
 }
 
+mod process_args_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
+}
+
 // The resident collection ABI owns only handle conversion.  The operation
 // itself must stay in the same Prelude source embedded by AOT and evaluated by
 // tier 0 (I9).  This small module supplies the Prelude's sibling types that
@@ -67,8 +71,9 @@ mod collection_semantics {
     use jet_foundation::StructuralDebug::jet_debug_optional;
     use jet_foundation::StructuralDebug::jet_debug_range;
 
-    // These are emitted beside the Prelude in an AOT program.  Keep the same
-    // bridge here so Values.rs remains the only scalar/string/list formatter.
+    // These are emitted beside the Prelude in an AOT program. Keep the same
+    // bridge and text-value fragments here so collection adapters do not grow
+    // a second Display/Debug implementation.
     trait __jet_Display {
         fn display(&self) -> String;
     }
@@ -126,6 +131,7 @@ mod collection_semantics {
 
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Memo.rs");
@@ -310,10 +316,6 @@ mod collection_semantics {
         jet_string_try_push(text, addition)
     }
 
-    fn show<T: JetShow>(value: &T) -> String {
-        value.jet_show()
-    }
-
     fn debug<T: JetDebug>(value: &T) -> String {
         value.jet_debug()
     }
@@ -337,44 +339,23 @@ mod collection_semantics {
         debug(&value)
     }
 
-    pub(super) fn show_i64_list(value: Vec<i64>) -> String {
-        show(&value)
-    }
     pub(super) fn debug_i64_list(value: Vec<i64>) -> String {
         debug(&value)
-    }
-    pub(super) fn show_u64_list(value: Vec<u64>) -> String {
-        show(&value)
     }
     pub(super) fn debug_u64_list(value: Vec<u64>) -> String {
         debug(&value)
     }
-    pub(super) fn show_f64_list(value: Vec<f64>) -> String {
-        show(&value)
-    }
     pub(super) fn debug_f64_list(value: Vec<f64>) -> String {
         debug(&value)
-    }
-    pub(super) fn show_f32_list(value: Vec<f32>) -> String {
-        show(&value)
     }
     pub(super) fn debug_f32_list(value: Vec<f32>) -> String {
         debug(&value)
     }
-    pub(super) fn show_bool_list(value: Vec<bool>) -> String {
-        show(&value)
-    }
     pub(super) fn debug_bool_list(value: Vec<bool>) -> String {
         debug(&value)
     }
-    pub(super) fn show_char_list(value: Vec<char>) -> String {
-        show(&value)
-    }
     pub(super) fn debug_char_list(value: Vec<char>) -> String {
         debug(&value)
-    }
-    pub(super) fn show_string_list(value: Vec<String>) -> String {
-        show(&value)
     }
     pub(super) fn debug_string_list(value: Vec<String>) -> String {
         debug(&value)
@@ -416,7 +397,9 @@ mod collection_semantics {
         jet_list_product(xs)
     }
 
-    pub(super) fn list_copy_i64(xs: &[i64]) -> Vec<i64> {
+    /// One copy kernel for every carrier: the Prelude `.copy()` body AOT emits
+    /// (`jet_list_copy`) over whichever element vector the resident ABI holds.
+    pub(super) fn list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
         jet_list_copy(xs)
     }
 
@@ -622,6 +605,10 @@ mod collection_semantics {
         jet_list_equal(left, right)
     }
 
+    pub(super) fn list_order<T: PartialOrd>(left: &[T], right: &[T]) -> i8 {
+        jet_list_order(left, right)
+    }
+
     pub(super) fn list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
         jet_list_binary_search(xs, needle)
     }
@@ -748,6 +735,22 @@ fn jet_jit_io_args() -> i64 {
             rt.heap
                 .list_push_int(list, sid)
                 .expect("jit process.argv push");
+        }
+        list
+    })
+}
+
+fn jet_jit_io_process_args() -> i64 {
+    let argv = jet_codegen::Comptime::runtime_argv()
+        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
+    let args = process_args_kernel::jet_process_args_view(argv);
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for arg in args {
+            let sid = rt.heap.alloc_string(arg);
+            rt.heap
+                .list_push_int(list, sid)
+                .expect("jit process.args push");
         }
         list
     })
@@ -1299,10 +1302,7 @@ fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
 /// Marshal those handles to the same Vec shape that AOT passes to the shared
 /// Prelude equality kernel.
 fn jet_jit_list_eq_nested(a: i64, b: i64) -> i8 {
-    collection_semantics::list_equal(
-        &clone_nested_int_lists(a),
-        &clone_nested_int_lists(b),
-    ) as i8
+    collection_semantics::list_equal(&clone_nested_int_lists(a), &clone_nested_int_lists(b)) as i8
 }
 
 /// Typed list equality adapters preserve the element semantics of the shared
@@ -1316,36 +1316,16 @@ fn jet_jit_list_eq_f64(a: i64, b: i64) -> i8 {
     collection_semantics::list_equal(&clone_list_floats(a), &clone_list_floats(b)) as i8
 }
 
-/// Lexicographic list ordering for `[T]` / `[T#n]` under `<`, `<=`, `>`, `>=`.
-///
-/// AOT emits the bare Rust operator on whatever the operand lowers to —
-/// `[i64; 3]` for `[Int#3]`, `Vec<i64>` for `[Int]` (the plain `rust_spell`
-/// arm of `Codegen/TIR/emit/expressions.rs`) — so the ordering law for these
-/// types is Rust's own slice `PartialOrd`; the Prelude has `jet_list_equal`
-/// but no ordering kernel to call. Ask that one law once and report it as a
-/// tag, so this host never decides which of the four operators was written and
-/// float partiality survives the crossing: `0` less, `1` equal, `2` greater
-/// (the same numbering `ordering_from_flags` uses), `3` incomparable — a NaN
-/// element, where all four operators are false in both tiers.
-fn list_order<T: PartialOrd>(left: &[T], right: &[T]) -> i8 {
-    match left.partial_cmp(right) {
-        Some(std::cmp::Ordering::Less) => 0,
-        Some(std::cmp::Ordering::Equal) => 1,
-        Some(std::cmp::Ordering::Greater) => 2,
-        None => 3,
-    }
-}
-
 fn jet_jit_list_order(a: i64, b: i64) -> i8 {
-    list_order(&clone_list_ints(a), &clone_list_ints(b))
+    collection_semantics::list_order(&clone_list_ints(a), &clone_list_ints(b))
 }
 
 fn jet_jit_list_order_str(a: i64, b: i64) -> i8 {
-    list_order(&clone_list_strings(a), &clone_list_strings(b))
+    collection_semantics::list_order(&clone_list_strings(a), &clone_list_strings(b))
 }
 
 fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
-    list_order(&clone_list_floats(a), &clone_list_floats(b))
+    collection_semantics::list_order(&clone_list_floats(a), &clone_list_floats(b))
 }
 
 fn jet_jit_list_sort_f64(list: i64) {
@@ -1675,9 +1655,25 @@ fn jet_jit_list_clone(list: i64) -> i64 {
     })
 }
 
+/// `.copy()` on the dense i64 carrier — `Int`/`IntN`/`Char` values, and the
+/// string ids a `[String]` holds.
 fn jet_jit_list_copy(list: i64) -> i64 {
     let values = clone_list_ints(list);
-    alloc_from_ints(&collection_semantics::list_copy_i64(&values))
+    alloc_from_ints(&collection_semantics::list_copy(&values))
+}
+
+/// `.copy()` on the boxed float carrier (`JetVal::List(Float…)`), which
+/// `clone_list_ints` cannot read. Same kernel, read and republished as floats.
+fn jet_jit_list_copy_f64(list: i64) -> i64 {
+    let values = clone_list_floats(list);
+    alloc_from_floats(&collection_semantics::list_copy(&values))
+}
+
+/// `.copy()` on a `[String]`, copying the text rather than the ids so the
+/// result owns its elements exactly as the AOT `Vec<String>` clone does.
+fn jet_jit_list_copy_str(list: i64) -> i64 {
+    let values = clone_list_strings(list);
+    alloc_from_strings(&collection_semantics::list_copy(&values))
 }
 
 fn jet_jit_list_count(list: i64, value: i64) -> i64 {
@@ -1690,7 +1686,9 @@ fn jet_jit_list_count(list: i64, value: i64) -> i64 {
 }
 
 fn jet_jit_list_counts(list: i64) -> i64 {
-    alloc_map_pairs(&collection_semantics::list_counts_i64(clone_list_strings(list)))
+    alloc_map_pairs(&collection_semantics::list_counts_i64(clone_list_strings(
+        list,
+    )))
 }
 
 fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
@@ -2123,9 +2121,8 @@ fn jet_jit_map_get_int(map: i64, key: i64, line: u32) -> i64 {
             if rt.heap.map_len(map).is_none() {
                 jet_foundation::ice!(None, "jit Int map get: bad handle");
             }
-            let key_text = jet_foundation::Outcome::jet_missing_map_key_value(
-                rt.heap.int_to_string(key),
-            );
+            let key_text =
+                jet_foundation::Outcome::jet_missing_map_key_value(rt.heap.int_to_string(key));
             rt.set_runtime_stop("E3001", line, &key_text);
             0
         }
@@ -3422,56 +3419,7 @@ fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
     });
 }
 
-fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
-    if !debug {
-        let values = || rt.heap.clone_int_list(list).unwrap_or_default();
-        match kind {
-            5 => {
-                return format!(
-                    "[{}]",
-                    values()
-                        .into_iter()
-                        .map(|handle| crate::Net::show_value(rt, handle))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            6 => {
-                return collection_semantics::show_bool_list(
-                    values().into_iter().map(|value| value != 0).collect(),
-                );
-            }
-            7 => {
-                return collection_semantics::show_char_list(
-                    values()
-                        .into_iter()
-                        .map(|value| char::from_u32(value as u32).unwrap_or('?'))
-                        .collect(),
-                );
-            }
-            8 => {
-                return format!(
-                    "[{}]",
-                    values()
-                        .into_iter()
-                        .map(|handle| crate::CoreHost::show_path(rt, handle))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            9 => {
-                return format!(
-                    "[{}]",
-                    values()
-                        .into_iter()
-                        .map(|handle| crate::Time::show_value(rt, handle))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            _ => {}
-        }
-    }
+fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
     match kind {
         1 => {
             let values = rt
@@ -3481,19 +3429,11 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
                 .into_iter()
                 .map(|id| rt.heap.clone_string(id).unwrap_or_default())
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_string_list(values)
-            } else {
-                collection_semantics::show_string_list(values)
-            }
+            collection_semantics::debug_string_list(values)
         }
         2 => {
             let values = rt.heap.clone_int_list(list).unwrap_or_default();
-            if debug {
-                collection_semantics::debug_i64_list(values)
-            } else {
-                collection_semantics::show_i64_list(values)
-            }
+            collection_semantics::debug_i64_list(values)
         }
         3 => {
             let values = rt
@@ -3503,33 +3443,21 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
                 .into_iter()
                 .map(|value| value as u64)
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_u64_list(values)
-            } else {
-                collection_semantics::show_u64_list(values)
-            }
+            collection_semantics::debug_u64_list(values)
         }
         4 => {
             let len = rt.heap.list_len(list).unwrap_or(0);
             let values = (0..len)
                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_f64_list(values)
-            } else {
-                collection_semantics::show_f64_list(values)
-            }
+            collection_semantics::debug_f64_list(values)
         }
         7 => {
             let len = rt.heap.list_len(list).unwrap_or(0);
             let values = (0..len)
                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0) as f32)
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_f32_list(values)
-            } else {
-                collection_semantics::show_f32_list(values)
-            }
+            collection_semantics::debug_f32_list(values)
         }
         5 => {
             let values = rt
@@ -3539,11 +3467,7 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
                 .into_iter()
                 .map(|value| value != 0)
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_bool_list(values)
-            } else {
-                collection_semantics::show_bool_list(values)
-            }
+            collection_semantics::debug_bool_list(values)
         }
         6 => {
             let values = rt
@@ -3553,25 +3477,17 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
                 .into_iter()
                 .map(|value| char::from_u32(value as u32).unwrap_or('?'))
                 .collect::<Vec<_>>();
-            if debug {
-                collection_semantics::debug_char_list(values)
-            } else {
-                collection_semantics::show_char_list(values)
-            }
+            collection_semantics::debug_char_list(values)
         }
         _ => {
             let values = rt.heap.clone_int_list(list).unwrap_or_default();
-            if debug {
-                collection_semantics::debug_i64_list(values)
-            } else {
-                collection_semantics::show_i64_list(values)
-            }
+            collection_semantics::debug_i64_list(values)
         }
     }
 }
 
 fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
-    list_text(rt, list, kind, true)
+    list_text(rt, list, kind)
 }
 
 /// Jet Debug list text as a string handle for structural-value marshalling.
@@ -5855,6 +5771,7 @@ host_fns! {
 
     }
     io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
+    io_process_args: "jet_jit_io_process_args" => jet_jit_io_process_args: sig_new;
     list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
     list_try_new: "jet_jit_list_try_new" => jet_jit_list_try_new: sig_try_new;
     list_try_with_capacity: "jet_jit_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
@@ -5914,6 +5831,8 @@ host_fns! {
     list_sort_str_desc: "jet_jit_list_sort_str_desc" => jet_jit_list_sort_str_desc: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
     list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
+    list_copy_f64: "jet_jit_list_copy_f64" => jet_jit_list_copy_f64: sig_len;
+    list_copy_str: "jet_jit_list_copy_str" => jet_jit_list_copy_str: sig_len;
     list_count: "jet_jit_list_count" => jet_jit_list_count: sig_get_opt;
     list_counts: "jet_jit_list_counts" => jet_jit_list_counts: sig_len;
     list_remove_value: "jet_jit_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;

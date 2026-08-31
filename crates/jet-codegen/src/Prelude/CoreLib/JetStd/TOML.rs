@@ -37,6 +37,7 @@
                 chars: raw.chars().collect(),
                 pos: 0,
                 line: 1,
+                current_path_len: 0,
             };
             let mut items = Vec::new();
             loop {
@@ -44,9 +45,11 @@
                 if p.peek().is_none() {
                     break;
                 }
-                match p.statement()? {
-                    Some(item) => items.push(item),
-                    None => {}
+                if let Some(item) = p.statement()? {
+                    if let Item::Header { path, .. } = &item {
+                        p.current_path_len = path.len();
+                    }
+                    items.push(item);
                 }
             }
             Ok(assemble(items))
@@ -232,6 +235,7 @@
             chars: Vec<char>,
             pos: usize,
             line: usize,
+            current_path_len: usize,
         }
 
         impl Parser {
@@ -325,6 +329,13 @@
                 if path.is_empty() {
                     return Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_KEY));
                 }
+                if self
+                    .current_path_len
+                    .checked_add(path.len())
+                    .is_none_or(|depth| depth > MAX_TOML_DEPTH)
+                {
+                    return Err(self.err("TOML key path is nested too deeply"));
+                }
                 self.skip_inline_ws();
                 if self.peek() != Some('=') {
                     return Err(self.err(crate::jet_encoding_errors::toml_expected_equals_after_key(
@@ -341,6 +352,9 @@
                 let mut path = Vec::new();
                 loop {
                     self.skip_inline_ws();
+                    if path.len() >= MAX_TOML_DEPTH {
+                        return Err(self.err("TOML key path is nested too deeply"));
+                    }
                     path.push(self.simple_key()?);
                     self.skip_inline_ws();
                     if self.peek() == Some('.') {
@@ -782,5 +796,31 @@
 
         fn is_bare_key_char(c: char) -> bool {
             c.is_ascii_alphanumeric() || c == '_' || c == '-'
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::{parse_to_tree, MAX_TOML_DEPTH};
+
+            fn dotted_path(depth: usize) -> String {
+                (0..depth)
+                    .map(|index| format!("key{index}"))
+                    .collect::<Vec<_>>()
+                    .join(".")
+            }
+
+            #[test]
+            fn dotted_key_depth_is_bounded_before_assembly() {
+                assert!(parse_to_tree(&format!("{} = 0", dotted_path(MAX_TOML_DEPTH))).is_ok());
+                assert!(parse_to_tree(&format!(
+                    "{} = 0",
+                    dotted_path(MAX_TOML_DEPTH + 1)
+                ))
+                .is_err());
+                let header = dotted_path(MAX_TOML_DEPTH - 1);
+                assert!(parse_to_tree(&format!("[{header}]\nleaf = 0")).is_ok());
+                let too_deep_header = dotted_path(MAX_TOML_DEPTH);
+                assert!(parse_to_tree(&format!("[{too_deep_header}]\nleaf = 0")).is_err());
+            }
         }
     }

@@ -1,29 +1,29 @@
-use core.files as fs
-use core.process as process
-use core.regex as re
+use core.files as files
 
-fn run() {
-    args :: process.argv()
-    path :: args.get(1) ?? "records.bin"
-    reader :: Reader.over(fs.read_bytes(Path.from(path)) ?? return Err("cannot read input"))
-    if (reader.take(4) ?? return Err("short magic")) != [U8]{"JGB1"} -> return Err("bad magic")
-    count :: Int.from_u32(reader.read_u32_le() ?? return Err("short count"))
+#CLI
+struct Args {
+    input: String
+}
+
+fn run(args: Args) !Err -> {
+    data :: files.read_bytes(Path.from(args.input)) ?? return
+    reader :: Reader.over(data)
+    if (reader.take(4) ?? return) != "JGB1".bytes() -> return Err("bad magic")
+    count :: Int.from_u32(reader.read_u32_le() ?? return)
 
     sum := Float{0.0}
     hash := U64{14695981039346656037}
     loop _ in 0..<count {
-        id :: Int.from_u32(reader.read_u32_le() ?? return Err("short id"))
-        value :: reader.read_f64_le() ?? return Err("short value")
-        name_len :: Int.from_u16(reader.read_u16_le() ?? return Err("short name length"))
+        id :: Int.from_u32(reader.read_u32_le() ?? return)
+        value :: reader.read_f64_le() ?? return
+        name_len :: Int.from_u16(reader.read_u16_le() ?? return)
         if id % 7 == 0 -> sum += value
         loop _ in 0..<name_len {
-            byte :: reader.read_u8() ?? return Err("short name")
+            byte :: reader.read_u8() ?? return
             hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
         }
     }
     print("records {count}")
-    sum_text :: re.replace_all(Regex{","}, "", "{sum:Fixed(6)}")
-    print("sum7 {sum_text}")
-    h :: Int.parse(hash.to_string()) ?? 0
-    print("fnv {h:Hex(16)}")
+    print("sum7 {sum:Fixed(6)}")
+    print("fnv {(Int.parse(hash.to_string()) ?? 0):Hex(16)}")
 }

@@ -2,7 +2,7 @@
 
 Durable notes every Jet agent reads. Exported 2026-08-09 from per-session agent memory so the owner can audit and edit them in one place. Orchestration law lives in `docs/agents/orchestration.md`; this file holds owner preferences, project state, and technical traps.
 
-Edit freely: delete what is stale, correct what is wrong. Agents treat this as law after `AGENTS.md`. Dated audit entries below record what was ratified and what is still owed — they go stale fast, prune them once their cards close.
+Edit freely: delete what is stale, correct what is wrong. Shared conduct, skill routing, model adapters, Codex invocation, and retirement state live only in `docs/agents/owner-guidance.md`; this file does not select a route or model. Dated entries below are historical provenance, not active policy. When an old entry conflicts with owner guidance or orchestration, ignore its process rule and use the canonical source.
 
 ## Owner preferences and working agreements
 

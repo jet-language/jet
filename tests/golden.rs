@@ -524,7 +524,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
     let mut rustc_cmd = Command::new("rustc");
-    add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
+    let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &ffi_link {
         rustc_cmd
@@ -1051,7 +1051,7 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
         std::process::id()
     ));
     let mut rustc = Command::new("rustc");
-    add_generated_rust(&mut rustc, &rs, &compiled.rust, compiled.ffi.is_some(), &[]);
+    let _runtime_lease = add_generated_rust(&mut rustc, &rs, &compiled.rust, compiled.ffi.is_some(), &[]);
     rustc.arg("-o").arg(&bin);
     if let Some(link) = &compiled.ffi {
         rustc
@@ -1131,4 +1131,12 @@ fn shared_guard_runtime_is_vetted_without_hiding_user_unsafe() {
     assert!(!stripped.contains("first()"));
     assert!(!stripped.contains("second()"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_the_golden_gate() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("golden")
+        .expect("golden corpus semantic policy");
 }

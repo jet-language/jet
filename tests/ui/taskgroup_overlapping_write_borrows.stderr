@@ -1,8 +1,26 @@
+Error [E0320]: Inferred record construction uses `{…}`, not `.{…}`
+  --> tests/ui/taskgroup_overlapping_write_borrows.jet:8:9
+    |
+  8 |         .{position: 10, velocity: 2},
+    |         ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: Write `{…}`
+More: jet-lang.dev/e/E0320
+
+Error [E0320]: Inferred record construction uses `{…}`, not `.{…}`
+  --> tests/ui/taskgroup_overlapping_write_borrows.jet:9:9
+    |
+  9 |         .{position: 20, velocity: 3}
+    |         ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: Write `{…}`
+More: jet-lang.dev/e/E0320
+
 Error [E1101]: `two` and `one` can reach the same place at the same time
   --> tests/ui/taskgroup_overlapping_write_borrows.jet:16:13
     |
  16 |             { two.position += 1; two.position }
     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: a task.group runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap
- Fix: give it with `^`, freeze it with `freeze`, or share it with `shared`; in a group, borrow separate fields or constant indexes
+ Why: A task.group runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap
+ Fix: Give it with `^`, freeze it with `freeze`, or share it with `shared`; in a group, borrow separate fields or constant indexes
 More: jet-lang.dev/e/E1101

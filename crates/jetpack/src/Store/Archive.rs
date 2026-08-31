@@ -10,7 +10,7 @@
 use super::Closure;
 use super::{parse_meta, Roots, StoreEntry};
 use crate::RuntimePolicy;
-use crate::TrustRoot::{os_random_bytes, Signature as TrustSignature, TrustKey};
+use crate::TrustRoot::{constant_time_eq, os_random_bytes, Signature as TrustSignature, TrustKey};
 use crate::{Envelope, JSON};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -1396,12 +1396,17 @@ fn signing_key(roots: &Roots, requested: Option<&str>, create: bool) -> io::Resu
                 path.display()
             )));
         }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        #[cfg(not(unix))]
+        {
+            return Err(invalid(
+                "archive signer key creation requires private file permissions on this platform",
+            ));
         }
-        let secret = entropy()?;
-        write_atomic(&path, &secret)?;
-        set_mode(&path, 0o600)?;
+        #[cfg(unix)]
+        {
+            let secret = entropy()?;
+            write_private_atomic(&path, &secret)?;
+        }
     }
     let metadata = fs::symlink_metadata(&path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -1503,7 +1508,7 @@ impl Archive {
         let mut unsigned = self.clone();
         unsigned.signature = None;
         let expected = key.sign(&unsigned.encode_unsigned()?).sig_hex;
-        if expected != signature.sig_hex {
+        if !constant_time_eq(expected.as_bytes(), signature.sig_hex.as_bytes()) {
             return Err(invalid("Hangar archive signature verification failed"));
         }
         Ok(())
@@ -1933,6 +1938,65 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn write_private_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("archive destination may not be a symlink"));
+        }
+    }
+    let partial = path.with_extension(format!(
+        "jet-partial-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&partial)?;
+        let mut permissions = file.metadata()?.permissions();
+        permissions.set_mode(0o600);
+        file.set_permissions(permissions)?;
+        if file.metadata()?.permissions().mode() & 0o7777 != 0o600 {
+            return Err(invalid(
+                "archive signer key could not be made private before writing",
+            ));
+        }
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        fs::rename(&partial, path)
+    })();
+    match result {
+        Ok(()) => {}
+        Err(error) => {
+            match fs::remove_file(&partial) {
+                Ok(()) => {}
+                Err(cleanup) if cleanup.kind() == io::ErrorKind::NotFound => {}
+                Err(cleanup) => {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "{error}; could not remove private archive-key staging file: {cleanup}"
+                        ),
+                    ));
+                }
+            }
+            return Err(error);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        fsync_directory(parent)?;
+    }
+    Ok(())
+}
+
 fn fsync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -2083,6 +2147,63 @@ mod tests {
         assert_eq!(decoded.objects[0].nodes[0].mode, 0o755);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn generated_archive_key_is_private_before_publication() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-archive-generated-key-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let _ = remove_tree(&root);
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+
+        let key = signing_key(&roots, None, true).unwrap();
+        let path = root.join("trust").join(ARCHIVE_KEY);
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o7777,
+            0o600
+        );
+        assert_eq!(key.secret.len(), 32);
+        let _ = remove_tree(&root);
+    }
+
+    #[test]
+    fn archive_entropy_is_exactly_key_sized_and_not_eof_driven() {
+        let bytes = entropy().expect("OS CSPRNG");
+        assert_eq!(bytes.len(), 32);
+        assert!(
+            include_str!("../TrustRoot.rs").contains("read_exact(&mut bytes)"),
+            "archive key entropy must consume only the fixed key buffer"
+        );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn generated_archive_key_fails_closed_without_private_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-archive-generated-key-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let _ = remove_tree(&root);
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+
+        let error = signing_key(&roots, None, true).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("private file permissions on this platform"));
+        assert!(!root.exists());
+    }
+
     #[test]
     fn archive_signature_covers_unsigned_payload() {
         let key = TrustKey::from_secret(vec![7; 32]).unwrap();
@@ -2111,6 +2232,27 @@ mod tests {
         decoded
             .verify_signature(&root, Some(key_path.to_str().unwrap()), false)
             .unwrap();
+        let mut tampered = decoded;
+        let replacement = if tampered
+            .signature
+            .as_ref()
+            .unwrap()
+            .sig_hex
+            .starts_with('0')
+        {
+            '1'
+        } else {
+            '0'
+        };
+        tampered
+            .signature
+            .as_mut()
+            .unwrap()
+            .sig_hex
+            .replace_range(0..1, &replacement.to_string());
+        assert!(tampered
+            .verify_signature(&root, Some(key_path.to_str().unwrap()), false)
+            .is_err());
         let _ = remove_tree(&root.root);
     }
 

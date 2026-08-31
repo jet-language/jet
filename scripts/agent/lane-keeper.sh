@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# lane-keeper.sh — keep every lane slot full, without a human in the loop.
+# lane-keeper.sh — recycle one explicitly authorized direct-CLI fallback lane.
 #
-# The orchestrator's attention is the scarce resource in a burndown, and it was
-# going almost entirely to noticing that lanes had finished and starting more.
-# Measured repeatedly in one session: the running count fell from 25 to 1 while
-# the orchestrator was busy repairing a build, and the whole wave idled.
-#
-# This closes that gap. Every INTERVAL seconds it asks lane-dispatch how many
-# lanes are actually alive — by pidfile, not by log — and if there is room it
-# briefs more open cards straight from Tower and launches them detached.
+# OMP task/hub owns normal dispatch. This loop stays dormant unless the caller
+# records the exact OMP failure in JET_OMP_FALLBACK_REASON; it cannot silently
+# become a second dispatch route.
 #
 # It never closes a card and never touches the board beyond reading it. Judging
 # a lane's output and closing its card stays with the orchestrator, because that
@@ -23,6 +18,11 @@ MIN_FREE_GB="${2:-14}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOG="$HOME/.cache/jet-luna/keeper.log"
 DISPATCH="$REPO/scripts/agent/lane-dispatch.mjs"
+
+if [ -z "${JET_OMP_FALLBACK_REASON:-}" ]; then
+    printf '%s\n' "lane-keeper disabled: use OMP task/hub; set JET_OMP_FALLBACK_REASON only after recording the exact failure" >&2
+    exit 2
+fi
 
 note() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$LOG"; }
 
@@ -49,12 +49,8 @@ while true; do
     # back something already in flight or genuinely gated.
     fresh=$(cd "$REPO" && node "$DISPATCH" brief --auto "$room" 2>/dev/null | tr -d '\n')
 
-    # When every open card has already had a lane, restart the ones that
-    # produced no report. A lane that timed out still leaves its partial work in
-    # the tree, so a second pass usually gets further than the first.
-    # Once every open card has had a lane, keep the slots working by giving the
-    # unfinished ones another pass, least-recently-worked first. A second lane
-    # starts from the first one's partial work and usually gets further.
+    # When every open card has already had a lane, recycle the least-recently
+    # worked unfinished card. The dispatcher defaults to one stream.
     if [ -z "$fresh" ] || [ "$fresh" = "(nothing to brief)" ]; then
         fresh=$(cd "$REPO" && node "$DISPATCH" recycle "$room" 2>/dev/null | tr -d '\n')
         [ -n "${fresh// /}" ] && note "recycling open cards: $fresh"

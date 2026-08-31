@@ -187,12 +187,18 @@ fn dynamic_projection_host_precondition() -> Result<(), String> {
         "/usr/lib/x86_64-linux-gnu/libc.so.6",
         "/usr/lib64/libc.so.6",
     ];
-    if !HOST_LIBC_CANDIDATES.iter().any(|path| Path::new(path).is_file()) {
+    if !HOST_LIBC_CANDIDATES
+        .iter()
+        .any(|path| Path::new(path).is_file())
+    {
         return Err("isolated namespace has no host libc.so.6".into());
     }
     let binary = Path::new("/run/current-system/sw/bin/true");
     if !binary.is_file() {
-        return Err(format!("Nix dynamic binary is unavailable: {}", binary.display()));
+        return Err(format!(
+            "Nix dynamic binary is unavailable: {}",
+            binary.display()
+        ));
     }
     let ldd = Command::new("ldd")
         .arg(binary)
@@ -459,11 +465,13 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
         .err()
         .expect("conflicting closure owner must be rejected at registration");
         assert!(
-            error.to_string().contains("conflicting bytes or provenance"),
+            error
+                .to_string()
+                .contains("conflicting bytes or provenance"),
             "{error}"
         );
-        let lease = snapshot_lease(&roots, &root_entry)
-            .expect("the untouched root entry must still lease");
+        let lease =
+            snapshot_lease(&roots, &root_entry).expect("the untouched root entry must still lease");
         drop(lease);
     }
 

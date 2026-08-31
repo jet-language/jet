@@ -308,6 +308,12 @@ pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
 /// fields intentionally do not enter the source `PolicyKey` registry.
 pub const POLICY_FIELD_CONTAIN: &str = "contain";
 pub const POLICY_FIELD_HARDEN: &str = "harden";
+/// D-TEAMPOLICY1=A: one package policy namespace for team ceilings. These
+/// fields are package-only and therefore never become source policy keys.
+pub const POLICY_FIELD_EFFECTS: &str = "effects";
+pub const POLICY_FIELD_UNSAFE: &str = "unsafe";
+pub const POLICY_FIELD_EXPERT: &str = "expert";
+pub const POLICY_FIELD_DEPS: &str = "deps";
 /// D-JPK-POLICYSURFACE1=D: package license allow-list policy.
 pub const POLICY_FIELD_LICENSES: &str = "licenses";
 /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.

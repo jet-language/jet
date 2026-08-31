@@ -1,3 +1,6 @@
+use cranelift_codegen::settings::{self, Configurable};
+use cranelift_module::Module;
+use cranelift_object::{ObjectBuilder, ObjectModule};
 use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
 use jet_foundation::{JitBackend::RunOutcome, AST::ProgramBundle};
 use std::collections::HashSet;
@@ -22,6 +25,97 @@ pub fn cranelift_host_supported() -> bool {
     // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
     // default dev path safe by delegating to the tier-0 backend there.
     cfg!(target_arch = "x86_64")
+}
+
+/// Object emitted by the debug AOT Cranelift route. The caller owns the final
+/// native link because it also owns output paths, C-link flags, and the
+/// existing rustc fallback.
+#[derive(Debug)]
+pub struct DebugAotObject {
+    pub bytes: Vec<u8>,
+    pub entry: String,
+}
+
+/// Compile a checked executable bundle through Cranelift's object backend.
+/// `Err` is a deliberate capability refusal: the caller must report the reason
+/// and retry the same bundle through the debug rustc route.
+pub fn try_compile_debug_aot(bundle: &ProgramBundle) -> Result<DebugAotObject, String> {
+    crate::on_compiler_stack(|| try_compile_debug_aot_on_stack(bundle))
+}
+
+fn try_compile_debug_aot_on_stack(bundle: &ProgramBundle) -> Result<DebugAotObject, String> {
+    // Object emission is a separate artifact path. Never let its compiled
+    // bytes enter the resident JIT's process-local warm-code capture.
+    super::tier_cache::abort_capture();
+    if !cfg!(target_arch = "x86_64") {
+        return Err("Cranelift debug-AOT object emission is unavailable on this architecture".into());
+    }
+    if bundle.cffi.links_c() {
+        return Err("the checked bundle has native C links".into());
+    }
+    let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
+        format!(
+            "TIR lowering refused the checked bundle ({})",
+            TIR::lower_jit_program_fail_reason(bundle)
+        )
+    })?;
+    if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
+        return Err("program-struct CLI dispatch needs the rustc runtime adapter".into());
+    }
+    let plan = plan_tiers(bundle, Some(&program));
+    if plan.whole_interp || !plan.deopt.is_empty() {
+        return Err("the checked bundle requires interpreter deopt".into());
+    }
+
+    crate::Encoding::register_migrations(bundle);
+    super::types_meta::install_struct_redact(bundle);
+    let mut flags = settings::builder();
+    flags
+        .set("opt_level", "none")
+        .map_err(|error| format!("Cranelift debug flags: {error}"))?;
+    // Keep the object relocatable for the final native linker. These are the
+    // same long-range/libcall settings used by the resident backend, without
+    // turning any generated address into an in-process pointer.
+    flags
+        .set("use_colocated_libcalls", "false")
+        .map_err(|error| format!("Cranelift debug flags: {error}"))?;
+    flags
+        .set("is_pic", "true")
+        .map_err(|error| format!("Cranelift debug flags: {error}"))?;
+    let isa_builder = cranelift_native::builder().map_err(str::to_string)?;
+    let isa = isa_builder
+        .finish(settings::Flags::new(flags))
+        .map_err(|error| format!("Cranelift native ISA: {error}"))?;
+    let mut object_builder = ObjectBuilder::new(
+        isa,
+        "jet-debug-aot",
+        cranelift_module::default_libcall_names(),
+    )
+    .map_err(|error| format!("Cranelift object builder: {error}"))?;
+    object_builder.per_function_section(true);
+    let mut module = ObjectModule::new(object_builder);
+    let host = super::runtime_host::declare_host_fns_for_module(&mut module)?;
+    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
+    let mut runtime = super::resident::fresh_runtime_with_allocator_cap(cap_bytes);
+    let entry_id = super::functions_compile::compile_program_object(
+        &mut module,
+        &host,
+        &program,
+        &mut runtime,
+    )?;
+    let entry = module
+        .declarations()
+        .get_function_decl(entry_id)
+        .linkage_name(entry_id)
+        .into_owned();
+    let bytes = module
+        .finish()
+        .emit()
+        .map_err(|error| format!("Cranelift object emission: {error}"))?;
+    Ok(DebugAotObject {
+        bytes,
+        entry,
+    })
 }
 
 pub(crate) fn classify_jit_gap(bundle: &ProgramBundle) -> JitGap {
@@ -255,6 +349,7 @@ pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome
 }
 
 fn run_resident_strict_on_compiler_stack(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
+    let _loaded_mod_scope = crate::Mod::LoadScope;
     if !cranelift_host_supported() {
         return Err("cranelift-jit host path unsupported on this architecture".to_string());
     }

@@ -16,7 +16,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
-            | ("core.text.fmt", "pretty" | "decimal")
+            | ("core.text.fmt", "pretty" | "decimal" | "grouped")
             | ("core.math", "clamp")
             // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
@@ -332,6 +332,10 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
         )),
+        ("core.files", "set_mode") => Some((
+            vec![(read, path), (read, int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
         ("core.files", "canonicalize" | "absolute") => Some((
             vec![(read, path)],
             Some(result_ty(Type::String, io_error_ty())),
@@ -362,7 +366,7 @@ fn core_fixed_sig_impl(
         )),
         // `walk` and `walk_parallel` are one surface with one result shape: the
         // parallel form only chooses how the directories are traversed.
-        ("core.files", "walk" | "walk_parallel") => Some((
+        ("core.files", "walk" | "walk_parallel" | "walk_files") => Some((
             vec![(read, path)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("WalkEntry".to_string()))),
@@ -433,7 +437,9 @@ fn core_fixed_sig_impl(
             Some(Type::Named("WatchHandle".to_string())),
         )),
         ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
-        ("core.process", "argv") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
+        ("core.process", "argv" | "args") => {
+            Some((vec![], Some(Type::List(Box::new(Type::String)))))
+        }
         ("core.term", "confirm") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.term", "choose") => Some((
             vec![
@@ -782,7 +788,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("RowPolicy".into()))],
             Some(Type::String),
         )),
-        ("core.process", "exit") => Some((vec![(read, int)], None)),
+        ("core.process", "exit") => Some((
+            vec![(read, int)],
+            Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
+        )),
         ("core.process", "workspace") => Some((
             vec![],
             Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
@@ -907,10 +916,31 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named("DateTime".to_string())),
         )),
+        ("core.time", "from_unix_seconds")
+        | ("core.time", "from_unix_microseconds")
+        | ("core.time", "from_unix_nanoseconds") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("DateTime".to_string())),
+        )),
         ("core.time", "today") => Some((vec![], Some(Type::Named("LocalDate".to_string())))),
         ("core.time", "parse_rfc3339") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("DateTime".to_string()), Type::String)),
+        )),
+        ("core.time", "parse_iso_week_date") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("LocalDate".to_string()), Type::String)),
+        )),
+        ("core.time", "from_iso_week") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Named("LocalDate".to_string()), Type::String)),
+        )),
+        ("core.time", "parse_zoned") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("ZonedDateTime".to_string()),
+                Type::String,
+            )),
         )),
         ("core.time", "datetime") => Some((
             vec![
@@ -963,8 +993,12 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("LocalDate".to_string())),
                 (read, Type::Named("LocalTime".to_string())),
                 (read, Type::Named("Zone".to_string())),
+                (read, Type::String),
             ],
-            Some(Type::Named("ZonedDateTime".to_string())),
+            Some(result_ty(
+                Type::Named("ZonedDateTime".to_string()),
+                Type::String,
+            )),
         )),
         ("core.game", "run") => Some((
             vec![
@@ -1055,11 +1089,29 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
-        // jet.csv → core.encoding.csv: parse text into a list of rows (list of fields).
+        // jet.csv → core.encoding.csv: parse text into field rows. `rows`
+        // exposes the same records with their physical opening line.
         ("core.encoding.csv", "parse") => Some((
-            vec![(read, Type::String)],
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Bool),
+            ],
             Some(result_ty(
                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                Type::String,
+            )),
+        )),
+        ("core.encoding.csv", "rows") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Bool),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("CSVRow".to_string()))),
                 Type::String,
             )),
         )),
@@ -1074,6 +1126,9 @@ fn core_fixed_sig_impl(
             vec![
                 (moved, Type::Named("FileReader".to_string())),
                 (read, Type::Named("EncodingLimits".to_string())),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Bool),
             ],
             Some(result_ty(
                 Type::Named("CSVReader".to_string()),
@@ -1896,7 +1951,7 @@ fn core_fixed_sig_impl(
         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }
-        ("core.text.fmt", "decimal" | "percent" | "sci") => Some((
+        ("core.text.fmt", "decimal" | "grouped" | "percent" | "sci") => Some((
             vec![(read, Type::Float), (read, Type::Int)],
             Some(Type::String),
         )),
@@ -2298,16 +2353,19 @@ fn core_fixed_sig_impl(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::Named("Digest256".into())),
         )),
-        ("core.crypto", "sha256_bytes") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::String),
-        )),
         (
             "core.crypto",
             "sha1" | "sha224" | "sha384" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512",
         ) => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
+        )),
+        ("core.crypto", "hmac_sha256") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(Type::List(Box::new(u8_ty()))),
         )),
         ("core.crypto", "pbkdf2_hmac") => Some((
             vec![
@@ -2317,10 +2375,6 @@ fn core_fixed_sig_impl(
                 (read, Type::Int),
             ],
             Some(Type::List(Box::new(u8_ty()))),
-        )),
-        ("core.crypto", "sha512_bytes" | "blake3_bytes") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::String),
         )),
         ("core.crypto", "constant_time_equal_bytes") => Some((
             vec![
@@ -3430,7 +3484,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.regex", "replace" | "replace_first" | "replace_all") => Some((
+        ("core.regex", "replace" | "replace_first") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -3974,6 +4028,7 @@ pub struct CoreParam {
 #[derive(Clone, Copy)]
 pub enum CoreDefault {
     Bool(bool),
+    Int(i64),
     String(&'static str),
     EmptyList,
     /// An omitted optional Core handle. The binder inserts the slot; the
@@ -3985,12 +4040,18 @@ pub enum CoreDefault {
         type_name: &'static str,
         method: &'static str,
     },
+    /// A unit variant of a compiler-owned Core enum.
+    StaticEnum {
+        type_name: &'static str,
+        variant: &'static str,
+    },
 }
 
 impl CoreDefault {
     pub fn build(self, span: crate::Diagnostics::Span) -> crate::AST::Expr {
         match self {
             CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
+            CoreDefault::Int(value) => crate::AST::Expr::Int(value, span, None, None),
             CoreDefault::String(value) => {
                 crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
             }
@@ -4006,6 +4067,14 @@ impl CoreDefault {
                 recv_type: None,
                 resolved_ret: None,
                 checked_widen: false,
+            },
+            CoreDefault::StaticEnum { type_name, variant } => crate::AST::Expr::EnumLit {
+                type_name: type_name.to_string(),
+                variant: variant.to_string(),
+                variant_span: None,
+                args: Vec::new(),
+                leading_dot: false,
+                span,
             },
         }
     }
@@ -4037,6 +4106,14 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault = CoreDefault::StaticCall {
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
     match (module, name) {
+        // D-TIMEDEPTH1=A: local-to-zoned construction has one explicit DST
+        // policy, with Temporal's compatible choice as the beginner default.
+        ("core.time", "zoned_local") => Some(vec![
+            required("date"),
+            required("time"),
+            required("zone"),
+            optional("disambiguation", CoreDefault::String("compatible")),
+        ]),
         // D-CONFIG-ENV1: labels are part of the runtime config surface, while
         // the defaults keep `env.decode<T>()` as the beginner one-call form.
         ("core.sys", "decode") => Some(vec![
@@ -4066,11 +4143,27 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 default: Some(CoreDefault::Absent),
             },
         ]),
+        ("core.encoding.csv", "parse") => Some(vec![
+            required("text"),
+            optional("delimiter", CoreDefault::String(",")),
+            optional("header", CoreDefault::Bool(false)),
+            optional("skip_blank", CoreDefault::Bool(false)),
+        ]),
+        ("core.encoding.csv", "rows") => Some(vec![
+            required("text"),
+            optional("delimiter", CoreDefault::String(",")),
+            optional("header", CoreDefault::Bool(false)),
+            optional("skip_blank", CoreDefault::Bool(false)),
+        ]),
+        ("core.encoding.csv", "reader") => Some(vec![
+            required("source"),
+            optional("limits", ENCODING_LIMITS_DEFAULT),
+            optional("delimiter", CoreDefault::String(",")),
+            optional("header", CoreDefault::Bool(false)),
+            optional("skip_blank", CoreDefault::Bool(false)),
+        ]),
         (
-            "core.encoding.json"
-            | "core.encoding.jsonl"
-            | "core.encoding.csv"
-            | "core.encoding.cbor",
+            "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.cbor",
             "reader",
         ) => Some(vec![
             required("source"),

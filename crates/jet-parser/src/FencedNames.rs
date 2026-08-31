@@ -10,10 +10,123 @@
 use std::collections::HashSet;
 
 const MAX_FENCE_EXPANSION: usize = 4096;
+const MAX_FENCE_EXPANSION_BYTES: usize = 4 * 1024 * 1024;
+const MAX_FENCE_BUDGET_ENTRIES: usize = 64 * 1024;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Lexer::{TokKind, Token};
+use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::AST::{FencedNames, FencedStatement};
+
+#[derive(Default)]
+struct FenceExpansionBudget {
+    entries: usize,
+    bytes: usize,
+}
+
+impl FenceExpansionBudget {
+    fn reserve(&mut self, entries: usize, bytes: usize) -> bool {
+        let Some(total_entries) = self.entries.checked_add(entries) else {
+            return false;
+        };
+        let Some(total_bytes) = self.bytes.checked_add(bytes) else {
+            return false;
+        };
+        if total_entries > MAX_FENCE_BUDGET_ENTRIES || total_bytes > MAX_FENCE_EXPANSION_BYTES {
+            return false;
+        }
+        self.entries = total_entries;
+        self.bytes = total_bytes;
+        true
+    }
+}
+
+fn token_cost(tokens: &[Token]) -> Option<(usize, usize)> {
+    let mut pending = vec![tokens];
+    let mut count = 0usize;
+    let mut bytes = 0usize;
+    while let Some(tokens) = pending.pop() {
+        for token in tokens {
+            count = count.checked_add(1)?;
+            bytes = bytes.checked_add(std::mem::size_of::<Token>())?;
+            let extra = match &token.kind {
+                TokKind::Ident(name)
+                | TokKind::Int(_, name)
+                | TokKind::Float(_, name)
+                | TokKind::LineComment(name)
+                | TokKind::BlockComment(name) => name.len(),
+                TokKind::UnitNumber {
+                    raw,
+                    suffix,
+                    ..
+                } => raw.len().checked_add(suffix.len())?,
+                TokKind::Str(parts) => {
+                    let mut part_bytes = parts
+                        .len()
+                        .checked_mul(std::mem::size_of::<StrTokPart>())?;
+                    let mut literal_bytes = 0usize;
+                    for part in parts {
+                        match part {
+                            StrTokPart::Lit(text) => {
+                                literal_bytes = literal_bytes.checked_add(text.len())?;
+                            }
+                            StrTokPart::Byte(_) => {}
+                            StrTokPart::Interp(tokens) => pending.push(tokens),
+                        }
+                    }
+                    part_bytes = part_bytes.checked_add(literal_bytes)?;
+                    part_bytes
+                }
+                _ => 0,
+            };
+            bytes = bytes.checked_add(extra)?;
+        }
+    }
+    Some((count, bytes))
+}
+
+fn add_cost(left: &mut (usize, usize), right: (usize, usize)) -> Option<()> {
+    left.0 = left.0.checked_add(right.0)?;
+    left.1 = left.1.checked_add(right.1)?;
+    Some(())
+}
+
+fn expanded_cost(
+    segment: &[Token],
+    pairs: &[(usize, usize)],
+    fence_entries: &[Vec<Vec<Token>>],
+    copies: usize,
+) -> Option<(usize, usize)> {
+    // Authored tokens repeat for every copy, while each replacement entry is
+    // consumed exactly once. Charge both classes once, then multiply only the
+    // authored cost; scanning the whole body for every copy lets a legal
+    // 4096-entry fence turn the preflight itself into a CPU denial of service.
+    let mut repeated = (0usize, 0usize);
+    let mut replacements = (0usize, 0usize);
+    let mut cursor = 0usize;
+    for (fence_index, &(open, close)) in pairs.iter().enumerate() {
+        add_cost(&mut repeated, token_cost(segment.get(cursor..open)?)?)?;
+        for entry in fence_entries.get(fence_index)? {
+            add_cost(&mut replacements, token_cost(entry)?)?;
+        }
+        cursor = close.checked_add(1)?;
+    }
+    add_cost(&mut repeated, token_cost(segment.get(cursor..)?)?)?;
+
+    let mut total = (
+        repeated.0.checked_mul(copies)?,
+        repeated.1.checked_mul(copies)?,
+    );
+    add_cost(&mut total, replacements)?;
+    let separators = copies.checked_sub(1)?;
+    add_cost(
+        &mut total,
+        (
+            separators,
+            separators.checked_mul(std::mem::size_of::<Token>())?,
+        ),
+    )?;
+    Some(total)
+}
 
 pub(crate) fn expand(
     toks: &[Token],
@@ -26,6 +139,7 @@ pub(crate) fn expand(
     let mut nested_brace_depth = 0usize;
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
+    let mut budget = FenceExpansionBudget::default();
 
     for (index, token) in toks.iter().enumerate() {
         let nested_expression_brace = matches!(token.kind, TokKind::LBrace)
@@ -59,23 +173,31 @@ pub(crate) fn expand(
                 &mut out,
                 &mut facts,
                 &mut diags,
+                &mut budget,
             );
             out.push(token.clone());
             match token.kind {
-                TokKind::LBrace => brace_depth += 1,
+                TokKind::LBrace => brace_depth = brace_depth.saturating_add(1),
                 TokKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
                 _ => {}
             }
-            segment_start = index + 1;
+            let Some(next) = index.checked_add(1) else {
+                diags.push(rejected_position(
+                    token.span,
+                    "the fenced statement position overflows",
+                ));
+                break;
+            };
+            segment_start = next;
             continue;
         }
 
         match token.kind {
-            TokKind::LParen => paren_depth += 1,
+            TokKind::LParen => paren_depth = paren_depth.saturating_add(1),
             TokKind::RParen => paren_depth = paren_depth.saturating_sub(1),
-            TokKind::LBracket => bracket_depth += 1,
+            TokKind::LBracket => bracket_depth = bracket_depth.saturating_add(1),
             TokKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
-            TokKind::LBrace => nested_brace_depth += 1,
+            TokKind::LBrace => nested_brace_depth = nested_brace_depth.saturating_add(1),
             TokKind::RBrace => nested_brace_depth = nested_brace_depth.saturating_sub(1),
             _ => {}
         }
@@ -94,6 +216,7 @@ fn flush_segment(
     out: &mut Vec<Token>,
     facts: &mut Vec<FencedStatement>,
     diags: &mut Vec<Diagnostic>,
+    budget: &mut FenceExpansionBudget,
 ) {
     if !segment
         .iter()
@@ -103,7 +226,7 @@ fn flush_segment(
         return;
     }
 
-    match expand_segment(segment, brace_depth) {
+    match expand_segment(segment, brace_depth, budget) {
         Ok((expanded, fact)) => {
             out.extend(expanded);
             facts.push(fact);
@@ -118,6 +241,7 @@ fn flush_segment(
 fn expand_segment(
     segment: &[Token],
     brace_depth: usize,
+    budget: &mut FenceExpansionBudget,
 ) -> Result<(Vec<Token>, FencedStatement), Vec<Diagnostic>> {
     let mut fences = Vec::new();
     let mut fence_entries: Vec<Vec<Vec<Token>>> = Vec::new();
@@ -129,7 +253,17 @@ fn expand_segment(
         match segment[index].kind {
             TokKind::FenceOpen => {
                 let open = index;
-                let Some(relative_close) = segment[index + 1..]
+                let Some(after_open) = index
+                    .checked_add(1)
+                    .and_then(|start| segment.get(start..))
+                else {
+                    diags.push(rejected_position(
+                        segment[open].span,
+                        "this fence cannot be expanded because its position overflows",
+                    ));
+                    break;
+                };
+                let Some(relative_close) = after_open
                     .iter()
                     .position(|token| matches!(token.kind, TokKind::FenceClose))
                 else {
@@ -142,18 +276,39 @@ fn expand_segment(
                     ));
                     break;
                 };
-                let close = index + 1 + relative_close;
-                if segment[index + 1..close]
-                    .iter()
-                    .any(|token| matches!(token.kind, TokKind::FenceOpen))
-                {
+                let Some(close) = index
+                    .checked_add(1)
+                    .and_then(|start| start.checked_add(relative_close))
+                else {
+                    diags.push(rejected_position(
+                        segment[open].span,
+                        "this fence cannot be expanded because its position overflows",
+                    ));
+                    break;
+                };
+                let nested = index
+                    .checked_add(1)
+                    .and_then(|start| segment.get(start..close))
+                    .is_some_and(|tokens| {
+                        tokens
+                            .iter()
+                            .any(|token| matches!(token.kind, TokKind::FenceOpen))
+                    });
+                if nested {
                     diags.push(rejected_position(
                         Span::new(segment[open].span.start, segment[close].span.end),
                         "fences cannot nest",
                     ));
                 }
                 pairs.push((open, close));
-                index = close + 1;
+                let Some(next) = close.checked_add(1) else {
+                    diags.push(rejected_position(
+                        segment[open].span,
+                        "this fence cannot be expanded because its position overflows",
+                    ));
+                    break;
+                };
+                index = next;
             }
             TokKind::FenceClose => {
                 diags.push(rejected_position(
@@ -164,9 +319,25 @@ fn expand_segment(
                         crate::Syntax::SIGIL_FENCE_OPEN
                     ),
                 ));
-                index += 1;
+                let Some(next) = index.checked_add(1) else {
+                    diags.push(rejected_position(
+                        segment[index].span,
+                        "this fence cannot be expanded because its position overflows",
+                    ));
+                    break;
+                };
+                index = next;
             }
-            _ => index += 1,
+            _ => {
+                let Some(next) = index.checked_add(1) else {
+                    diags.push(rejected_position(
+                        segment[index].span,
+                        "this fence cannot be expanded because its position overflows",
+                    ));
+                    break;
+                };
+                index = next;
+            }
         }
     }
 
@@ -176,11 +347,11 @@ fn expand_segment(
 
     let first = pairs[0];
     let binding_target = first.0 == 0
-        && first.1 + 1 < segment.len()
-        && matches!(
-            segment[first.1 + 1].kind,
-            TokKind::ColonColon | TokKind::ColonEq
-        );
+        && first
+            .1
+            .checked_add(1)
+            .and_then(|next| segment.get(next))
+            .is_some_and(|token| matches!(token.kind, TokKind::ColonColon | TokKind::ColonEq));
     let expression_statement = brace_depth > 0
         && !segment.iter().any(|token| {
             matches!(
@@ -219,7 +390,21 @@ fn expand_segment(
 
     for (fence_index, &(open, close)) in pairs.iter().enumerate() {
         let binding_fence = binding_target && fence_index == 0;
-        match parse_entries(&segment[open + 1..close], segment[open].span, binding_fence) {
+        let Some(content_start) = open.checked_add(1) else {
+            diags.push(rejected_position(
+                segment[open].span,
+                "this fence cannot be expanded because its position overflows",
+            ));
+            continue;
+        };
+        let Some(content) = segment.get(content_start..close) else {
+            diags.push(rejected_position(
+                segment[open].span,
+                "this fence cannot be expanded because its position is invalid",
+            ));
+            continue;
+        };
+        match parse_entries(content, segment[open].span, binding_fence, budget) {
             Ok((mut names, entries)) => {
                 names.span = Span::new(segment[open].span.start, segment[close].span.end);
                 fences.push(names);
@@ -249,7 +434,20 @@ fn expand_segment(
     }
 
     let copies = fences[0].names.len();
-    let mut expanded = Vec::with_capacity(segment.len() * copies);
+    let Some((expanded_count, expanded_bytes)) = expanded_cost(segment, &pairs, &fence_entries, copies)
+    else {
+        return Err(vec![rejected_entry(
+            statement_span(segment),
+            "a fenced statement is too large to expand",
+        )]);
+    };
+    if !budget.reserve(expanded_count, expanded_bytes) {
+        return Err(vec![rejected_entry(
+            statement_span(segment),
+            "a fenced statement exceeds the expansion resource budget",
+        )]);
+    }
+    let mut expanded = Vec::with_capacity(expanded_count);
     for copy in 0..copies {
         if copy > 0 {
             let at = segment.first().map_or(0, |token| token.span.start);
@@ -262,7 +460,13 @@ fn expand_segment(
         for (fence_index, &(open, close)) in pairs.iter().enumerate() {
             expanded.extend_from_slice(&segment[cursor..open]);
             expanded.extend_from_slice(&fence_entries[fence_index][copy]);
-            cursor = close + 1;
+            let Some(next) = close.checked_add(1) else {
+                return Err(vec![rejected_entry(
+                    statement_span(segment),
+                    "a fenced statement has an invalid boundary",
+                )]);
+            };
+            cursor = next;
         }
         expanded.extend_from_slice(&segment[cursor..]);
     }
@@ -284,6 +488,7 @@ fn parse_entries(
     content: &[Token],
     open_span: Span,
     binding_fence: bool,
+    budget: &mut FenceExpansionBudget,
 ) -> Result<(FencedNames, Vec<Vec<Token>>), Diagnostic> {
     if content.is_empty() {
         return Err(Diagnostic::error(
@@ -321,6 +526,23 @@ fn parse_entries(
                             "a fenced range expands to too many entries",
                         ));
                     }
+                    let Some(bytes) = count.and_then(|count| {
+                        count.checked_mul(
+                            std::mem::size_of::<Token>()
+                                .checked_add(20)?,
+                        )
+                    }) else {
+                        return Err(rejected_entry(
+                            range_span,
+                            "a fenced range is too large to expand",
+                        ));
+                    };
+                    if !budget.reserve(count.unwrap_or(0), bytes) {
+                        return Err(rejected_entry(
+                            range_span,
+                            "a fenced range exceeds the expansion resource budget",
+                        ));
+                    }
                     let entries = (*start..=*end)
                         .map(|value| {
                             vec![Token {
@@ -348,6 +570,23 @@ fn parse_entries(
             let range_span = Span::new(content[0].span.start, content[2].span.end);
             match expand_numbered_range(start, end, range_span) {
                 Ok(names) => {
+                    let Some(bytes) = names.iter().try_fold(0usize, |bytes, (name, _)| {
+                        bytes
+                            .checked_add(std::mem::size_of::<Token>())?
+                            .checked_add(name.len())?
+                            .checked_add(name.len())
+                    }) else {
+                        return Err(rejected_entry(
+                            range_span,
+                            "a fenced name range is too large to expand",
+                        ));
+                    };
+                    if !budget.reserve(names.len(), bytes) {
+                        return Err(rejected_entry(
+                            range_span,
+                            "a fenced name range exceeds the expansion resource budget",
+                        ));
+                    }
                     let entries = names
                         .iter()
                         .map(|(name, span)| {
@@ -385,7 +624,9 @@ fn parse_entries(
     let mut depth = 0usize;
     for token in content {
         match token.kind {
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                depth = depth.saturating_add(1)
+            }
             TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
                 depth = depth.saturating_sub(1)
             }
@@ -397,6 +638,19 @@ fn parse_entries(
                 continue;
             }
             _ => {}
+        }
+        let Some((_, bytes)) = token_cost(std::slice::from_ref(token))
+        else {
+            return Err(rejected_entry(
+                token.span,
+                "a fenced entry is too large to expand",
+            ));
+        };
+        if !budget.reserve(1, bytes) {
+            return Err(rejected_entry(
+                token.span,
+                "a fenced entry exceeds the expansion resource budget",
+            ));
         }
         current.push(token.clone());
     }
@@ -422,6 +676,12 @@ fn parse_entries(
                 }],
                 _,
             ) => {
+                if !budget.reserve(0, name.len()) {
+                    return Err(rejected_entry(
+                        span,
+                        "a fenced name exceeds the expansion resource budget",
+                    ));
+                }
                 names.push((name.clone(), span));
             }
             (_, true) => {
@@ -486,7 +746,14 @@ fn expand_numbered_range(
     let count = end_number
         .checked_sub(start_number)
         .and_then(|length| length.checked_add(1));
-    if !count.is_some_and(|count| count <= MAX_FENCE_EXPANSION) {
+    if !count.is_some_and(|count| {
+        count <= MAX_FENCE_EXPANSION
+            && start_prefix
+                .len()
+                .checked_add(width)
+                .and_then(|name_len| count.checked_mul(name_len))
+                .is_some_and(|bytes| bytes <= MAX_FENCE_EXPANSION_BYTES)
+    }) {
         return Err(rejected_entry(
             span,
             "a fenced name range expands to too many entries",
@@ -502,7 +769,8 @@ fn numbered_name(name: &str) -> Option<(&str, usize, usize)> {
         .char_indices()
         .rev()
         .find(|(_, ch)| !ch.is_ascii_digit())
-        .map_or(0, |(index, ch)| index + ch.len_utf8());
+        .map_or(Some(0), |(index, ch)| index.checked_add(ch.len_utf8()))
+        ?;
     if split == name.len() {
         return None;
     }
@@ -750,12 +1018,14 @@ fn run() {
 
     #[test]
     fn hostile_fence_ranges_are_rejected_before_expansion() {
+        let padded_start = "0".repeat(MAX_FENCE_EXPANSION_BYTES / MAX_FENCE_EXPANSION + 1);
         for source in [
             format!(
                 "fn run() {{ print(@[0..{}]@) }}\n",
                 MAX_FENCE_EXPANSION
             ),
             "fn run() { @[ task1..task1000000000 ]@ :: work() }\n".to_string(),
+            format!("fn run() {{ @[ task{padded_start}..task4095 ]@ :: work() }}\n"),
         ] {
             let (tokens, lex_diags) = Lexer::lex(&source);
             assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -767,6 +1037,35 @@ fn run() {
                 "{source}: {diagnostics:?}"
             );
         }
+    }
+
+    #[test]
+    fn hostile_explicit_fence_lists_are_rejected_by_the_shared_budget() {
+        let names = (0..=MAX_FENCE_BUDGET_ENTRIES)
+            .map(|index| format!("name{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("fn run() {{ @[ {names} ]@ :: work() }}\n");
+        let (tokens, lex_diags) = Lexer::lex(&source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0371"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget() {
+        let body = "x".repeat(MAX_FENCE_EXPANSION_BYTES / MAX_FENCE_EXPANSION + 1);
+        let source = format!("fn run() {{ print(@[0..4095]@, \"{body}\") }}\n");
+        let (tokens, lex_diags) = Lexer::lex(&source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0371"),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]

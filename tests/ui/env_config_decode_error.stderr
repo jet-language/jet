@@ -1,26 +1,26 @@
-Error [E2402]: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists
   --> tests/ui/env_config_decode_error.jet:11:19
     |
  11 |     failed :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"])
     |                   ^^^^^^
- Why: `?` uses the declared conversion rail; `[FieldError]` can reach `Err` only through `impl [FieldError] -> Err`
- Fix: add `impl [FieldError] -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `[FieldError]` can reach `Err` only through `impl [FieldError] -> Err`
+ Fix: Handle this call locally with `??`, add `impl [FieldError] -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E0107]: nothing named `errors` exists here
+Error [E0107]: Nothing named `errors` exists here
   --> tests/ui/env_config_decode_error.jet:14:43
     |
  14 |         .Err(errors) -> { panic("config: {errors}") }
     |                                           ^^^^^^
- Why: a name must be declared before it's used
- Fix: declare it first: `errors :: ...`
+ Why: A name must be declared before it's used
+ Fix: Declare it first: `errors :: ...`
 More: jet-lang.dev/e/E0107
 
-Error [E0003]: this `if` needs an `else` arm
+Error [E0003]: This `if` needs an `else` arm
   --> tests/ui/env_config_decode_error.jet:12:5
     |
  12 |     if failed == {
     |     ^^
- Why: mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)
- Fix: add `else -> { ... }` after the last arm
+ Why: Mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)
+ Fix: Add `else -> { ... }` after the last arm
 More: jet-lang.dev/e/E0003

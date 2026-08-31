@@ -227,6 +227,63 @@ fn run() {
     assert_eq!(out, "true\ntrue\n", "gzip round-trip failed: {out:?}");
 }
 
+fn zstd_rle_frame(output_len: usize, byte: u8) -> Vec<u8> {
+    let mut frame = vec![0x28, 0xb5, 0x2f, 0xfd, 0xe0];
+    frame.extend_from_slice(&(output_len as u64).to_le_bytes());
+    let mut remaining = output_len;
+    while remaining > 0 {
+        let block_len = remaining.min(128 * 1024);
+        let last = block_len == remaining;
+        let header = ((block_len as u32) << 3) | (1 << 1) | u32::from(last);
+        frame.extend_from_slice(&header.to_le_bytes()[..3]);
+        frame.push(byte);
+        remaining -= block_len;
+    }
+    frame
+}
+
+#[test]
+fn runtime_compressors_reject_output_over_the_shared_budget() {
+    if !have_toolchain() {
+        eprintln!("note: cargo/rustc not found; skipping hostile codec integration test");
+        return;
+    }
+
+    const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
+    let temp = TempTree::new("jet_archive_codec_limits");
+    let gzip_path = temp.0.join("oversized.gz");
+    let zstd_path = temp.0.join("oversized.zst");
+    let gzip = jet_foundation::GzipKernel::jet_compress_gzip_compress(&vec![b'x'; OUTPUT_LIMIT + 1]);
+    fs::write(&gzip_path, gzip).unwrap();
+    fs::write(&zstd_path, zstd_rle_frame(OUTPUT_LIMIT + 1, b'x')).unwrap();
+
+    let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.archive.gzip as gzip
+use core.archive.zstd as zstd
+use core.files as files
+
+fn run() {
+    gzip_bytes :: files.read_bytes("__GZIP__") ?? panic("gzip fixture")
+    if gzip.decompress(gzip_bytes) == {
+        .Ok(_) -> print("gzip accepted")
+        .Err(_) -> print("gzip rejected")
+        else -> print("gzip unexpected")
+    }
+    zstd_bytes :: files.read_bytes("__ZSTD__") ?? panic("zstd fixture")
+    if zstd.decompress(zstd_bytes) == {
+        .Ok(_) -> print("zstd accepted")
+        .Err(_) -> print("zstd rejected")
+        else -> print("zstd unexpected")
+    }
+}
+"#
+    .replace("__GZIP__", &escape(&gzip_path))
+    .replace("__ZSTD__", &escape(&zstd_path));
+    let out = run_core_bridge(&source);
+    assert_eq!(out, "gzip rejected\nzstd rejected\n", "codec budget regression: {out:?}");
+}
+
 #[test]
 fn archive_zip_and_tar_round_trip_bytes() {
     if !have_toolchain() {
@@ -250,6 +307,204 @@ data :: [U8]{ 72, 101, 108, 108, 111 }
     assert_eq!(
         out, "true\ntrue\ntrue\n",
         "zip/tar byte round-trip failed: {out:?}"
+    );
+}
+
+#[test]
+fn archive_long_names_preserve_format_semantics_below_limits() {
+    let zip_name = "zip-name/".repeat(120) + "file.txt";
+    let zip = jet_foundation::CoreArchive::jet_archive_zip_compress(&zip_name, b"zip");
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_zip_names_json(&zip),
+        format!("[\"{zip_name}\"]")
+    );
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_zip_decompress(&zip),
+        b"zip"
+    );
+
+    let tar_name = "tar-name/".repeat(40) + "file.txt";
+    let tar = jet_foundation::CoreArchive::jet_archive_tar_add(&[], &tar_name, b"tar");
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_names_json(&tar),
+        format!("[\"{tar_name}\"]")
+    );
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_get(&tar, &tar_name),
+        b"tar"
+    );
+}
+
+#[test]
+fn archive_name_json_escapes_controls() {
+    let name = "quote\"line\ncontrol\u{0001}";
+    let expected = "[\"quote\\\"line\\ncontrol\\u0001\"]";
+
+    let zip = jet_foundation::CoreArchive::jet_archive_zip_compress(name, b"zip");
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_zip_names_json(&zip),
+        expected
+    );
+
+    let tar = jet_foundation::CoreArchive::jet_archive_tar_add(&[], name, b"tar");
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_names_json(&tar),
+        expected
+    );
+}
+
+fn push_archive_u16(output: &mut Vec<u8>, value: usize) {
+    output.extend_from_slice(&(value as u16).to_le_bytes());
+}
+
+fn push_archive_u32(output: &mut Vec<u8>, value: usize) {
+    output.extend_from_slice(&(value as u32).to_le_bytes());
+}
+
+fn zip_names_json_materialization_bomb() -> Vec<u8> {
+    const ENTRY_COUNT: usize = 4096;
+    const NAME_LEN: usize = 4096;
+    let name = vec![1u8; NAME_LEN];
+    let mut local = Vec::new();
+    let mut central = Vec::new();
+    for _ in 0..ENTRY_COUNT {
+        let local_offset = local.len();
+        push_archive_u32(&mut local, 0x0403_4b50);
+        push_archive_u16(&mut local, 20);
+        push_archive_u16(&mut local, 0);
+        push_archive_u16(&mut local, 0);
+        push_archive_u16(&mut local, 0);
+        push_archive_u16(&mut local, 0);
+        push_archive_u32(&mut local, 0);
+        push_archive_u32(&mut local, 0);
+        push_archive_u32(&mut local, 0);
+        push_archive_u16(&mut local, NAME_LEN);
+        push_archive_u16(&mut local, 0);
+        local.extend_from_slice(&name);
+
+        push_archive_u32(&mut central, 0x0201_4b50);
+        push_archive_u16(&mut central, 20);
+        push_archive_u16(&mut central, 20);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u32(&mut central, 0);
+        push_archive_u32(&mut central, 0);
+        push_archive_u32(&mut central, 0);
+        push_archive_u16(&mut central, NAME_LEN);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u32(&mut central, 0);
+        push_archive_u32(&mut central, local_offset);
+        central.extend_from_slice(&name);
+    }
+
+    let central_offset = local.len();
+    let central_size = central.len();
+    let mut archive = local;
+    archive.extend_from_slice(&central);
+    push_archive_u32(&mut archive, 0x0605_4b50);
+    push_archive_u16(&mut archive, 0);
+    push_archive_u16(&mut archive, 0);
+    push_archive_u16(&mut archive, ENTRY_COUNT);
+    push_archive_u16(&mut archive, ENTRY_COUNT);
+    push_archive_u32(&mut archive, central_size);
+    push_archive_u32(&mut archive, central_offset);
+    push_archive_u16(&mut archive, 0);
+    archive
+}
+
+fn tar_bomb_octal(field: &mut [u8], value: usize) {
+    field.fill(b'0');
+    field[field.len() - 1] = 0;
+    let digits = format!("{value:o}");
+    let start = field.len() - 1 - digits.len();
+    field[start..start + digits.len()].copy_from_slice(digits.as_bytes());
+}
+
+fn append_tar_bomb_record(output: &mut Vec<u8>, name: &[u8], payload: &[u8], kind: u8) {
+    let mut header = [0u8; 512];
+    header[..name.len()].copy_from_slice(name);
+    tar_bomb_octal(&mut header[100..108], 0o644);
+    tar_bomb_octal(&mut header[124..136], payload.len());
+    header[148..156].fill(b' ');
+    header[156] = kind;
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    let checksum = header.iter().map(|byte| *byte as u64).sum::<u64>();
+    let digits = format!("{checksum:06o}");
+    header[148..154].copy_from_slice(&digits.as_bytes()[digits.len() - 6..]);
+    header[154] = 0;
+    output.extend_from_slice(&header);
+    output.extend_from_slice(payload);
+    let padded = (output.len() + 511) / 512 * 512;
+    output.resize(padded, 0);
+}
+
+fn tar_names_json_materialization_bomb() -> Vec<u8> {
+    const PAIR_COUNT: usize = 2048;
+    const NAME_LEN: usize = 8192;
+    let name = vec![1u8; NAME_LEN];
+    let mut archive = Vec::new();
+    for _ in 0..PAIR_COUNT {
+        let mut long_name = name.clone();
+        long_name.push(0);
+        append_tar_bomb_record(&mut archive, b"././#LongLink", &long_name, b'L');
+        append_tar_bomb_record(&mut archive, b"x", b"x", b'0');
+    }
+    archive.extend_from_slice(&[0; 1024]);
+    archive
+}
+
+#[test]
+fn archive_public_zip_names_json_rejects_aggregate_materialization_bomb() {
+    let archive = zip_names_json_materialization_bomb();
+    assert!(archive.len() < 64 * 1024 * 1024);
+    assert!(
+        !jet_foundation::CoreArchive::jet_archive_zip_open(&archive).is_empty(),
+        "ZIP materialization bomb fixture must parse before JSON sizing"
+    );
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_zip_names_json(&archive),
+        ""
+    );
+}
+
+#[test]
+fn archive_public_tar_names_json_rejects_aggregate_materialization_bomb() {
+    let archive = tar_names_json_materialization_bomb();
+    assert!(archive.len() < 64 * 1024 * 1024);
+    let long_name = "\u{0001}".repeat(8192);
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_get(&archive, &long_name),
+        b"x"
+    );
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_names_json(&archive),
+        ""
+    );
+}
+
+#[test]
+fn archive_public_tar_reader_rejects_an_entry_count_bomb() {
+    const TOO_MANY_ENTRIES: usize = 4097;
+    let mut archive = Vec::new();
+    for index in 0..TOO_MANY_ENTRIES {
+        let name = format!("entry-{index}");
+        append_tar_bomb_record(&mut archive, name.as_bytes(), b"x", b'0');
+    }
+    archive.extend_from_slice(&[0; 1024]);
+    assert!(archive.len() < 8 * 1024 * 1024);
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_get(&archive, "entry-0"),
+        Vec::<u8>::new()
+    );
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_names_json(&archive),
+        ""
     );
 }
 

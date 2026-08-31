@@ -132,6 +132,12 @@ itself is a card. It never fails on a card lane, so logging never derails the
 task. The **Papercuts** tab groups them by day; the owner clears a handled one
 with `tower papercut resolve <id> --by owner`.
 
+The **Guidance** tab sits to the right of **Papercuts**. It shows
+`docs/agents/owner-guidance.md`, the owner's source of truth for agent behavior.
+Agents can read it through the repository. Only an authenticated owner UI
+session can save changes, and the normal Docs API cannot update, archive, or
+delete it.
+
 `tower brief` is the one-shot agent work packet (#462): card, live blocker
 state, exit criteria, every linked decision copied verbatim, open questions,
 `refs` (explicit + harvested from body/plan), recent log, and the standing
@@ -149,10 +155,10 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 - **SSE** — the UI updates over `/api/stream` the instant anything changes;
   passive updates never disturb reading, typing, or an open ballot.
-- **Auth (opt-in)** — set `"auth": {"token": "…"}` in the untracked
-  `plugins/tower/.tower/secrets.json` to
-  require a key from non-localhost devices (`/?key=<token>` once per device;
-  localhost always exempt). Without it the board is open to your LAN/tailnet.
+- **Auth** — without a configured token, Tower binds to loopback and keeps
+  board access local. Set `"auth": {"token": "…"}` in the untracked
+  `plugins/tower/.tower/secrets.json` to permit authenticated remote devices
+  (`/?key=<token>` once per device; localhost remains exempt).
 - **PWA** — installable app (offline shell). Live updates use SSE; web push
   was removed (owner D-VERDICT-460-1).
 - **Undo** — every owner action shows an Undo toast (`tower undo` in the

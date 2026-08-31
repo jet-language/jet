@@ -9,8 +9,8 @@
 #
 # So a worker now type-checks its own patch, in the main checkout, against the
 # warm shared target dir. Cargo serializes concurrent invocations on its own
-# build lock, so several workers may call this at once; they queue, they do not
-# corrupt.
+# build lock, so explicitly approved disjoint workers may call this at once;
+# they queue, they do not corrupt the shared target.
 #
 # What this is NOT: it does not run tests, does not run formatters, does not
 # regenerate artifacts, does not build a release binary. Those stay with the
@@ -39,15 +39,13 @@ export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
 # One rustc per hardware thread put this machine into swap on a cold build.
-# Eight was still too many: with up to 30 lanes queuing on cargo's build lock,
-# each holder forking eight rustc drove the box into an OOM kill. Four keeps a
-# single holder near ~8G peak while staying fast on a warm target dir.
+# Four keeps a single holder near ~8G peak while staying fast on a warm target
+# dir, while the slot gate below bounds shared resource pressure.
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
-# A memory floor alone is not enough, and this is the lesson of two OOM kills:
-# it is a one-shot gate, so thirty lanes read "plenty free" in the same instant
-# and then all fork together. The floor has to be paired with a hard limit on
-# how many checks may run at once. `flock` gives us that: at most
+# A memory floor alone is not enough: concurrent callers can read "plenty free"
+# in the same instant and then all fork together. The floor has to be paired
+# with a hard limit on how many checks may run at once. `flock` gives us that: at most
 # JET_CHECK_SLOTS lanes hold a slot, the rest block until one frees.
 floor_mb="${JET_MIN_FREE_MB:-8000}"
 slots="${JET_CHECK_SLOTS:-3}"

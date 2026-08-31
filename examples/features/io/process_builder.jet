@@ -1,8 +1,7 @@
 use core.process as process
-use core.time as time
 
 fn run() {
-    timeout :: Duration.seconds(1) ?? panic("duration")
+    timeout :: 1s
     result :: process.cmd(["echo", "process-api"]).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(1024).run() ?? panic("process failed")
     print(result.success)
     print(result.timed_out)

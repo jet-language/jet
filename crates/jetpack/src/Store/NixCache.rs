@@ -15,6 +15,8 @@ use std::fs;
 #[cfg(test)]
 use std::io::Write;
 use std::io::{self, Read};
+use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -679,8 +681,11 @@ impl<'a> NixAdmission<'a> {
             ));
         }
         let url = endpoint.object_url(&info.info.url)?;
-        let response = jet_net::get_stream(&url, Duration::from_secs(120))
-            .map_err(|error| NixCacheError::new(NixCacheErrorKind::Transport, error.to_string()))?;
+        let response =
+            jet_net::get_stream_pinned(&url, &endpoint.addresses, Duration::from_secs(120))
+                .map_err(|error| {
+                    NixCacheError::new(NixCacheErrorKind::Transport, error.to_string())
+                })?;
         if response.status() == 404 || response.status() == 410 {
             return Err(NixCacheError::new(
                 NixCacheErrorKind::MissingReference,
@@ -1073,6 +1078,7 @@ struct CacheInfo {
 struct CacheEndpoint {
     endpoint: String,
     trusted_keys: Vec<NixPublicKey>,
+    addresses: Vec<SocketAddr>,
 }
 
 thread_local! {
@@ -1135,8 +1141,8 @@ impl CacheEndpoint {
     fn from_roots(roots: &Roots) -> Result<Self, NixCacheError> {
         let endpoint_path = roots.root.join("config/nix-cache-v1.endpoint");
         let key_path = roots.root.join("trust/nix-cache-v1.ed25519.pub");
-        let endpoint_present = fs::symlink_metadata(&endpoint_path).is_ok();
-        let key_present = fs::symlink_metadata(&key_path).is_ok();
+        let endpoint_present = optional_path_present(&endpoint_path)?;
+        let key_present = optional_path_present(&key_path)?;
         if endpoint_present != key_present {
             return Err(NixCacheError::new(
                 NixCacheErrorKind::Metadata,
@@ -1150,6 +1156,7 @@ impl CacheEndpoint {
             DEFAULT_ENDPOINT.to_string()
         };
         validate_endpoint(&endpoint)?;
+        let addresses = resolve_endpoint_addresses(&endpoint)?;
         let trusted_keys = if key_present {
             vec![
                 NixPublicKey::parse(&read_config(&key_path)?).map_err(|error| {
@@ -1170,6 +1177,7 @@ impl CacheEndpoint {
         Ok(Self {
             endpoint,
             trusted_keys,
+            addresses,
         })
     }
 
@@ -1291,8 +1299,10 @@ impl CacheEndpoint {
     }
 
     fn get(&self, url: &str, limit: u64) -> Result<Option<Vec<u8>>, NixCacheError> {
-        let response = jet_net::get_stream(url, Duration::from_secs(120))
-            .map_err(|error| NixCacheError::new(NixCacheErrorKind::Transport, error.to_string()))?;
+        let response = jet_net::get_stream_pinned(url, &self.addresses, Duration::from_secs(120))
+            .map_err(|error| {
+            NixCacheError::new(NixCacheErrorKind::Transport, error.to_string())
+        })?;
         if response.status() == 404 || response.status() == 410 {
             return Ok(None);
         }
@@ -1438,17 +1448,14 @@ fn existing_object(
     {
         return Ok(None);
     }
-    let digest = super::Ingest::verified_output_hash_persistent(
-        output,
-        Some(&roots.hangar_dir()),
-        false,
-    )
-        .map_err(|error| {
-            NixCacheError::new(
-                NixCacheErrorKind::Admission,
-                format!("existing Nix object {store_path} failed re-hash: {error}"),
-            )
-        })?;
+    let digest =
+        super::Ingest::verified_output_hash_persistent(output, Some(&roots.hangar_dir()), false)
+            .map_err(|error| {
+                NixCacheError::new(
+                    NixCacheErrorKind::Admission,
+                    format!("existing Nix object {store_path} failed re-hash: {error}"),
+                )
+            })?;
     if digest != entry.envelope.output_hash {
         return Ok(None);
     }
@@ -1667,6 +1674,80 @@ fn validate_endpoint(endpoint: &str) -> Result<(), NixCacheError> {
     ))
 }
 
+fn resolve_endpoint_addresses(endpoint: &str) -> Result<Vec<SocketAddr>, NixCacheError> {
+    let (scheme, rest) = endpoint.split_once("://").ok_or_else(|| {
+        NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint has no supported scheme",
+        )
+    })?;
+    let authority = rest.split('/').next().unwrap_or_default();
+    let (host, port) = if let Some(host) = authority.strip_prefix('[') {
+        let (host, suffix) = host.split_once(']').ok_or_else(|| {
+            NixCacheError::new(
+                NixCacheErrorKind::PathTraversal,
+                "Nix cache endpoint IPv6 host is malformed",
+            )
+        })?;
+        let port = suffix
+            .strip_prefix(':')
+            .map(parse_cache_port)
+            .transpose()?
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
+        (host, port)
+    } else {
+        let (host, raw_port) = authority
+            .rsplit_once(':')
+            .map(|(host, port)| (host, Some(port)))
+            .unwrap_or((authority, None));
+        let port = raw_port
+            .map(parse_cache_port)
+            .transpose()?
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
+        (host, port)
+    };
+    if scheme == "https" {
+        return jet_net::resolve_public_addresses(host, port)
+            .map_err(|detail| NixCacheError::new(NixCacheErrorKind::Transport, detail));
+    }
+    let socket_name = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let addresses = socket_name
+        .to_socket_addrs()
+        .map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::Transport,
+                format!("could not resolve Nix cache endpoint: {error}"),
+            )
+        })?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() || addresses.iter().any(|address| !address.ip().is_loopback()) {
+        return Err(NixCacheError::new(
+            NixCacheErrorKind::Transport,
+            "plain HTTP Nix cache transport is restricted to loopback",
+        ));
+    }
+    Ok(addresses)
+}
+
+fn parse_cache_port(port: &str) -> Result<u16, NixCacheError> {
+    let port = port.parse::<u16>().map_err(|_| {
+        NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint port is malformed",
+        )
+    })?;
+    (port != 0).then_some(port).ok_or_else(|| {
+        NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint port must not be zero",
+        )
+    })
+}
+
 fn validate_relative_endpoint_url(relative: &str) -> Result<(), NixCacheError> {
     let (path, query) = relative.split_once('?').unwrap_or((relative, ""));
     if path.is_empty()
@@ -1787,6 +1868,14 @@ fn read_config(path: &Path) -> Result<String, NixCacheError> {
                 Ok(value.trim().to_string())
             }
         })
+}
+
+fn optional_path_present(path: &Path) -> Result<bool, NixCacheError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(NixCacheErrorKind::Metadata, error)),
+    }
 }
 
 fn ensure_dir(path: &Path, kind: NixCacheErrorKind) -> Result<(), NixCacheError> {

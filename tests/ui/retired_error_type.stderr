@@ -1,8 +1,17 @@
 Error [E0432]: `Error` is retired
-  --> tests/ui/retired_error_type.jet:1:20
+  --> tests/ui/retired_error_type.jet:1:15
     |
-  1 | fn load() => Int Error! { return Ok(1) }
-    |                    ^^^^^
- Why: the default error type and its constructor now use the same name
- Fix: replace `Error` with `Err`
+  1 | fn load() Int Error! -> { return Ok(1) }
+    |               ^^^^^
+ Why: The default error type and its constructor now use the same name
+ Fix: Replace `Error` with `Err`
 More: jet-lang.dev/e/E0432
+
+Error [E-ERR-SUFFIX]: `Error!` is a retired suffix failure contract.
+  --> tests/ui/retired_error_type.jet:1:15
+    |
+  1 | fn load() Int Error! -> { return Ok(1) }
+    |               ^^^^^^
+ Why: Jet puts the error contract before its type so the success role and error role stay distinct in every type position.
+ Fix: Write `!Error`, or write `?Success !Error` when the success can be absent.
+More: jet-lang.dev/e/E-ERR-SUFFIX

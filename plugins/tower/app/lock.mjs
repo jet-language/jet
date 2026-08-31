@@ -1,7 +1,7 @@
 // Cross-process write lock: a lock DIRECTORY next to the data file (mkdir is
 // atomic on every platform). Holds pid + timestamp; stale locks (dead pid or
 // too old) are broken. Serializes CLI vs server vs concurrent agents.
-import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const STALE_MS = 15_000;
@@ -25,7 +25,13 @@ export function withLock(file, fn) {
       try {
         const held = JSON.parse(readFileSync(info, 'utf8'));
         stale = Date.now() - held.at > STALE_MS || !pidAlive(held.pid);
-      } catch { /* unreadable info → likely mid-create; only stale if dir is old */ }
+      } catch {
+        // The winner creates the directory before it can write info.json.
+        // Treat that ordinary publication window as live; only an old lock
+        // directory with no readable owner record is safe to break.
+        try { stale = Date.now() - statSync(dir).mtimeMs > STALE_MS; }
+        catch { stale = false; }
+      }
       if (stale) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* raced */ } continue; }
       if (Date.now() > deadline) throw new Error(`tower: could not acquire write lock at ${dir} (held by another process)`);
       const until = Date.now() + 50;

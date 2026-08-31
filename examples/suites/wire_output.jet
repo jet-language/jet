@@ -1,0 +1,52 @@
+// User story: a command emits stable JSON and reads the typed record back.
+//
+// Anti-pattern from the dogfood port: escaped string interpolation built wire
+// JSON beside a typed model:
+// `wire :: "{\"name\":\"{record.name}\",\"count\":{record.count}}"`
+// Rule D-ENCSTREAM-SURFACE1/D-JSONCANON1: let the shipped canonical writer
+// own quoting, key order, and bytes; let `#Codable` own typed reconstruction.
+//
+// Authoring pitfall: `{value}` is interpolation. A literal object in a Jet
+// string needs doubled braces, `{{` and `}}`; neither spelling is a substitute
+// for the writer. This suite does not hand-build JSON text.
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+use core.testing as testing
+
+#Codable
+struct WireRecord {
+    count: Int
+    name: String
+}
+
+fn write_record(path: Path) Bool !(EncodingError | IOError) -> {
+    output :: files.create(path)
+    writer :: json.writer(^output, canonical: true)
+
+    // Canonical mode sorts these keys, so the bytes are count then name.
+    writer.write(encoding.DataEvent.ObjectStart)
+    writer.write(encoding.DataEvent.Key("name"))
+    writer.write(encoding.DataEvent.Text("Ada"))
+    writer.write(encoding.DataEvent.Key("count"))
+    writer.write(encoding.DataEvent.Int(2))
+    writer.write(encoding.DataEvent.ObjectEnd)
+    writer.flush()
+    writer.finish()
+    return Ok(true)
+}
+
+fn run() !(EncodingError | IOError) {
+    root :: testing.temp_dir("suite-wire-output")
+    path :: Path.from(root).join("record.json")
+    write_record(path)
+    wire :: files.read(path)
+    print(wire)
+
+    // Encode and decode the same shape through the typed `#Codable` contract.
+    record :: WireRecord{count: 2, name: "Ada"}
+    encoded :: json.to_string(record)
+    decoded :: json.decode<WireRecord>(encoded) ?? panic("round-trip decode failed")
+    print("round-trip:{decoded.name}/{decoded.count}")
+    files.remove(path)
+}

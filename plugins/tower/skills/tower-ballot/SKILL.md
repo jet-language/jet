@@ -34,6 +34,10 @@ short ballot in the current request.
 - A **full ballot** starts with the same complete base draft, then runs all four
   review passes below. Set `ballotMode: "full"` and record all five stage
   summaries in `reviewPasses`.
+  The `reviewPasses.adversarial` string must begin with these exact sentences:
+  `Author model family: <family>. Adversarial model family: <family>.`
+  The two normalized family names must differ. Draft and updated full ballots
+  follow the same rule. Ratified decisions are immutable history.
 
 "Simple ballot" is not a profile name. `/simple` applies to both profiles.
 
@@ -127,11 +131,11 @@ cat > /tmp/ballot.json <<'EOF'
     "tradeoff": "Every writer must emit a purge event. That is acceptable because this system already owns every price update."
   },
   "reviewPasses": {
-    "base": "The first draft compared time limits with purge events and recommended purge events because known changes become visible at once.",
-    "boilOcean": "The breadth review also tested versioned keys, manual clearing, and no cache. Those were folded into the two main choices because they did not change who controls expiry.",
-    "hybrid": "The hybrid review kept purge events and added a long safety limit. The limit clears an entry if an event is ever lost.",
-    "cooperative": "The cooperative review strengthened time limits with random staggering and per-entry settings. It still permits known-stale prices after an update.",
-    "adversarial": "The adversarial review tested lost, repeated, and delayed events. A safety limit and safe repeated purges repair those risks, so purge events remain the recommendation."
+    "base": "The first draft compared time limits with purge events.",
+    "boilOcean": "The breadth review tested versioned keys and manual clearing.",
+    "hybrid": "The hybrid review kept purge events and added a safety limit.",
+    "cooperative": "The cooperative review strengthened time limits with safe staggering.",
+    "adversarial": "Author model family: family-a. Adversarial model family: family-b. The rival-family review attacked the recommendation and repaired one failure mode."
   }
 }
 EOF

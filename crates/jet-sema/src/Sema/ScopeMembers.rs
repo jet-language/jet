@@ -314,6 +314,7 @@ fn expr_has_assertion(expr: &Expr) -> bool {
         | Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
+        | Expr::Unit(..)
         | Expr::Char(..)
         | Expr::Ident(..)
         | Expr::UnitLit { .. }

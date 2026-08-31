@@ -1649,7 +1649,7 @@ fn run() {
     let rs = dir.join("clock.rs");
     let bin = dir.join("clock");
     let mut rustc = Command::new("rustc");
-    common::add_generated_rust(
+    let _runtime_lease = common::add_generated_rust(
         &mut rustc,
         &rs,
         &compiled.rust,

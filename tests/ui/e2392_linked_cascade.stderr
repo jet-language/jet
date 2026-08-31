@@ -1,0 +1,17 @@
+Error [E0104]: `load_row` expects 0 arguments, got 1
+  --> tests/ui/e2392_linked_cascade.jet:15:5
+    |
+ 15 |     load_row(1)
+    |     ^^^^^^^^
+ Why: every argument must match a parameter
+ Fix: check the definition of `load_row`
+More: jet-lang.dev/e/E0104
+
+Error [E2404]: `?` can't turn the `SourceErr` from `load_row` into `TargetErr` here
+  --> tests/ui/e2392_linked_cascade.jet:15:5
+    |
+ 15 |     load_row(1)
+    |     ^^^^^^^^
+ Why: `load_row` is defined at `e2392_linked_cascade.jet:12:4` with effective failure contract `explicit !SourceErr`; the caller's `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
+ Fix: declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `load_row` locally with `??`
+More: jet-lang.dev/e/E2404

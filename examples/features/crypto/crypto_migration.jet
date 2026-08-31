@@ -17,9 +17,9 @@ fn run() {
     source_text :: "/tmp/jet_crypto_migration_v1.jetc"
     migrated_text :: "/tmp/jet_crypto_migration_v2.jetc"
     restored_text :: "/tmp/jet_crypto_migration_restored"
-    if fs.exists(source_text) -> fs.remove(source_text) ?? return Err("migration cleanup")
-    if fs.exists(migrated_text) -> fs.remove(migrated_text) ?? return Err("migration cleanup")
-    if fs.exists(restored_text) -> fs.remove(restored_text) ?? return Err("migration cleanup")
+    if fs.exists(source_text) -> fs.remove(source_text)
+    if fs.exists(migrated_text) -> fs.remove(migrated_text)
+    if fs.exists(restored_text) -> fs.remove(restored_text)
     source :: Path.from(source_text)
     migrated :: Path.from(migrated_text)
     restored :: Path.from(restored_text)
@@ -30,7 +30,7 @@ fn run() {
         loop byte in nonce -> v1.push(byte)
         loop byte in box -> v1.push(byte)
         historical = expert.open_v1(key, v1) ?? return Err("v1 open failed")
-        source.write_atomic(v1) ?? return Err("v1 fixture")
+        source.write_atomic(v1)
         expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? return Err("v1 migration failed")
         raw_secret :: expert.x25519_raw(alice, bob) ?? return Err("X25519 failed")
         shared_raw = expert.secret_bytes(raw_secret)
@@ -38,11 +38,11 @@ fn run() {
     print("expert AES ok: {plain == msg}")
     print("expert JETC v1 ok: {historical == msg}")
     crypto.file_open(&recipient, migrated, restored) ?? return Err("migrated v2 open failed")
-    restored_bytes :: fs.read(restored_text) ?? return Err("restored read")
+    restored_bytes :: fs.read(restored_text)
     restored_ok :: restored_bytes == "abc"
     print("expert JETC v1 migrated: {restored_ok}")
     print("expert X25519 raw ok: {shared_raw.len() == 32}")
-    fs.remove(source_text) ?? return Err("migration cleanup")
-    fs.remove(migrated_text) ?? return Err("migration cleanup")
-    fs.remove(restored_text) ?? return Err("migration cleanup")
+    fs.remove(source_text)
+    fs.remove(migrated_text)
+    fs.remove(restored_text)
 }

@@ -1,9 +1,11 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background OMP task.
 ---
 
-Spin up a **background agent** to do the research, so you keep working while it reads.
+If delegation helps, submit one **background OMP task** under
+`docs/agents/owner-guidance.md`; otherwise do the research in the current
+context. Keep the research workflow and output contract below.
 
 Its job:
 

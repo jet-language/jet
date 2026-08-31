@@ -1,0 +1,19 @@
+use "counter.h" as counter
+use c.pthread
+
+fn foreign_work() Int {
+    return counter.mixed_c_threaded(41)
+}
+
+#Test("C host and worker-thread boundary") {
+    assert_eq(counter.mixed_c_value(41), 42)
+    assert_eq(counter.mixed_c_threaded(41), 42)
+}
+
+fn run() {
+    print(counter.mixed_c_value(41))
+    task.group c_workers {
+        worker :: task foreign_work()
+        print(worker.join() ?? panic("C worker failed"))
+    }
+}

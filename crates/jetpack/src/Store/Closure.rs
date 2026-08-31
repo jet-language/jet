@@ -1,4 +1,3 @@
-use super::*;
 use super::Journal::{
     append_entry, apply_entry, canonical_action_projection, closure_graph_structure_read_only,
     compact_if_needed, journal_dir, load_graph, load_graph_structure_mode,
@@ -6,9 +5,10 @@ use super::Journal::{
     validate_graph_store_proofs, validate_graph_structure_mode, validate_record_store_proof,
     JournalEntry, JournalKind, PARTIAL_SUFFIX, TXN_SUFFIX,
 };
-use super::Receipt::{materialize_receipt, prepare_entry_receipt, recover_receipt_staging};
 #[cfg(test)]
 use super::Journal::{hex, sync_dir, transaction_paths, DB_DIR};
+use super::Receipt::{materialize_receipt, prepare_entry_receipt, recover_receipt_staging};
+use super::*;
 
 pub(crate) const RECEIPTS_DIR: &str = "receipts";
 
@@ -572,6 +572,34 @@ mod registration_tests {
             dev_mode: true,
         };
         (roots, guard)
+    }
+
+    #[test]
+    fn wal_stamp_is_stable_when_directory_insertion_order_changes() {
+        let (first_roots, _first_guard) = roots();
+        let (second_roots, _second_guard) = roots();
+        for (roots, reverse) in [(&first_roots, false), (&second_roots, true)] {
+            let journal = journal_dir(roots);
+            fs::create_dir_all(&journal).unwrap();
+            let names = if reverse { ["z", "a"] } else { ["a", "z"] };
+            for name in names {
+                let path = journal.join(name);
+                fs::write(&path, "same").unwrap();
+                fs::File::open(path)
+                    .unwrap()
+                    .set_times(
+                        std::fs::FileTimes::new().set_modified(
+                            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1),
+                        ),
+                    )
+                    .unwrap();
+            }
+        }
+
+        let first = wal_state_stamp(&first_roots).unwrap();
+        let second = wal_state_stamp(&second_roots).unwrap();
+
+        assert_eq!(first, second);
     }
 
     fn identity() -> CacheIdentity {
@@ -1296,7 +1324,6 @@ pub(super) fn entry_closure_store_proof(
         .all(|digest| closure_object_rehashes(roots, graph, &digest))
 }
 
-
 /// Closure members already proven against their seals in this process. A
 /// 28-package env shares one toolchain closure; without this each package
 /// re-stat-walks every shared member (~28× the whole hangar). Entry-level
@@ -1518,23 +1545,46 @@ fn stamp_mtime_ns(metadata: &fs::Metadata) -> i128 {
 }
 
 fn push_stat(table: &mut Vec<u8>, name: &std::ffi::OsStr, metadata: &fs::Metadata) {
-    table.extend_from_slice(name.as_encoded_bytes());
-    table.extend_from_slice(
-        format!("\t{}\t{}\n", metadata.len(), stamp_mtime_ns(metadata)).as_bytes(),
-    );
+    let name = name.as_encoded_bytes();
+    table.extend_from_slice(&(name.len() as u64).to_le_bytes());
+    table.extend_from_slice(name);
+    table.extend_from_slice(&metadata.len().to_le_bytes());
+    table.extend_from_slice(&stamp_mtime_ns(metadata).to_le_bytes());
+    let kind = if metadata.file_type().is_symlink() {
+        b"symlink".as_slice()
+    } else if metadata.is_dir() {
+        b"directory".as_slice()
+    } else if metadata.is_file() {
+        b"file".as_slice()
+    } else {
+        b"other".as_slice()
+    };
+    table.extend_from_slice(&(kind.len() as u64).to_le_bytes());
+    table.extend_from_slice(kind);
 }
 
 fn push_dir_stats(table: &mut Vec<u8>, dir: &Path) -> std::io::Result<()> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+    let directory = match fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            table.extend_from_slice(b"directory-missing\0");
+            return Ok(());
+        }
         Err(error) => return Err(error),
     };
+    table.extend_from_slice(b"directory-present\0");
+    if !directory.is_dir() {
+        push_stat(table, dir.as_os_str(), &directory);
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by(|left, right| {
+        left.file_name()
+            .as_encoded_bytes()
+            .cmp(right.file_name().as_encoded_bytes())
+    });
     for entry in entries {
-        let entry = entry?;
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
+        let metadata = fs::symlink_metadata(entry.path())?;
         push_stat(table, &entry.file_name(), &metadata);
     }
     Ok(())
@@ -1544,23 +1594,31 @@ pub(super) fn wal_state_stamp(roots: &Roots) -> std::io::Result<String> {
     let mut table = Vec::new();
     push_dir_stats(&mut table, &journal_dir(roots))?;
     push_dir_stats(&mut table, &roots.hangar_dir().join(RECEIPTS_DIR))?;
+    push_dir_stats(&mut table, &roots.hangar_dir().join(super::SEALS_DIR))?;
+    push_dir_stats(&mut table, &roots.hangar_dir().join(super::OBJECTS_DIR))?;
     // Entry set: a new or deleted entry must invalidate, but the entry NAME
     // alone is enough — meta content is authenticated against its immutable
     // receipt on every load, and warm runs bump `last_used_at` (meta mtime)
     // on every cached use, which would otherwise evict the cache mid-run.
     let hangar = roots.hangar_dir();
-    if let Ok(entries) = fs::read_dir(&hangar) {
-        let mut names = Vec::new();
-        for entry in entries.flatten() {
-            if entry.path().join("meta.json").exists() {
-                names.push(entry.file_name());
+    match fs::read_dir(&hangar) {
+        Ok(entries) => {
+            let mut names = Vec::new();
+            for entry in entries {
+                let entry = entry?;
+                if fs::symlink_metadata(entry.path().join("meta.json")).is_ok() {
+                    names.push(entry.file_name());
+                }
+            }
+            names.sort_by(|left, right| left.as_encoded_bytes().cmp(right.as_encoded_bytes()));
+            for name in names {
+                let name = name.as_encoded_bytes();
+                table.extend_from_slice(&(name.len() as u64).to_le_bytes());
+                table.extend_from_slice(name);
             }
         }
-        names.sort();
-        for name in names {
-            table.extend_from_slice(name.as_encoded_bytes());
-            table.push(b'\n');
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     Ok(super::super::SHA256::sha256_hex(&table))
 }
@@ -1681,7 +1739,12 @@ fn migrate_closure_graph_from_entries(
 /// which deliberately re-runs the full validation path for one entry.
 #[cfg(any(test, feature = "test-seam"))]
 pub(crate) fn register_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<bool> {
-    register_entries_unlocked_with_mode(roots, std::slice::from_ref(entry), RegistrationMode::Native, None)
+    register_entries_unlocked_with_mode(
+        roots,
+        std::slice::from_ref(entry),
+        RegistrationMode::Native,
+        None,
+    )
 }
 
 /// Register a batch of already-quarantined entries as one closure transaction.
@@ -1739,8 +1802,7 @@ pub(crate) fn register_entries_unlocked_with_mode(
         // checked the canonical digest before publication.
         if !entry.envelope.output_hash.is_empty() {
             let digest = entry.envelope.output_hash.as_str();
-            if object_digest_for_path(Path::new(&entry.out), &roots.hangar_dir())
-                .as_deref()
+            if object_digest_for_path(Path::new(&entry.out), &roots.hangar_dir()).as_deref()
                 == Some(digest)
             {
                 write_seal(Path::new(&entry.out), &roots.hangar_dir(), digest)?;
@@ -1752,10 +1814,7 @@ pub(crate) fn register_entries_unlocked_with_mode(
     if let Some(action_key) = fresh_action_key {
         for entry in entries {
             super::Reproducibility::certify_registration_unlocked_with_fresh_agreement(
-                roots,
-                entry,
-                entries,
-                action_key,
+                roots, entry, entries, action_key,
             )?;
         }
     } else {
@@ -1825,8 +1884,7 @@ pub(crate) fn register_entries_unlocked_with_mode(
 }
 
 fn verify_admitted_nix_output(roots: &Roots, entry: &StoreEntry) -> std::io::Result<()> {
-    let producer =
-        ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
+    let producer = ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
     let expected = roots
         .hangar_dir()
         .join(OBJECTS_DIR)

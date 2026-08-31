@@ -74,10 +74,16 @@ fn native_admission_seals_after_shared_cas_hardlinking() {
     let object = PathBuf::from(&ingested.entry.out);
     let digest = &ingested.entry.envelope.output_hash;
     assert!(roots.hangar_dir().join("cas").is_dir());
-    assert_eq!(check_seal(&object, &roots.hangar_dir()).unwrap(), Some(digest.clone()));
+    assert_eq!(
+        check_seal(&object, &roots.hangar_dir()).unwrap(),
+        Some(digest.clone())
+    );
 
     reset_verified_digest_hash_count(&object);
-    assert_eq!(try_entry_output_hash(&roots, &ingested.entry).unwrap(), *digest);
+    assert_eq!(
+        try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+        *digest
+    );
     assert_eq!(verified_digest_hash_count(&object), 0);
 }
 
@@ -123,7 +129,10 @@ fn seal_written_at_admission_and_warm_verification_skips_content_hash() {
     assert!(seal.is_file(), "admission must write {seal:?}");
 
     reset_verified_digest_hash_count(&object);
-    assert_eq!(try_entry_output_hash(&roots, &ingested.entry).unwrap(), *digest);
+    assert_eq!(
+        try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+        *digest
+    );
     assert_eq!(verified_digest_hash_count(&object), 0);
 
     // Owner-ratified verify-once tradeoff: bytes can change without a tuple
@@ -141,7 +150,10 @@ fn seal_written_at_admission_and_warm_verification_skips_content_hash() {
     reset_verified_digest_hash_count(&object);
     assert_eq!(list_checked(&roots).unwrap().len(), 1);
     assert_eq!(verified_digest_hash_count(&object), 0);
-    assert_eq!(check_seal(&object, &roots.hangar_dir()).unwrap(), Some(digest.clone()));
+    assert_eq!(
+        check_seal(&object, &roots.hangar_dir()).unwrap(),
+        Some(digest.clone())
+    );
 }
 
 #[cfg(unix)]
@@ -159,11 +171,17 @@ fn seal_mtime_drift_rehashes_once_and_reseals() {
     set_mtime(&payload, seconds + 1, nanos);
 
     reset_verified_digest_hash_count(&object);
-    assert_eq!(try_entry_output_hash(&roots, &ingested.entry).unwrap(), *digest);
+    assert_eq!(
+        try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+        *digest
+    );
     assert_eq!(verified_digest_hash_count(&object), 1);
     assert_ne!(before, fs::read(&seal).unwrap());
 
-    assert_eq!(try_entry_output_hash(&roots, &ingested.entry).unwrap(), *digest);
+    assert_eq!(
+        try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+        *digest
+    );
     assert_eq!(verified_digest_hash_count(&object), 1);
 }
 
@@ -204,7 +222,10 @@ fn hangar_verify_rehashes_despite_valid_seal_and_catches_content_corruption() {
     let ingested = fixture(&roots, "audit");
     let object = PathBuf::from(&ingested.entry.out);
     let digest = ingested.entry.envelope.output_hash.clone();
-    assert_eq!(check_seal(&object, &roots.hangar_dir()).unwrap(), Some(digest));
+    assert_eq!(
+        check_seal(&object, &roots.hangar_dir()).unwrap(),
+        Some(digest)
+    );
 
     let payload = object.join("payload");
     let before = fs::metadata(&payload).unwrap();

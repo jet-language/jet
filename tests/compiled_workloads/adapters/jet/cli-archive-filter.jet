@@ -1,0 +1,45 @@
+// #1414 CLI workload: filter a deterministic archive index. Parent paths,
+// duplicate entries, malformed sizes, and oversized files are rejected.
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("read input")
+    accepted := 0
+    rejected := 0
+    duplicates := 0
+    selected := ""
+    loop line in raw.lines() {
+        if line == "" -> next
+        fields :: line.split("|").to_list()
+        if fields.len() != 3 {
+            rejected += 1
+            next
+        }
+        path :: "{fields[1]}"
+        if path == "" || path.contains("..") || path.starts_with("/") {
+            rejected += 1
+            next
+        }
+        if !path.ends_with(".md") -> next
+        size :: Int.parse(fields[2]) ?? -1
+        if size < 0 || size > 64 {
+            rejected += 1
+        } else if path == selected {
+            duplicates += 1
+            rejected += 1
+        } else {
+            selected = path
+            accepted += 1
+        }
+    }
+    print("accepted={accepted}")
+    if selected != "" -> print("path={selected}")
+    print("rejected={rejected}")
+    print("duplicates={duplicates}")
+}

@@ -13,33 +13,30 @@ use crate::OutputMode;
 
 pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
     let entry = PathBuf::from(crate::resolve_source_path(target));
-    let projection = match crate::CmdInspect::check_projection_for_effects(
-        &entry,
-        "dev",
-        &BTreeMap::new(),
-    ) {
-        Ok(projection) => projection,
-        Err(diagnostics) => {
-            let source = fs::read_to_string(&entry).unwrap_or_default();
-            if mode.json {
-                print!(
-                    "{}",
-                    jet::render_all_json(&ReportPath::from_path(&entry), &source, &diagnostics)
-                );
-            } else {
-                eprint!(
-                    "{}",
-                    jet::render_all_colored(
-                        &entry.display().to_string(),
-                        &source,
-                        &diagnostics,
-                        mode.color_stderr(),
-                    )
-                );
+    let projection =
+        match crate::CmdInspect::check_projection_for_effects(&entry, "dev", &BTreeMap::new()) {
+            Ok(projection) => projection,
+            Err(diagnostics) => {
+                let source = fs::read_to_string(&entry).unwrap_or_default();
+                if mode.json {
+                    print!(
+                        "{}",
+                        jet::render_all_json(&ReportPath::from_path(&entry), &source, &diagnostics)
+                    );
+                } else {
+                    eprint!(
+                        "{}",
+                        jet::render_all_colored(
+                            &entry.display().to_string(),
+                            &source,
+                            &diagnostics,
+                            mode.color_stderr(),
+                        )
+                    );
+                }
+                exit(ExitCodes::USER_ERROR);
             }
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
+        };
     let graph = build_doc_graph(&projection.bundle, &projection.index);
 
     if check {
@@ -51,7 +48,10 @@ pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
         if mode.json {
             println!("{}", graph.to_json());
         } else {
-            println!("doc check: passed ({} doctest block(s))", graph.doctests.len());
+            println!(
+                "doc check: passed ({} doctest block(s))",
+                graph.doctests.len()
+            );
         }
         return;
     }

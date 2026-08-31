@@ -371,10 +371,400 @@ fn zip_binop(op: &str, a: &[f64], b: &[f64], f32_lanes: bool) -> Option<Vec<f64>
     if f32_lanes {
         let left = a.iter().map(|value| *value as f32).collect::<Vec<_>>();
         let right = b.iter().map(|value| *value as f32).collect::<Vec<_>>();
-        return simd_lanes::jet_simd_binary_slice(&left, &right, op)
+        return simd_lanes::jet_simd_f32_binary_slice(&left, &right, op)
             .map(|values| values.into_iter().map(f64::from).collect());
     }
-    simd_lanes::jet_simd_binary_slice(a, b, op)
+    simd_lanes::jet_simd_f64_binary_slice(a, b, op)
+}
+
+fn binary_op_name(op: simd_lanes::JetSimdBinaryOp) -> &'static str {
+    match op {
+        simd_lanes::JetSimdBinaryOp::Add => "add",
+        simd_lanes::JetSimdBinaryOp::Sub => "sub",
+        simd_lanes::JetSimdBinaryOp::Mul => "mul",
+        simd_lanes::JetSimdBinaryOp::Div => "div",
+    }
+}
+
+fn f32_lanes_binary(
+    left: F32Lanes,
+    right: F32Lanes,
+    op: simd_lanes::JetSimdBinaryOp,
+) -> Option<MathVal> {
+    if left.len != right.len {
+        return None;
+    }
+    let mut out = left.lanes;
+    match left.len {
+        4 => {
+            let left = [left.lanes[0], left.lanes[1], left.lanes[2], left.lanes[3]];
+            let right = [
+                right.lanes[0],
+                right.lanes[1],
+                right.lanes[2],
+                right.lanes[3],
+            ];
+            let value = match op {
+                simd_lanes::JetSimdBinaryOp::Add => {
+                    simd_lanes::jet_simd_f32x4_add_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Sub => {
+                    simd_lanes::jet_simd_f32x4_sub_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Mul => {
+                    simd_lanes::jet_simd_f32x4_mul_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Div => {
+                    simd_lanes::jet_simd_f32x4_div_array(&left, &right)
+                }
+            };
+            out[..4].copy_from_slice(&value);
+        }
+        8 => {
+            let left = left.lanes;
+            let right = right.lanes;
+            let value = match op {
+                simd_lanes::JetSimdBinaryOp::Add => {
+                    simd_lanes::jet_simd_f32x8_add_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Sub => {
+                    simd_lanes::jet_simd_f32x8_sub_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Mul => {
+                    simd_lanes::jet_simd_f32x8_mul_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Div => {
+                    simd_lanes::jet_simd_f32x8_div_array(&left, &right)
+                }
+            };
+            out.copy_from_slice(&value);
+        }
+        _ => return None,
+    }
+    Some(MathVal::F32(F32Lanes { lanes: out, len: left.len }))
+}
+
+fn f64_lanes_binary(
+    left: F64Lanes,
+    right: F64Lanes,
+    op: simd_lanes::JetSimdBinaryOp,
+) -> Option<MathVal> {
+    if left.len != right.len {
+        return None;
+    }
+    let mut out = left.lanes;
+    match left.len {
+        2 => {
+            let left = [left.lanes[0], left.lanes[1]];
+            let right = [right.lanes[0], right.lanes[1]];
+            let value = match op {
+                simd_lanes::JetSimdBinaryOp::Add => {
+                    simd_lanes::jet_simd_f64x2_add_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Sub => {
+                    simd_lanes::jet_simd_f64x2_sub_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Mul => {
+                    simd_lanes::jet_simd_f64x2_mul_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Div => {
+                    simd_lanes::jet_simd_f64x2_div_array(&left, &right)
+                }
+            };
+            out[..2].copy_from_slice(&value);
+        }
+        4 => {
+            let left = left.lanes;
+            let right = right.lanes;
+            let value = match op {
+                simd_lanes::JetSimdBinaryOp::Add => {
+                    simd_lanes::jet_simd_f64x4_add_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Sub => {
+                    simd_lanes::jet_simd_f64x4_sub_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Mul => {
+                    simd_lanes::jet_simd_f64x4_mul_array(&left, &right)
+                }
+                simd_lanes::JetSimdBinaryOp::Div => {
+                    simd_lanes::jet_simd_f64x4_div_array(&left, &right)
+                }
+            };
+            out.copy_from_slice(&value);
+        }
+        _ => return None,
+    }
+    Some(MathVal::F64(F64Lanes { lanes: out, len: left.len }))
+}
+
+fn math_binary_value(
+    left: MathVal,
+    right: MathVal,
+    op: simd_lanes::JetSimdBinaryOp,
+) -> Option<MathVal> {
+    match (left, right) {
+        (MathVal::F32(left), MathVal::F32(right)) => f32_lanes_binary(left, right, op),
+        (MathVal::F64(left), MathVal::F64(right)) => f64_lanes_binary(left, right, op),
+        (MathVal::Int(left), MathVal::Int(right))
+            if left.len == right.len
+                && left.signed == right.signed
+                && left.bits == right.bits =>
+        {
+            let name = type_name_of(MathVal::Int(left));
+            let result = zip_int_binop(
+                binary_op_name(op),
+                &left.lanes[..left.len as usize],
+                &right.lanes[..right.len as usize],
+                left.signed,
+                left.bits,
+            )?;
+            from_int_lanes(name, &result)
+        }
+        (MathVal::Mat3(matrix), MathVal::Vec3(vector))
+            if op == simd_lanes::JetSimdBinaryOp::Mul => {
+            let out = mat_vec(3, &matrix.0, &vector.0);
+            from_lanes("Vec3", &out)
+        }
+        (MathVal::Mat4(matrix), MathVal::Vec4(vector))
+            if op == simd_lanes::JetSimdBinaryOp::Mul => {
+            let out = mat_vec(4, &matrix.0, &vector.0);
+            from_lanes("Vec4", &out)
+        }
+        (left, right) => {
+            let name = type_name_of(left);
+            let left = lanes_of(left);
+            let right = lanes_of(right);
+            let result = simd_lanes::jet_simd_f64_binary_slice(&left, &right, op)?;
+            from_lanes(name, &result)
+        }
+    }
+}
+
+fn simd_kind_code(kind: jet_foundation::Syntax::SimdLaneKind) -> i64 {
+    use jet_foundation::Syntax::SimdLaneKind;
+    match kind {
+        SimdLaneKind::F32 => 0,
+        SimdLaneKind::F64 => 1,
+        SimdLaneKind::I8 => 2,
+        SimdLaneKind::I16 => 3,
+        SimdLaneKind::I32 => 4,
+        SimdLaneKind::I64 => 5,
+        SimdLaneKind::U8 => 6,
+        SimdLaneKind::U16 => 7,
+        SimdLaneKind::U32 => 8,
+        SimdLaneKind::U64 => 9,
+    }
+}
+
+fn simd_kind_from_code(code: i64) -> Option<jet_foundation::Syntax::SimdLaneKind> {
+    use jet_foundation::Syntax::SimdLaneKind;
+    Some(match code {
+        0 => SimdLaneKind::F32,
+        1 => SimdLaneKind::F64,
+        2 => SimdLaneKind::I8,
+        3 => SimdLaneKind::I16,
+        4 => SimdLaneKind::I32,
+        5 => SimdLaneKind::I64,
+        6 => SimdLaneKind::U8,
+        7 => SimdLaneKind::U16,
+        8 => SimdLaneKind::U32,
+        9 => SimdLaneKind::U64,
+        _ => return None,
+    })
+}
+
+pub(crate) fn simd_lane_type_code(type_name: &str) -> Option<(i64, usize)> {
+    let (kind, len) = jet_foundation::Syntax::simd_lane_layout(type_name)?;
+    Some((simd_kind_code(kind), len))
+}
+
+pub(crate) fn simd_reduce_op_code(op: &str) -> Option<i64> {
+    Some(match op {
+        "Add" | "sum" => 0,
+        "Mul" | "product" => 1,
+        "Min" => 2,
+        "Max" => 3,
+        "Avg" => 4,
+        _ => return None,
+    })
+}
+
+fn simd_reduce_op_from_code(code: i64) -> Option<simd_lanes::JetSimdReduceOp> {
+    Some(match code {
+        0 => simd_lanes::JetSimdReduceOp::Add,
+        1 => simd_lanes::JetSimdReduceOp::Mul,
+        2 => simd_lanes::JetSimdReduceOp::Min,
+        3 => simd_lanes::JetSimdReduceOp::Max,
+        4 => simd_lanes::JetSimdReduceOp::Avg,
+        _ => return None,
+    })
+}
+
+fn jet_jit_math_binary(left: i64, right: i64, op: i64) -> i64 {
+    let Some(op) = simd_binary_op(match op {
+        0 => "add",
+        1 => "sub",
+        2 => "mul",
+        3 => "div",
+        _ => {
+            trap("math binary: bad operator");
+            return 0;
+        }
+    }) else {
+        trap("math binary: bad operator");
+        return 0;
+    };
+    let Some(left) = take_val(left) else {
+        trap("math binary: bad left");
+        return 0;
+    };
+    let Some(right) = take_val(right) else {
+        trap("math binary: bad right");
+        return 0;
+    };
+    let Some(value) = math_binary_value(left, right, op) else {
+        trap("math binary size mismatch or division by zero");
+        return 0;
+    };
+    pack_handle(push_val(value))
+}
+
+fn jet_jit_math_splat(value: i64, kind_code: i64, len: i64) -> i64 {
+    let Some(kind) = simd_kind_from_code(kind_code) else {
+        trap("math splat: bad lane kind");
+        return 0;
+    };
+    if !(1..=32).contains(&len) {
+        trap("math splat: bad lane count");
+        return 0;
+    }
+    let len = len as usize;
+    let Some(type_name) = simd_type_name(kind, len) else {
+        trap("math splat: unsupported lane layout");
+        return 0;
+    };
+    let value = match kind {
+        jet_foundation::Syntax::SimdLaneKind::F32 => match len {
+            4 => {
+                let value = simd_lanes::jet_simd_f32x4_splat_array(bits_f64(value) as f32);
+                let mut lanes = [0.0f32; 8];
+                lanes[..4].copy_from_slice(&value);
+                Some(MathVal::F32(F32Lanes { lanes, len: 4 }))
+            }
+            8 => Some(MathVal::F32(F32Lanes {
+                lanes: simd_lanes::jet_simd_f32x8_splat_array(bits_f64(value) as f32),
+                len: 8,
+            })),
+            _ => None,
+        },
+        jet_foundation::Syntax::SimdLaneKind::F64 => match len {
+            2 => {
+                let value = simd_lanes::jet_simd_f64x2_splat_array(bits_f64(value));
+                let mut lanes = [0.0f64; 4];
+                lanes[..2].copy_from_slice(&value);
+                Some(MathVal::F64(F64Lanes { lanes, len: 2 }))
+            }
+            4 => Some(MathVal::F64(F64Lanes {
+                lanes: simd_lanes::jet_simd_f64x4_splat_array(bits_f64(value)),
+                len: 4,
+            })),
+            _ => None,
+        },
+        _ => {
+            let lanes = simd_lanes::jet_simd_splat_slice(value, len);
+            from_int_lanes(type_name, &lanes)
+        }
+    };
+    let Some(value) = value else {
+        trap("math splat: unsupported lane value");
+        return 0;
+    };
+    pack_handle(push_val(value))
+}
+
+fn jet_jit_math_reduce(value: i64, op: i64) -> i64 {
+    let Some(op) = simd_reduce_op_from_code(op) else {
+        trap("math reduce: bad operator");
+        return 0;
+    };
+    let Some(value) = take_val(value) else {
+        trap("math reduce: bad receiver");
+        return 0;
+    };
+    match value {
+        MathVal::F32(value) => simd_lanes::jet_simd_reduce_slice(
+            &value.lanes[..value.len as usize],
+            op,
+        )
+        .map(|value| pack_float(f64::from(value)))
+        .unwrap_or_else(|| {
+            trap("math reduce: empty lanes");
+            0
+        }),
+        MathVal::F64(value) => simd_lanes::jet_simd_reduce_slice(
+            &value.lanes[..value.len as usize],
+            op,
+        )
+        .map(pack_float)
+        .unwrap_or_else(|| {
+            trap("math reduce: empty lanes");
+            0
+        }),
+        MathVal::Int(value) => reduce_int_op(
+            &value.lanes[..value.len as usize],
+            match op {
+                simd_lanes::JetSimdReduceOp::Add => "Add",
+                simd_lanes::JetSimdReduceOp::Mul => "Mul",
+                simd_lanes::JetSimdReduceOp::Min => "Min",
+                simd_lanes::JetSimdReduceOp::Max => "Max",
+                simd_lanes::JetSimdReduceOp::Avg => "Avg",
+            },
+            value.signed,
+            value.bits,
+        )
+        .map(pack_int)
+        .unwrap_or_else(|| {
+            trap("math reduce: invalid integer lanes");
+            0
+        }),
+        value => simd_lanes::jet_simd_reduce_slice(&lanes_of(value), op)
+            .map(pack_float)
+            .unwrap_or_else(|| {
+                trap("math reduce: empty lanes");
+                0
+            }),
+    }
+}
+
+fn jet_jit_math_dot(left: i64, right: i64) -> i64 {
+    let Some(left) = take_val(left) else {
+        trap("dot: bad receiver");
+        return 0;
+    };
+    let Some(right) = take_val(right) else {
+        trap("dot: bad argument");
+        return 0;
+    };
+    let left = lanes_of(left);
+    let right = lanes_of(right);
+    let Some(value) = simd_lanes::jet_simd_dot_f64_slice(&left, &right) else {
+        trap("dot size mismatch");
+        return 0;
+    };
+    pack_float(value)
+}
+
+fn jet_jit_math_length(value: i64) -> i64 {
+    let Some(value) = take_val(value) else {
+        trap("length: bad receiver");
+        return 0;
+    };
+    let lanes = lanes_of(value);
+    let Some(value) = simd_lanes::jet_simd_length_f64_slice(&lanes) else {
+        trap("length: empty lanes");
+        return 0;
+    };
+    pack_float(value)
 }
 
 fn zip_int_binop(
@@ -513,44 +903,16 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 trap("math binary: bad right");
                 return 0;
             };
-            // MatN * VecN
-            if func == "mul" {
-                match (a, b) {
-                    (MathVal::Mat3(m), MathVal::Vec3(v)) => {
-                        let out = mat_vec(3, &m.0, &v.0);
-                        return pack_handle(push_val(from_lanes("Vec3", &out).unwrap()));
-                    }
-                    (MathVal::Mat4(m), MathVal::Vec4(v)) => {
-                        let out = mat_vec(4, &m.0, &v.0);
-                        return pack_handle(push_val(from_lanes("Vec4", &out).unwrap()));
-                    }
-                    _ => {}
-                }
-            }
-            let la = lanes_of(a);
-            let lb = lanes_of(b);
-            let name = type_name_of(a);
-            if let Some((signed, bits)) = int_layout {
-                let Some(la) = int_lanes_of(a) else {
-                    trap("math binary integer left");
-                    return 0;
-                };
-                let Some(lb) = int_lanes_of(b) else {
-                    trap("math binary integer right");
-                    return 0;
-                };
-                let Some(out) = zip_int_binop(&func, &la, &lb, signed, bits) else {
+            let Some(op) = simd_binary_op(&func) else {
+                trap("math binary: bad operator");
+                return 0;
+            };
+            math_binary_value(a, b, op)
+                .map(|value| pack_handle(push_val(value)))
+                .or_else(|| {
                     trap("math binary size mismatch or division by zero");
-                    return 0;
-                };
-                from_int_lanes(name, &out).map(|v| pack_handle(push_val(v)))
-            } else {
-                let Some(out) = zip_binop(&func, &la, &lb, f32_lanes) else {
-                    trap("math binary size mismatch");
-                    return 0;
-                };
-                from_lanes(name, &out).map(|v| pack_handle(push_val(v)))
-            }
+                    None
+                })
         }
         (_, "to_array") if argv.len() == 1 => {
             let Some(v) = take_val(argv[0]) else {
@@ -568,22 +930,27 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 trap("math unary: bad recv");
                 return 0;
             };
-            let lanes = lanes_of(v);
+            if func == "length" {
+                let lanes = lanes_of(v);
+                return simd_lanes::jet_simd_length_f64_slice(&lanes)
+                    .map(pack_float)
+                    .unwrap_or_else(|| {
+                        trap("length: empty lanes");
+                        0
+                    });
+            }
             if let Some((signed, bits)) = int_layout {
-                let Some(n) = reduce_int_op(&int_lanes_of(v).unwrap(), &func, signed, bits)
-                else {
+                let Some(lanes) = int_lanes_of(v) else {
+                    trap("integer reduction failed");
+                    return 0;
+                };
+                let Some(n) = reduce_int_op(&lanes, &func, signed, bits) else {
                     trap("integer reduction failed");
                     return 0;
                 };
                 Some(pack_int(n))
             } else {
-                let n = match func.as_str() {
-                    "length" => {
-                        let acc: f64 = lanes.iter().map(|n| n * n).sum();
-                        acc.sqrt()
-                    }
-                    other => reduce_op(&lanes, other, f32_lanes).unwrap_or(0.0),
-                };
+                let n = reduce_op(&lanes_of(v), &func, f32_lanes).unwrap_or(0.0);
                 Some(pack_float(n))
             }
         }
@@ -613,15 +980,11 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
             };
             let la = lanes_of(a);
             let lb = lanes_of(b);
-            if la.len() != lb.len() {
+            let Some(value) = simd_lanes::jet_simd_dot_f64_slice(&la, &lb) else {
                 trap("dot size mismatch");
                 return 0;
-            }
-            let mut acc = 0.0f64;
-            for (x, y) in la.iter().zip(lb.iter()) {
-                acc += x * y;
-            }
-            Some(pack_float(acc))
+            };
+            Some(pack_float(value))
         }
         (_, "cross") if argv.len() == 2 => {
             let Some(a) = take_val(argv[0]) else {
@@ -1052,6 +1415,11 @@ host_fns! {
 
     }
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
+    binary: "jet_jit_math_binary" => jet_jit_math_binary: sig_call;
+    splat: "jet_jit_math_splat" => jet_jit_math_splat: sig_call;
+    reduce: "jet_jit_math_reduce" => jet_jit_math_reduce: sig_binary;
+    dot: "jet_jit_math_dot" => jet_jit_math_dot: sig_binary;
+    length: "jet_jit_math_length" => jet_jit_math_length: sig_unary;
     result_is_float: "jet_jit_math_result_is_float" => jet_jit_math_result_is_float: sig_i64_i8;
     result_float: "jet_jit_math_result_float" => jet_jit_math_result_float: sig_i64_f64;
     result_int: "jet_jit_math_result_int" => jet_jit_math_result_int: sig_unary;

@@ -27,6 +27,10 @@ struct Lexer<'a> {
     diags: Vec<Diagnostic>,
     allow_reserved_identifiers: bool,
     config_surface: bool,
+    /// Number of enclosing string interpolations being lexed. This is passed
+    /// through recursive sub-streams so hostile nesting cannot exhaust the
+    /// lexer stack before the parser's source-depth check runs.
+    interpolation_depth: usize,
 }
 
 /// The word behind a keyword token. A position that accepts any written word —

@@ -35,104 +35,25 @@ use super::JSONInterp::{json_payload, json_variant};
 
 // ── core.encoding.csv ───────────────────────────────────────────────────────
 
-pub(super) fn csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    let mut field = String::new();
-    let mut chars = text.chars().peekable();
-    let mut quoted = false;
-    let mut closed_quote = false;
-    let mut record = 1usize;
-    let mut line = 1usize;
-    let mut column = 0usize;
-    let mut ended_record = false;
-
-    while let Some(ch) = chars.next() {
-        column += 1;
-        ended_record = false;
-        if quoted {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    column += 1;
-                    field.push('"');
-                } else {
-                    quoted = false;
-                    closed_quote = true;
-                }
-            } else {
-                field.push(ch);
-                if ch == '\n' {
-                    line += 1;
-                    column = 0;
-                }
-            }
-            continue;
-        }
-        if closed_quote {
-            match ch {
-                ',' => { row.push(std::mem::take(&mut field)); closed_quote = false; }
-                '\r' if chars.peek() == Some(&'\n') => {
-                    chars.next(); row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
-                    closed_quote = false; ended_record = true; record += 1; line += 1; column = 0;
-                }
-                '\n' => {
-                    row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
-                    closed_quote = false; ended_record = true; record += 1; line += 1; column = 0;
-                }
-                _ => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — only quote, comma, CRLF, LF, or EOF may follow a closing quote")),
-            }
-            continue;
-        }
-        match ch {
-            '"' if field.is_empty() => quoted = true,
-            '"' => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — quote inside an unquoted field")),
-            ',' => row.push(std::mem::take(&mut field)),
-            '\r' if chars.peek() == Some(&'\n') => {
-                chars.next(); row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
-                ended_record = true; record += 1; line += 1; column = 0;
-            }
-            '\r' => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — bare CR is not a record ending")),
-            '\n' => {
-                row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
-                ended_record = true; record += 1; line += 1; column = 0;
-            }
-            _ => field.push(ch),
-        }
-    }
-    if quoted {
-        return Err(format!("E2701: CSV row {record}, line {line}, column {} — quoted field ended before its closing quote", column + 1));
-    }
-    if !ended_record {
-        row.push(field);
-        rows.push(row);
-    }
-    Ok(rows)
+pub(super) fn csv_parse(
+    text: &str,
+    delimiter: &str,
+    header: bool,
+    skip_blank: bool,
+) -> Result<Vec<jet_foundation::CsvKernel::CsvRecord>, String> {
+    let delimiter = jet_foundation::CsvKernel::delimiter(delimiter)?;
+    jet_foundation::CsvKernel::parse(
+        text,
+        jet_foundation::CsvKernel::CsvOptions {
+            delimiter,
+            header,
+            skip_blank,
+        },
+    )
 }
 
 pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
-    rows.iter()
-        .map(|row| {
-            row.iter()
-                .map(|field| {
-                    if field.contains(',')
-                        || field.contains('"')
-                        || field.contains('\n')
-                        || field.contains('\r')
-                    {
-                        format!("\"{}\"", field.replace('"', "\"\""))
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    jet_foundation::CsvKernel::render(rows)
 }
 
 // ── shared: JSONError-shaped CtValue::Struct (line/message) ────────────────
@@ -175,6 +96,7 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
         chars: raw.chars().collect(),
         pos: 0,
         line: 1,
+        current_path_len: 0,
     };
     let mut items = Vec::new();
     loop {
@@ -182,12 +104,14 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
         if p.peek().is_none() {
             break;
         }
-        match p
+        if let Some(item) = p
             .statement()
             .map_err(|e| json_error_struct(e.line as i64, e.message))?
         {
-            Some(item) => items.push(item),
-            None => {}
+            if let TOMLItem::Header { path, .. } = &item {
+                p.current_path_len = path.len();
+            }
+            items.push(item);
         }
     }
     Ok(toml_assemble(items))
@@ -472,6 +396,7 @@ struct TOMLParser {
     chars: Vec<char>,
     pos: usize,
     line: usize,
+    current_path_len: usize,
 }
 const MAX_TOML_DEPTH: usize = 64;
 struct TOMLParseError {
@@ -575,6 +500,13 @@ impl TOMLParser {
         if path.is_empty() {
             return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY));
         }
+        if self
+            .current_path_len
+            .checked_add(path.len())
+            .is_none_or(|depth| depth > MAX_TOML_DEPTH)
+        {
+            return Err(self.err("TOML key path is nested too deeply"));
+        }
         self.skip_inline_ws();
         if self.peek() != Some('=') {
             return Err(self.err(
@@ -591,6 +523,9 @@ impl TOMLParser {
         let mut path = Vec::new();
         loop {
             self.skip_inline_ws();
+            if path.len() >= MAX_TOML_DEPTH {
+                return Err(self.err("TOML key path is nested too deeply"));
+            }
             path.push(self.simple_key()?);
             self.skip_inline_ws();
             if self.peek() == Some('.') {
@@ -1070,6 +1005,18 @@ fn quote_json_local(s: &str) -> String {
 // `DataTree` to the `JSON`-tagged `CtValue` (same convention as toml above).
 
 pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
+    let line_count = raw
+        .as_bytes()
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        .checked_add(1);
+    if raw.len() > MAX_YAML_BYTES || !line_count.is_some_and(|count| count <= MAX_YAML_NODES) {
+        return Err(json_error_struct(
+            1,
+            "YAML input exceeds its byte or line budget".to_string(),
+        ));
+    }
     let lines: Vec<String> = raw
         .split('\n')
         .map(|l| l.trim_end_matches('\r').to_string())
@@ -1078,14 +1025,21 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
         lines,
         pos: 0,
         anchors: BTreeMap::new(),
+        budget: YamlBudget::default(),
     };
     p.skip_ignorable();
     while p.at_doc_marker() {
-        p.pos += 1;
+        p.pos = p.pos.saturating_add(1);
         p.skip_ignorable();
     }
     if p.pos >= p.lines.len() || p.at_doc_end() {
-        return Ok(json_variant("Null", None));
+        let line = p.pos.saturating_add(1) as i64;
+        return p.null().map_err(|_| {
+            json_error_struct(
+                line,
+                "YAML value exceeds its node or byte budget".to_string(),
+            )
+        });
     }
     let base = p.indent(p.pos);
     let value = p
@@ -1094,7 +1048,7 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     p.skip_ignorable();
     if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
         return Err(json_error_struct(
-            (p.pos + 1) as i64,
+            p.pos.saturating_add(1) as i64,
             jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.to_string(),
         ));
     }
@@ -1105,8 +1059,125 @@ struct YAMLParser {
     lines: Vec<String>,
     pos: usize,
     anchors: BTreeMap<String, CtValue>,
+    budget: YamlBudget,
 }
 const MAX_YAML_DEPTH: usize = 64;
+const MAX_YAML_NODES: usize = 64 * 1024;
+const MAX_YAML_BYTES: usize = 64 * 1024 * 1024;
+const YAML_NODE_OVERHEAD: usize = 32;
+
+#[derive(Default)]
+struct YamlBudget {
+    nodes: usize,
+    bytes: usize,
+}
+
+impl YamlBudget {
+    fn node(&mut self, payload: usize) -> Result<(), ()> {
+        let nodes = self.nodes.checked_add(1).ok_or(())?;
+        let cost = YAML_NODE_OVERHEAD.checked_add(payload).ok_or(())?;
+        let bytes = self.bytes.checked_add(cost).ok_or(())?;
+        if nodes > MAX_YAML_NODES || bytes > MAX_YAML_BYTES {
+            return Err(());
+        }
+        self.nodes = nodes;
+        self.bytes = bytes;
+        Ok(())
+    }
+
+    fn bytes(&mut self, amount: usize) -> Result<(), ()> {
+        let bytes = self.bytes.checked_add(amount).ok_or(())?;
+        if bytes > MAX_YAML_BYTES {
+            return Err(());
+        }
+        self.bytes = bytes;
+        Ok(())
+    }
+}
+
+enum FlowError {
+    Depth,
+    Budget,
+}
+
+fn yaml_null(budget: &mut YamlBudget) -> Result<CtValue, ()> {
+    budget.node(0)?;
+    Ok(json_variant("Null", None))
+}
+
+fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<CtValue, ()> {
+    let value = yaml_scalar_value(s);
+    let payload = yaml_scalar_payload(&value).ok_or(())?;
+    budget.node(payload)?;
+    Ok(value)
+}
+
+fn yaml_scalar_payload(value: &CtValue) -> Option<usize> {
+    if let CtValue::BigInt(integer) = value {
+        return integer
+            .limbs
+            .len()
+            .checked_mul(std::mem::size_of::<u32>());
+    }
+    if let Some(CtValue::BigInt(integer)) = json_payload(value, "Int") {
+        return integer
+            .limbs
+            .len()
+            .checked_mul(std::mem::size_of::<u32>());
+    }
+    Some(
+        ["Text", "Number", "TypedText"]
+            .iter()
+            .find_map(|variant| match json_payload(value, variant) {
+                Some(CtValue::Str(text)) => Some(text.len()),
+                _ => None,
+            })
+            .unwrap_or(0),
+    )
+}
+
+fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
+    if matches!(
+        value,
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "JSON" && variant == "Null" && args.is_empty()
+    ) {
+        budget.node(0)?;
+    } else if let Some(CtValue::List(items)) = json_payload(value, "Array") {
+        budget.node(0)?;
+        for item in items {
+            yaml_clone(item, budget)?;
+        }
+    } else if let Some(CtValue::Struct { fields, .. }) = json_payload(value, "Object") {
+        budget.node(0)?;
+        for (key, item) in fields {
+            budget.bytes(key.len())?;
+            yaml_clone(item, budget)?;
+        }
+    } else if value_is_yaml_scalar(value) {
+        let payload = yaml_scalar_payload(value).ok_or(())?;
+        budget.node(payload)?;
+    } else {
+        return Err(());
+    }
+    Ok(value.clone())
+}
+
+fn value_is_yaml_scalar(value: &CtValue) -> bool {
+    ["Bool", "Int", "Float", "Number", "TypedText", "Text"]
+        .iter()
+        .any(|variant| json_payload(value, variant).is_some())
+}
+
+fn yaml_flow_message(error: FlowError) -> &'static str {
+    match error {
+        FlowError::Depth => "YAML value is nested too deeply",
+        FlowError::Budget => "YAML value exceeds its node or byte budget",
+    }
+}
 struct YAMLParseError {
     line: usize,
     message: String,
@@ -1126,7 +1197,7 @@ impl YAMLParser {
     }
     fn skip_ignorable(&mut self) {
         while self.pos < self.lines.len() && self.is_ignorable(self.pos) {
-            self.pos += 1;
+            self.pos = self.pos.saturating_add(1);
         }
     }
     fn at_doc_marker(&self) -> bool {
@@ -1136,20 +1207,59 @@ impl YAMLParser {
         self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
     }
 
+    fn limit_error(&self) -> YAMLParseError {
+        YAMLParseError {
+            line: self.pos.saturating_add(1),
+            message: "YAML value exceeds its node or byte budget".to_string(),
+        }
+    }
+
+    fn null(&mut self) -> Result<CtValue, YAMLParseError> {
+        yaml_null(&mut self.budget).map_err(|_| self.limit_error())
+    }
+
+    fn scalar(&mut self, value: &str) -> Result<CtValue, YAMLParseError> {
+        yaml_scalar(value, &mut self.budget).map_err(|_| self.limit_error())
+    }
+
+    fn array(&mut self, items: Vec<CtValue>) -> Result<CtValue, YAMLParseError> {
+        self.budget.node(0).map_err(|_| self.limit_error())?;
+        Ok(json_array(items))
+    }
+
+    fn object(
+        &mut self,
+        entries: Vec<(String, CtValue)>,
+    ) -> Result<CtValue, YAMLParseError> {
+        for (key, _) in &entries {
+            self.budget.bytes(key.len()).map_err(|_| self.limit_error())?;
+        }
+        self.budget.node(0).map_err(|_| self.limit_error())?;
+        Ok(json_object(entries))
+    }
+
+    fn next_depth(&self, depth: usize) -> Result<usize, YAMLParseError> {
+        depth.checked_add(1).ok_or_else(|| self.limit_error())
+    }
+
+    fn next_indent(&self, indent: usize) -> Result<usize, YAMLParseError> {
+        indent.checked_add(1).ok_or_else(|| self.limit_error())
+    }
+
     fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
         self.skip_ignorable();
         if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-            return Ok(json_variant("Null", None));
+            return self.null();
         }
         if depth >= MAX_YAML_DEPTH {
             return Err(YAMLParseError {
-                line: self.pos + 1,
+                line: self.pos.saturating_add(1),
                 message: "YAML value is nested too deeply".to_string(),
             });
         }
         let ind = self.indent(self.pos);
         if ind < min_indent {
-            return Ok(json_variant("Null", None));
+            return self.null();
         }
         let content = self.content(self.pos);
         if content == "-" || content.starts_with("- ") {
@@ -1157,7 +1267,7 @@ impl YAMLParser {
         } else if yaml_is_map_entry(&content) {
             self.parse_block_map(ind, depth)
         } else {
-            self.pos += 1;
+            self.pos = self.pos.saturating_add(1);
             self.parse_inline_value(&content, depth)
         }
     }
@@ -1188,10 +1298,10 @@ impl YAMLParser {
                 rebuilt = String::new();
             }
             *line = rebuilt;
-            let item = self.parse_node(indent + 1, depth + 1)?;
+            let item = self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?;
             items.push(item);
         }
-        Ok(json_array(items))
+        self.array(items)
     }
 
     fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
@@ -1209,12 +1319,12 @@ impl YAMLParser {
             if content.starts_with("- ") || content == "-" || !yaml_is_map_entry(&content) {
                 break;
             }
-            let line_no = self.pos + 1;
+            let line_no = self.pos.saturating_add(1);
             let (key, rest) = yaml_split_key(&content).ok_or_else(|| YAMLParseError {
                 line: line_no,
                 message: jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.into(),
             })?;
-            self.pos += 1;
+            self.pos = self.pos.saturating_add(1);
             let rest = rest.trim();
             let value = if rest.is_empty() {
                 self.skip_ignorable();
@@ -1223,21 +1333,25 @@ impl YAMLParser {
                     && !self.at_doc_marker()
                     && !self.at_doc_end()
                 {
-                    self.parse_node(indent + 1, depth + 1)?
+                    self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?
                 } else {
-                    json_variant("Null", None)
+                    self.null()?
                 }
             } else if rest.starts_with('|') || rest.starts_with('>') {
-                self.parse_block_scalar(indent, rest)
+                self.parse_block_scalar(indent, rest)?
             } else {
-                self.parse_inline_value(rest, depth + 1)?
+                self.parse_inline_value(rest, self.next_depth(depth)?)?
             };
             entries.push((key, value));
         }
-        Ok(json_object(entries))
+        self.object(entries)
     }
 
-    fn parse_block_scalar(&mut self, parent_indent: usize, header: &str) -> CtValue {
+    fn parse_block_scalar(
+        &mut self,
+        parent_indent: usize,
+        header: &str,
+    ) -> Result<CtValue, YAMLParseError> {
         let folded = header.starts_with('>');
         let chomp = if header.contains('-') {
             'S'
@@ -1252,7 +1366,7 @@ impl YAMLParser {
             let raw = &self.lines[self.pos];
             if raw.trim().is_empty() {
                 body_lines.push(String::new());
-                self.pos += 1;
+                self.pos = self.pos.saturating_add(1);
                 continue;
             }
             let ind = self.indent(self.pos);
@@ -1264,7 +1378,7 @@ impl YAMLParser {
             let start = bi.min(chars.len());
             let dedented: String = chars[start..].iter().collect();
             body_lines.push(dedented);
-            self.pos += 1;
+            self.pos = self.pos.saturating_add(1);
         }
         let mut text = if folded {
             yaml_fold_lines(&body_lines)
@@ -1277,7 +1391,10 @@ impl YAMLParser {
             'K' => text.trim_end_matches('\n').to_string() + "\n",
             _ => trimmed + "\n",
         };
-        json_variant("Text", Some(CtValue::Str(text)))
+        self.budget
+            .node(text.len())
+            .map_err(|_| self.limit_error())?;
+        Ok(json_variant("Text", Some(CtValue::Str(text))))
     }
 
     fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<CtValue, YAMLParseError> {
@@ -1285,143 +1402,171 @@ impl YAMLParser {
         if let Some(rest) = s.strip_prefix('&') {
             let mut it = rest.splitn(2, char::is_whitespace);
             let name = it.next().unwrap_or("").to_string();
+            self.budget
+                .bytes(name.len())
+                .map_err(|_| self.limit_error())?;
             let val_str = it.next().unwrap_or("").trim();
             let value = if val_str.is_empty() {
-                self.parse_node(0, depth + 1)?
+                self.parse_node(0, self.next_depth(depth)?)?
             } else {
-                self.parse_inline_value(val_str, depth + 1)?
+                self.parse_inline_value(val_str, self.next_depth(depth)?)?
             };
-            self.anchors.insert(name, value.clone());
+            let stored = yaml_clone(&value, &mut self.budget)
+                .map_err(|_| self.limit_error())?;
+            self.anchors.insert(name, stored);
             return Ok(value);
         }
         if let Some(name) = s.strip_prefix('*') {
-            return Ok(self
-                .anchors
-                .get(name.trim())
-                .cloned()
-                .unwrap_or(json_variant("Null", None)));
+            if let Some(value) = self.anchors.get(name.trim()) {
+                return yaml_clone(value, &mut self.budget)
+                    .map_err(|_| self.limit_error());
+            }
+            return self.null();
         }
         if s.starts_with('[') || s.starts_with('{') {
-            return yaml_parse_flow(s, depth)
+            return yaml_parse_flow(s, depth, &mut self.budget)
                 .map(|(value, _)| value)
-                .map_err(|_| YAMLParseError {
-                    line: self.pos + 1,
-                    message: "YAML value is nested too deeply".to_string(),
+                .map_err(|error| YAMLParseError {
+                    line: self.pos.saturating_add(1),
+                    message: yaml_flow_message(error).to_string(),
                 });
         }
-        Ok(yaml_scalar_value(s))
+        self.scalar(s)
     }
 }
 
-fn yaml_parse_flow(s: &str, depth: usize) -> Result<(CtValue, usize), ()> {
+fn yaml_parse_flow(
+    s: &str,
+    depth: usize,
+    budget: &mut YamlBudget,
+) -> Result<(CtValue, usize), FlowError> {
     let chars: Vec<char> = s.chars().collect();
-    yaml_parse_flow_at(&chars, 0, depth)
+    yaml_parse_flow_at(&chars, 0, depth, budget)
 }
-fn yaml_parse_flow_at(chars: &[char], mut i: usize, depth: usize) -> Result<(CtValue, usize), ()> {
+fn yaml_parse_flow_at(
+    chars: &[char],
+    mut i: usize,
+    depth: usize,
+    budget: &mut YamlBudget,
+) -> Result<(CtValue, usize), FlowError> {
     while i < chars.len() && chars[i].is_whitespace() {
-        i += 1;
+        i = i.saturating_add(1);
     }
     if i >= chars.len() {
-        return Ok((json_variant("Null", None), i));
+        return Ok((yaml_null(budget).map_err(|_| FlowError::Budget)?, i));
     }
     match chars[i] {
         '[' => {
             if depth >= MAX_YAML_DEPTH {
-                return Err(());
+                return Err(FlowError::Depth);
             }
-            i += 1;
+            i = i.saturating_add(1);
             let mut items = Vec::new();
             loop {
                 while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
                 if i >= chars.len() || chars[i] == ']' {
-                    i += 1;
+                    i = i.saturating_add(1);
                     break;
                 }
-                let (v, ni) = yaml_parse_flow_at(chars, i, depth + 1)?;
+                let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
+                let (v, ni) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
                 items.push(v);
                 i = ni;
                 while i < chars.len() && chars[i].is_whitespace() {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
                 if i < chars.len() && chars[i] == ',' {
-                    i += 1;
+                    i = i.saturating_add(1);
                 } else if i < chars.len() && chars[i] == ']' {
-                    i += 1;
+                    i = i.saturating_add(1);
                     break;
                 }
             }
+            budget.node(0).map_err(|_| FlowError::Budget)?;
             Ok((json_array(items), i))
         }
         '{' => {
             if depth >= MAX_YAML_DEPTH {
-                return Err(());
+                return Err(FlowError::Depth);
             }
-            i += 1;
+            i = i.saturating_add(1);
             let mut entries = Vec::new();
             loop {
                 while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
                 if i >= chars.len() || chars[i] == '}' {
-                    i += 1;
+                    i = i.saturating_add(1);
                     break;
                 }
                 let (key, ni) = yaml_scan_flow_scalar(chars, i, true);
                 i = ni;
                 while i < chars.len() && chars[i].is_whitespace() {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
                 if i < chars.len() && chars[i] == ':' {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
-                let (v, nj) = yaml_parse_flow_at(chars, i, depth + 1)?;
+                let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
+                let (v, nj) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
                 i = nj;
-                entries.push((key.trim().to_string(), v));
+                let key = key.trim().to_string();
+                budget
+                    .bytes(key.len())
+                    .map_err(|_| FlowError::Budget)?;
+                entries.push((key, v));
                 while i < chars.len() && chars[i].is_whitespace() {
-                    i += 1;
+                    i = i.saturating_add(1);
                 }
                 if i < chars.len() && chars[i] == ',' {
-                    i += 1;
+                    i = i.saturating_add(1);
                 } else if i < chars.len() && chars[i] == '}' {
-                    i += 1;
+                    i = i.saturating_add(1);
                     break;
                 }
             }
+            budget.node(0).map_err(|_| FlowError::Budget)?;
             Ok((json_object(entries), i))
         }
         _ => {
             let (raw, ni) = yaml_scan_flow_scalar(chars, i, false);
-            Ok((yaml_scalar_value(raw.trim()), ni))
+            Ok((yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?, ni))
         }
     }
 }
 fn yaml_scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String, usize) {
     while i < chars.len() && chars[i].is_whitespace() {
-        i += 1;
+        i = i.saturating_add(1);
     }
     if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
         let q = chars[i];
         let mut out = String::new();
-        i += 1;
+        i = i.saturating_add(1);
         while i < chars.len() {
             if chars[i] == q {
-                if q == '\'' && i + 1 < chars.len() && chars[i + 1] == '\'' {
+                if q == '\''
+                    && i
+                        .checked_add(1)
+                        .is_some_and(|next| next < chars.len() && chars[next] == '\'')
+                {
                     out.push('\'');
-                    i += 2;
+                    i = i.saturating_add(2);
                     continue;
                 }
-                i += 1;
+                i = i.saturating_add(1);
                 break;
             }
-            if chars[i] == '\\' && q == '"' && i + 1 < chars.len() {
-                out.push(yaml_unescape(chars[i + 1]));
-                i += 2;
-                continue;
+            if chars[i] == '\\' && q == '"' {
+                if let Some(next) = i.checked_add(1).filter(|next| *next < chars.len()) {
+                    out.push(yaml_unescape(chars[next]));
+                    i = i.saturating_add(2);
+                    continue;
+                }
             }
             out.push(chars[i]);
-            i += 1;
+            i = i.saturating_add(1);
         }
         return (out, i);
     }
@@ -1435,7 +1580,7 @@ fn yaml_scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String,
             break;
         }
         out.push(c);
-        i += 1;
+        i = i.saturating_add(1);
     }
     (out, i)
 }
@@ -1483,7 +1628,7 @@ fn yaml_strip_comment(s: &str) -> String {
             }
             _ => {}
         }
-        i += 1;
+        i = i.saturating_add(1);
     }
     s.trim_end().to_string()
 }
@@ -1501,16 +1646,19 @@ fn yaml_top_level_colon(s: &str) -> Option<usize> {
         match c {
             '\'' if !in_d => in_s = !in_s,
             '"' if !in_s => in_d = !in_d,
-            '[' | '{' if !in_s && !in_d => depth += 1,
-            ']' | '}' if !in_s && !in_d => depth -= 1,
+            '[' | '{' if !in_s && !in_d => depth = depth.saturating_add(1),
+            ']' | '}' if !in_s && !in_d => depth = depth.saturating_sub(1),
             ':' if !in_s && !in_d && depth == 0 => {
-                if i + 1 >= chars.len() || chars[i + 1] == ' ' {
+                if i
+                    .checked_add(1)
+                    .is_none_or(|next| next >= chars.len() || chars[next] == ' ')
+                {
                     return Some(i);
                 }
             }
             _ => {}
         }
-        i += 1;
+        i = i.saturating_add(1);
     }
     None
 }
@@ -1518,7 +1666,8 @@ fn yaml_split_key(s: &str) -> Option<(String, String)> {
     let idx = yaml_top_level_colon(s)?;
     let chars: Vec<char> = s.chars().collect();
     let key_raw: String = chars[..idx].iter().collect();
-    let rest: String = chars[idx + 1..].iter().collect();
+    let rest_start = idx.checked_add(1)?;
+    let rest: String = chars[rest_start..].iter().collect();
     Some((yaml_unquote_key(key_raw.trim()), rest))
 }
 fn yaml_unquote_key(k: &str) -> String {
@@ -3439,5 +3588,41 @@ mod depth_tests {
         yaml.push_str(&"  ".repeat(yaml_depth));
         yaml.push_str("0\n");
         assert!(yaml_parse(&yaml).is_err());
+    }
+
+    #[test]
+    fn hostile_yaml_alias_clones_are_rejected_by_the_shared_budget() {
+        let mut yaml = String::from("base: &a\n  value: x\nitems:\n");
+        for _ in 0..=(MAX_YAML_NODES / 2) {
+            yaml.push_str("  - *a\n");
+        }
+        assert!(yaml_parse(&yaml).is_err());
+    }
+
+    #[test]
+    fn dotted_toml_key_depth_is_bounded_before_assembly() {
+        let dotted = (0..MAX_TOML_DEPTH)
+            .map(|index| format!("key{index}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        assert!(toml_parse(&format!("{dotted} = 0")).is_ok());
+
+        let too_deep = (0..=MAX_TOML_DEPTH)
+            .map(|index| format!("key{index}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        assert!(toml_parse(&format!("{too_deep} = 0")).is_err());
+
+        let header = (0..(MAX_TOML_DEPTH - 1))
+            .map(|index| format!("table{index}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        assert!(toml_parse(&format!("[{header}]\nleaf = 0")).is_ok());
+
+        let too_deep_header = (0..MAX_TOML_DEPTH)
+            .map(|index| format!("table{index}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        assert!(toml_parse(&format!("[{too_deep_header}]\nleaf = 0")).is_err());
     }
 }

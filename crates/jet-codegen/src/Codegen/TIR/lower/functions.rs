@@ -22,7 +22,9 @@ use crate::Codegen::TIR::{
 };
 use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
@@ -155,6 +157,7 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
         Some(from_ty.clone()),
     );
     prepare_interrupt_callback_locals(&conversion.body, cx, &mut env);
+    let body = lower_stmts(&conversion.body, cx, &mut env);
     TFunc {
         name,
         source_span: conversion.from_span,
@@ -183,7 +186,8 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
         is_scalar: false,
         kernel_proof: None,
         memo_field: None,
-        body: lower_stmts(&conversion.body, cx, &mut env),
+        uses_stack_sentry: env.stack_sentry_needed(),
+        body,
         kind: TFuncKind::TopLevel,
     }
 }
@@ -305,8 +309,10 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         body,
         None,
         Some(cx.expand_type_aliases(&return_type)),
+        &env.stack_sentry_needed,
         cx,
     );
+    let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -334,6 +340,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
+        uses_stack_sentry,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -344,6 +351,7 @@ fn lower_contract_cond(
     cond: &Expr,
     result_binding: Option<(&str, &Type)>,
     owner_type: Option<&str>,
+    stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> TExpr {
     let mut env = LowerEnv::new(f.name.clone());
@@ -365,6 +373,9 @@ fn lower_contract_cond(
         let place = if owner_type.is_some() && p.name == Syntax::KW_SELF {
             if matches!(p.convention, AccessConvention::Write) {
                 TLocal::generated(Syntax::KW_SELF).through_ref()
+            } else if matches!(p.convention, AccessConvention::Read) {
+                TLocal::generated(Syntax::KW_SELF)
+                    .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
             } else {
                 TLocal::generated(Syntax::KW_SELF)
             }
@@ -376,6 +387,7 @@ fn lower_contract_cond(
     if let Some((rust_name, ty)) = result_binding {
         env.bind("result", TLocal::generated(rust_name), Some(ty.clone()));
     }
+    env.stack_sentry_needed = stack_sentry_needed.clone();
     lower_expr(cond, cx, &mut env)
 }
 
@@ -482,14 +494,29 @@ fn lower_contract_clause(
     result_binding: Option<(&str, &Type)>,
     kind: TContractKind,
     owner_type: Option<&str>,
+    stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> TContract {
     let (_, line, _) = crate::Codegen::TIR::tir_src_line_at(&cx.src, clause.span.start);
     let bindings = contract_fact_bindings(f, result_binding, owner_type, cx);
     TContract {
         kind,
-        condition: lower_contract_cond(f, &clause.cond, result_binding, owner_type, cx),
-        message: lower_contract_cond(f, &clause.message_expr, result_binding, owner_type, cx),
+        condition: lower_contract_cond(
+            f,
+            &clause.cond,
+            result_binding,
+            owner_type,
+            stack_sentry_needed,
+            cx,
+        ),
+        message: lower_contract_cond(
+            f,
+            &clause.message_expr,
+            result_binding,
+            owner_type,
+            stack_sentry_needed,
+            cx,
+        ),
         file: cx.file.clone(),
         line,
         span: clause.span,
@@ -501,7 +528,12 @@ fn lower_contract_clause(
     }
 }
 
-fn lower_post_contracts_for_owner(f: &Func, owner_type: Option<&str>, cx: &Cx) -> Vec<TContract> {
+fn lower_post_contracts_for_owner(
+    f: &Func,
+    owner_type: Option<&str>,
+    stack_sentry_needed: &Rc<Cell<bool>>,
+    cx: &Cx,
+) -> Vec<TContract> {
     let ret_ty = {
         let ty = owner_type
             .map(|owner| resolve_self_ty(&f.effective_return_type(), owner))
@@ -519,6 +551,7 @@ fn lower_post_contracts_for_owner(f: &Func, owner_type: Option<&str>, cx: &Cx) -
                 Some((&result_name, &ret_ty)),
                 TContractKind::Post,
                 owner_type,
+                stack_sentry_needed,
                 cx,
             )
         })
@@ -531,9 +564,10 @@ fn wrap_contract_scope(
     body: Vec<TStmt>,
     owner_type: Option<&str>,
     ret: Option<Type>,
+    stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> Vec<TStmt> {
-    let post = lower_post_contracts_for_owner(f, owner_type, cx);
+    let post = lower_post_contracts_for_owner(f, owner_type, stack_sentry_needed, cx);
     if post.is_empty() {
         body
     } else {
@@ -571,6 +605,9 @@ pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     env.ret_ty = Some(test_body_return_type());
     prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
+    if env.stack_sentry_needed() {
+        out.push_str("    let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame();\n");
+    }
     emit_tir_stmts(&tbody, cx, out, 1);
 }
 
@@ -593,6 +630,9 @@ pub(crate) fn emit_tir_property_test_body(
     }
     prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
+    if env.stack_sentry_needed() {
+        out.push_str("    let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame();\n");
+    }
     emit_tir_stmts(&tbody, cx, out, 1);
 }
 
@@ -615,6 +655,9 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
     );
     prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = cx.time_tir(|| lower_stmts(body, cx, &mut env));
+    if env.stack_sentry_needed() {
+        out.push_str("    let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame();\n");
+    }
     cx.time_emission(|| emit_tir_stmts(&tbody, cx, out, 1));
 }
 
@@ -733,9 +776,7 @@ pub(crate) fn lower_method_for_owner(
     cx: &Cx,
     raw_protocol_return: bool,
 ) -> TFunc {
-    cx.time_tir(|| {
-        lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return)
-    })
+    cx.time_tir(|| lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return))
 }
 
 fn lower_method_for_owner_inner(
@@ -745,9 +786,10 @@ fn lower_method_for_owner_inner(
     cx: &Cx,
     raw_protocol_return: bool,
 ) -> TFunc {
-    let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
-        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
-    });
+    let declared_return_type = f
+        .return_type
+        .clone()
+        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     let return_type = if raw_protocol_return {
         debug_assert!(
             f.compiler_generated && f.return_type.is_some(),
@@ -778,6 +820,9 @@ fn lower_method_for_owner_inner(
             // `(*self) = New{}` (D-MUTSELF1). `self`/`take self` carry no deref.
             let place = if matches!(p.convention, AccessConvention::Write) {
                 TLocal::generated("self").through_ref()
+            } else if matches!(p.convention, AccessConvention::Read) {
+                TLocal::generated("self")
+                    .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
             } else {
                 TLocal::generated("self")
             };
@@ -822,6 +867,7 @@ fn lower_method_for_owner_inner(
         body,
         Some(type_name),
         Some(cx.expand_type_aliases(&return_type)),
+        &env.stack_sentry_needed,
         cx,
     );
     let mut clone_types = env.cloned_types.borrow().clone();
@@ -841,6 +887,7 @@ fn lower_method_for_owner_inner(
         .memo_fields
         .get(type_name)
         .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
+    let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -871,6 +918,7 @@ fn lower_method_for_owner_inner(
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field,
+        uses_stack_sentry,
         body,
         kind,
     }
@@ -902,9 +950,7 @@ pub(crate) fn lower_trait_method(
     trait_name: &str,
     raw_protocol_return: bool,
 ) -> TFunc {
-    cx.time_tir(|| {
-        lower_trait_method_inner(f, type_name, cx, trait_name, raw_protocol_return)
-    })
+    cx.time_tir(|| lower_trait_method_inner(f, type_name, cx, trait_name, raw_protocol_return))
 }
 
 fn lower_trait_method_inner(
@@ -930,9 +976,10 @@ fn lower_trait_method_inner(
                 | crate::Generics::COMPARABLE
                 | crate::Generics::CLOSE
         );
-    let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
-        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
-    });
+    let declared_return_type = f
+        .return_type
+        .clone()
+        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     let return_type = if raw_protocol_return {
         debug_assert!(
             f.return_type.is_some() || trait_name == crate::Generics::CLOSE,
@@ -971,6 +1018,9 @@ fn lower_trait_method_inner(
             // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
             let place = if matches!(p.convention, AccessConvention::Write) {
                 TLocal::generated("self").through_ref()
+            } else if matches!(p.convention, AccessConvention::Read) {
+                TLocal::generated("self")
+                    .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
             } else {
                 TLocal::generated("self")
             };
@@ -1014,6 +1064,7 @@ fn lower_trait_method_inner(
         body,
         Some(type_name),
         Some(cx.expand_type_aliases(&return_type)),
+        &env.stack_sentry_needed,
         cx,
     );
     let mut body = body;
@@ -1058,6 +1109,7 @@ fn lower_trait_method_inner(
     }
     collect_signature_clone_types(&return_type, cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
+    let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -1088,6 +1140,7 @@ fn lower_trait_method_inner(
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
+        uses_stack_sentry,
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -1188,6 +1241,7 @@ fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_scalar: false,
         kernel_proof: None,
         memo_field: None,
+        uses_stack_sentry: false,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,

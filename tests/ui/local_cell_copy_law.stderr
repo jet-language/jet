@@ -4,7 +4,7 @@ Error [E0112]: `Cell<fn() Int>.get()` cannot copy its value
   1 | fn get_callback(cell: Cell<fn() Int>) { _ :: cell.get() }
     |                                                   ^^^
  Why: `get` returns an independent owned value, so the stored type must support copying
- Fix: use `.read(value => ...)` to inspect it without making a copy
+ Fix: Use `.read(value -> ...)` to inspect it without making a copy
 More: jet-lang.dev/e/E0112
 
 Error [E0112]: `Cell<[fn() Int]?>.get_or_set()` cannot copy its value
@@ -13,5 +13,5 @@ Error [E0112]: `Cell<[fn() Int]?>.get_or_set()` cannot copy its value
   3 | fn get_callbacks_or_set(cell: Cell<?[fn() Int]>) { _ :: cell.get_or_set(() -> [() -> 1]) }
     |                                                              ^^^^^^^^^^
  Why: `get_or_set` returns an independent owned value, so `T` must support copying
- Fix: use `.edit(value => ...)` when the cached value cannot be copied
+ Fix: Use `.edit(value -> ...)` when the cached value cannot be copied
 More: jet-lang.dev/e/E0112

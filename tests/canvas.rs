@@ -2877,11 +2877,16 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"command\":[\"jet\",\"check\",\"main.jet\"]",
         "\"writes\":\"none\"",
         "\"requires_confirmation\":false",
+        "\"action_id\":\"canvas.command:test\"",
+        "\"command\":[\"jet\",\"test\",\"main.jet\"]",
+        "\"writes\":\"test_outputs\"",
+        "\"requires_confirmation\":true",
         "\"action_id\":\"canvas.command:build\"",
         "\"authority\":[\"canvas.command:build\",\"canvas.build_output:binary\",\"canvas.source_edit:single_file\"]",
-        "\"command\":[\"jet\",\"dev\",\"main.jet\",\"--target=web\"]",
-        "\"writes\":\"dev_server\"",
+        "\"command\":[\"jet\",\"build\",\"main.jet\"]",
+        "\"writes\":\"build_outputs\"",
         "\"action_id\":\"canvas.command:service.start\"",
+        "\"command\":[\"jet\",\"services\",\"up\"]",
         "\"available\":false",
         "\"denied_reason\":\"no env service selected\"",
     ] {
@@ -2944,7 +2949,6 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"version\":\"0.7.0\"",
         "\"touched_files\":[\"main.jet\"]",
         "\"command\":[\"jet\",\"build\",\"main.jet\"]",
-        "\"authority\":[\"canvas.command:dev\",\"canvas.service:dev_server\",\"canvas.source_edit:package\"]",
     ] {
         assert!(pkg_actions.contains(field), "package actions missing {field}: {pkg_actions}");
     }
@@ -5442,6 +5446,23 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
         "{receipt}"
     );
 
+    let nested_dir = dir.join("src");
+    fs::create_dir_all(&nested_dir).unwrap();
+    let nested = nested_dir.join("nested.jet");
+    fs::write(&nested, "fn nested() Int -> {\n    return 9\n}\n").unwrap();
+    let nested_src = fs::read_to_string(&nested).unwrap();
+    let nested_revision = jet::Canvas::source_revision(&nested_src);
+    let nested_command = format!(
+        "{{\"schema_version\":1,\"action_id\":\"canvas.command:check\",\"source_id\":\"src/nested.jet\",\"revision\":\"{}\"}}",
+        nested_revision
+    );
+    let nested_receipt = jet::Canvas::command_receipt_json_for_entry(&entry, &nested_command)
+        .expect("nested source command receipt");
+    assert!(
+        nested_receipt.contains("\"command\":[\"jet\",\"check\",\"src/nested.jet\"]"),
+        "{nested_receipt}"
+    );
+
     let edit = format!(
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"source\":\"fn helper() Int -> {{\\n    return 8\\n}}\\n\"}}",
         revision
@@ -5537,6 +5558,63 @@ fn canvas_project_source_id_rejects_existing_unprojected_file() {
     let err = jet::Canvas::graph_json_for_entry_source(&entry, Some("stray.jet"))
         .expect_err("existing but unprojected file should be rejected");
     assert!(err.contains("\"kind\":\"not_found\""), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn canvas_project_source_id_rejects_symlink_alias() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("project_source_id_symlink");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"source_id_symlink\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"entry\")\n}\n").unwrap();
+    let real = dir.join("real.jet");
+    let real_source = "fn leaked() {\n    print(\"must not be selected through a link\")\n}\n";
+    fs::write(&real, real_source).unwrap();
+    let alias = dir.join("alias.jet");
+    symlink(&real, &alias).unwrap();
+
+    assert!(
+        jet::Canvas::project_path_for_source_id(&entry, "alias.jet").is_none(),
+        "Canvas source ids must not select symlink aliases"
+    );
+    let revision = jet::Canvas::source_revision(real_source);
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"noop\",\"source_id\":\"alias.jet\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let error = jet::Canvas::apply_transaction_json(&entry, &request)
+        .expect_err("Canvas must not read a symlink alias as source truth");
+    assert!(error.contains("\"kind\":\"not_found\""), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn canvas_rename_receipt_rejects_symlinked_metadata_directory() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("rename_receipt_symlink");
+    let path = dir.join("main.jet");
+    fs::write(&path, CANVAS_FIXTURE).unwrap();
+    let outside = dir.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, dir.join(".jet")).unwrap();
+
+    let source = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{}\",\"from\":\"total\",\"to\":\"score\"}}",
+        revision
+    );
+    let error = jet::Canvas::apply_transaction_json(&path, &request)
+        .expect_err("Canvas must not write rename receipts through a symlink");
+    assert!(error.contains("\"kind\":\"io\""), "{error}");
+    assert!(!outside.join("codemods").exists());
 }
 
 #[test]

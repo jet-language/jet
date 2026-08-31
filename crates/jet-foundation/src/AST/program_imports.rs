@@ -650,6 +650,27 @@ pub struct ProgramBundle {
 pub struct PackageGuarantees {
     pub contain: std::collections::BTreeSet<String>,
     pub harden: bool,
+    /// D-TEAMPOLICY1=A: every dependency name declared by the root package,
+    /// including native/system and foreign dependencies with no source root.
+    pub dependency_names: std::collections::BTreeSet<String>,
+    /// D-TEAMPOLICY1=A: normalized module-path effect ceilings from the
+    /// package policy. An empty set is an explicit pure ceiling.
+    pub effects: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<String>,
+    >,
+    /// D-TEAMPOLICY1=A: `None` means no unsafe rule; `Some(empty)` denies all
+    /// unsafe gates, while non-empty values allow only those project paths.
+    pub unsafe_paths: Option<Vec<String>>,
+    /// D-TEAMPOLICY1=A: `None` means no expert rule; `Some(false)` denies
+    /// expert-only surfaces, while `Some(true)` permits them.
+    pub expert: Option<bool>,
+    /// D-TEAMPOLICY1=A: normalized dependency allow-list. Absence means no
+    /// allow-list; an explicit empty list denies every declared dependency.
+    pub deps: Option<Vec<String>>,
+    /// D-TEAMPOLICY1=A: normalized diagnostics-as-errors classes. Absence
+    /// leaves lint severity unchanged; an explicit empty list denies nothing.
+    pub lints_deny: Option<Vec<String>>,
     /// D-AUTHORITY-MEM1/D-AUTHORITY-MEM2: package-wide memory denials from
     /// `authority.holds.deny`. The loader carries the raw canonical rights here so
     /// sema applies the same memory proof as a signature denial.
@@ -807,8 +828,13 @@ pub enum TryConvert {
     /// `Err` value at the propagation seam.
     DefaultErr,
     /// Declared `impl Source -> Target { … }` conversion (D-ERR-CONV).
-    /// Holds the mangled Rust function name emitted by codegen.
-    Typed(String),
+    /// Holds the mangled Rust function name and the exact sema-resolved error
+    /// types carried into TIR.
+    Typed {
+        fn_name: String,
+        source: Type,
+        target: Type,
+    },
     /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
     /// Codegen wraps with the canonical `__jet_<enum>::__jet_<tag>(e)` path.
     WidenUnion { enum_name: String, tag: String },

@@ -984,7 +984,7 @@ pub(crate) fn snapshot_with_legacy(
 pub(crate) fn recover(roots: &Roots) -> io::Result<usize> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let recovered = recover_unlocked(roots)?;
-    let (known, _) = Journal::lifecycle_inputs_unlocked(roots)?;
+        let (known, _) = Journal::lifecycle_inputs_unlocked(roots)?;
         let state = load_state(roots, &known)?;
         compact_if_needed(roots, &state)?;
         Ok(recovered)

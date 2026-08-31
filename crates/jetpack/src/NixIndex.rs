@@ -12,8 +12,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const MAX_COMPRESSED_BYTES: usize = 33_554_432;
@@ -22,9 +24,11 @@ pub(crate) const MAX_RECORDS: usize = 400_000;
 pub(crate) const MAX_NATIVE_RECIPE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_MANIFEST_FUTURE_SKEW_SECONDS: u64 = 5 * 60;
 const INDEX_SCHEMA: u64 = 1;
 const INDEX_DOMAIN: &[u8] = b"jet-nixpkgs-index-v1\n";
 const MANIFEST_DOMAIN: &[u8] = b"jet-nixpkgs-channel-manifest-v1\n";
+const TEST_INDEX_KEY_ID: &str = "jet-test-index-v1";
 const INDEX_ROOT: &str = "hangar/nix-index/v1";
 const LOCAL_INDEX_ROOT: &str = "index-v1";
 const LOCAL_NATIVE_RECIPE_ROOT: &str = "recipes-v1.json";
@@ -326,25 +330,36 @@ pub(crate) struct OracleRecord {
     pub(crate) cache_admitted: bool,
 }
 
-/// Native bounded transport used by `from_roots`. HTTPS uses the existing
-/// dependency-free `jet_net` seam; plain HTTP remains restricted to loopback.
-struct NativeIndexTransport;
+#[derive(Clone, Debug)]
+struct PinnedIndexEndpoint {
+    scheme: String,
+    host: String,
+    port: u16,
+    addresses: Vec<SocketAddr>,
+}
+
+/// Native bounded transport used by `from_roots`. The configured endpoint is
+/// resolved once; every request uses the held address set while retaining the
+/// original host in the URL for HTTPS SNI and certificate validation.
+struct NativeIndexTransport {
+    endpoint: Option<PinnedIndexEndpoint>,
+    // Signed manifests may name a distinct host for a target or signature
+    // sidecar. Resolve each such authority once for this client, then reuse
+    // the held addresses for every request. The URL still carries the
+    // original host so HTTPS keeps normal SNI and certificate validation.
+    address_cache: Mutex<BTreeMap<(String, String, u16), Vec<SocketAddr>>>,
+}
 
 impl IndexTransport for NativeIndexTransport {
     fn get_bounded(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, NixIndexError> {
-        if let Some(authority) = url
-            .strip_prefix("http://")
-            .and_then(|value| value.split('/').next())
-        {
-            if !is_loopback_host(authority) {
-                return Err(NixIndexError::Transport(
-                    "plain HTTP index transport is restricted to loopback".to_string(),
-                ));
-            }
-        }
+        let addresses = self.pinned_addresses(url)?;
         let limit = usize::try_from(max_bytes)
             .map_err(|_| NixIndexError::invalid("index response bound is too large"))?;
-        let response = jet_net::get_stream(url, std::time::Duration::from_secs(120))
+        let response = jet_net::get_stream_pinned(
+            url,
+            &addresses,
+            std::time::Duration::from_secs(120),
+        )
             .map_err(|error| NixIndexError::Transport(error.to_string()))?;
         if response.status() != 200 {
             return Err(NixIndexError::Transport(format!(
@@ -371,6 +386,133 @@ impl IndexTransport for NativeIndexTransport {
         }
         Ok(body)
     }
+}
+
+impl NativeIndexTransport {
+    fn pinned_addresses(&self, url: &str) -> Result<Vec<SocketAddr>, NixIndexError> {
+        let Some(configured) = &self.endpoint else {
+            return Err(NixIndexError::Transport(
+                "native index transport has no configured endpoint".to_string(),
+            ));
+        };
+        let (scheme, host, port) = parse_network_url(url)?;
+        if scheme == configured.scheme
+            && host.eq_ignore_ascii_case(&configured.host)
+            && port == configured.port
+        {
+            return Ok(configured.addresses.clone());
+        }
+        if scheme != configured.scheme {
+            return Err(NixIndexError::Transport(
+                "signed nix index target changes the endpoint scheme".to_string(),
+            ));
+        }
+        let key = (scheme.clone(), host.to_ascii_lowercase(), port);
+        let mut cache = self
+            .address_cache
+            .lock()
+            .map_err(|_| NixIndexError::Transport("index address cache is poisoned".to_string()))?;
+        if let Some(addresses) = cache.get(&key) {
+            return Ok(addresses.clone());
+        }
+        let addresses = resolve_index_addresses(&scheme, &host, port)?;
+        cache.insert(key, addresses.clone());
+        Ok(addresses)
+    }
+}
+
+fn native_index_transport(endpoint: &str) -> Result<NativeIndexTransport, NixIndexError> {
+    let (scheme, host, port) = parse_network_url(endpoint)?;
+    let addresses = resolve_index_addresses(&scheme, &host, port)?;
+    Ok(NativeIndexTransport {
+        endpoint: Some(PinnedIndexEndpoint {
+            scheme,
+            host,
+            port,
+            addresses,
+        }),
+        address_cache: Mutex::new(BTreeMap::new()),
+    })
+}
+
+fn parse_network_url(url: &str) -> Result<(String, String, u16), NixIndexError> {
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| NixIndexError::invalid("nix index URL has no scheme"))?;
+    let scheme = scheme.to_ascii_lowercase();
+    if !matches!(scheme.as_str(), "http" | "https") {
+        return Err(NixIndexError::invalid(
+            "nix index URL must use HTTP or HTTPS",
+        ));
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
+        return Err(NixIndexError::invalid("nix index URL authority is malformed"));
+    }
+    let (host, port, bracketed) = if let Some(host) = authority.strip_prefix('[') {
+        let (host, suffix) = host
+            .split_once(']')
+            .ok_or_else(|| NixIndexError::invalid("nix index IPv6 host is malformed"))?;
+        let port = suffix
+            .strip_prefix(':')
+            .map(parse_index_port)
+            .transpose()?
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
+        (host.to_string(), port, true)
+    } else {
+        let (host, raw_port) = authority
+            .rsplit_once(':')
+            .map(|(host, port)| (host, Some(port)))
+            .unwrap_or((authority, None));
+        let port = raw_port
+            .map(parse_index_port)
+            .transpose()?
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
+        (host.to_string(), port, false)
+    };
+    if host.is_empty() || (!bracketed && host.contains(':')) || host.chars().any(char::is_whitespace) {
+        return Err(NixIndexError::invalid("nix index host is malformed"));
+    }
+    Ok((scheme, host, port))
+}
+
+fn parse_index_port(port: &str) -> Result<u16, NixIndexError> {
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| NixIndexError::invalid("nix index port is malformed"))?;
+    (port != 0)
+        .then_some(port)
+        .ok_or_else(|| NixIndexError::invalid("nix index port must not be zero"))
+}
+
+fn resolve_index_addresses(
+    scheme: &str,
+    host: &str,
+    port: u16,
+) -> Result<Vec<SocketAddr>, NixIndexError> {
+    if scheme == "https" {
+        return jet_net::resolve_public_addresses(host, port)
+            .map_err(NixIndexError::Transport);
+    }
+    let endpoint = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let addresses = endpoint
+        .to_socket_addrs()
+        .map_err(|error| NixIndexError::Transport(format!("could not resolve index endpoint: {error}")))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| !address.ip().is_loopback())
+    {
+        return Err(NixIndexError::Transport(
+            "plain HTTP index transport is restricted to loopback".to_string(),
+        ));
+    }
+    Ok(addresses)
 }
 
 trait IndexClock {
@@ -428,41 +570,42 @@ impl NixIndexClient<'static> {
         }
         let trust_exists = path_exists(&trust_path)?;
         let endpoint_exists = path_exists(&endpoint_path)?;
-        let (key_id, public_key, endpoint) = match (trust_exists, endpoint_exists) {
-            (true, true) => {
-                let trust = read_regular(&trust_path, 4096)?;
-                let endpoint = read_regular(&endpoint_path, 4096)?;
-                let text = std::str::from_utf8(&trust)
-                    .map_err(|_| NixIndexError::invalid("nix index public key is not UTF-8"))?;
-                let (key_id, encoded) = text.trim().split_once(':').ok_or_else(|| {
-                    NixIndexError::invalid("nix index public key must be key-id:base64-public-key")
-                })?;
-                let key_id = nonempty_text(key_id, "nix index key id")?.to_string();
-                let key_bytes = decode_base64(encoded, false, false)
-                    .map_err(|_| NixIndexError::invalid("nix index public key is not base64"))?;
-                let key_bytes: [u8; 32] = key_bytes
-                    .try_into()
-                    .map_err(|_| NixIndexError::invalid("nix index public key must be 32 bytes"))?;
-                let endpoint = parse_endpoint(
-                    std::str::from_utf8(&endpoint)
-                        .map_err(|_| NixIndexError::invalid("nix index endpoint is not UTF-8"))?
-                        .trim(),
-                )?;
-                (key_id, key_bytes, endpoint)
-            }
-            (false, false) => {
+        if !trust_exists || !endpoint_exists {
+            if !trust_exists && !endpoint_exists {
                 return Err(NixIndexError::invalid(
                     "signed nixpkgs index endpoint and public key must be configured explicitly",
                 ));
             }
-            _ => {
-                return Err(NixIndexError::invalid(
-                    "nix index endpoint and public-key overrides must be installed together",
-                ));
-            }
-        };
-        let public_key = VerifyingKey::from_bytes(&public_key)
+            return Err(NixIndexError::invalid(
+                "nix index endpoint and public-key overrides must be installed together",
+            ));
+        }
+        let trust = read_regular(&trust_path, 4096)?;
+        let text = std::str::from_utf8(&trust)
+            .map_err(|_| NixIndexError::invalid("nix index public key is not UTF-8"))?;
+        let (key_id, encoded) = text.trim().split_once(':').ok_or_else(|| {
+            NixIndexError::invalid("nix index public key must be key-id:base64-public-key")
+        })?;
+        let key_id = nonempty_text(key_id, "nix index key id")?.to_string();
+        if key_id == TEST_INDEX_KEY_ID {
+            return Err(NixIndexError::invalid(format!(
+                "nix index trust root `{TEST_INDEX_KEY_ID}` is test-only and cannot be used for official signed indexes"
+            )));
+        }
+        let key_bytes = decode_base64(encoded, false, false)
+            .map_err(|_| NixIndexError::invalid("nix index public key is not base64"))?;
+        let key_bytes: [u8; 32] = key_bytes
+            .try_into()
+            .map_err(|_| NixIndexError::invalid("nix index public key must be 32 bytes"))?;
+        let endpoint = read_regular(&endpoint_path, 4096)?;
+        let endpoint = parse_endpoint(
+            std::str::from_utf8(&endpoint)
+                .map_err(|_| NixIndexError::invalid("nix index endpoint is not UTF-8"))?
+                .trim(),
+        )?;
+        let public_key = VerifyingKey::from_bytes(&key_bytes)
             .map_err(|_| NixIndexError::invalid("nix index public key is invalid"))?;
+        let transport = native_index_transport(&endpoint)?;
         Ok(Self {
             endpoint,
             root: roots.root.clone(),
@@ -471,7 +614,7 @@ impl NixIndexClient<'static> {
             local_catalog: false,
             offline,
             clock: Box::new(SystemIndexClock),
-            transport: Box::new(NativeIndexTransport),
+            transport: Box::new(transport),
         })
     }
 
@@ -494,7 +637,10 @@ impl NixIndexClient<'static> {
             local_catalog: true,
             offline,
             clock: Box::new(SystemIndexClock),
-            transport: Box::new(NativeIndexTransport),
+            transport: Box::new(NativeIndexTransport {
+                endpoint: None,
+                address_cache: Mutex::new(BTreeMap::new()),
+            }),
         })
     }
 }
@@ -548,6 +694,11 @@ impl<'a> NixIndexClient<'a> {
             Err(error) if self.is_offline() => return Err(error),
             Err(_) => self.fetch_manifest(&key.channel)?,
         };
+        if manifest.manifest.issued_unix > now.saturating_add(MAX_MANIFEST_FUTURE_SKEW_SECONDS) {
+            return Err(NixIndexError::invalid(
+                "signed nixpkgs channel manifest is too far in the future",
+            ));
+        }
         if manifest.manifest.expires_unix <= now {
             return Err(NixIndexError::invalid(
                 "signed nixpkgs channel manifest is expired",
@@ -1010,13 +1161,16 @@ impl<'a> NixIndexClient<'a> {
             directory.join(format!("{}.sig.json", manifest.manifest.generation));
         write_atomic(&immutable, &manifest.bytes, false)?;
         write_atomic(&immutable_signature, &manifest.signature_bytes, false)?;
+        // Advance the monotonic replay floor before exposing the new current
+        // pair. A crash after this point can leave an old current pair, but it
+        // can never make that pair authoritative again.
+        self.record_highest_generation_atomically(channel, &manifest.manifest, &manifest.bytes)?;
         write_atomic(&directory.join("current.json"), &manifest.bytes, true)?;
         write_atomic(
             &directory.join("current.sig.json"),
             &manifest.signature_bytes,
             true,
-        )?;
-        self.record_highest_generation_atomically(channel, &manifest.manifest, &manifest.bytes)
+        )
     }
 
     fn cache_target_atomically(
@@ -1162,22 +1316,16 @@ fn ensure_real_directory(path: &Path) -> Result<(), NixIndexError> {
 }
 
 fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, NixIndexError> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| NixIndexError::Transport(format!("read {}: {error}", path.display())))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(NixIndexError::invalid(format!(
-            "nix index path `{}` is not a regular file",
-            path.display()
-        )));
-    }
-    if metadata.len() > limit {
-        return Err(NixIndexError::invalid(format!(
-            "nix index file `{}` exceeds its bound",
-            path.display()
-        )));
-    }
-    fs::read(path)
-        .map_err(|error| NixIndexError::Transport(format!("read {}: {error}", path.display())))
+    crate::SHA256::read_file_nofollow(path, limit).map_err(|error| {
+        if matches!(
+            error.kind(),
+            io::ErrorKind::InvalidData | io::ErrorKind::InvalidInput
+        ) {
+            NixIndexError::invalid(format!("read {}: {error}", path.display()))
+        } else {
+            NixIndexError::Transport(format!("read {}: {error}", path.display()))
+        }
+    })
 }
 
 fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndexError> {
@@ -1193,9 +1341,7 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
             )));
         }
         if !replace {
-            let current = fs::read(path).map_err(|error| {
-                NixIndexError::Transport(format!("read existing {}: {error}", path.display()))
-            })?;
+            let current = read_regular(path, bytes.len() as u64)?;
             if current == bytes {
                 return Ok(());
             }
@@ -1216,6 +1362,12 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
     let result = (|| {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
+        if !add_nofollow_flags(&mut options) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "no-follow state-file publication is unavailable on this platform",
+            ));
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt as _;
@@ -1229,12 +1381,13 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
             if fs::symlink_metadata(path).is_ok() {
                 fs::remove_file(path)?;
             }
-            fs::rename(&temporary, path)
+            fs::rename(&temporary, path)?;
+            sync_directory(parent)
         } else {
             match fs::hard_link(&temporary, path) {
                 Ok(()) => {
-                    let _ = fs::remove_file(&temporary);
-                    Ok(())
+                    fs::remove_file(&temporary)?;
+                    sync_directory(parent)
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let metadata = fs::symlink_metadata(path)?;
@@ -1244,7 +1397,8 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
                             "immutable nix index object is not a regular file",
                         ));
                     }
-                    let current = fs::read(path)?;
+                    let current = read_regular(path, bytes.len() as u64)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
                     if current == bytes {
                         let _ = fs::remove_file(&temporary);
                         Ok(())
@@ -1263,6 +1417,47 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
         let _ = fs::remove_file(&temporary);
     }
     result.map_err(|error| NixIndexError::Transport(format!("write {}: {error}", path.display())))
+}
+
+fn add_nofollow_flags(options: &mut fs::OpenOptions) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0o2000000;
+        const O_NOFOLLOW: i32 = 0o400000;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0x01000000;
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        return true;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    )))]
+    {
+        let _ = options;
+        false
+    }
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
 }
 
 fn validate_channel(channel: &str) -> Result<(), NixIndexError> {
@@ -3115,6 +3310,12 @@ mod tests {
     }
 
     fn signed_fixture() -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
+        signed_fixture_at("http://127.0.0.1:9999")
+    }
+
+    fn signed_fixture_at(
+        endpoint: &str,
+    ) -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let root =
             std::env::temp_dir().join(format!("jet-nix-index-{}-{serial}", std::process::id()));
@@ -3131,7 +3332,6 @@ mod tests {
         .unwrap();
         let index_signature = key.sign(&producer_signature_request(&decoded));
         let sidecar = signature_sidecar_for_test("test-key", &index_signature.to_bytes());
-        let endpoint = "http://127.0.0.1:9999";
         let target = index_target_for_test(
             REVISION,
             "x86_64-linux",
@@ -3207,6 +3407,115 @@ mod tests {
             NixIndexError::Invalid(detail)
                 if detail == "signed nixpkgs index endpoint and public key must be configured explicitly"
         ));
+
+        fs::create_dir_all(root.join("trust")).unwrap();
+        fs::write(
+            root.join("trust/nix-index-v1.ed25519.pub"),
+            format!(
+                "fixture-index-signer-v1:{}\n",
+                base64_encode(&[7; 32])
+            ),
+        )
+        .unwrap();
+        let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+            Ok(_) => panic!("the official endpoint must not be implicit"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            NixIndexError::Invalid(detail)
+                if detail == "nix index endpoint and public-key overrides must be installed together"
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn nix_index_never_accepts_the_test_key_as_an_official_root() {
+        let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "jet-nix-index-test-root-{}-{serial}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::create_dir_all(root.join("trust")).unwrap();
+        fs::write(
+            root.join("config/nix-index-v1.endpoint"),
+            "http://127.0.0.1:9999\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("trust/nix-index-v1.ed25519.pub"),
+            format!("{TEST_INDEX_KEY_ID}:{}\n", base64_encode(&[7; 32])),
+        )
+        .unwrap();
+
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+            Ok(_) => panic!("the test key must not configure an official index"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), 1348);
+        assert!(matches!(
+            error,
+            NixIndexError::Invalid(detail)
+                if detail == "nix index trust root `jet-test-index-v1` is test-only and cannot be used for official signed indexes"
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn nix_index_holds_endpoint_after_config_rewrite() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "jet-nix-index-config-rewrite-{}-{serial}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::create_dir_all(root.join("trust")).unwrap();
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let endpoint_path = root.join("config/nix-index-v1.endpoint");
+        fs::write(&endpoint_path, format!("{endpoint}\n")).unwrap();
+        let key = SigningKey::from_bytes(&[7; 32]);
+        fs::write(
+            root.join("trust/nix-index-v1.ed25519.pub"),
+            format!("fixture-index-signer-v1:{}\n", base64_encode(&key.verifying_key().to_bytes())),
+        )
+        .unwrap();
+
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        let client = NixIndexClient::from_roots_with_mode(&roots, false).unwrap();
+
+        // A later rewrite must not change the held endpoint or its resolved
+        // address authority for this already-created client.
+        fs::write(&endpoint_path, "http://127.0.0.1:9\n").unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nheld")
+                .unwrap();
+        });
+        let body = client
+            .transport
+            .get_bounded(&format!("{endpoint}/held"), 32)
+            .unwrap();
+        assert_eq!(body, b"held");
+        server.join().unwrap();
         let _ = fs::remove_dir_all(root);
     }
 
@@ -3230,6 +3539,36 @@ mod tests {
         assert_eq!(resolved.proof.manifest_generation, 1);
         assert_eq!(resolved.proof.jet_key_id, "test-key");
         assert!(root.join(INDEX_ROOT).exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // Card #2200 criterion 1: the resolver follows the documented owned
+    // endpoint and verifies the manifest and content-addressed target there.
+    #[test]
+    fn nix_index_resolves_documented_official_endpoint_layout() {
+        const ENDPOINT: &str = "https://index.jet-lang.dev";
+        let (root, transport, clock, key, index_key) = signed_fixture_at(ENDPOINT);
+        let client = NixIndexClient::for_test(
+            root.clone(),
+            ENDPOINT.to_string(),
+            "test-key".to_string(),
+            key.verifying_key().to_bytes(),
+            &transport,
+            &clock,
+            false,
+        )
+        .unwrap();
+        let resolved = client.resolve(&index_key).unwrap();
+        assert_eq!(resolved.record, ripgrep_record());
+        let values = transport.values.lock().unwrap();
+        assert!(values.contains_key(&format!(
+            "{ENDPOINT}/v1/nixpkgs-unstable/manifest.json"
+        )));
+        assert!(values.keys().any(|url| {
+            url.starts_with(&format!("{ENDPOINT}/index-v1/{REVISION}/x86_64-linux/"))
+        }));
+        drop(values);
+        drop(client);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -3357,6 +3696,47 @@ mod tests {
         assert!(
             verify_index_signature(&key.verifying_key(), "test-key", &signature, &forged).is_err()
         );
+    }
+
+    #[test]
+    fn nix_index_refuses_a_server_signature_from_a_substituted_key() {
+        let (root, transport, clock, trusted_key, index_key) = signed_fixture();
+        let endpoint = "http://127.0.0.1:9999";
+        let manifest_url = format!("{endpoint}/v1/nixpkgs-unstable/manifest.json");
+        let manifest_signature_url = format!("{manifest_url}.sig.json");
+        let manifest = transport
+            .values
+            .lock()
+            .unwrap()
+            .get(&manifest_url)
+            .cloned()
+            .unwrap();
+        let substituted_key = SigningKey::from_bytes(&[8; 32]);
+        let substituted_signature = substituted_key.sign(&manifest_signature_request(&manifest));
+        transport.values.lock().unwrap().insert(
+            manifest_signature_url,
+            signature_sidecar_for_test("test-key", &substituted_signature.to_bytes()),
+        );
+
+        let client = NixIndexClient::for_test(
+            root.clone(),
+            endpoint.to_string(),
+            "test-key".to_string(),
+            trusted_key.verifying_key().to_bytes(),
+            &transport,
+            &clock,
+            false,
+        )
+        .unwrap();
+        let error = client.resolve(&index_key).unwrap_err();
+        assert_eq!(error.code(), 1348);
+        assert!(matches!(
+            error,
+            NixIndexError::Invalid(detail)
+                if detail == "nix index manifest signature verification failed"
+        ));
+        drop(client);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

@@ -82,6 +82,40 @@ fn comptime_fetch_rejects_outside_files_and_private_networks() {
     assert!(network_diags.iter().any(|diag| diag.code == "E3414"));
     assert!(!server.join().unwrap(), "private destination was contacted");
 
+    let reserved_source = format!(
+        "use core.net as net\n@data :: net.fetch(\"http://192.0.0.1/secret\", sha256: \"{}\")\nfn run() {{}}\n",
+        "0".repeat(64)
+    );
+    fs::write(&source_path, &reserved_source).unwrap();
+    let reserved_diags = jet::compile_with_path(&reserved_source, source_path.to_str().unwrap())
+        .expect_err("comptime fetch must reject reserved IPv4 destinations");
+    assert!(reserved_diags.iter().any(|diag| diag.code == "E3414"));
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn comptime_fetch_rejects_hardlinks_to_outside_files() {
+    let root = common::unique_tmp("comptime_fetch_hardlink_root");
+    let outside = common::unique_tmp("comptime_fetch_hardlink_outside");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&outside, "private fixture").unwrap();
+    let hardlink = root.join("linked-secret");
+    fs::hard_link(&outside, &hardlink).unwrap();
+    let source_path = root.join("main.jet");
+    let source = format!(
+        "use core.net as net\n@data :: net.fetch(\"file://{}\", sha256: \"{}\")\nfn run() {{}}\n",
+        hardlink.display(),
+        "0".repeat(64)
+    );
+    fs::write(&source_path, &source).unwrap();
+
+    let diagnostics = jet::compile_with_path(&source, source_path.to_str().unwrap())
+        .expect_err("compile-time fetch must reject hardlinks to outside files");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3414"));
+
     let _ = fs::remove_dir_all(root);
     let _ = fs::remove_file(outside);
 }

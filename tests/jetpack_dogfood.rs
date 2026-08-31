@@ -999,3 +999,11 @@ struct PhysicalUse {
     shared_bytes: u64,
     total_bytes: u64,
 }
+
+#[test]
+fn semantic_corpus_policy_runs_with_dogfood() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("dogfood")
+        .expect("dogfood corpus semantic policy");
+}

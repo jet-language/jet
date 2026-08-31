@@ -452,10 +452,25 @@ fn fs_read_for_http(path: &Path) -> Vec<u8> {
 }
 
 fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
+    read_http_request_until(stream, std::time::Instant::now() + STUDIO_IO_TIMEOUT)
+}
+
+fn read_http_request_until(
+    stream: &mut std::net::TcpStream,
+    deadline: std::time::Instant,
+) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 1024];
     loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Studio request deadline exceeded",
+            ));
+        }
+        stream.set_read_timeout(Some(remaining))?;
         let n = stream.read(&mut chunk)?;
         if n == 0 {
             break;
@@ -494,7 +509,7 @@ mod tests {
         use std::io::Write;
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
 
         configure_studio_stream(&server).unwrap();
@@ -503,8 +518,21 @@ mod tests {
         server
             .set_read_timeout(Some(std::time::Duration::from_millis(20)))
             .unwrap();
-        client.write_all(b"GET /studio/ HTTP/1.1\r\n").unwrap();
-        let error = read_http_request(&mut server).unwrap_err();
+        let writer = std::thread::spawn(move || {
+            let mut client = client;
+            for _ in 0..200 {
+                if client.write_all(b"G").is_err() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        });
+        let started = std::time::Instant::now();
+        let error = read_http_request_until(
+            &mut server,
+            started + std::time::Duration::from_millis(80),
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 error.kind(),
@@ -512,6 +540,8 @@ mod tests {
             ),
             "partial request should hit the read deadline: {error}"
         );
-        drop(client);
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        drop(server);
+        writer.join().unwrap();
     }
 }

@@ -255,6 +255,27 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     assert_eq!(unknown.source, "host");
 }
 
+#[test]
+fn ffi_runtime_stop_keeps_one_jet_source_frame() {
+    let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "E3014",
+        "ffi.jet",
+        7,
+        "run",
+        "foreign_call()",
+        1,
+        1,
+        "panic: a foreign function panicked",
+        "",
+    );
+    assert_eq!(report.source, "runtime");
+    assert_eq!(report.exit_code, 70);
+    assert!(report.rendered.contains("Stop [E3014]"));
+    assert!(report.rendered.contains("--> ffi.jet:7 in run"));
+    assert!(report.rendered.contains("foreign_call()"));
+    assert!(!report.rendered.contains("rustc"));
+}
+
 fn registered_code_rows() -> Vec<(String, usize)> {
     jet_foundation::Registry::diagnostic_rows()
         .iter()
@@ -290,6 +311,31 @@ fn registered_codes_keep_explicit_severity_and_lint_names() {
             "lint {} has an unstable selector name `{name}`",
             lint.code
         );
+    }
+}
+
+#[test]
+fn semantic_guidance_lints_round_trip_through_the_registry() {
+    use jet_foundation::Diagnostics::Severity;
+
+    for (code, name) in [
+        ("L0515", "process_args_view"),
+        ("L0516", "message_text"),
+        ("L0517", "path_containment_string_prefix"),
+        ("L0518", "redundant_fixed_cleanup"),
+        ("L0519", "unit_scalar_rewrap"),
+        ("L0521", "complete_ascii_case_ladder"),
+        ("L0522", "walk_files_filter"),
+    ] {
+        let row = jet_foundation::Registry::diagnostic(code)
+            .unwrap_or_else(|| panic!("{code} must stay registered"));
+        assert_eq!(row.severity, Severity::Lint);
+        assert_eq!(row.lint_name, Some(name));
+        assert!(!row.what.is_empty(), "{code} needs What copy");
+        assert!(!row.why.is_empty(), "{code} needs Why copy");
+        assert!(!row.fix.is_empty(), "{code} needs Fix copy");
+        assert_eq!(jet_foundation::LintPolicy::code_for_name(name), Some(code));
+        assert_eq!(jet_foundation::LintPolicy::name_for_code(code), Some(name));
     }
 }
 

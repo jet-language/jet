@@ -411,8 +411,7 @@ fn nix_multi_projection_registers_recovers_queries_and_rolls_back_conflict() {
 #[test]
 fn closure_empty_reference_proof_rejects_unknown_provider() {
     let (roots, _g) = temp_roots();
-    let mut entry =
-        ingest_fixture(&roots, "unknown-proof", &[("out", "bytes")], Vec::new()).entry;
+    let mut entry = ingest_fixture(&roots, "unknown-proof", &[("out", "bytes")], Vec::new()).entry;
     entry.id = "unknown-proof-record".into();
     let original = ProducerRecord::decode(&entry.producer_record).unwrap();
     entry.producer_record = ProducerRecord::new(
@@ -622,10 +621,7 @@ fn admission_failure_points_hide_partial_metadata_and_recover_idempotently() {
         } else {
             let committed = list_checked(&roots).unwrap();
             assert_eq!(committed.len(), 1);
-            let meta = roots
-                .hangar_dir()
-                .join(&committed[0].id)
-                .join("meta.json");
+            let meta = roots.hangar_dir().join(&committed[0].id).join("meta.json");
             fs::remove_file(&meta).unwrap();
             recover_hangar(&roots).unwrap();
             let recovered = list_checked(&roots).unwrap();
@@ -639,8 +635,7 @@ fn admission_failure_points_hide_partial_metadata_and_recover_idempotently() {
 #[test]
 fn closure_legacy_migration_is_idempotent() {
     let (roots, _g) = temp_roots();
-    let mut first =
-        ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
+    let mut first = ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
     let mut second =
         ingest_fixture(&roots, "legacy-second", &[("out", "second")], Vec::new()).entry;
     first.references = vec![second.envelope.output_hash.clone()];
@@ -977,12 +972,11 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
     fs::write(&non_pool_payload, "unpooled").unwrap();
     let non_pool_peer = roots.root.join("outside-non-pool-peer");
     fs::hard_link(&non_pool_payload, &non_pool_peer).unwrap();
-    let non_pool_result =
-        super::super::super::super::Envelope::try_output_hash_of_in_hangar(
-            &non_pool.to_string_lossy(),
-            &roots.hangar_dir(),
-            false,
-        );
+    let non_pool_result = super::super::super::super::Envelope::try_output_hash_of_in_hangar(
+        &non_pool.to_string_lossy(),
+        &roots.hangar_dir(),
+        false,
+    );
     assert!(non_pool_result.is_err(), "{non_pool_result:?}");
     fs::remove_file(non_pool_peer).ok();
     fs::remove_dir_all(non_pool).ok();
@@ -1046,12 +1040,9 @@ fn cleanup_protects_named_outputs_from_canonical_gc() {
         Vec::new(),
     );
 
-    let orphaned = collect_orphaned_canonical_objects(
-        &roots,
-        &LiveRoots::default(),
-        &BTreeSet::new(),
-    )
-    .unwrap();
+    let orphaned =
+        collect_orphaned_canonical_objects(&roots, &LiveRoots::default(), &BTreeSet::new())
+            .unwrap();
     assert!(orphaned.is_empty(), "{orphaned:?} for {}", entry.entry.id);
 }
 

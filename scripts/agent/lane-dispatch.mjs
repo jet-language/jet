@@ -1,48 +1,17 @@
 #!/usr/bin/env node
-// lane-dispatch.mjs — the high-throughput burndown loop, as a tool rather than a habit.
+// lane-dispatch.mjs — status/brief/harvest adapter for Tower worker lanes.
 //
-// This encodes the cadence that moved epoch 3 from 752 to 793 closed cards in a
-// single session, after several days at a far lower rate. Every rule below is
-// here because its absence cost real time, and the cost is named.
+// OMP task/hub is the primary dispatch path. This utility is a narrow direct-
+// CLI fallback for the existing lane logs and refuses to launch until the
+// caller records why OMP could not run the required worker.
 //
 //   brief   <card…|--auto N>   write a lane brief per card, straight from Tower
 //   launch  <lane…>            start lanes DETACHED, staggered, under the cap
 //   status                     what is running, what finished, memory headroom
 //   harvest                    print the final message of each unread lane
 //
-// The five rules that made the difference:
-//
-//  1. PARALLELISM IS THE WHOLE GAME. Run 25-30 lanes, not 5. Cards are mostly
-//     independent; the tree is shared, so there is no merge to do afterwards.
-//     Serial lanes were the single largest source of elapsed time.
-//
-//  2. LAUNCH DETACHED. `(sh run.sh x &)` inside a tool call loses most of the
-//     batch: the parent shell exits and takes the not-yet-established children
-//     with it. Measured once: 9 of 27 lanes survived, and the other 18 were
-//     silently absent for twenty minutes. Always `setsid nohup … < /dev/null`.
-//
-//  3. NEVER HAND-WRITE A BRIEF. Generate it from the card. The card already has
-//     the title, body, plan and exit criteria; retyping them is slow and drifts
-//     from the board. Hand-write only for a defect with no card yet.
-//
-//  4. WORKERS TYPE-CHECK, THEY DO NOT TEST. `scripts/agent/lane-check.sh` and
-//     nothing heavier. Before this rule the orchestrator became a serial repair
-//     queue — nine build breaks in one session from source-only patches. After
-//     it, breaks are rare and small. Tests are batched (rule 5).
-//
-//  5. CLOSE ON IMPLEMENTATION; BATCH THE PROOF. A card closes when its criteria
-//     have concrete implementation evidence and the patch is integrated. Every
-//     deferred test run, every found defect, every owner gate goes into ONE
-//     sweep ledger, resolved after the cards are closed: targeted tests at a
-//     milestone boundary, the full suite once at epoch end.
-//
-// Two things that are easy to miss and cost hours:
-//
-//   * STALE BLOCKERS. Check `blockedBy` against actual phase. On this board 21
-//     of 31 "blocked" cards had blockers that were already closed.
-//   * BUILD BREAKS ARE YOURS. Lanes share one tree, so a break blocks every
-//     lane's self-check. Fix it immediately; do not wait for the lane that
-//     caused it.
+// Briefs carry the card contract. Closure, proof, model selection, and shared
+// conduct remain in the owner guide and orchestration law.
 
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -51,7 +20,7 @@ import { join } from "node:path";
 const REPO = "/home/nate/Projects/Github/jet";
 const HOME = process.env.HOME;
 const DIR = `${HOME}/.cache/jet-luna`;
-const CAP = Number(process.env.LANE_CAP ?? 30); // concurrent lanes; the harness allows 32
+const CAP = Number(process.env.LANE_CAP ?? 1); // one stream by default; expand only after an ownership check
 const MIN_FREE_GB = 12;    // refuse to launch under this
 const BY = process.env.LANE_BY ?? "fable-e3-burndown";
 const EPOCH = process.env.LANE_EPOCH ?? "e3";
@@ -215,6 +184,12 @@ function cmdBrief(args) {
 // ---------------------------------------------------------------- launch
 
 function cmdLaunch(args) {
+  const fallbackReason = process.env.JET_OMP_FALLBACK_REASON?.trim();
+  if (!fallbackReason) {
+    console.error("refusing direct lane launch: use OMP task/hub first; set JET_OMP_FALLBACK_REASON to the exact failure before using the fallback");
+    process.exitCode = 2;
+    return;
+  }
   const secs = Number(process.env.LANE_SECS ?? 1500);
   const running = lanes().filter((l) => l.running).length;
   let room = CAP - running;
@@ -226,7 +201,7 @@ function cmdLaunch(args) {
   for (const name of args) {
     if (room <= 0) break;
     if (!existsSync(join(DIR, `${name}.md`))) { console.log(`${name}: no brief`); continue; }
-    // Detached, or the batch dies with the parent shell. This is rule 2.
+    // Detached, or the lane dies with the parent shell.
     execFileSync("setsid", ["nohup", "sh", `${DIR}/run.sh`, name, "max", String(secs)], {
       cwd: DIR, stdio: "ignore", detached: true,
     });
@@ -234,7 +209,7 @@ function cmdLaunch(args) {
     room -= 1;
     execFileSync("sleep", ["1"]);
   }
-  console.log(`launched ${started.length}: ${started.join(" ")}  (was ${running} running, ${free}G free)`);
+  console.log(`launched ${started.length}: ${started.join(" ")}  (was ${running} running, ${free}G free; OMP fallback: ${fallbackReason})`);
 }
 
 // ---------------------------------------------------------------- status

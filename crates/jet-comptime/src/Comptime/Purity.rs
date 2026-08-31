@@ -395,6 +395,7 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         | Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
+        | Expr::Unit(_)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)
         | Expr::UnitLit { .. }

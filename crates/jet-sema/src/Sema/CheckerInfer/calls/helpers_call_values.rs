@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn core_module_path_from_receiver(
+    pub(in crate::Sema::CheckerInfer) fn core_module_path_from_receiver(
         &self,
         receiver: &Expr,
     ) -> Option<(String, String, Span)> {
@@ -323,13 +323,45 @@ impl<'a> Checker<'a> {
                     let got =
                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
                     let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
-                    let callable_compatible = matches!(param_ty, Type::Fn { .. })
+                    let callable_shape_compatible = matches!(param_ty, Type::Fn { .. })
                         && matches!(&got, Type::Fn { .. })
                         && fn_types_compatible(param_ty, &got);
+                    // An absent contract is structurally unconstrained, but it
+                    // cannot satisfy an explicit positional-only or label-only
+                    // requirement. Keep this in sync with the E0771 guard in
+                    // `check_type_assignable` for the function-value-call path.
+                    let missing_strict_contract = callable_shape_compatible
+                        && matches!(
+                            (param_ty, &got),
+                            (
+                                Type::Fn {
+                                    param_contract: Some(required),
+                                    ..
+                                },
+                                Type::Fn {
+                                    param_contract: None,
+                                    ..
+                                }
+                            ) if required.iter().any(|(_, zone)| matches!(
+                                zone,
+                                crate::AST::ParamZone::PositionalOnly
+                                    | crate::AST::ParamZone::LabelOnly
+                            ))
+                        );
+                    let callable_compatible = callable_shape_compatible
+                        && Type::obligations_satisfy(param_ty, &got)
+                        && !missing_strict_contract;
                     if boxes_as_trait {
                         self.note_move_if_direct_ident(&arg.expr);
                     }
-                    if got != *param_ty && !boxes_as_trait && !callable_compatible {
+                    let type_mismatch = if matches!(param_ty, Type::Fn { .. })
+                        && matches!(&got, Type::Fn { .. })
+                    {
+                        !callable_compatible
+                    } else {
+                        got != *param_ty
+                    };
+                    if type_mismatch && !boxes_as_trait {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(

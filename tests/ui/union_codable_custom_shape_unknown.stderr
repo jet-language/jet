@@ -1,8 +1,8 @@
-Error [E2411]: union `Int | Token` can't be decoded — `Token` has no compiler-known wire shape
-  --> tests/ui/union_codable_custom_shape_unknown.jet:18:5
+Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
+  --> tests/ui/union_codable_custom_shape_unknown.jet:11:27
     |
- 18 |     value: Token | Int
-    |     ^^^^^
- Why: `Token` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen
- Fix: use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type
-More: jet-lang.dev/e/E2411
+ 11 |         raw :: tree.text()?
+    |                           ^
+ Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

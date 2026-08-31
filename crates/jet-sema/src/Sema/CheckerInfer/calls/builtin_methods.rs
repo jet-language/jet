@@ -1069,20 +1069,29 @@ impl<'a> Checker<'a> {
                     let open_ret =
                         matches!(et, Type::Fn { ret: None, .. }) && matches!(gt, Type::Fn { .. });
                     let union_match = matches!(et, Type::Union(members) if members.iter().any(|member| {
-                        member == &gt
-                            && if matches!(member, Type::Fn { .. }) && matches!(&gt, Type::Fn { .. }) {
-                                fn_types_compatible(member, &gt)
-                            } else {
-                                Type::obligations_satisfy(member, &gt)
-                            }
+                        if matches!(member, Type::Fn { .. }) && matches!(&gt, Type::Fn { .. }) {
+                            fn_types_compatible(member, &gt)
+                                && Type::obligations_satisfy(member, &gt)
+                        } else {
+                            member == &gt && Type::obligations_satisfy(member, &gt)
+                        }
                     }));
-                    let callable_mismatch = matches!(et, Type::Fn { .. })
-                        && matches!(gt, Type::Fn { .. })
-                        && !fn_types_compatible(et, &gt);
-                    let obligation_mismatch = gt == *et && !Type::obligations_satisfy(et, &gt);
+                    let callable_pair =
+                        matches!(et, Type::Fn { .. }) && matches!(gt, Type::Fn { .. });
+                    let callable_mismatch = callable_pair
+                        && (!fn_types_compatible(et, &gt)
+                            || !Type::obligations_satisfy(et, &gt));
+                    let obligation_mismatch = !callable_pair
+                        && gt == *et
+                        && !Type::obligations_satisfy(et, &gt);
+                    let type_mismatch = if callable_pair {
+                        false
+                    } else {
+                        gt != *et
+                    };
                     if !open_ret
                         && !union_match
-                        && (callable_mismatch || obligation_mismatch || gt != *et)
+                        && (callable_mismatch || obligation_mismatch || type_mismatch)
                     {
                         self.diags.push(Diagnostic::error(
                             "E0108",

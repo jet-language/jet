@@ -3,10 +3,10 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0905, substitute_type, COMPARABLE};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
-use crate::AST::{BinOp, CtValue, Dimension, Expr, Type};
+use crate::AST::{BinOp, CtValue, Dimension, Expr, StrPart, Type};
 use std::collections::HashMap;
 
 /// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
@@ -59,6 +59,105 @@ fn is_folded_fact_expr(expr: &Expr) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    fn path_string_source(&self, name: &str) -> Option<&str> {
+        self.flow
+            .path_strings
+            .get(name)
+            .map(|fact| fact.source.as_str())
+    }
+
+    fn path_ident(expr: &Expr) -> Option<&str> {
+        match expr.without_parens() {
+            Expr::Ident(name, _) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    fn path_prefix_guard(expr: &Expr) -> Option<(&str, &str)> {
+        let Expr::Unary(crate::AST::UnOp::Not, inner, _) = expr.without_parens() else {
+            return None;
+        };
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = inner.without_parens()
+        else {
+            return None;
+        };
+        if method != "starts_with"
+            || args.len() != 1
+            || args[0].label.is_some()
+            || args[0].spread
+        {
+            return None;
+        }
+        let candidate = Self::path_ident(receiver)?;
+        let Expr::Str(parts, _) = args[0].expr.without_parens() else {
+            return None;
+        };
+        let [StrPart::Interp(base, crate::AST::StrFormat::Display), StrPart::Lit(separator)] =
+            parts.as_slice()
+        else {
+            return None;
+        };
+        if separator != "/" {
+            return None;
+        }
+        Some((candidate, Self::path_ident(base)?))
+    }
+
+    /// D-PATH-CONTAINMENT1=A: both strings must retain provenance from a
+    /// normalized typed Path, and the Boolean expression must be the exact
+    /// separator-aware prefix guard. String-only and physical/symlink policy
+    /// checks do not satisfy this proof.
+    pub(crate) fn path_containment_string_prefix_edit(
+        &self,
+        lhs: &Expr,
+        rhs: &Expr,
+        span: Span,
+    ) -> Option<TextEdit> {
+        let (equality, guard) = if Self::path_prefix_guard(rhs).is_some() {
+            (lhs, rhs)
+        } else if Self::path_prefix_guard(lhs).is_some() {
+            (rhs, lhs)
+        } else {
+            return None;
+        };
+        let (candidate, base) = Self::path_prefix_guard(guard)?;
+        if candidate == base {
+            return None;
+        }
+        let Expr::Binary(BinOp::Ne, left, right, _) = equality.without_parens() else {
+            return None;
+        };
+        let equal_names = match (Self::path_ident(left), Self::path_ident(right)) {
+            (Some(left), Some(right)) if left == candidate && right == base => true,
+            (Some(left), Some(right)) if left == base && right == candidate => true,
+            _ => false,
+        };
+        if !equal_names {
+            return None;
+        }
+        let candidate_source = self.path_string_source(candidate)?;
+        let base_source = self.path_string_source(base)?;
+        if !self
+            .lookup(candidate)
+            .is_some_and(|info| info.ty == Type::String)
+            || !self.lookup(base).is_some_and(|info| info.ty == Type::String)
+        {
+            return None;
+        }
+        Some(TextEdit {
+            span,
+            // The recognized idiom is the negative guard (`!=` plus a
+            // negated separator-aware prefix). Preserve that polarity while
+            // moving the policy to the typed Path relation.
+            new_text: format!("!{candidate_source}.is_within({base_source})"),
+        })
+    }
+
     fn is_complex_type(ty: &Type) -> bool {
         matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
     }
@@ -510,6 +609,44 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn unit_scalar_wrapped_binary(
+        &self,
+        op: BinOp,
+        unit: Expr,
+        unit_name: &str,
+        scalar: Expr,
+        unit_on_left: bool,
+        span: Span,
+    ) -> Expr {
+        let unit = Self::distinct_raw(unit, unit_name, Type::Float, span);
+        let (left, right) = if unit_on_left {
+            (unit, scalar)
+        } else {
+            (scalar, unit)
+        };
+        let raw = Expr::Binary(op, Box::new(left), Box::new(right), span);
+        Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(unit_name.to_string(), span)),
+            method: Syntax::numeric_conversion_method("Float")
+                .expect("Float conversion is registered")
+                .to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: raw,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: None,
+            resolved_ret: Some(Type::Named(unit_name.to_string())),
+            checked_widen: false,
+        }
+    }
+
     fn operator_expr_type(&self, expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
@@ -614,6 +751,211 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn is_scalable_unit_fact(fact: &UnitFact) -> bool {
+        // Canonical Time is a fixed nanosecond carrier with its own checked
+        // Int operators above. It is not a Float-backed user unit.
+        !(fact.family == "Time" && fact.package == std::path::PathBuf::from("core.units"))
+            && matches!(
+                fact.kind,
+                crate::AST::QuantityKind::Linear | crate::AST::QuantityKind::Delta
+            )
+    }
+
+    fn is_unit_scalar_type(ty: &Type) -> bool {
+        // These are the built-in numeric carriers accepted by the existing
+        // Float conversion seam. Decimal stays distinct so a Decimal value
+        // cannot silently cross this boundary as a unit scale.
+        matches!(
+            ty,
+            Type::Int | Type::IntN { .. } | Type::Float32 | Type::Float
+        )
+    }
+
+    fn is_scalable_unit_type(&self, ty: &Type) -> bool {
+        self.unit_fact_for_type(ty)
+            .is_some_and(|(_, fact)| Self::is_scalable_unit_fact(&fact))
+    }
+
+    fn known_unit_expr(&self, expr: &Expr) -> bool {
+        if let Some(ty) = self.operator_expr_type(expr) {
+            if self.unit_fact_for_type(&ty).is_some() {
+                return true;
+            }
+        }
+        match expr {
+            Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                self.known_unit_expr(inner)
+            }
+            Expr::UnitLit { suffix, .. } => self
+                .unit_fact_for_type(&Type::Named(crate::AST::UnitFamilyDef::type_name(suffix)))
+                .is_some(),
+            Expr::MethodCall { receiver, .. } => match receiver.as_ref() {
+                Expr::Ident(name, _) => self
+                    .unit_fact_for_type(&Type::Named(name.clone()))
+                    .is_some(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn direct_static_type_name(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident(name, _) if !name.is_empty() && self.lookup(name).is_none() => {
+                Some(name.clone())
+            }
+            Expr::Field(base, member, _) => {
+                Some(format!("{}.{}", self.direct_static_type_name(base)?, member))
+            }
+            Expr::Paren(inner, _) => self.direct_static_type_name(inner),
+            _ => None,
+        }
+    }
+
+    fn direct_unit_value_fact(&self, expr: &Expr) -> Option<(String, UnitFact)> {
+        let expr = match expr {
+            Expr::Paren(inner, _) => inner.as_ref(),
+            _ => expr,
+        };
+        let ty = self.operator_expr_type(expr)?;
+        self.unit_fact_for_type(&ty)
+    }
+
+    fn same_unit_fact(left: &UnitFact, right: &UnitFact) -> bool {
+        left.package == right.package
+            && left.family == right.family
+            && left.member == right.member
+            && left.kind == right.kind
+    }
+
+    fn direct_unit_raw(&self, expr: &Expr, unit_fact: &UnitFact) -> bool {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = (match expr {
+            Expr::Paren(inner, _) => inner.as_ref(),
+            _ => expr,
+        })
+        else {
+            return false;
+        };
+        if method != crate::Syntax::METHOD_DISTINCT_RAW
+            || !args.is_empty()
+            || args.iter().any(|arg| arg.label.is_some() || arg.spread)
+        {
+            return false;
+        }
+        self.direct_unit_value_fact(receiver)
+            .is_some_and(|(_, raw_fact)| Self::same_unit_fact(&raw_fact, unit_fact))
+    }
+
+    /// The lint deliberately accepts only a scalar expression whose type is
+    /// already a built-in numeric carrier. Calls remain quiet unless they are
+    /// the canonical Float widening constructor; this keeps FFI, calibration,
+    /// helper, and exact-number conversion boundaries outside the suggestion.
+    fn direct_unit_scalar(&self, expr: &Expr) -> bool {
+        let expr = match expr {
+            Expr::Paren(inner, _) => inner.as_ref(),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => return self.direct_unit_scalar(inner),
+            _ => expr,
+        };
+        match expr {
+            Expr::Int(..) | Expr::Float(..) => true,
+            Expr::Ident(..) => self
+                .operator_expr_type(expr)
+                .is_some_and(|ty| Self::is_unit_scalar_type(&ty)),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                let Some(type_name) = self.direct_static_type_name(receiver) else {
+                    return false;
+                };
+                type_name == crate::Syntax::TYPE_FLOAT
+                    && args.len() == 1
+                    && !args[0].spread
+                    && args[0].label.is_none()
+                    && self.direct_unit_scalar(&args[0].expr)
+                    && crate::Syntax::numeric_conversion_source(method).is_some_and(|source| {
+                        matches!(
+                            source,
+                            "I8"
+                                | "I64"
+                                | "I16"
+                                | "I32"
+                                | "Int"
+                                | "U8"
+                                | "U16"
+                                | "U32"
+                                | "U64"
+                                | "F32"
+                                | "Float"
+                        )
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    /// D-UNIT-SCALAR1=A / `unit_scalar_rewrap`: match only the direct,
+    /// policy-free `Unit.from_float(Unit.raw() OP scalar)` identity. The
+    /// operation is checked after all children are typed, so this cannot
+    /// diagnose an untyped resemblance or a policy-rewritten expression.
+    pub(crate) fn unit_scalar_rewrap_identity(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        args: &[crate::AST::CallArg],
+        inferred: Option<&Type>,
+    ) -> bool {
+        if !self.arithmetic_policy_stack.is_empty()
+            || method != crate::Syntax::numeric_conversion_method("Float").unwrap()
+            || args.len() != 1
+            || args[0].label.is_some()
+            || args[0].spread
+        {
+            return false;
+        }
+        let Some(type_name) = self.direct_static_type_name(receiver) else {
+            return false;
+        };
+        let Some((_, outer_fact)) = self.unit_fact_for_type(&Type::Named(type_name)) else {
+            return false;
+        };
+        if !Self::is_scalable_unit_fact(&outer_fact) {
+            return false;
+        }
+        let Some((_, result_fact)) = inferred.and_then(|ty| self.unit_fact_for_type(ty)) else {
+            return false;
+        };
+        if !Self::same_unit_fact(&outer_fact, &result_fact) {
+            return false;
+        }
+        let Expr::Binary(op, left, right, _) = (match &args[0].expr {
+            Expr::Paren(inner, _) => inner.as_ref(),
+            expr => expr,
+        })
+        else {
+            return false;
+        };
+        match op {
+            BinOp::Mul => {
+                (Self::direct_unit_raw(self, left, &outer_fact)
+                    && self.direct_unit_scalar(right))
+                    || (Self::direct_unit_raw(self, right, &outer_fact)
+                        && self.direct_unit_scalar(left))
+            }
+            BinOp::Div => {
+                Self::direct_unit_raw(self, left, &outer_fact) && self.direct_unit_scalar(right)
+            }
+            _ => false,
+        }
+    }
+
     fn is_exact_numeric_literal(expr: &Expr) -> bool {
         match expr {
             Expr::Int(..) | Expr::Float(..) => true,
@@ -680,8 +1022,8 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         if matches!(op, BinOp::And | BinOp::Or) {
             let lt = self.infer(lhs);
-            if let Some(lt) = lt {
-                if lt != Type::Bool {
+            if let Some(lt) = &lt {
+                if *lt != Type::Bool {
                     self.diags.push(Diagnostic::error(
                         "E0110",
                         format!(
@@ -697,8 +1039,8 @@ impl<'a> Checker<'a> {
                 }
             }
             let rt = self.infer(rhs);
-            if let Some(rt) = rt {
-                if rt != Type::Bool {
+            if let Some(rt) = &rt {
+                if *rt != Type::Bool {
                     // D-S25-RETIRE1=A: comparison distribution via `||`/`&&` is gone.
                     // Each side of `||`/`&&` must be a Bool expression.
                     self.diags.push(Diagnostic::error(
@@ -715,6 +1057,16 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            if op == BinOp::And
+                && lt.as_ref() == Some(&Type::Bool)
+                && rt.as_ref() == Some(&Type::Bool)
+            {
+                if let Some(edit) = self.path_containment_string_prefix_edit(lhs, rhs, span) {
+                    let diagnostic =
+                        Diagnostic::from_row("L0517", &[], Some(span)).with_edit(edit);
+                    self.diags.push(diagnostic);
+                }
+            }
             return Some(Type::Bool);
         }
 
@@ -722,7 +1074,11 @@ impl<'a> Checker<'a> {
         // Ordinary expressions retain the canonical owning-read clone rule.
         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
         let saved_expected = self.expected_type.clone();
-        if Self::is_exact_numeric_literal(lhs) && self.known_measurement_expr(rhs) {
+        if Self::is_exact_numeric_literal(lhs)
+            && (self.known_measurement_expr(rhs)
+                || (matches!(op, BinOp::Mul | BinOp::Div)
+                    && self.known_unit_expr(rhs)))
+        {
             self.expected_type = Some(Type::Float);
         }
         let lt = self.infer(lhs);
@@ -762,6 +1118,13 @@ impl<'a> Checker<'a> {
         ) {
             self.expected_type = if lt.as_ref().is_some_and(Self::is_measurement_type)
                 && Self::is_exact_numeric_literal(rhs)
+            {
+                Some(Type::Float)
+            } else if matches!(op, BinOp::Mul | BinOp::Div)
+                && Self::is_exact_numeric_literal(rhs)
+                && lt
+                    .as_ref()
+                    .is_some_and(|ty| self.is_scalable_unit_type(ty))
             {
                 Some(Type::Float)
             } else {
@@ -1164,6 +1527,85 @@ impl<'a> Checker<'a> {
         // D-DIMENSION-OPEN1=D: a nominal family has no dimension, and still
         // owns unit conversion, affine points, and rounding policy.
         let any_dimensional = ldim.is_some() || rdim.is_some();
+
+        // D-UNIT-SCALAR1=A: scalar arithmetic is a same-family operation.
+        // Strip only the unit wrapper, perform the operation on its Float
+        // carrier, then rewrap the result in that exact unit. This keeps the
+        // rule in sema; every execution tier sees the existing raw/constructor
+        // seams. Time is excluded because its fixed Int nanosecond carrier has
+        // the dedicated checked path above.
+        if matches!(op, BinOp::Mul | BinOp::Div) {
+            if let (Some((lname, lfact)), None) = (&lunit, &runit) {
+                if Self::is_unit_scalar_type(&rt) {
+                    if !Self::is_scalable_unit_fact(lfact) {
+                        self.op_mismatch(op, &lt, &rt, span);
+                        return None;
+                    }
+                    let unit = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                    let mut scalar =
+                        *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                    self.widen_numeric_expr(&mut scalar, &rt, &Type::Float);
+                    *replacement = Some(self.unit_scalar_wrapped_binary(
+                        op,
+                        unit,
+                        lname,
+                        scalar,
+                        true,
+                        span,
+                    ));
+                    return Some(Type::Named(lname.clone()));
+                }
+            }
+            if let (None, Some((rname, rfact))) = (&lunit, &runit) {
+                if Self::is_unit_scalar_type(&lt) {
+                    if op != BinOp::Mul || !Self::is_scalable_unit_fact(rfact) {
+                        self.op_mismatch(op, &lt, &rt, span);
+                        return None;
+                    }
+                    let mut scalar =
+                        *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                    let unit = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                    self.widen_numeric_expr(&mut scalar, &lt, &Type::Float);
+                    *replacement = Some(self.unit_scalar_wrapped_binary(
+                        op,
+                        unit,
+                        rname,
+                        scalar,
+                        false,
+                        span,
+                    ));
+                    return Some(Type::Named(rname.clone()));
+                }
+            }
+        }
+
+        // D-UNIT-SCALAR1=A keeps unit×unit outside scalar scaling. Physical
+        // dimension algebra is the one existing exception: both operands must
+        // be dimensioned linear/delta values. Affine points and nominal/base
+        // units have no multiplicative algebra, even though their erased
+        // carriers are numeric and would otherwise reach #Numeric.
+        if matches!(op, BinOp::Mul | BinOp::Div) {
+            let has_point = lunit
+                .as_ref()
+                .is_some_and(|(_, fact)| fact.kind == crate::AST::QuantityKind::Point)
+                || runit
+                    .as_ref()
+                    .is_some_and(|(_, fact)| fact.kind == crate::AST::QuantityKind::Point);
+            let unit_pair_is_physical = match (&lunit, &runit) {
+                (Some((_, left)), Some((_, right))) => {
+                    any_dimensional
+                        && left.dimension.is_some()
+                        && right.dimension.is_some()
+                        && !has_point
+                }
+                _ => true,
+            };
+            if has_point || !unit_pair_is_physical {
+                self.unit_arithmetic_mismatch(op, &lt, &rt, span);
+                return None;
+            }
+        }
+
         if any_dimensional || lunit.is_some() || runit.is_some() {
             if let (Some((lname, lfact)), Some((rname, rfact))) = (&lunit, &runit) {
                 if lfact.package == rfact.package
@@ -2132,6 +2574,23 @@ impl<'a> Checker<'a> {
             ),
             why,
             fix,
+            Some(span),
+        ));
+    }
+
+    fn unit_arithmetic_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0127",
+            format!(
+                "{} is not available between `{}` and `{}`",
+                operator_label(op),
+                lt.name(),
+                rt.name()
+            ),
+            "unit-family arithmetic only defines scalar scaling and physical dimension algebra; nominal units and affine points do not multiply or divide"
+                .to_string(),
+            "scale a linear unit or delta by a plain numeric scalar, or use a dimensioned linear/delta family for physical products"
+                .to_string(),
             Some(span),
         ));
     }

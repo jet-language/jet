@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::time::Instant;
 
 use jet::Diagnostics::Diagnostic;
 use jet::Sema::GateLedger::{GateKind, GateLedger};
@@ -26,12 +27,46 @@ pub(crate) struct CheckProjection {
     pub(crate) check: CheckResult,
 }
 
+const CHECK_RESULT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CheckScope {
+    Project,
+    ExplicitFile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckProofRow {
+    output: String,
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+    diagnostic: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct ProjectOutputSpec {
+    address: String,
+    name: String,
+    path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+struct ProjectOutputGroup {
+    key: String,
+    path: Option<PathBuf>,
+    addresses: Vec<String>,
+}
+
 pub(crate) struct CheckResult {
     source: String,
     profile: String,
     front_end: &'static str,
     programmable_build: &'static str,
     diagnostics: usize,
+    scope: CheckScope,
+    elapsed_ms: u64,
+    proof_rows: Vec<CheckProofRow>,
 }
 
 pub(crate) fn check_projection(path: &Path) -> Result<CheckProjection, Vec<Diagnostic>> {
@@ -54,9 +89,36 @@ pub(crate) fn check_projection_with_options(
         gates,
         profile,
         setting_overrides,
-        true,
         None,
         false,
+        CheckScope::ExplicitFile,
+        None,
+        None,
+    )
+}
+
+/// Check the target selected by the command dispatcher.  A bare or directory
+/// command is a project promise; an explicitly named file keeps semantic
+/// scope, even when it lives inside a package.
+pub(crate) fn check_projection_for_command(
+    path: &Path,
+    gates: jet::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    scope: CheckScope,
+    entry_fn: Option<&str>,
+    target: Option<&str>,
+) -> Result<CheckProjection, Vec<Diagnostic>> {
+    check_projection_with_options_and_preflight(
+        path,
+        gates,
+        profile,
+        setting_overrides,
+        None,
+        false,
+        scope,
+        entry_fn,
+        target,
     )
 }
 
@@ -70,9 +132,11 @@ pub(crate) fn check_projection_for_effects(
         jet::Policy::GateSet::default(),
         profile,
         setting_overrides,
-        false,
         None,
         false,
+        CheckScope::ExplicitFile,
+        None,
+        None,
     )
 }
 
@@ -86,9 +150,11 @@ pub(crate) fn check_projection_for_run(
         jet::Policy::GateSet::default(),
         profile,
         setting_overrides,
-        false,
         None,
         true,
+        CheckScope::ExplicitFile,
+        None,
+        None,
     )
 }
 
@@ -103,9 +169,11 @@ pub(crate) fn check_projection_for_output_effects(
         jet::Policy::GateSet::default(),
         profile,
         setting_overrides,
-        false,
         Some(output),
         false,
+        CheckScope::ExplicitFile,
+        None,
+        None,
     )
 }
 
@@ -114,21 +182,75 @@ fn check_projection_with_options_and_preflight(
     gates: jet::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-    run_preflight: bool,
     output: Option<&str>,
     run_mode: bool,
+    scope: CheckScope,
+    entry_fn: Option<&str>,
+    target: Option<&str>,
 ) -> Result<CheckProjection, Vec<Diagnostic>> {
+    let started = Instant::now();
     let entry = path.display().to_string();
-    let programmable_build = if run_preflight {
-        match jet::check_programmable_build_for_tier(&entry, gates, profile, setting_overrides) {
-            None => "not-selected",
-            Some(Ok(())) => "checked",
-            Some(Err(diagnostics)) => return Err(diagnostics),
+    if scope == CheckScope::ExplicitFile {
+        if let Some(diagnostic) = missing_project_context_diagnostic(path) {
+            return Err(vec![diagnostic]);
         }
+    }
+    let mut programmable_build = "not-selected";
+    let project_build = if scope == CheckScope::Project {
+        jet::check_project_build_for_tier(
+            &entry,
+            gates,
+            profile,
+            setting_overrides,
+            target,
+            entry_fn,
+        )?
     } else {
-        "not-selected"
+        None
     };
-    let (diagnostics, bundle, facts, front_end) = if let Some(output) = output {
+    let (mut diagnostics, bundle, facts, front_end) = if let Some(output) = project_build {
+        programmable_build = "checked";
+        let jet::Driver::BuildCompileOutput {
+            compile,
+            runtime,
+            runtime_effect_facts,
+            ..
+        } = output;
+        let bundle = runtime.ok_or_else(|| {
+            vec![Diagnostic::from_row(
+                "E2390",
+                &[("detail", "project check returned no final runtime graph")],
+                None,
+            )]
+        })?;
+        let facts = runtime_effect_facts.ok_or_else(|| {
+            vec![Diagnostic::from_row(
+                "E2391",
+                &[("detail", "project check returned no final runtime effect facts")],
+                None,
+            )]
+        })?;
+        (
+            compile.lints,
+            Some(bundle),
+            facts,
+            "Driver::check_project_build_for_tier",
+        )
+    } else if scope == CheckScope::Project {
+        let (diagnostics, bundle, facts) =
+            jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+                &entry,
+                profile,
+                setting_overrides,
+                entry_fn,
+            );
+        (
+            diagnostics,
+            bundle,
+            facts,
+            "Driver::check_file_with_effect_facts_for_run_and_entry",
+        )
+    } else if let Some(output) = output {
         let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
             &entry,
             output,
@@ -173,19 +295,20 @@ fn check_projection_with_options_and_preflight(
             "Driver::check_file_with_effect_facts_and_settings",
         )
     };
-    if diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    if scope == CheckScope::ExplicitFile
+        && diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
     {
         return Err(diagnostics);
     }
     let Some(bundle) = bundle else {
         return Err(diagnostics);
     };
+    let package_facts = jet_semindex::package_facts_for_entry(path)
+        .map_err(|error| vec![jet_semindex::package_facts_diagnostic(path, &error)])?;
     let mut index = jet_semindex::from_checked(&bundle, &facts);
-    if let Some(package_facts) = jet_semindex::package_facts_for_entry(path)
-        .map_err(|error| vec![jet_semindex::package_facts_diagnostic(path, &error)])?
-    {
+    if let Some(package_facts) = package_facts.clone() {
         index.attach_package_facts(package_facts);
     }
     if let Some(policy) = jet_semindex::workspace_overlay_policy_for_entry(path)
@@ -193,12 +316,33 @@ fn check_projection_with_options_and_preflight(
     {
         index.attach_workspace_overlay_policy(policy);
     }
+    let (proof_rows, proof_diagnostics) = match scope {
+        CheckScope::Project => project_proof_rows(
+            &bundle,
+            package_facts.as_ref(),
+            entry_fn,
+            target,
+            profile,
+            setting_overrides,
+        ),
+        CheckScope::ExplicitFile => (explicit_file_proof_rows(), Vec::new()),
+    };
+    diagnostics.extend(proof_diagnostics);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        return Err(diagnostics);
+    }
     let check = CheckResult {
         source: entry,
         profile: profile.to_string(),
         front_end,
         programmable_build,
         diagnostics: diagnostics.len(),
+        scope,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        proof_rows,
     };
     Ok(CheckProjection {
         bundle,
@@ -209,14 +353,276 @@ fn check_projection_with_options_and_preflight(
     })
 }
 
+fn scope_name(scope: CheckScope) -> &'static str {
+    match scope {
+        CheckScope::Project => "project",
+        CheckScope::ExplicitFile => "explicit-file",
+    }
+}
+
+fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if jet::Loader::find_manifest_root_checked(parent)
+        .ok()
+        .flatten()
+        .is_some()
+        || jet::Loader::find_workspace_root_checked(parent)
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        return None;
+    }
+    let source = fs::read_to_string(path).ok()?;
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+    if !lex_diagnostics.is_empty() {
+        return None;
+    }
+    let program = jet::Parser::parse(&tokens).ok()?;
+    let span = program.imports.iter().find_map(|import| match &import.kind {
+        jet::AST::ImportKind::Module(name, span)
+            if name.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
+        jet::AST::ImportKind::Unqualified {
+            module_alias, span, ..
+        } if module_alias.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
+        _ => None,
+    })?;
+    Some(Diagnostic::from_row(
+        "E2393",
+        &[("import", "use project.<module>")],
+        Some(span),
+    ))
+}
+
+fn explicit_file_proof_rows() -> Vec<CheckProofRow> {
+    vec![
+        CheckProofRow {
+            name: "entry resolution",
+            status: "not applicable",
+            detail: "explicit-file checks resolve only the named source file".to_string(),
+            diagnostic: "E2389",
+        },
+        CheckProofRow {
+            name: "module graph",
+            status: "not applicable",
+            detail: "explicit-file checks keep semantic scope and do not promise a project graph".to_string(),
+            diagnostic: "E2390",
+        },
+        CheckProofRow {
+            name: "Core closure",
+            status: "not applicable",
+            detail: "explicit-file checks keep semantic scope and do not promise project Core closure".to_string(),
+            diagnostic: "E2391",
+        },
+        CheckProofRow {
+            name: "tier lowering",
+            status: "not applicable",
+            detail: "explicit-file checks keep semantic scope and do not promise project tier lowering".to_string(),
+            diagnostic: "E2392",
+        },
+    ]
+}
+
+fn project_proof_rows(
+    bundle: &jet::AST::ProgramBundle,
+    entry_fn: Option<&str>,
+    target: Option<&str>,
+) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
+    let mut rows = Vec::new();
+    let mut diagnostics = Vec::new();
+    // Entry overrides are normalized by the driver into the canonical runtime
+    // wrapper. Prove that wrapper in the actual entry module; a same-named
+    // function in an imported module is not the callable the adapters receive.
+    let selected_name = jet::Codegen::ENTRY_FN;
+    let selected = bundle.modules.get(bundle.entry).and_then(|module| {
+        module.items.iter().find_map(|item| match item {
+            jet::AST::Item::Func(function) if function.name == selected_name => {
+                Some((bundle.entry, function))
+            }
+            _ => None,
+        })
+    });
+    let entry_detail = match selected.as_ref() {
+        Some((module, function)) if entry_fn.is_some_and(|name| name != selected_name) => format!(
+            "requested `{}` resolved through selected `{selected_name}` in {} ({})",
+            entry_fn.unwrap_or_default(),
+            bundle.modules[*module].display,
+            function.span.start,
+        ),
+        Some((module, function)) => format!(
+            "selected `{selected_name}` in {} ({})",
+            bundle.modules[*module].display,
+            function.span.start,
+        ),
+        None => format!("selected `{selected_name}` is absent from the checked module graph"),
+    };
+    push_proof_row(
+        &mut rows,
+        &mut diagnostics,
+        "entry resolution",
+        selected.is_some().then_some("proven").unwrap_or("compiler defect"),
+        entry_detail,
+        "E2389",
+    );
+
+    let import_edges = bundle
+        .modules
+        .iter()
+        .map(|module| module.imports.len())
+        .sum::<usize>();
+    push_proof_row(
+        &mut rows,
+        &mut diagnostics,
+        "module graph",
+        (!bundle.modules.is_empty())
+            .then_some("proven")
+            .unwrap_or("compiler defect"),
+        format!(
+            "{} loaded module(s), {} resolved import edge(s); project root {}",
+            bundle.modules.len(),
+            import_edges,
+            bundle.project_root.display(),
+        ),
+        "E2390",
+    );
+
+    let core = jet::Codegen::core_closure_proof(bundle, false);
+    let used_core = if core.used_calls.is_empty() {
+        "none".to_string()
+    } else {
+        core.used_calls.join(",")
+    };
+    let synthesized_core = if core.synthesized_calls.is_empty() {
+        "none".to_string()
+    } else {
+        core.synthesized_calls.join(",")
+    };
+    push_proof_row(
+        &mut rows,
+        &mut diagnostics,
+        "Core closure",
+        "proven",
+        format!(
+            "used=[{used_core}] synthesized=[{synthesized_core}] routes=[{}] fingerprint={}",
+            core.adapter_routes.join(","),
+            core.fingerprint,
+        ),
+        "E2391",
+    );
+
+    let (tier_status, tier_detail) = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+        let misses = jet::Codegen::validate_web_tir_support(bundle, None);
+        if misses.is_empty() {
+            ("proven", "web=proven; structured web-TIR validator".to_string())
+        } else {
+            (
+                "compiler defect",
+                format!(
+                    "web=compiler defect; {}",
+                    misses
+                        .iter()
+                        .map(|miss| format!("{} at {}..{}", miss.func_name, miss.span.start, miss.span.end))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            )
+        }
+    } else if target.is_some() {
+        (
+            "toolchain unavailable",
+            format!(
+                "native target `{}` needs the build toolchain; check does not invoke rustc",
+                target.unwrap_or_default()
+            ),
+        )
+    } else {
+        let misses = jet::Codegen::TIR::validate_tir_support(bundle);
+        if misses.is_empty() {
+            (
+                "proven",
+                "AOT=proven; JIT=proven; interpreter=shared checked TIR route".to_string(),
+            )
+        } else {
+            (
+                "compiler defect",
+                format!(
+                    "{}",
+                    misses
+                        .iter()
+                        .map(|miss| format!(
+                            "{} {}: {}",
+                            miss.tier, miss.callable, miss.reason
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            )
+        }
+    };
+    push_proof_row(
+        &mut rows,
+        &mut diagnostics,
+        "tier lowering",
+        tier_status,
+        tier_detail,
+        "E2392",
+    );
+    (rows, diagnostics)
+}
+
+fn push_proof_row(
+    rows: &mut Vec<CheckProofRow>,
+    diagnostics: &mut Vec<Diagnostic>,
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+    diagnostic: &'static str,
+) {
+    let row = CheckProofRow {
+        name,
+        status,
+        detail,
+        diagnostic,
+    };
+    if !matches!(row.status, "proven" | "not applicable") {
+        diagnostics.push(Diagnostic::from_row(
+            row.diagnostic,
+            &[("detail", row.detail.as_str())],
+            None,
+        ));
+    }
+    rows.push(row);
+}
+
 pub(crate) fn check_result_json(check: &CheckResult) -> String {
+    let rows = check
+        .proof_rows
+        .iter()
+        .map(|row| {
+            format!(
+                "{{\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+                json_escape(row.name),
+                json_escape(row.status),
+                json_escape(&row.detail),
+                json_escape(row.diagnostic),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"status\":\"passed\",\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}}}}",
+        "{{\"status\":\"passed\",\"schema_version\":{},\"scope\":\"{}\",\"elapsed_ms\":{},\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}},\"proof\":[{}]}}",
+        CHECK_RESULT_SCHEMA_VERSION,
+        scope_name(check.scope),
+        check.elapsed_ms,
         json_escape(&check.source),
         json_escape(&check.profile),
         json_escape(check.front_end),
         json_escape(check.programmable_build),
         check.diagnostics,
+        rows,
     )
 }
 
@@ -228,10 +634,25 @@ pub(crate) fn with_check_json(mut document: String, check: &CheckResult) -> Stri
 }
 
 pub(crate) fn check_result_text(check: &CheckResult) -> String {
-    format!(
-        "check: passed (source={}, profile={}, front_end={}, programmable_build={}, diagnostics={})\n",
-        check.source, check.profile, check.front_end, check.programmable_build, check.diagnostics,
-    )
+    let mut text = format!(
+        "check: passed (source={}, profile={}, scope={}, schema_version={}, elapsed_ms={}, front_end={}, programmable_build={}, diagnostics={})\n",
+        check.source,
+        check.profile,
+        scope_name(check.scope),
+        CHECK_RESULT_SCHEMA_VERSION,
+        check.elapsed_ms,
+        check.front_end,
+        check.programmable_build,
+        check.diagnostics,
+    );
+    for row in &check.proof_rows {
+        let _ = writeln!(
+            text,
+            "proof: {} [{}] {} (diagnostic={})",
+            row.name, row.status, row.detail, row.diagnostic,
+        );
+    }
+    text
 }
 
 pub(crate) fn render_check_failure(
@@ -619,6 +1040,7 @@ fn digest_slices() -> Vec<DigestSlice> {
         ("first-program", "## First program"),
         ("core.source-rules", "## Core source rules"),
         ("canonical", "## Canonical compiling example"),
+        ("idioms", "## Canonical idiom suites"),
         ("syntax.keywords", "## Keywords"),
         ("syntax.types", "## Built-in type names"),
         ("syntax.reserved", "## Reserved first-party names"),
@@ -679,6 +1101,16 @@ fn llm_digest() -> String {
     let diagnostic_text = digest_diagnostic_text();
     let core_text = digest_core_module_text();
     let canonical = include_str!("../examples/canon.jet").trim();
+    let idiom_suites_body = [
+        "Each idiom has one executable, golden-backed source of truth under `examples/suites/`.",
+        "",
+        "- Dispatch: `examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
+        "- Failure: `examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
+        "- Finite state: `examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
+        "- Ownership: `examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.",
+        "- Wire output: `examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
+    ]
+    .join("\n");
 
     let first_program_body = [
         "A source file ends with one `fn run()` entry. `print` is a built-in.",
@@ -734,6 +1166,7 @@ fn llm_digest() -> String {
         digest_section("First program", &first_program_body),
         digest_section("Core source rules", &core_rules_body),
         digest_section("Canonical compiling example", &canonical_body),
+        digest_section("Canonical idiom suites", &idiom_suites_body),
         digest_section("Keywords", &digest_list(jet::Syntax::JET_KEYWORD_LIST)),
         digest_section("Built-in type names", &digest_list(jet::Syntax::JET_TYPE_LIST)),
         digest_section(
@@ -1075,9 +1508,18 @@ fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
 
 fn render_effect_provenance_text(report: &jet::Lock::DependencyProvenanceReport) {
     println!("  effect roles");
-    println!("    required effects: {}", effect_names(&report.required_effects));
-    println!("    granted effects: {}", effect_names(&report.granted_effects));
-    println!("    denied effects: {}", effect_names(&report.denied_effects));
+    println!(
+        "    required effects: {}",
+        effect_names(&report.required_effects)
+    );
+    println!(
+        "    granted effects: {}",
+        effect_names(&report.granted_effects)
+    );
+    println!(
+        "    denied effects: {}",
+        effect_names(&report.denied_effects)
+    );
     println!("    authority: {}", report.authority);
 }
 
@@ -1234,6 +1676,77 @@ fn module_source(bundle: &jet::AST::ProgramBundle, display: &str) -> String {
         .unwrap_or_default()
 }
 
+fn render_human_policy(policy: &jet::Driver::GuaranteePolicyReport) {
+    if policy.effects.is_empty() {
+        println!("policy.effects: absent");
+    } else {
+        println!("policy.effects:");
+        for (path, ceiling) in &policy.effects {
+            println!(
+                "  {path}: -[{}]>",
+                ceiling.iter().cloned().collect::<Vec<_>>().join(",")
+            );
+        }
+    }
+    match &policy.unsafe_paths {
+        None => println!("policy.unsafe: absent"),
+        Some(paths) if paths.is_empty() => println!("policy.unsafe: .Deny"),
+        Some(paths) => println!("policy.unsafe: .Paths({paths:?})"),
+    }
+    match policy.expert {
+        None => println!("policy.expert: absent"),
+        Some(false) => println!("policy.expert: .Deny"),
+        Some(true) => println!("policy.expert: .Allow"),
+    }
+    match &policy.deps {
+        None => println!("policy.deps: absent"),
+        Some(deps) => println!("policy.deps: .List({deps:?})"),
+    }
+    match &policy.lints_deny {
+        None => println!("policy.lints.deny: absent"),
+        Some(classes) => println!("policy.lints.deny: {classes:?}"),
+    }
+}
+
+fn render_policy_json(policy: &jet::Driver::GuaranteePolicyReport) -> String {
+    let effects = policy
+        .effects
+        .iter()
+        .map(|(path, ceiling)| {
+            let ceiling = ceiling.iter().cloned().collect::<Vec<_>>();
+            format!(
+                "{{\"path\":\"{}\",\"ceiling\":{}}}",
+                json_escape(path),
+                json_strings(&ceiling)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let unsafe_policy = match &policy.unsafe_paths {
+        None => "null".to_string(),
+        Some(paths) if paths.is_empty() => "{\"mode\":\"deny\"}".to_string(),
+        Some(paths) => format!("{{\"mode\":\"paths\",\"paths\":{}}}", json_strings(paths)),
+    };
+    let expert = policy
+        .expert
+        .map(|allowed| allowed.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let deps = policy
+        .deps
+        .as_deref()
+        .map(json_strings)
+        .unwrap_or_else(|| "null".to_string());
+    let lints = policy
+        .lints_deny
+        .as_deref()
+        .map(|classes| format!("{{\"deny\":{}}}", json_strings(classes)))
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"effects\":[{}],\"unsafe\":{},\"expert\":{},\"deps\":{},\"lints\":{}}}",
+        effects, unsafe_policy, expert, deps, lints
+    )
+}
+
 fn render_human(report: &jet::Driver::GuaranteeReport) {
     println!("guarantees");
     println!("profile: {}", report.profile);
@@ -1248,6 +1761,7 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
     if report.freestanding {
         println!("target: freestanding");
     }
+    render_human_policy(&report.policy);
     println!("component              guarantee  evidence");
     for component in &report.components {
         println!(
@@ -1263,11 +1777,13 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
 }
 
 fn render_json(report: &jet::Driver::GuaranteeReport, check: &CheckResult) {
+    let policy = render_policy_json(&report.policy);
     let mut document = format!(
-        "{{\"schema_version\":1,\"profile\":\"{}\",\"package\":{},\"freestanding\":{},\"components\":[",
+        "{{\"schema_version\":1,\"profile\":\"{}\",\"package\":{},\"freestanding\":{},\"policy\":{},\"components\":[",
         json_escape(&report.profile),
         report.package,
         report.freestanding,
+        policy,
     );
     for (index, component) in report.components.iter().enumerate() {
         if index > 0 {

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jet-lang.dev/adoption/schemas/playbook-v1.json",
+  "title": "Jet adoption playbook",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "tier_neutral", "representative_project", "required_sections", "commands", "operator_checks"],
+  "properties": {
+    "schema": { "const": "jet.adoption.playbook-checks/v1" },
+    "version": { "$ref": "#/$defs/version" },
+    "tier_neutral": { "const": true },
+    "representative_project": { "type": "string", "minLength": 1 },
+    "required_sections": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["prerequisites", "inventory", "pilot", "build-import", "test", "rollout", "rollback", "ownership", "known-non-goals"] }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "phase", "argv", "cwd", "expected_exit", "requires_clean_copy", "network", "captures"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "phase": { "enum": ["prerequisites", "inventory", "pilot", "build-import", "test"] },
+          "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "cwd": { "type": "string", "minLength": 1 },
+          "expected_exit": { "type": "integer" },
+          "requires_clean_copy": { "const": true },
+          "network": { "const": "denied" },
+          "captures": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "operator_checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "phase", "action", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "phase": { "enum": ["rollout", "rollback", "ownership", "known-non-goals"] },
+          "action": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+  }
+}

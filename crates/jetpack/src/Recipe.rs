@@ -31,7 +31,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+const MAX_RECIPE_READ_BYTES: u64 = 512 * 1024 * 1024;
 
 // Card #367 slice 4: the `BuildStep`/`BuildRecipe` *data* shape sunk into
 // `jet-pkg-model` (data-down / engine-up) — re-exported under the historical
@@ -41,8 +42,6 @@ pub use jet_pkg_model::Recipe::{
     BuildPlanFragment, BuildRecipe, BuildStep, PlanAuthority, PlanFragmentAction, PlanInput,
     StagedPlanAction, StagedPlanError, StagedPlanLock,
 };
-
-static STAGED_PLAN_ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A locked source fetch recorded for `.jet/lock` provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,7 +188,7 @@ impl<'a> PlanSandbox<'a> {
         let source = confined_source(self.source_dir, path, false).map_err(|error| {
             StagedPlanActionError::Failed(format!("{}: {}", error.code, error.what))
         })?;
-        let bytes = std::fs::read(&source).map_err(|error| {
+        let bytes = read_recipe_file_nofollow(&source, MAX_RECIPE_READ_BYTES).map_err(|error| {
             StagedPlanActionError::Failed(format!(
                 "could not read declared input `{path}`: {error}"
             ))
@@ -715,13 +714,16 @@ fn publish_staged_plan_artifact(
     lock: &StagedPlanLock,
     plan_fingerprint: &str,
 ) -> Result<PathBuf, Diagnostic> {
-    std::fs::create_dir_all(artifact_root)
+    let artifact_parent = PinnedRecipeDirectory::open_or_create(artifact_root)
         .map_err(|error| recipe_io_error("could not create staged-plan artifact root", error))?;
     let namespace = staged_plan_namespace(&action.name, &lock.action_identity);
-    let artifact = artifact_root.join(namespace);
+    let artifact = artifact_parent.path().join(&namespace);
     let fragment_bytes = fragment.canonical_bytes();
     let lock_bytes = lock.encode();
-    if artifact.exists() {
+    if artifact_parent
+        .existing_directory(&namespace)
+        .map_err(|error| recipe_io_error("could not inspect staged-plan artifact", error))?
+    {
         let matches = std::fs::read(artifact.join("fragment.plan"))
             .map(|bytes| bytes == fragment_bytes)
             .unwrap_or(false)
@@ -739,21 +741,21 @@ fn publish_staged_plan_artifact(
         ));
     }
 
-    let counter = STAGED_PLAN_ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let staging = artifact_root.join(format!(".staged-plan-{}-{counter}", std::process::id()));
+    let (staging_name, staging) = artifact_parent
+        .exclusive_child("jet-staged-plan")
+        .map_err(|error| recipe_io_error("could not create staged-plan scratch", error))?;
     let mut guard = StagedPlanArtifactGuard {
-        path: staging.clone(),
+        parent: artifact_parent,
+        name: staging_name,
         published: false,
     };
-    std::fs::create_dir(&staging)
-        .map_err(|error| recipe_io_error("could not create staged-plan scratch", error))?;
     std::fs::write(staging.join("fragment.plan"), fragment_bytes)
         .map_err(|error| recipe_io_error("could not write staged-plan fragment", error))?;
     std::fs::write(staging.join("lock"), lock_bytes)
         .map_err(|error| recipe_io_error("could not write staged-plan lock", error))?;
     std::fs::write(staging.join("plan.fingerprint"), plan_fingerprint)
         .map_err(|error| recipe_io_error("could not write staged-plan fingerprint", error))?;
-    if let Err(error) = std::fs::rename(&staging, &artifact) {
+    if let Err(error) = guard.parent.rename_name(&guard.name, &namespace) {
         return Err(recipe_io_error(
             "could not publish staged-plan artifact",
             error,
@@ -764,14 +766,15 @@ fn publish_staged_plan_artifact(
 }
 
 struct StagedPlanArtifactGuard {
-    path: PathBuf,
+    parent: PinnedRecipeDirectory,
+    name: String,
     published: bool,
 }
 
 impl Drop for StagedPlanArtifactGuard {
     fn drop(&mut self) {
         if !self.published {
-            remove_path(&self.path);
+            let _ = self.parent.remove_name(&self.name);
         }
     }
 }
@@ -978,7 +981,7 @@ pub fn run(
     let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
     let order = admitted_step_order(&plan, recipe.steps.len())?;
-    let staged = PrivateStage::new(ctx.output_root);
+    let staged = PrivateStage::new(ctx.output_root)?;
     let staged_ctx = BuildContext {
         source_dir: ctx.source_dir,
         output_root: staged.path(),
@@ -994,15 +997,24 @@ pub fn run(
 
 struct PrivateStage {
     path: PathBuf,
+    parent: PinnedRecipeDirectory,
+    name: String,
     published: bool,
 }
 
 impl PrivateStage {
-    fn new(output_root: &Path) -> Self {
-        Self {
-            path: staged_output_path(output_root),
+    fn new(output_root: &Path) -> Result<Self, Diagnostic> {
+        let parent = output_parent(output_root)
+            .map_err(|error| recipe_io_error("could not create private recipe stage", error))?;
+        let (name, path) = parent
+            .exclusive_child("jet-recipe-stage")
+            .map_err(|error| recipe_io_error("could not create private recipe stage", error))?;
+        Ok(Self {
+            path,
+            parent,
+            name,
             published: false,
-        }
+        })
     }
 
     fn path(&self) -> &Path {
@@ -1010,7 +1022,7 @@ impl PrivateStage {
     }
 
     fn publish(mut self, output_root: &Path) -> Result<(), Diagnostic> {
-        commit_staged_output(&self.path, output_root)?;
+        commit_staged_output(&self.parent, &self.name, output_root)?;
         self.published = true;
         Ok(())
     }
@@ -1019,7 +1031,7 @@ impl PrivateStage {
 impl Drop for PrivateStage {
     fn drop(&mut self) {
         if !self.published {
-            remove_path(&self.path);
+            let _ = self.parent.remove_name(&self.name);
         }
     }
 }
@@ -1036,7 +1048,7 @@ pub fn run_logged(
     let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
     let order = admitted_step_order(&plan, recipe.steps.len())?;
-    let staged = PrivateStage::new(ctx.output_root);
+    let staged = PrivateStage::new(ctx.output_root)?;
     let staged_ctx = BuildContext {
         source_dir: ctx.source_dir,
         output_root: staged.path(),
@@ -1047,7 +1059,7 @@ pub fn run_logged(
     let mut report = run_report();
     let total = recipe.steps.len();
     let result = (|| {
-        std::fs::create_dir_all(staged_ctx.output_root)
+        ensure_recipe_directory(staged_ctx.output_root)
             .map_err(|error| recipe_io_error("could not create staged recipe output", error))?;
         for (position, step_index) in order.iter().enumerate() {
             let step = recipe
@@ -1104,7 +1116,7 @@ fn run_steps(
     ctx: &BuildContext,
     transport: Option<Transport>,
 ) -> Result<RunReport, Diagnostic> {
-    std::fs::create_dir_all(ctx.output_root)
+    ensure_recipe_directory(ctx.output_root)
         .map_err(|error| recipe_io_error("could not create staged recipe output", error))?;
     let mut report = run_report();
     for step_index in order {
@@ -1135,10 +1147,19 @@ fn install_file(
     let target = confined_dest(ctx.output_root, dest)?;
     let from = confined_source(ctx.source_dir, src, false)?;
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)
+        ensure_recipe_directory(parent)
             .map_err(|error| recipe_io_error("could not create an install directory", error))?;
     }
-    std::fs::copy(&from, &target).map_err(|e| {
+    let metadata = std::fs::symlink_metadata(&from).map_err(|e| {
+        Diagnostic::error(
+            "E1237",
+            format!("build step could not inspect `{src}`"),
+            format!("reading `{}` failed: {e}", from.display()),
+            "make sure the source file exists in the staged tree.".to_string(),
+            None,
+        )
+    })?;
+    copy_regular_file_nofollow(&from, &target, &metadata).map_err(|e| {
         Diagnostic::error(
             "E1237",
             format!("build step could not install `{src}`"),
@@ -1178,42 +1199,700 @@ fn install_tree(
     Ok(())
 }
 
-fn staged_output_path(output_root: &Path) -> PathBuf {
+fn output_parent(output_root: &Path) -> std::io::Result<PinnedRecipeDirectory> {
     let parent = output_root.parent().unwrap_or_else(|| Path::new("."));
-    let name = output_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("output");
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    parent.join(format!(".{name}.jet-stage-{}-{stamp}", std::process::id()))
+    let parent = absolute_recipe_path(parent)?;
+    PinnedRecipeDirectory::open_or_create(&parent)
 }
 
-fn commit_staged_output(staged: &Path, output_root: &Path) -> Result<(), Diagnostic> {
-    let backup = staged.with_extension("previous");
-    let had_previous = output_root.exists();
-    if had_previous {
-        std::fs::rename(output_root, &backup).map_err(|error| {
-            recipe_io_error("could not preserve the previous recipe output", error)
-        })?;
-    }
-    if let Err(error) = std::fs::rename(staged, output_root) {
-        if had_previous {
-            let _ = std::fs::rename(&backup, output_root);
+fn absolute_recipe_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    Ok(normalize(&absolute))
+}
+
+fn output_name(output_root: &Path) -> std::io::Result<String> {
+    output_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+        .map(str::to_string)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe output root must have one ordinary path name",
+            )
+        })
+}
+
+/// A held, no-follow directory authority. All stage allocation, publication,
+/// and cleanup below is relative to this handle, so a concurrent replacement
+/// of the path name cannot redirect a write or cleanup into another tree.
+struct PinnedRecipeDirectory {
+    path: PathBuf,
+    #[cfg(unix)]
+    handle: std::fs::File,
+}
+
+impl PinnedRecipeDirectory {
+    fn open_or_create(path: &Path) -> std::io::Result<Self> {
+        let path = absolute_recipe_path(path)?;
+        #[cfg(unix)]
+        {
+            let handle = open_recipe_directory(&path)?;
+            return Ok(Self { path, handle });
         }
-        return Err(recipe_io_error(
-            "could not publish staged recipe output",
-            error,
-        ));
+        #[cfg(not(unix))]
+        {
+            ensure_recipe_directory(&path)?;
+            Ok(Self { path })
+        }
     }
-    if had_previous {
-        remove_path(&backup);
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn exclusive_child(&self, prefix: &str) -> std::io::Result<(String, PathBuf)> {
+        validate_recipe_component(prefix)?;
+        #[cfg(unix)]
+        {
+            return exclusive_recipe_child(&self.handle, &self.path, prefix);
+        }
+        #[cfg(not(unix))]
+        {
+            let path = crate::Provider::exclusive_temp_dir(&self.path, prefix)?;
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "temporary recipe path is not a text path",
+                    )
+                })?
+                .to_string();
+            Ok((name, path))
+        }
+    }
+
+    fn fresh_name(&self, prefix: &str) -> std::io::Result<String> {
+        validate_recipe_component(prefix)?;
+        let bytes = crate::TrustRoot::os_random_bytes::<16>()?;
+        let mut suffix = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use std::fmt::Write as _;
+            let _ = write!(suffix, "{byte:02x}");
+        }
+        Ok(format!("{prefix}-{suffix}"))
+    }
+
+    fn existing_directory(&self, name: &str) -> std::io::Result<bool> {
+        validate_recipe_component(name)?;
+        #[cfg(unix)]
+        {
+            return existing_recipe_directory(&self.handle, name);
+        }
+        #[cfg(not(unix))]
+        {
+            match std::fs::symlink_metadata(self.path.join(name)) {
+                Ok(metadata) if metadata.file_type().is_symlink() => Err(
+                    std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "recipe output root must not be a symlink",
+                    ),
+                ),
+                Ok(metadata) if metadata.is_dir() => Ok(true),
+                Ok(_) => Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "recipe output root is not a directory",
+                )),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
+    fn rename_name(&self, old: &str, new: &str) -> std::io::Result<()> {
+        validate_recipe_component(old)?;
+        validate_recipe_component(new)?;
+        #[cfg(unix)]
+        {
+            return rename_recipe_name(&self.handle, old, &self.handle, new);
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::rename(self.path.join(old), self.path.join(new))
+        }
+    }
+
+    fn exchange_name(&self, old: &str, new: &str) -> std::io::Result<bool> {
+        validate_recipe_component(old)?;
+        validate_recipe_component(new)?;
+        #[cfg(unix)]
+        {
+            return exchange_recipe_names(&self.handle, old, new);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (old, new);
+            Ok(false)
+        }
+    }
+
+    fn remove_name(&self, name: &str) -> std::io::Result<()> {
+        validate_recipe_component(name)?;
+        #[cfg(unix)]
+        {
+            return remove_recipe_name(&self.handle, name);
+        }
+        #[cfg(not(unix))]
+        {
+            remove_path(&self.path.join(name));
+            Ok(())
+        }
+    }
+
+    fn sync(&self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            self.handle.sync_all()
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(())
+        }
+    }
+}
+
+fn validate_recipe_component(value: &str) -> std::io::Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.chars().any(char::is_control)
+        || value.contains(['/', '\\'])
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe path name must be one ordinary path component",
+        ));
     }
     Ok(())
 }
 
+fn commit_staged_output(
+    parent: &PinnedRecipeDirectory,
+    staged_name: &str,
+    output_root: &Path,
+) -> Result<(), Diagnostic> {
+    commit_staged_output_io(parent, staged_name, output_root).map_err(|error| {
+        recipe_io_error("could not publish staged recipe output", error)
+    })
+}
+
+fn commit_staged_output_io(
+    parent: &PinnedRecipeDirectory,
+    staged_name: &str,
+    output_root: &Path,
+) -> std::io::Result<()> {
+    let output_parent = output_root.parent().unwrap_or_else(|| Path::new("."));
+    let expected_parent = absolute_recipe_path(output_parent)?;
+    if expected_parent != parent.path() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "staged output and destination do not share one held parent",
+        ));
+    }
+    let output_name = output_name(output_root)?;
+    let staged_exists = parent.existing_directory(staged_name)?;
+    if !staged_exists {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "staged recipe output disappeared before publication",
+        ));
+    }
+    let had_previous = parent.existing_directory(&output_name)?;
+
+    if had_previous && parent.exchange_name(staged_name, &output_name)? {
+        // The old output now has the private stage name. Remove it through the
+        // held parent; a child cannot turn this cleanup into a path escape.
+        let _ = parent.remove_name(staged_name);
+    } else if had_previous {
+        let mut backup_name = None;
+        for _ in 0..16 {
+            let candidate = parent.fresh_name("jet-recipe-backup")?;
+            match parent.rename_name(&output_name, &candidate) {
+                Ok(()) => {
+                    backup_name = Some(candidate);
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(error);
+                }
+            }
+        }
+        let backup_name = backup_name.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate an exclusive recipe backup name",
+            )
+        })?;
+        if let Err(error) = parent.rename_name(staged_name, &output_name) {
+            let _ = parent.rename_name(&backup_name, &output_name);
+            return Err(error);
+        }
+        let _ = parent.remove_name(&backup_name);
+    } else if let Err(error) = parent.rename_name(staged_name, &output_name) {
+        return Err(error);
+    }
+    parent.sync()
+}
+
+#[cfg(unix)]
+fn open_recipe_directory(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    const O_RDONLY: i32 = 0;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_DIRECTORY: i32 = 0o200000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_DIRECTORY: i32 = 0x00100000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+        fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
+    }
+
+    fn open_child(parent: &std::fs::File, name: &std::ffi::OsStr) -> std::io::Result<std::fs::File> {
+        let name = CString::new(name.as_bytes()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe directory name contains NUL",
+            )
+        })?;
+        // SAFETY: `parent` owns a live directory descriptor and `name` is a
+        // live NUL-terminated component. No caller-controlled flags are used.
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: the successful openat returned one uniquely owned fd.
+        Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+    }
+
+    let mut current = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        .open(Path::new("/"))?;
+    for component in path.components() {
+        let std::path::Component::Normal(component_name) = component else {
+            if matches!(component, std::path::Component::RootDir) {
+                continue;
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe parent contains an unsupported path component",
+            ));
+        };
+        current = match open_child(&current, component_name) {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let name = CString::new(component_name.as_bytes()).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "recipe directory name contains NUL",
+                    )
+                })?;
+                // SAFETY: the parent descriptor and NUL-terminated component
+                // remain live for the duration of this call.
+                let made = unsafe { mkdirat(current.as_raw_fd(), name.as_ptr(), 0o700) };
+                if made != 0 {
+                    let create_error = std::io::Error::last_os_error();
+                    if create_error.kind() != std::io::ErrorKind::AlreadyExists {
+                        return Err(create_error);
+                    }
+                }
+                open_child(&current, component_name)?
+            }
+            Err(error) => return Err(error),
+        };
+    }
+    Ok(current)
+}
+
+#[cfg(unix)]
+fn exclusive_recipe_child(
+    parent: &std::fs::File,
+    parent_path: &Path,
+    prefix: &str,
+) -> std::io::Result<(String, PathBuf)> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
+    }
+    for _ in 0..16 {
+        let name = random_recipe_name(prefix)?;
+        let name_c = CString::new(name.as_bytes()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe temporary name contains NUL",
+            )
+        })?;
+        // SAFETY: `parent` owns a live directory descriptor and `name_c` is a
+        // live, single-component name. `0700` grants no access to other users.
+        if unsafe { mkdirat(parent.as_raw_fd(), name_c.as_ptr(), 0o700) } == 0 {
+            return Ok((name.clone(), parent_path.join(name)));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(error);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate an exclusive recipe directory",
+    ))
+}
+
+fn random_recipe_name(prefix: &str) -> std::io::Result<String> {
+    let bytes = crate::TrustRoot::os_random_bytes::<16>()?;
+    let mut suffix = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(suffix, "{byte:02x}");
+    }
+    Ok(format!("{prefix}-{suffix}"))
+}
+
+#[cfg(unix)]
+fn existing_recipe_directory(parent: &std::fs::File, name: &str) -> std::io::Result<bool> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::{AsRawFd, FromRawFd};
+
+    const O_RDONLY: i32 = 0;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_DIRECTORY: i32 = 0o200000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_DIRECTORY: i32 = 0x00100000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+    }
+    let name = CString::new(name.as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe output name contains NUL",
+        )
+    })?;
+    // SAFETY: the parent descriptor and component remain live during openat.
+    let fd = unsafe {
+        openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    if fd >= 0 {
+        // SAFETY: the successful call returned one uniquely owned fd.
+        drop(unsafe { std::fs::File::from_raw_fd(fd) });
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::NotFound {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(unix)]
+fn rename_recipe_name(
+    old_parent: &std::fs::File,
+    old: &str,
+    new_parent: &std::fs::File,
+    new: &str,
+) -> std::io::Result<()> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn renameat(
+            old_directory: i32,
+            old_path: *const c_char,
+            new_directory: i32,
+            new_path: *const c_char,
+        ) -> i32;
+    }
+    let old = CString::new(old).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe source name contains NUL",
+        )
+    })?;
+    let new = CString::new(new).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe destination name contains NUL",
+        )
+    })?;
+    // SAFETY: both descriptors are live directories and both names contain no
+    // separators, so renameat cannot traverse an attacker-controlled path.
+    if unsafe {
+        renameat(
+            old_parent.as_raw_fd(),
+            old.as_ptr(),
+            new_parent.as_raw_fd(),
+            new.as_ptr(),
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn exchange_recipe_names(
+    parent: &std::fs::File,
+    old: &str,
+    new: &str,
+) -> std::io::Result<bool> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::AsRawFd;
+
+    let old = CString::new(old).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe source name contains NUL",
+        )
+    })?;
+    let new = CString::new(new).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recipe destination name contains NUL",
+        )
+    })?;
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn renameat2(
+                old_directory: i32,
+                old_path: *const c_char,
+                new_directory: i32,
+                new_path: *const c_char,
+                flags: u32,
+            ) -> i32;
+        }
+        const RENAME_EXCHANGE: u32 = 2;
+        // SAFETY: both descriptors are held directories and both names are
+        // single components. The exchange is one atomic namespace operation.
+        if unsafe {
+            renameat2(
+                parent.as_raw_fd(),
+                old.as_ptr(),
+                parent.as_raw_fd(),
+                new.as_ptr(),
+                RENAME_EXCHANGE,
+            )
+        } == 0
+        {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(22 | 38 | 95)) {
+            return Err(error);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn renameatx_np(
+                old_directory: i32,
+                old_path: *const c_char,
+                new_directory: i32,
+                new_path: *const c_char,
+                flags: u32,
+            ) -> i32;
+        }
+        const RENAME_SWAP: u32 = 2;
+        // SAFETY: both descriptors are held directories and both names are
+        // single components. macOS performs the swap atomically.
+        if unsafe {
+            renameatx_np(
+                parent.as_raw_fd(),
+                old.as_ptr(),
+                parent.as_raw_fd(),
+                new.as_ptr(),
+                RENAME_SWAP,
+            )
+        } == 0
+        {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(22 | 78 | 95)) {
+            return Err(error);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(unix)]
+fn remove_recipe_name(parent: &std::fs::File, name: &str) -> std::io::Result<()> {
+    use std::ffi::{c_char, CString};
+    use std::os::fd::{AsRawFd, FromRawFd};
+
+    const O_RDONLY: i32 = 0;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_DIRECTORY: i32 = 0o200000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_DIRECTORY: i32 = 0x00100000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+    const AT_REMOVEDIR: i32 = 0x200;
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+        fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+    }
+
+    fn remove_at(parent: &std::fs::File, name: &std::ffi::OsStr) -> std::io::Result<()> {
+        use std::os::unix::ffi::OsStrExt;
+        let name_c = CString::new(name.as_bytes()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe cleanup name contains NUL",
+            )
+        })?;
+        // SAFETY: the parent descriptor and component remain live during openat.
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name_c.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return Ok(());
+            }
+            if !matches!(error.raw_os_error(), Some(20 | 40)) {
+                // ENOTDIR or ELOOP are a regular file or symlink. unlinkat
+                // removes the name itself and never follows either object.
+                return Err(error);
+            }
+            // SAFETY: unlinkat removes only this directory entry; it never
+            // follows a symlink stored at `name_c`.
+            if unsafe { unlinkat(parent.as_raw_fd(), name_c.as_ptr(), 0) } != 0 {
+                let unlink_error = std::io::Error::last_os_error();
+                if unlink_error.kind() == std::io::ErrorKind::NotFound {
+                    return Ok(());
+                }
+                return Err(unlink_error);
+            }
+            return Ok(());
+        }
+        // SAFETY: the successful openat returned one uniquely owned fd.
+        let child = unsafe { std::fs::File::from_raw_fd(fd) };
+        let view = if cfg!(any(target_os = "linux", target_os = "android")) {
+            PathBuf::from(format!("/proc/self/fd/{}", child.as_raw_fd()))
+        } else {
+            PathBuf::from(format!("/dev/fd/{}", child.as_raw_fd()))
+        };
+        for entry in std::fs::read_dir(view)? {
+            let entry = entry?;
+            remove_at(&child, &entry.file_name())?;
+        }
+        drop(child);
+        // SAFETY: AT_REMOVEDIR removes the held directory's name only when it
+        // is still a directory and empty; it cannot follow a replacement.
+        if unsafe { unlinkat(parent.as_raw_fd(), name_c.as_ptr(), AT_REMOVEDIR) } != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(20) {
+                // The name was replaced by a non-directory during cleanup.
+                // Remove only that replacement name, never its target.
+                if unsafe { unlinkat(parent.as_raw_fd(), name_c.as_ptr(), 0) } != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            } else if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    remove_at(parent, std::ffi::OsStr::new(name))
+}
+
+#[cfg(unix)]
+fn ensure_recipe_directory(path: &Path) -> std::io::Result<()> {
+    PinnedRecipeDirectory::open_or_create(path).map(|_| ())
+}
+
+#[cfg(not(unix))]
+fn ensure_recipe_directory(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || is_reparse_point(&metadata) => {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "recipe directory must not be a symlink or reparse point",
+            ))
+        }
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "recipe directory path is not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+                ensure_recipe_directory(parent)?;
+            }
+            std::fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(unix))]
 fn remove_path(path: &Path) {
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
@@ -1266,11 +1945,14 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
             format!("recipe tree root is not a directory `{}`", src.display()),
         ));
     }
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
+    ensure_recipe_directory(dst)?;
+    let mut names = std::fs::read_dir(src)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    names.sort_unstable();
+    for name in &names {
+        let from = src.join(name);
+        let to = dst.join(name);
         let metadata = std::fs::symlink_metadata(&from)?;
         if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
             return Err(std::io::Error::new(
@@ -1282,15 +1964,10 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
             ));
         }
         if metadata.is_dir() {
+            ensure_recipe_directory(&to)?;
             copy_tree(&from, &to)?;
         } else if metadata.is_file() {
-            std::fs::copy(&from, &to)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = std::fs::metadata(&from)?.permissions().mode();
-                std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
-            }
+            copy_regular_file_nofollow(&from, &to, &metadata)?;
         } else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -1298,7 +1975,175 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
             ));
         }
     }
+    let mut after_names = std::fs::read_dir(src)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    after_names.sort_unstable();
+    let after_metadata = std::fs::symlink_metadata(src)?;
+    if !same_recipe_identity(&source_metadata, &after_metadata) || names != after_names {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("recipe source changed while copying `{}`", src.display()),
+        ));
+    }
     Ok(())
+}
+
+fn copy_regular_file_nofollow(
+    src: &Path,
+    dst: &Path,
+    expected: &std::fs::Metadata,
+) -> std::io::Result<()> {
+    let mut source_options = std::fs::OpenOptions::new();
+    source_options.read(true);
+    add_nofollow_flags(&mut source_options);
+    let mut source = source_options.open(src)?;
+    let opened = source.metadata()?;
+    if !opened.is_file() || is_reparse_point(&opened) || !same_recipe_identity(expected, &opened) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("recipe source file changed before copy `{}`", src.display()),
+        ));
+    }
+
+    let mut destination_options = std::fs::OpenOptions::new();
+    destination_options
+        .write(true)
+        .create(true)
+        .truncate(true);
+    add_nofollow_flags(&mut destination_options);
+    let mut destination = destination_options.open(dst)?;
+    std::io::copy(&mut source, &mut destination)?;
+    destination.sync_all()?;
+
+    let after = std::fs::symlink_metadata(src)?;
+    if !same_recipe_identity(expected, &after) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("recipe source file changed while copying `{}`", src.display()),
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dst,
+            std::fs::Permissions::from_mode(expected.permissions().mode()),
+        )?;
+    }
+    Ok(())
+}
+
+fn add_nofollow_flags(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_CLOEXEC: i32 = 0o2000000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_CLOEXEC: i32 = 0x01000000;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_NOFOLLOW: i32 = 0o400000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+}
+
+fn same_recipe_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type() && left.len() == right.len()
+    }
+}
+
+fn same_recipe_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
+    }
+}
+
+fn read_recipe_file_nofollow(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
+    let expected = std::fs::symlink_metadata(path)?;
+    if expected.file_type().is_symlink()
+        || is_reparse_point(&expected)
+        || !expected.is_file()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("recipe input is not a regular file `{}`", path.display()),
+        ));
+    }
+    if expected.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("recipe input exceeds its size limit `{}`", path.display()),
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    add_nofollow_flags(&mut options);
+    let mut file = options.open(path)?;
+    let opened = file.metadata()?;
+    if !opened.is_file()
+        || is_reparse_point(&opened)
+        || !same_recipe_file_identity(&expected, &opened)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("recipe input changed before read `{}`", path.display()),
+        ));
+    }
+
+    let mut content = Vec::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut remaining = limit.saturating_add(1);
+    while remaining > 0 {
+        use std::io::Read as _;
+        let size = buffer.len().min(remaining as usize);
+        let count = file.read(&mut buffer[..size])?;
+        if count == 0 {
+            break;
+        }
+        content.extend_from_slice(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    if content.len() as u64 > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("recipe input exceeds its size limit `{}`", path.display()),
+        ));
+    }
+    let after = std::fs::symlink_metadata(path)?;
+    if !same_recipe_file_identity(&expected, &after) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("recipe input changed while reading `{}`", path.display()),
+        ));
+    }
+    Ok(content)
 }
 
 fn confined_source(
@@ -1315,6 +2160,7 @@ fn confined_source(
     {
         return Err(e1237_source(source));
     }
+    validate_source_components(source_root, relative).map_err(|_| e1237_source(source))?;
     let root = source_root
         .canonicalize()
         .map_err(|error| recipe_io_error("could not resolve the recipe source root", error))?;
@@ -1335,6 +2181,41 @@ fn confined_source(
         return Err(e1237_source(source));
     }
     Ok(canonical)
+}
+
+fn validate_source_components(source_root: &Path, relative: &Path) -> std::io::Result<()> {
+    let root_metadata = std::fs::symlink_metadata(source_root)?;
+    if root_metadata.file_type().is_symlink() || is_reparse_point(&root_metadata) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "recipe source root must not be a symlink or reparse point",
+        ));
+    }
+    let mut current = source_root.to_path_buf();
+    let components = relative.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "recipe source contains a non-normal path component",
+            ));
+        };
+        current.push(name);
+        let metadata = std::fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "recipe source contains a symlink or reparse point",
+            ));
+        }
+        if index + 1 != components.len() && !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "recipe source path component is not a directory",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Resolve `dest` under `output_root`, rejecting any escape (`..`, absolute
@@ -1390,13 +2271,16 @@ fn do_fetch(
     if !valid_sha256(sha256) {
         return Err(e1236_invalid_hash(url, sha256));
     }
-    std::fs::create_dir_all(ctx.fetch_cache).ok();
-    let cached = ctx.fetch_cache.join(sha256);
-    if cached.is_file() {
+    let cache_root = PinnedRecipeDirectory::open_or_create(ctx.fetch_cache)
+        .map_err(|error| e1236_fetch(url, &format!("opening fetch cache: {error}")))?;
+    let cached = cache_root.path().join(sha256);
+    if let Some(cached_bytes) = match read_recipe_file_nofollow(&cached, MAX_RECIPE_READ_BYTES) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(e1236_fetch(url, &format!("reading cache: {error}"))),
+    } {
         // Offline-satisfiable only after re-verifying the immutable key. A
         // corrupt or stale cache entry must never become trusted input.
-        let cached_bytes =
-            std::fs::read(&cached).map_err(|e| e1236_fetch(url, &format!("reading cache: {e}")))?;
         if SHA256::sha256_hex(&cached_bytes) == sha256 {
             report.fetches.push(FetchRecord {
                 url: url.to_string(),
@@ -1405,11 +2289,14 @@ fn do_fetch(
             report.add_effect("net.fetch");
             return Ok(());
         }
-        let _ = std::fs::remove_file(&cached);
+        cache_root
+            .remove_name(sha256)
+            .map_err(|error| e1236_fetch(url, &format!("removing invalid cache entry: {error}")))?;
     }
     // Not cached: acquire the bytes. `file://` is std-only and offline-safe.
     let bytes = if let Some(path) = url.strip_prefix("file://") {
-        std::fs::read(path).map_err(|e| e1236_fetch(url, &e.to_string()))?
+        read_recipe_file_nofollow(Path::new(path), MAX_RECIPE_READ_BYTES)
+            .map_err(|e| e1236_fetch(url, &e.to_string()))?
     } else if ctx.offline {
         // A network fetch under `--offline` with no cache hit is ungranted.
         return Err(e1236_offline(url));
@@ -1420,19 +2307,46 @@ fn do_fetch(
         // network capability (I6). The caller must vendor or mirror the source.
         return Err(e1236_no_transport(url));
     };
+    if bytes.len() as u64 > MAX_RECIPE_READ_BYTES {
+        return Err(e1236_fetch(url, "fetched content exceeds its size limit"));
+    }
     // Verify the locked hash before the bytes are ever used.
     let got = SHA256::sha256_hex(&bytes);
     if got != sha256 {
         return Err(e1236_mismatch(url, sha256, &got));
     }
-    let temporary = ctx
-        .fetch_cache
-        .join(format!(".{sha256}.tmp-{}", std::process::id()));
-    std::fs::write(&temporary, &bytes).map_err(|e| e1236_fetch(url, &e.to_string()))?;
-    if let Err(error) = std::fs::rename(&temporary, &cached) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(e1236_fetch(url, &format!("publishing cache: {error}")));
+    let temporary_name = cache_root
+        .fresh_name("jet-fetch")
+        .map_err(|error| e1236_fetch(url, &format!("allocating cache staging: {error}")))?;
+    let temporary = cache_root.path().join(&temporary_name);
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        add_nofollow_flags(&mut options);
+        let mut file = options.open(&temporary)?;
+        use std::io::Write;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        match cache_root.rename_name(&temporary_name, sha256) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let winner = read_recipe_file_nofollow(&cached, MAX_RECIPE_READ_BYTES)?;
+                if SHA256::sha256_hex(&winner) == sha256 {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            }
+            Err(error) => Err(error),
+        }
+    })();
+    if result.is_err() {
+        let _ = cache_root.remove_name(&temporary_name);
     }
+    result.map_err(|error: std::io::Error| e1236_fetch(url, &format!("publishing cache: {error}")))?;
+    cache_root
+        .sync()
+        .map_err(|error| e1236_fetch(url, &format!("syncing fetch cache: {error}")))?;
     report.fetches.push(FetchRecord {
         url: url.to_string(),
         sha256: sha256.to_string(),
@@ -1571,6 +2485,35 @@ fn realized_tool<'a>(
     if !path.is_absolute() {
         return Err(e1238(tool));
     }
+    let expected = std::fs::symlink_metadata(path).map_err(|_| e1238(tool))?;
+    if expected.file_type().is_symlink()
+        || is_reparse_point(&expected)
+        || !expected.is_file()
+    {
+        return Err(e1238(tool));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    add_nofollow_flags(&mut options);
+    let file = options.open(path).map_err(|_| e1238(tool))?;
+    let opened = file.metadata().map_err(|_| e1238(tool))?;
+    if !opened.is_file()
+        || is_reparse_point(&opened)
+        || !same_recipe_file_identity(&expected, &opened)
+    {
+        return Err(e1238(tool));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if expected.permissions().mode() & 0o111 == 0 {
+            return Err(e1238(tool));
+        }
+    }
+    let after = std::fs::symlink_metadata(path).map_err(|_| e1238(tool))?;
+    if !same_recipe_file_identity(&expected, &after) {
+        return Err(e1238(tool));
+    }
     Ok(path.as_path())
 }
 
@@ -1626,33 +2569,36 @@ fn run_recipe_tool(
     args: &[String],
     ctx: &BuildContext,
 ) -> Result<jet_comptime::Comptime::Build::NativeSandboxOutput, Diagnostic> {
-    let parent = ctx.output_root.parent().unwrap_or_else(|| Path::new("."));
-    let name = ctx
-        .output_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("output");
-    let sandbox = parent.join(format!(
-        ".{name}.jet-sandbox-{}-{}",
-        std::process::id(),
-        STAGED_PLAN_ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    remove_path(&sandbox);
+    let parent = output_parent(ctx.output_root)
+        .map_err(|error| sandbox_copy_error("could not open the recipe sandbox parent", error))?;
+    let (sandbox_name, sandbox) = parent
+        .exclusive_child("jet-recipe-sandbox")
+        .map_err(|error| sandbox_copy_error("could not create the private recipe sandbox", error))?;
     let source = sandbox.join("source");
     let output = sandbox.join("output");
-    std::fs::create_dir_all(&source)
-        .map_err(|error| sandbox_copy_error("could not create the private recipe source", error))?;
-    std::fs::create_dir_all(&output)
-        .map_err(|error| sandbox_copy_error("could not create the private recipe output", error))?;
+    if let Err(error) = ensure_recipe_directory(&source) {
+        let _ = parent.remove_name(&sandbox_name);
+        return Err(sandbox_copy_error(
+            "could not create the private recipe source",
+            error,
+        ));
+    }
+    if let Err(error) = ensure_recipe_directory(&output) {
+        let _ = parent.remove_name(&sandbox_name);
+        return Err(sandbox_copy_error(
+            "could not create the private recipe output",
+            error,
+        ));
+    }
     if let Err(error) = copy_tree(ctx.source_dir, &source) {
-        remove_path(&sandbox);
+        let _ = parent.remove_name(&sandbox_name);
         return Err(sandbox_copy_error(
             "could not snapshot the recipe source for the sandbox",
             error,
         ));
     }
     if let Err(error) = copy_tree(ctx.output_root, &output) {
-        remove_path(&sandbox);
+        let _ = parent.remove_name(&sandbox_name);
         return Err(sandbox_copy_error(
             "could not snapshot the recipe output for the sandbox",
             error,
@@ -1671,28 +2617,38 @@ fn run_recipe_tool(
     let result = match result {
         Ok(result) => result,
         Err(error) => {
-            remove_path(&sandbox);
+            let _ = parent.remove_name(&sandbox_name);
             return Err(error);
         }
     };
     if result.output.status.success() {
-        if let Err(error) = replace_recipe_output(&output, ctx.output_root) {
-            remove_path(&sandbox);
+        if let Err(error) = replace_recipe_output(&parent, &output, ctx.output_root) {
+            let _ = parent.remove_name(&sandbox_name);
             return Err(sandbox_copy_error(
                 "the sandbox produced an unsafe recipe output",
                 error,
             ));
         }
     }
-    remove_path(&sandbox);
+    let _ = parent.remove_name(&sandbox_name);
     Ok(result)
 }
 
-fn replace_recipe_output(from: &Path, to: &Path) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(to)? {
-        remove_path(&entry?.path());
+fn replace_recipe_output(
+    parent: &PinnedRecipeDirectory,
+    from: &Path,
+    to: &Path,
+) -> std::io::Result<()> {
+    let (staging_name, staging) = parent.exclusive_child("jet-recipe-output")?;
+    if let Err(error) = copy_tree(from, &staging) {
+        let _ = parent.remove_name(&staging_name);
+        return Err(error);
     }
-    copy_tree(from, to)
+    if let Err(error) = commit_staged_output_io(parent, &staging_name, to) {
+        let _ = parent.remove_name(&staging_name);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn sandbox_copy_error(what: &str, error: std::io::Error) -> Diagnostic {
@@ -2418,7 +3374,86 @@ mod tests {
             .any(|entry| entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".out.jet-stage-")));
+                .to_string()
+                .starts_with("jet-recipe-stage-")));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recipe_publication_rejects_output_root_swap() {
+        use std::os::unix::fs::symlink;
+
+        let base = scratch("output-swap");
+        let outside = base.join("outside");
+        let output = base.join("out");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "keep").unwrap();
+        symlink(&outside, &output).unwrap();
+
+        let parent = PinnedRecipeDirectory::open_or_create(&base).unwrap();
+        let (stage_name, stage) = parent.exclusive_child("jet-recipe-stage").unwrap();
+        std::fs::write(stage.join("new"), "new").unwrap();
+        let error = commit_staged_output(&parent, &stage_name, &output)
+            .expect_err("a swapped output root must fail closed");
+        assert_eq!(error.code, "E1238");
+        assert_eq!(std::fs::read_to_string(outside.join("sentinel")).unwrap(), "keep");
+        assert!(!outside.join("new").exists());
+        parent.remove_name(&stage_name).unwrap();
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recipe_publication_stays_on_held_parent_after_path_swap() {
+        use std::os::unix::fs::symlink;
+
+        let base = scratch("parent-swap");
+        let parent_path = base.join("parent");
+        let replacement = base.join("replacement");
+        let moved = base.join("moved");
+        let output = parent_path.join("out");
+        std::fs::create_dir_all(&parent_path).unwrap();
+        std::fs::create_dir_all(&replacement).unwrap();
+        std::fs::write(replacement.join("sentinel"), "keep").unwrap();
+
+        let parent = PinnedRecipeDirectory::open_or_create(&parent_path).unwrap();
+        let (stage_name, stage) = parent.exclusive_child("jet-recipe-stage").unwrap();
+        std::fs::write(stage.join("new"), "new").unwrap();
+        std::fs::rename(&parent_path, &moved).unwrap();
+        symlink(&replacement, &parent_path).unwrap();
+
+        commit_staged_output(&parent, &stage_name, &output).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(moved.join("out/new")).unwrap(),
+            "new"
+        );
+        assert!(!replacement.join("out").exists());
+        assert_eq!(
+            std::fs::read_to_string(replacement.join("sentinel")).unwrap(),
+            "keep"
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn recipe_publication_replaces_only_complete_staged_tree() {
+        let base = scratch("complete-output");
+        let output = base.join("out");
+        std::fs::create_dir_all(output.join("old")).unwrap();
+        std::fs::write(output.join("old/value"), "old").unwrap();
+        let parent = PinnedRecipeDirectory::open_or_create(&base).unwrap();
+        let (stage_name, stage) = parent.exclusive_child("jet-recipe-stage").unwrap();
+        std::fs::create_dir_all(stage.join("new")).unwrap();
+        std::fs::write(stage.join("new/value"), "new").unwrap();
+
+        commit_staged_output(&parent, &stage_name, &output).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output.join("new/value")).unwrap(),
+            "new"
+        );
+        assert!(!output.join("old").exists());
+        assert!(!parent.existing_directory(&stage_name).unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 }

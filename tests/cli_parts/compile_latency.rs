@@ -152,6 +152,7 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
             "source_tree_sha256",
             "compiler_digest",
             "core_digest",
+            "clock",
             "target",
             "profile",
             "backend",
@@ -172,6 +173,10 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
                 "missing compile metadata field {key}"
             );
         }
+        assert_eq!(
+            compile["clock"],
+            CanonicalJson::String("process_cpu".into())
+        );
         assert!(
             compile.contains_key("peak_rss_bytes"),
             "missing compile metadata field peak_rss_bytes"

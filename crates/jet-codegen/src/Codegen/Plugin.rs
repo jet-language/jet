@@ -3,13 +3,13 @@
 //! loader (the host side lives in `crates/jet-driver/src/Prelude/Plugin.rs`,
 //! embedded via the FFI bridge). Reuses the ordinary whole-program `emit_bundle`
 //! output verbatim (I3: codegen stays dumb, no second lowering path) and
-//! appends one `#[export_name = "…"] pub extern "C" fn` wrapper per exported
-//! `pub fn`, calling straight into the already-emitted `__jet_<name>` — the
+//! appends one `#[export_name = "…"] pub extern "C" fn` wrapper per marked
+//! `#Export(c)` function, calling straight into the already-emitted `__jet_<name>` — the
 //! same naming convention every other Jet top-level function gets.
 //!
 //! v1 scope, both real (working end-to-end) and deliberately narrow — a
 //! documented boundary, not a stub:
-//!   - an exported `pub fn` must have every parameter and its return type be
+//!   - a marked `#Export(c)` function must have every parameter and its return type be
 //!     one homogeneous Component Model scalar: `Int`, `Float`, `Bool`, or
 //!     `Text` (checked before this runs — see
 //!     `Jetpack::PluginExport::validate_export_surface` in the driver, I3: the
@@ -18,7 +18,8 @@
 //!     turned a non-conforming plugin build into a hard error, so this can
 //!     never observe one in practice; this is a defensive skip, not the
 //!     enforcement point.
-//!   - only the entry file's TOP-LEVEL `pub fn` items are walked — a `pub fn`
+//!   - only the entry file's TOP-LEVEL `#Export(c)` items are walked — a marked
+//!     function
 //!     nested inside a `module <name> { … }` body isn't (yet) collected. A
 //!     top-level function is always emitted as `__jet_<name>` in the whole-
 //!     program Rust this module calls straight into; a module-scoped one may
@@ -61,7 +62,7 @@ pub struct PluginArtifacts {
 /// keyword, so there is nothing else to name per-plugin).
 const WORLD_NAME: &str = "jetplugin";
 
-/// Classify a `pub fn`'s signature for export: `Some(scalar)` when every
+/// Classify a `#Export(c)` signature for export: `Some(scalar)` when every
 /// parameter and the return type are the same Component Model scalar, else
 /// `None` (not exportable in v1 — see module doc).
 pub fn plugin_export_shape(f: &crate::AST::Func) -> Option<PluginScalar> {

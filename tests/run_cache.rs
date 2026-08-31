@@ -166,6 +166,55 @@ fn warm_hit_skips_front_end_and_matches_stdout() {
 }
 
 #[test]
+fn named_job_warm_hit_preserves_selection_and_arguments() {
+    let _guard = lock_run_cache_tests();
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let file = repo.join("examples/features/devloop/job_runner.jet");
+    let expected =
+        std::fs::read(repo.join("examples/features/expected/devloop/job_runner.greet.out"))
+            .unwrap();
+    let cache = std::env::temp_dir().join(format!("jet_run_job_cache_{}", unique()));
+    let _ = std::fs::remove_dir_all(&cache);
+
+    let run = || {
+        Command::new(jet_bin())
+            .args(["run", file.to_str().unwrap(), "--", "greet"])
+            .current_dir(&repo)
+            .env("JET_RUN_CACHE_DIR", &cache)
+            .env("JET_RUN_TRACE", "1")
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run named job")
+    };
+
+    let cold = run();
+    assert!(
+        cold.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cold.stderr)
+    );
+    assert_eq!(cold.stdout, expected);
+    assert!(
+        String::from_utf8_lossy(&cold.stderr).contains("[run-cache] store"),
+        "{}",
+        String::from_utf8_lossy(&cold.stderr)
+    );
+
+    let warm = run();
+    assert!(
+        warm.status.success(),
+        "{}",
+        String::from_utf8_lossy(&warm.stderr)
+    );
+    assert_eq!(warm.stdout, expected);
+    assert!(
+        String::from_utf8_lossy(&warm.stderr).contains("[run-cache] hit"),
+        "{}",
+        String::from_utf8_lossy(&warm.stderr)
+    );
+}
+
+#[test]
 fn warm_runtime_stop_preserves_source_location() {
     let _guard = lock_run_cache_tests();
     let root = std::env::temp_dir().join(format!("jet_run_stop_location_{}", unique()));

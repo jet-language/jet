@@ -1,0 +1,26 @@
+fn source(value: Int) Int -> {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn add_one(value: Int) Int -> value + 1
+fn source_flag(value: Int) Bool -> {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn retain_flag(value: Bool) Bool -> value
+
+fn run() {
+    sum :: source(1) + 1
+    mapped :: [1, 2].map((value: Int) -> add_one(source(value))) ?? []
+    filtered :: [1, 2].filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+    print(sum)
+    print(mapped[0])
+    print(mapped[1])
+    print(filtered.len())
+}

@@ -80,6 +80,11 @@ pub(crate) struct LowerEnv {
     /// independent; this fact only controls runtime observation.
     pub(super) sentries_enabled: bool,
     pub(super) sentries_fenced: bool,
+    /// D-HARDENED1 / D-MEM-SENTRY1: shared lowering fact that this function or
+    /// deferred body mints an address from current-frame storage. Child branch
+    /// environments share it so the enclosing function receives one lifetime
+    /// hook for every path.
+    pub(super) stack_sentry_needed: Rc<Cell<bool>>,
 }
 
 impl LowerEnv {
@@ -105,6 +110,7 @@ impl LowerEnv {
             txn_undo_needed: None,
             sentries_enabled: true,
             sentries_fenced: false,
+            stack_sentry_needed: Rc::new(Cell::new(false)),
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).
@@ -169,6 +175,12 @@ impl LowerEnv {
     }
     pub(super) fn is_send_fn(&self, name: &str) -> bool {
         self.send_fn_locals.contains(name)
+    }
+    pub(super) fn note_stack_address(&self) {
+        self.stack_sentry_needed.set(true);
+    }
+    pub(super) fn stack_sentry_needed(&self) -> bool {
+        self.stack_sentry_needed.get()
     }
     pub(super) fn binder_ref(&self, name: &str) -> Option<&(String, Type)> {
         self.binder_refs.get(name)

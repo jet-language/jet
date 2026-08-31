@@ -68,13 +68,13 @@ use CmdCompile::{
     project_environment_requirement, require_project_environment, resolve_named_profile,
     run_build_query, run_compiler_api, run_debug_native, run_dev_entry, run_dev_web,
     run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_native_execution, run_new,
-    run_test_opts, run_test_package, run_web_app_dev_entry, validate_target,
-    FuzzRunOpts, NativeExecutionRequest, TestRunOpts,
+    run_test_opts, run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts,
+    NativeExecutionRequest, TestRunOpts,
 };
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
-    run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y,
-    run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
+    run_eval_expression, run_explain, run_explain_cost, run_explain_marker, run_explain_web_graph,
+    run_lint_a11y, run_lint_complexity, run_lint_cost, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDoc::run_doc;
 use CmdDossier::{run_dossier, run_module_explain};
@@ -112,6 +112,21 @@ pub(crate) struct OutputMode {
     /// suppresses errors (stderr) or requested data (a command's actual
     /// result, `--json` output).
     pub(crate) quiet: bool,
+}
+
+#[derive(Clone)]
+struct ResolvedEntry {
+    path: PathBuf,
+    callable: Option<String>,
+}
+
+impl ResolvedEntry {
+    fn file(path: PathBuf) -> Self {
+        Self {
+            path,
+            callable: None,
+        }
+    }
 }
 
 impl OutputMode {
@@ -789,6 +804,21 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
     None
 }
 
+fn normalize_compiler_alias(raw: &mut Vec<String>, argv0: &str) {
+    let Some(name) = Path::new(argv0).file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    let Some(verb) = (match name {
+        "jet-cc" => Some("cc"),
+        "jet-cxx" | "jet-c++" => Some("c++"),
+        _ => None,
+    }) else {
+        return;
+    };
+    raw.insert(0, verb.to_string());
+}
+
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     if let Some(retired) = jet::CLI::retired_command(raw) {
         let category = retired.category;
@@ -1301,6 +1331,16 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
 }
 /// Find an external `jet-<cmd>` executable on PATH (D-DX5).
 fn find_external(cmd: &str) -> Option<PathBuf> {
+    // Keep the derived executable name to one safe path component. Otherwise
+    // separators in an unknown command can escape the PATH entry below.
+    if cmd.is_empty()
+        || matches!(cmd, "." | "..")
+        || cmd
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return None;
+    }
     let exe = format!("{}-{}", jet::Syntax::BINARY_NAME, cmd);
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -1449,10 +1489,20 @@ fn main() {
     // ICE report instead of raw Rust panic text.
     jet::Diagnostics::install_ice_panic_hook();
 
+    // Windows cannot replace an executable while it is mapped. The updater
+    // launches a separate helper image, then exits before normal boot so the
+    // helper can complete the verified handoff.
+    if jetpack::ToolchainUpdate::windows_update_helper_requested() {
+        exit(jetpack::ToolchainUpdate::run_windows_update_helper());
+    }
+
     // Process-wide: any derive/comptime path may hit TirBridge before Loader.
     jet::boot_tir_eval();
 
-    let mut raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut args = std::env::args();
+    let argv0 = args.next().unwrap_or_default();
+    let mut raw: Vec<String> = args.collect();
+    normalize_compiler_alias(&mut raw, &argv0);
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
@@ -1465,17 +1515,23 @@ fn main() {
 
     normalize_frequency_ring_argv(&mut raw);
 
+    // D-ADOPT-CCSPELL1=A: compiler aliases preserve the raw driver argv and
+    // re-enter the canonical Jet subcommand. Keep this ahead of Jet's global
+    // `--version` and flag parser so compiler options remain compiler-owned.
+    if matches!(raw.first().map(String::as_str), Some("cc") | Some("c++")) {
+        exit(EngineDispatch::dispatch(
+            jet::Syntax::JETPACK_BINARY_NAME,
+            raw[0].as_str(),
+            &raw,
+        ));
+    }
+
     // D-PERFSESSION1=D: `jet perf` owns trace sessions for the run and test
     // intents and spawns the exact base-intent driver that writes .jettrace.
     if raw.first().map(String::as_str) == Some("perf") {
         match CmdPerf::run(&raw) {
             CmdPerf::Outcome::Exit(code) => exit(code),
         }
-    }
-
-    if raw.iter().any(|a| a == "--version") {
-        run_version();
-        return;
     }
 
     // D-CLI1 (c11): split at the first standalone `--` separator.
@@ -1488,6 +1544,10 @@ fn main() {
         Some(pos) => &raw[..pos],
         None => &raw,
     };
+    if jet_argv.iter().any(|a| a == "--version") {
+        run_version();
+        return;
+    }
     // `passthrough`: tokens after `--`, forwarded verbatim to the program.
     // When no `--` was given this is empty; the caller site decides whether to
     // fall back to the positional words instead.
@@ -1524,6 +1584,7 @@ fn main() {
     // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in, never blocking.
     let a11y = jet_argv.iter().any(|a| a == "--a11y");
     let complexity = jet_argv.iter().any(|a| a == "--complexity");
+    let cost = jet_argv.iter().any(|a| a == "--cost");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
     // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target` accepts either
@@ -1762,9 +1823,10 @@ fn main() {
         exit(ExitCodes::USAGE);
     }
     if let Some(output) = output_name.as_deref() {
-        let output_allowed = cmd == "run" || (cmd == "dev" && canvas_requested);
+        let output_allowed =
+            cmd == "run" || (cmd == "dev" && canvas_requested) || (cmd == "build" && library_flag);
         if !output_allowed || output.is_empty() {
-            crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address with `jet run`", format!("write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT));
+            crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address or `jet build --lib`", format!("write `jet run --output <address> <file.{}>`, or `jet build --lib --output <name> <file.{}>`", jet::Syntax::FILE_EXT, jet::Syntax::FILE_EXT));
             exit(ExitCodes::USAGE);
         }
     }
@@ -1807,12 +1869,13 @@ fn main() {
             } else {
                 args.iter().skip(1).copied().collect()
             };
-            let effective = effective_target("run", &resolved, cross_target.as_deref());
+            let resolved_path = resolved.path.to_string_lossy().into_owned();
+            let effective = effective_target("run", &resolved_path, cross_target.as_deref());
             reject_native_web_run("run", effective.as_deref(), mode);
             let effective = native_run_target("run", effective);
             run_native_execution(NativeExecutionRequest {
                 command: "run",
-                file: &resolved,
+                file: &resolved_path,
                 emit_rust,
                 emit_generated,
                 library: library_flag,
@@ -1834,6 +1897,8 @@ fn main() {
                 mode,
                 record: record_name.as_deref(),
                 interpret,
+                entry_fn: resolved.callable.as_deref(),
+                check_project_scope: false,
                 package_scope: true,
                 build_override: true,
             });
@@ -2053,7 +2118,7 @@ fn main() {
             let member_flag = flag_value(&raw, "-p");
             let entry = resolve_bare_entry("jobs", &cwd, member_flag)
                 .unwrap_or_else(|| missing_bare_entry("run", &cwd));
-            run_jobs(&entry.to_string_lossy(), mode);
+            run_jobs(&entry.path.to_string_lossy(), mode);
             return;
         }
         "doctor" => {
@@ -2088,6 +2153,15 @@ fn main() {
         "explain" => {
             if jet_argv.iter().any(|a| a == "--web-graph") {
                 run_explain_web_graph(&jet_argv[1..], mode);
+                return;
+            }
+            if cost {
+                run_explain_cost(
+                    args.get(1).map(|value| value.as_str()),
+                    mode,
+                    named_profile.as_deref().unwrap_or("dev"),
+                    &setting_overrides,
+                );
                 return;
             }
             if let (Some(subject), Some(file)) = (args.get(1), args.get(2)) {
@@ -2197,7 +2271,7 @@ fn main() {
         // `package.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str()), &raw, mode),
         "split" => run_split(&args, &raw, mode),
-        "fold" => run_fold(&args, &raw, mode),
+        "Fold" => run_fold(&args, &raw, mode),
         // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
         // still teaches `jet clean`.
         "gc" => match args.get(1).map(|word| word.as_str()) {
@@ -2231,7 +2305,8 @@ fn main() {
             let force = raw.iter().any(|a| a == "--force");
             // c146 (D-PKGSIGN1): sign by default; --no-sign opts out.
             let no_sign = raw.iter().any(|a| a == "--no-sign");
-            run_publish(force, no_sign, mode);
+            let foreign_registry = flag_value(&raw, "--to");
+            run_publish(force, no_sign, foreign_registry, mode);
             return;
         }
         "keygen" => {
@@ -2609,7 +2684,7 @@ fn main() {
             // --restart / --swap / --watch=off.
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
             let bare_member = flag_value(&raw, "-p");
-            let file: String = match args.get(1) {
+            let resolved = match args.get(1) {
                 Some(f) => resolve_command_target(
                     "dev",
                     f,
@@ -2634,14 +2709,15 @@ fn main() {
                             exit(ExitCodes::USAGE);
                         }
                     };
-                    let entry = if !jet_argv.iter().any(|arg| arg == "--show-default") {
-                        package_command_override_for_entry("dev", &entry, mode).unwrap_or(entry)
-                    } else {
-                        entry
-                    };
-                    entry.to_string_lossy().into_owned()
+                    apply_package_command_override(
+                        "dev",
+                        entry,
+                        mode,
+                        !jet_argv.iter().any(|arg| arg == "--show-default"),
+                    )
                 }
             };
+            let file = resolved.path.to_string_lossy().into_owned();
             // E2-M15: `jet dev` has the same target validation contract as
             // build/run, even when its execution tier is the native watcher.
             // A target flag must never disappear merely because dev selects a
@@ -2700,6 +2776,7 @@ fn main() {
                     }
                     run_dev(
                         &file,
+                        resolved.callable.as_deref(),
                         try_anyway,
                         policy,
                         gates,
@@ -2745,6 +2822,7 @@ fn main() {
             }
             run_dev(
                 &file,
+                resolved.callable.as_deref(),
                 try_anyway,
                 policy,
                 gates,
@@ -2776,12 +2854,15 @@ fn main() {
             // entry the same way run/build/check/dev do; outside a package
             // the usage error is unchanged.
             let file: String = match args.get(1) {
-                Some(f) => resolve_command_target("debug", f, flag_value(&raw, "-p"), mode, false),
+                Some(f) => resolve_command_target("debug", f, flag_value(&raw, "-p"), mode, false)
+                    .path
+                    .to_string_lossy()
+                    .into_owned(),
                 None => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     let member_flag = flag_value(&raw, "-p");
                     match resolve_bare_entry("debug", &cwd, member_flag) {
-                        Some(entry) => entry.to_string_lossy().into_owned(),
+                        Some(entry) => entry.path.to_string_lossy().into_owned(),
                         None => {
                             crate::cli_error!(
                                 "E2104",
@@ -2870,14 +2951,17 @@ fn main() {
         Some(f) if cmd == "build" && checked_explicit_file(Path::new(f.as_str())).is_none() => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             match resolve_named_build_member(&cwd, f) {
-                Ok(entry) => entry.map(|entry| entry.to_string_lossy().into_owned()),
+                Ok(entry) => entry,
                 Err(error) => report_build_resolution_error(error),
             }
         }
         _ => None,
     };
+    let named_build_path = named_build_entry
+        .as_ref()
+        .map(|entry| entry.path.to_string_lossy().into_owned());
     let target = match args.get(1) {
-        Some(f) if cmd == "build" => named_build_entry.as_deref().unwrap_or(f.as_str()),
+        Some(f) if cmd == "build" => named_build_path.as_deref().unwrap_or(f.as_str()),
         Some(f) => f.as_str(),
         None => {
             // No target: try project-root mode for run/build/test/check/dev/doc.
@@ -2885,14 +2969,13 @@ fn main() {
                 "run" | "build" | "test" | "check" | "dev" | "doc" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     if let Some(entry) = resolve_bare_entry(cmd, &cwd, bare_member_flag) {
-                        let entry = if matches!(cmd, "run" | "dev")
-                            && !jet_argv.iter().any(|arg| arg == "--show-default")
-                        {
-                            package_command_override_for_entry(cmd, &entry, mode).unwrap_or(entry)
-                        } else {
-                            entry
-                        };
-                        let entry_str = entry.to_string_lossy().to_string();
+                        let entry = apply_package_command_override(
+                            cmd,
+                            entry,
+                            mode,
+                            !jet_argv.iter().any(|arg| arg == "--show-default"),
+                        );
+                        let entry_str = entry.path.to_string_lossy().to_string();
                         match cmd {
                             "doc" => {
                                 run_doc(
@@ -2909,6 +2992,7 @@ fn main() {
                                 // same project shape as the package test resolver
                                 // below, with member selection unchanged.
                                 let entry_dir = entry
+                                    .path
                                     .parent()
                                     .filter(|path| !path.as_os_str().is_empty())
                                     .unwrap_or_else(|| Path::new("."));
@@ -2947,6 +3031,7 @@ fn main() {
                                 });
                                 run_dev(
                                     &entry_str,
+                                    entry.callable.as_deref(),
                                     try_anyway,
                                     policy,
                                     gates,
@@ -2977,6 +3062,7 @@ fn main() {
                                     let use_interpreter = raw.iter().any(|a| a == "--interpret");
                                     run_dev(
                                         &entry_str,
+                                        entry.callable.as_deref(),
                                         try_anyway,
                                         WatchPolicy::Restart,
                                         gates,
@@ -3019,6 +3105,8 @@ fn main() {
                                     mode,
                                     record: record_name.as_deref(),
                                     interpret,
+                                    entry_fn: entry.callable.as_deref(),
+                                    check_project_scope: cmd == "check",
                                     package_scope: cmd != "build"
                                         || !jet_argv.iter().any(|arg| arg == "--show-default"),
                                     build_override: cmd != "build"
@@ -3197,26 +3285,25 @@ fn main() {
             );
         }
         "doc" => {
-            run_doc(
-                target,
-                mode,
-                jet_argv.iter().any(|arg| arg == "--check"),
-            );
+            run_doc(target, mode, jet_argv.iter().any(|arg| arg == "--check"));
         }
-        // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in accessibility
-        // lints (E2930/E2931), never blocking `jet build`/`jet run`.
+        // Expert-only lint categories. Ordinary build/check never run these
+        // opt-in policy views.
         "lint" => {
-            if a11y == complexity {
+            let categories = usize::from(a11y) + usize::from(complexity) + usize::from(cost);
+            if categories != 1 {
                 emit_cli_report(
                     "E2102",
                     format!(
-                        "usage: {} lint --a11y|--complexity <file.{}>",
+                        "usage: {} lint --a11y|--complexity|--cost <file.{}>",
                         jet::Syntax::BINARY_NAME,
                         jet::Syntax::FILE_EXT
                     ),
                     "`lint` needs exactly one category flag".to_string(),
                     format!(
-                        "run `{} lint --a11y <file.{}>` or `{} lint --complexity <file.{}>`",
+                        "run `{} lint --a11y <file.{}>`, `{} lint --complexity <file.{}>`, or `{} lint --cost <file.{}>`",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT,
                         jet::Syntax::BINARY_NAME,
                         jet::Syntax::FILE_EXT,
                         jet::Syntax::BINARY_NAME,
@@ -3241,6 +3328,8 @@ fn main() {
                     }
                 });
                 run_lint_complexity(&resolved, mode, max_budget);
+            } else if cost {
+                run_lint_cost(&resolved, mode);
             } else {
                 run_lint_a11y(&resolved, mode);
             }
@@ -3260,7 +3349,17 @@ fn main() {
             };
             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
             // for the path-accepting compile commands.
-            let resolved = if matches!(cmd, "run" | "build" | "check") {
+            let resolved = if cmd == "build" {
+                named_build_entry.unwrap_or_else(|| {
+                    resolve_command_target(
+                        cmd,
+                        target,
+                        bare_member_flag,
+                        mode,
+                        !jet_argv.iter().any(|arg| arg == "--show-default"),
+                    )
+                })
+            } else if matches!(cmd, "run" | "check") {
                 resolve_command_target(
                     cmd,
                     target,
@@ -3269,8 +3368,9 @@ fn main() {
                     !jet_argv.iter().any(|arg| arg == "--show-default"),
                 )
             } else {
-                target.to_string()
+                ResolvedEntry::file(PathBuf::from(target))
             };
+            let resolved_path = resolved.path.to_string_lossy().into_owned();
             if cmd == "run" {
                 // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
                 // aware engine; `jet dev` keeps the richer swap/overlay surface.
@@ -3278,7 +3378,8 @@ fn main() {
                     let try_anyway = raw.iter().any(|a| a == "--try-anyway");
                     let use_interpreter = raw.iter().any(|a| a == "--interpret");
                     run_dev(
-                        &resolved,
+                        &resolved_path,
+                        resolved.callable.as_deref(),
                         try_anyway,
                         WatchPolicy::Restart,
                         gates,
@@ -3297,12 +3398,12 @@ fn main() {
             if jet_argv.iter().any(|arg| arg == "--show-default") {
                 println!("jet {cmd}: using stock default");
             }
-            let effective = effective_target(cmd, &resolved, cross_target.as_deref());
+            let effective = effective_target(cmd, &resolved_path, cross_target.as_deref());
             reject_native_web_run(cmd, effective.as_deref(), mode);
             let effective = native_run_target(cmd, effective);
             run_native_execution(NativeExecutionRequest {
                 command: cmd,
-                file: &resolved,
+                file: &resolved_path,
                 emit_rust,
                 emit_generated,
                 library: library_flag,
@@ -3324,10 +3425,13 @@ fn main() {
                 mode,
                 record: record_name.as_deref(),
                 interpret,
+                entry_fn: resolved.callable.as_deref(),
+                check_project_scope: cmd == "check" && Path::new(target).is_dir(),
                 package_scope: cmd != "build"
                     || (Path::new(target).is_dir()
                         && !jet_argv.iter().any(|arg| arg == "--show-default")),
-                build_override: cmd != "build" || !jet_argv.iter().any(|arg| arg == "--show-default"),
+                build_override: cmd != "build"
+                    || !jet_argv.iter().any(|arg| arg == "--show-default"),
             });
         }
     }
@@ -3542,6 +3646,25 @@ fn package_command_override_for_entry(
     resolve_package_command_override(&root, command, mode)
 }
 
+fn apply_package_command_override(
+    command: &str,
+    entry: ResolvedEntry,
+    mode: OutputMode,
+    use_override: bool,
+) -> ResolvedEntry {
+    if use_override && matches!(command, "run" | "dev") {
+        let Some(path) = package_command_override_for_entry(command, &entry.path, mode) else {
+            return entry;
+        };
+        if path == entry.path {
+            return entry;
+        }
+        ResolvedEntry::file(path)
+    } else {
+        entry
+    }
+}
+
 /// Resolve a command target through the shared bare-entry rule when it names a
 /// project directory. Explicit files keep the ordinary path resolver, so a
 /// directory target and a bare command have one workspace/member decision.
@@ -3551,20 +3674,15 @@ fn resolve_command_target(
     member_flag: Option<&str>,
     mode: OutputMode,
     use_override: bool,
-) -> String {
+) -> ResolvedEntry {
     if Path::new(raw).is_dir() {
         if let Some(entry) = resolve_bare_entry(cmd, Path::new(raw), member_flag) {
-            if let Some(checked) = checked_explicit_file(&entry) {
-                let selected = if use_override && matches!(cmd, "run" | "dev") {
-                    package_command_override_for_entry(cmd, &checked, mode).unwrap_or(checked)
-                } else {
-                    checked
-                };
-                return selected.to_string_lossy().into_owned();
+            if checked_explicit_file(&entry.path).is_some() {
+                return apply_package_command_override(cmd, entry, mode, use_override);
             }
         }
     }
-    resolve_source_path(raw)
+    ResolvedEntry::file(PathBuf::from(resolve_source_path(raw)))
 }
 
 pub(crate) fn resolve_source_path(raw: &str) -> String {
@@ -3664,6 +3782,10 @@ fn checked_explicit_file(path: &Path) -> Option<PathBuf> {
 /// followed by `src/run.jet` and `<package>.jet`; command homes are selected by
 /// the command resolver before this stock fallback is used.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
+    find_project_entry_with_callable(root).path
+}
+
+fn find_project_entry_with_callable(root: &Path) -> ResolvedEntry {
     let resolver = match jet::Authority::AuthorityResolver::open(root) {
         Ok(resolver) => resolver,
         Err(error) => report_entry_authority_error(error),
@@ -3675,7 +3797,12 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     };
     if let Some(package) = &package {
         match package.facts.resolve_run_entry_checked(&resolver) {
-            Ok(Some(entry)) => return entry.path,
+            Ok(Some(entry)) => {
+                return ResolvedEntry {
+                    path: entry.file.path,
+                    callable: Some(entry.callable),
+                }
+            }
             Ok(None) => {}
             Err(error) => {
                 crate::cli_error!(@fix "E2105", error, "repair the typed Package output or point at a `.jet` file directly");
@@ -3694,13 +3821,13 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     if let Some(entry) =
         checked_project_entry(&resolver, Path::new(jet::Syntax::DEFAULT_ENTRY_FILE))
     {
-        return entry;
+        return ResolvedEntry::file(entry);
     }
     if let Some(entry) = checked_project_entry(
         &resolver,
         &Path::new("src").join(jet::Syntax::DEFAULT_ENTRY_FILE),
     ) {
-        return entry;
+        return ResolvedEntry::file(entry);
     }
     if let Some(manifest) = package.as_ref().map(|package| &package.facts) {
         let named = resolver
@@ -3708,11 +3835,11 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
             .join(format!("{}.{}", manifest.name, jet::Syntax::FILE_EXT));
         if let Ok(relative) = named.strip_prefix(resolver.root()) {
             if let Some(entry) = checked_project_entry(&resolver, relative) {
-                return entry;
+                return ResolvedEntry::file(entry);
             }
         }
     }
-    resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE)
+    ResolvedEntry::file(resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE))
 }
 
 fn checked_project_entry(
@@ -3752,7 +3879,7 @@ fn report_build_resolution_error(error: String) -> ! {
 /// Resolve positional `jet build <member>` against only declared depth-one
 /// workspace members. This chooses the member; the normal PackageFacts/Driver
 /// path still chooses and executes its one build entry.
-fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<PathBuf>, String> {
+fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<ResolvedEntry>, String> {
     let Ok(resolver) = jet::Authority::AuthorityResolver::open(cwd) else {
         return Ok(None);
     };
@@ -3771,21 +3898,24 @@ fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<PathBuf
     resolve_member_build_entry(&cwd.join(&member.path))
 }
 
-fn resolve_member_build_entry(root: &Path) -> Result<Option<PathBuf>, String> {
+fn resolve_member_build_entry(root: &Path) -> Result<Option<ResolvedEntry>, String> {
     let member_resolver =
         jet::Authority::AuthorityResolver::open(&root).map_err(|error| error.to_string())?;
     let checked = member_resolver
         .checked_manifest(Path::new("."))
         .map_err(|error| error.to_string())?;
     if let Ok(Some(entry)) = checked.facts.resolve_run_entry_checked(&member_resolver) {
-        return Ok(Some(entry.path));
+        return Ok(Some(ResolvedEntry {
+            path: entry.file.path,
+            callable: Some(entry.callable),
+        }));
     }
     if let Some(entry) = checked
         .facts
         .resolve_build_entry_checked(&member_resolver)
         .map_err(|error| error.to_string())?
     {
-        return Ok(Some(entry.path));
+        return Ok(Some(ResolvedEntry::file(entry.path)));
     }
     Ok(None)
 }
@@ -3812,7 +3942,7 @@ fn resolve_member_build_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// `find_project_entry` single-package convention (unchanged from before
 /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
 /// caller keeps today's "no file given" usage error verbatim.
-fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
+fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<ResolvedEntry> {
     let workspace_resolver = match jet::Authority::AuthorityResolver::open(cwd) {
         Ok(resolver) => Some(resolver),
         Err(error) if error.is_missing() => None,
@@ -3868,7 +3998,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     if cmd == "build" && member_flag.is_none() {
         if let Some(Ok(Some(source))) = workspace_source.as_ref() {
             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
-                return Some(source.path.clone());
+                return Some(ResolvedEntry::file(source.path.clone()));
             }
         }
     }
@@ -3911,7 +4041,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 if cmd == "build" && member_flag.is_none() {
                     if let Some(Ok(Some(source))) = workspace_source.as_ref() {
                         if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
-                            return Some(source.path.clone());
+                            return Some(ResolvedEntry::file(source.path.clone()));
                         }
                     }
                 }
@@ -3922,7 +4052,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 exit(ExitCodes::USER_ERROR);
             }
         };
-        let runnable: Vec<(String, PathBuf)> = plan
+        let runnable: Vec<(String, ResolvedEntry)> = plan
             .members
             .iter()
             .filter_map(|m| {
@@ -3932,8 +4062,8 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                         Err(error) => report_build_resolution_error(error),
                     }
                 } else {
-                    let entry = find_project_entry(&cwd.join(&m.path));
-                    checked_explicit_file(&entry)
+                    let entry = find_project_entry_with_callable(&cwd.join(&m.path));
+                    checked_explicit_file(&entry.path).map(|_| entry)
                 }?;
                 Some((m.name.clone(), entry))
             })
@@ -3967,7 +4097,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
         }
     }
     match jet::Loader::find_manifest_root_checked(cwd) {
-        Ok(Some(root)) => Some(find_project_entry(&root)),
+        Ok(Some(root)) => Some(find_project_entry_with_callable(&root)),
         Ok(None) => None,
         Err(diagnostic) => report_entry_diagnostic(diagnostic),
     }
@@ -3997,8 +4127,10 @@ fn run_version() {
 }
 
 /// Self update verifies the signed channel manifest and selected platform
-/// artifact. The endpoint is host-owned so local staging and HTTPS use one
-/// verifier.
+/// artifact. An explicit `--allow-unofficial` selects only a local keyless
+/// fixture; the endpoint is host-owned so local staging and HTTPS use one
+/// verifier. Apply is exact-host only; cross-platform selection is dry-run
+/// verification.
 fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
     let roots = jetpack::Store::resolve();
     let endpoint = self_update_option(raw, "--endpoint")
@@ -4024,11 +4156,18 @@ fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
         .unwrap_or_else(|| jetpack::ToolchainUpdate::DEFAULT_CHANNEL.to_string());
     let platform = self_update_option(raw, "--platform")
         .unwrap_or_else(jetpack::ToolchainUpdate::default_target);
+    let state_key =
+        jet::SHA256::sha256_hex(format!("toolchain-update-v1\n{channel}\n{platform}").as_bytes());
+    let state_path = roots
+        .root
+        .join("config/toolchain-v1")
+        .join(format!("{state_key}.state"));
     let trust_key = self_update_option(raw, "--trust-key")
         .map(PathBuf::from)
         .unwrap_or_else(|| roots.root.join("trust/toolchain-v1.ed25519.pub"));
     let dry_run = raw.iter().any(|arg| arg == "--dry-run");
     let apply = raw.iter().any(|arg| arg == "--apply");
+    let allow_unofficial = raw.iter().any(|arg| arg == "--allow-unofficial");
     let options = jetpack::ToolchainUpdate::UpdateOptions {
         endpoint,
         channel,
@@ -4036,6 +4175,9 @@ fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
         trust_key,
         dry_run,
         apply,
+        allow_unofficial,
+        running_version: jet::Manifest::COMPILER_VERSION.to_string(),
+        state_path,
     };
     let current_exe = apply.then(|| std::env::current_exe().ok()).flatten();
     match jetpack::ToolchainUpdate::run(&options, current_exe.as_deref()) {
@@ -4048,32 +4190,73 @@ fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
                         true,
                         "self-update",
                         &format!(
-                            ",\"channel\":{},\"version\":{},\"platform\":{},\"artifact\":{},\"sha256\":{},\"size\":{},\"key_id\":{},\"applied\":{}",
+                            ",\"channel\":{},\"version\":{},\"platform\":{},\"artifact\":{},\"sha256\":{},\"size\":{},\"key_id\":{},\"trust\":{},\"sequence\":{},\"published_at\":{},\"expires_at\":{},\"min_version\":{},\"applied\":{},\"deferred\":{}",
                             jet_foundation::JSON::quote(&result.plan.channel),
                             jet_foundation::JSON::quote(&result.plan.version),
                             jet_foundation::JSON::quote(&result.plan.platform),
                             jet_foundation::JSON::quote(&result.plan.artifact_url),
                             jet_foundation::JSON::quote(&result.plan.sha256),
                             result.plan.size,
-                            jet_foundation::JSON::quote(&result.plan.key_id),
-                            result.applied
+                            result
+                                .plan
+                                .key_id
+                                .as_deref()
+                                .map(jet_foundation::JSON::quote)
+                                .unwrap_or_else(|| "null".to_string()),
+                            jet_foundation::JSON::quote(match result.plan.trust {
+                                jetpack::ToolchainUpdate::UpdateTrust::Signed => "signed",
+                                jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+                                    "unofficial-keyless"
+                                }
+                            }),
+                            result.plan.sequence,
+                            result.plan.published_at,
+                            result.plan.expires_at,
+                            jet_foundation::JSON::quote(&result.plan.min_version),
+                            result.applied,
+                            result.deferred
                         ),
                     )
                 );
-            } else if result.applied {
+            } else if result.deferred {
                 println!(
-                    "updated {} to {} ({})",
-                    jet::Syntax::BINARY_NAME,
-                    result.plan.version,
-                    result.plan.platform
-                );
-            } else {
-                println!(
-                    "verified {} {} for {} from {}",
+                    "staged {} {} for {}; Windows will restart it after this process exits{}",
                     jet::Syntax::BINARY_NAME,
                     result.plan.version,
                     result.plan.platform,
-                    result.plan.artifact_url
+                    match result.plan.trust {
+                        jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+                        jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+                            " [unofficial keyless source]"
+                        }
+                    }
+                );
+            } else if result.applied {
+                println!(
+                    "updated {} to {} ({}){}",
+                    jet::Syntax::BINARY_NAME,
+                    result.plan.version,
+                    result.plan.platform,
+                    match result.plan.trust {
+                        jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+                        jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+                            " [unofficial keyless source]"
+                        }
+                    }
+                );
+            } else {
+                println!(
+                    "verified {} {} for {} from {}{}",
+                    jet::Syntax::BINARY_NAME,
+                    result.plan.version,
+                    result.plan.platform,
+                    result.plan.artifact_url,
+                    match result.plan.trust {
+                        jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+                        jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+                            " [unofficial keyless source]"
+                        }
+                    }
                 );
             }
             exit(ExitCodes::OK);
@@ -4082,9 +4265,9 @@ fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
             emit_cli_report(
                 "E2105",
                 format!("could not update {}: {error}", jet::Syntax::BINARY_NAME),
-                "self-update accepts only a signed channel manifest and a matching signed artifact"
+                "self-update accepts a signed channel manifest and matching signed artifact; local keyless sources are a separate explicit tier"
                     .to_string(),
-                "check the endpoint, public trust key, channel, and platform; use --dry-run to verify without installing"
+                "check the endpoint, public trust key, channel, and platform; use --dry-run to verify without installing, or --allow-unofficial only with a local file:// source"
                     .to_string(),
                 mode.json,
             );
@@ -4403,7 +4586,13 @@ fn report_transition_error(error: &jetpack::Transition::TransitionError) -> ! {
             "fix the named package or role file, then rerun the transition with `--check` first.",
         )
     };
-    emit_cli_report(code, message.to_string(), why.to_string(), fix.to_string(), false);
+    emit_cli_report(
+        code,
+        message.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        false,
+    );
     exit(ExitCodes::USER_ERROR);
 }
 

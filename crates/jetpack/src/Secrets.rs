@@ -76,11 +76,104 @@ pub fn write_runtime_plan(project_dir: &Path, specs: &[SecretSpec]) -> Result<()
         lines.push('\n');
     }
     let path = runtime_plan_path(project_dir);
+    if let Ok(existing) = std::fs::read(&path) {
+        if existing == lines.as_bytes() {
+            return Ok(());
+        }
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("couldn't create `{}`: {error}", parent.display()))?;
     }
     atomic_write(&path, lines.as_bytes())
+}
+
+/// Return a secret-free identity for validation inputs.
+///
+/// The identity binds the declaration shape, active environment, encrypted
+/// ciphertext, recipient file, and local decrypt identity. It never decrypts
+/// or includes secret values, so activation can reuse a successful validation
+/// without spawning the crypto helper when none of those inputs changed.
+pub fn validation_identity(
+    project_dir: &Path,
+    specs: &[SecretSpec],
+    active_environment: Option<&str>,
+) -> Result<Option<String>, String> {
+    let mut canonical = b"jetpack-secret-validation-v1\0".to_vec();
+    append_identity_field(&mut canonical, active_environment.unwrap_or("dynamic"));
+    let mut fingerprints = specs
+        .iter()
+        .map(|spec| {
+            let template = match &spec.declaration {
+                SecretDeclaration::Compose { template, .. } => {
+                    crate::SHA256::sha256_hex(template.as_bytes())
+                }
+                SecretDeclaration::Stored => String::new(),
+            };
+            format!("{}|{template}", spec.trust_fingerprint())
+        })
+        .collect::<Vec<_>>();
+    fingerprints.sort();
+    fingerprints.dedup();
+    for fingerprint in fingerprints {
+        append_identity_field(&mut canonical, &fingerprint);
+    }
+
+    let store = store_path(project_dir);
+    let store_metadata = match std::fs::symlink_metadata(&store) {
+        Ok(metadata) if metadata.file_type().is_file() => metadata,
+        Ok(_) => {
+            return Err(format!(
+                "secrets store `{}` is not a regular file",
+                store.display()
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            append_identity_field(&mut canonical, "store-absent");
+            return Ok(Some(crate::SHA256::sha256_hex(&canonical)));
+        }
+        Err(error) => return Err(format!("couldn't inspect `{}`: {error}", store.display())),
+    };
+    let ciphertext =
+        std::fs::read(&store).map_err(|error| format!("couldn't read `{}`: {error}", store.display()))?;
+    append_identity_field(&mut canonical, "store-present");
+    append_identity_field(&mut canonical, &store_metadata.len().to_string());
+    append_identity_field(&mut canonical, &crate::SHA256::sha256_hex(&ciphertext));
+
+    let identity = identity_path();
+    let identity_bytes = match std::fs::read(&identity) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "couldn't read secrets identity `{}`: {error}",
+                identity.display()
+            ))
+        }
+    };
+    append_identity_field(
+        &mut canonical,
+        &crate::SHA256::sha256_hex(&identity_bytes),
+    );
+    let recipients = recipients_path(project_dir);
+    match std::fs::read(&recipients) {
+        Ok(bytes) => append_identity_field(&mut canonical, &crate::SHA256::sha256_hex(&bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            append_identity_field(&mut canonical, "recipients-absent")
+        }
+        Err(error) => {
+            return Err(format!(
+                "couldn't read `{}`: {error}",
+                recipients.display()
+            ))
+        }
+    }
+    Ok(Some(crate::SHA256::sha256_hex(&canonical)))
+}
+
+fn append_identity_field(canonical: &mut Vec<u8>, field: &str) {
+    canonical.extend_from_slice(&(field.len() as u64).to_le_bytes());
+    canonical.extend_from_slice(field.as_bytes());
 }
 
 fn has_plan_control_character(value: &str) -> bool {

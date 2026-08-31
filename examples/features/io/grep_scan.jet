@@ -6,13 +6,13 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("grep-scan")
     src :: Path.from(root).join("src")
-    fs.create_dir_all(src) ?? return Err("mkdir failed")
-    fs.write(Path.from(root).join("notes.txt"), "needle in notes\n") ?? return Err("write failed")
-    fs.write(src.join("alpha.txt"), "needle in alpha\n") ?? return Err("write failed")
-    fs.write(src.join("beta.txt"), "no match\n") ?? return Err("write failed")
+    fs.create_dir_all(src)
+    fs.write(Path.from(root).join("notes.txt"), "needle in notes\n")
+    fs.write(src.join("alpha.txt"), "needle in alpha\n")
+    fs.write(src.join("beta.txt"), "no match\n")
 
-    parallel :: fs.walk_parallel(root) ?? return Err("parallel walk failed")
-    sequential :: fs.walk(root) ?? return Err("sequential walk failed")
+    parallel :: fs.walk_parallel(root)
+    sequential :: fs.walk(root)
     parallel_set := [String]{}
     sequential_set := [String]{}
     loop entry in parallel -> parallel_set.push("{entry.relative}:{entry.is_dir}")
@@ -23,7 +23,7 @@ fn run() {
     matches := [String]{}
     loop entry in parallel {
         if !entry.is_dir {
-            text :: fs.read(entry.path) ?? return Err("read failed")
+            text :: fs.read(entry.path)
             if re.is_match({"needle"}, text) -> matches.push("{entry.relative}: needle")
         }
     }

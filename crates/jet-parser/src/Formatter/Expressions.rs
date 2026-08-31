@@ -1160,6 +1160,7 @@ impl<'a> Fmt<'a> {
                 self.write(suffix);
             }
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
+            Expr::Unit(_) => self.write("()"),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
             Expr::ListLit(elems, span) => {
                 self.write("[");
@@ -2515,8 +2516,9 @@ impl<'a> Fmt<'a> {
         self.write(">");
     }
 
-    /// D-CONC-SPAWN1=D: restore the one-word task surface from its compiler-
-    /// private method-call form.
+    /// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: restore the one-word task
+    /// surface from its compiler-private method-call form. Named `task.all`
+    /// branches retain their field names; all other combinators stay lists.
     fn fmt_task_surface_method(&mut self, method: &str, args: &[CallArg]) -> bool {
         if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD && args.len() == 1 {
             self.write("task.timeout");
@@ -2578,17 +2580,32 @@ impl<'a> Fmt<'a> {
             Syntax::INTERNAL_TASK_ANY_METHOD => "any",
             _ => return false,
         };
-        let [CallArg {
-            expr: Expr::ListLit(branches, _),
-            ..
-        }] = args
-        else {
-            return false;
+        let branch_count = match args {
+            [CallArg {
+                expr: Expr::ListLit(branches, _),
+                ..
+            }] => branches.len(),
+            [CallArg {
+                expr: Expr::TupleLit(fields, _, _),
+                ..
+            }] => fields.len(),
+            _ => return false,
         };
         self.write(&format!("{}.{} {{", Syntax::KW_CONC_TASK, selector));
-        for (index, branch) in branches.iter().enumerate() {
+        for index in 0..branch_count {
+            let (name, branch) = match &args[0].expr {
+                Expr::ListLit(branches, _) => (None, &branches[index]),
+                Expr::TupleLit(fields, _, _) => {
+                    (Some(fields[index].0.as_str()), &fields[index].1)
+                }
+                _ => unreachable!("task combinator branch carrier"),
+            };
             if index > 0 {
                 self.write(", ");
+            }
+            if let Some(name) = name {
+                self.write(name);
+                self.write(": ");
             }
             if let Expr::MethodCall {
                 receiver,
@@ -2864,6 +2881,18 @@ impl<'a> Fmt<'a> {
                 self.write(
                     crate::Syntax::interpolation_selector_for_kind(
                         crate::Syntax::InterpolationSelectorKind::Fixed,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&precision.to_string());
+                self.write(")");
+            }
+            crate::AST::StrFormat::Grouped(precision) => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Grouped,
                     )
                     .name,
                 );

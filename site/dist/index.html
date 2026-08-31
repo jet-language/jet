@@ -33,12 +33,12 @@
       <div>
         <p class="eyebrow">// pre-release, built in the open</p>
         <h1>Safe at any <span class="hot">speed.</span></h1>
-        <p class="hero-sub">Jet is a <strong>memory-safe compiled language</strong> with one surface for starting fast and another for going deep. Beginners get a language with no ceremony and no footguns. Experts get raw memory, layout control, and every fact the compiler knows. Moving between the two costs one written word.</p>
+        <p class="hero-sub">Jet is a <strong>memory-safe compiled language</strong> with a beginner-first surface and explicit expert controls. The compiler checks source before producing native code. Examples show the language's current supported path without promising production readiness.</p>
         <div class="hero-ctas">
           <a class="btn btn-primary" href="install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a>
           <a class="btn btn-ghost" href="tour.html">Read the tour</a>
         </div>
-        <p class="hero-note">Flip the lens on the right. The same program has two honest readings, and the compiler backs both.</p>
+        <p class="hero-note">The example gives two readings of one program; the source and current checks define what is supported.</p>
       </div>
       <div class="lens" id="hero-lens">
         <div class="lens-bar">
@@ -61,14 +61,14 @@
     <span class="f">print</span>(<span class="s">"listening on {port}"</span>)
 }</code></pre></div>
         <ul class="lens-notes" data-facet="beginner">
-          <li>One file is a complete program. No manifest, no project folder, no setup.</li>
+          <li>The example fits in one file, with no project setup shown.</li>
           <li><code>::</code> binds a value. Strings fill in <code>{name}</code> slots themselves.</li>
-          <li>If <code>load_port</code> fails with no fallback, the program reports the error and exits 1. Failure is never silent.</li>
+          <li>If <code>load_port</code> fails with no fallback, the program reports the error and exits 1.</li>
         </ul>
         <ul class="lens-notes" data-facet="expert" hidden>
           <li>Effects are typed. <code>run()</code> infers <code>-[IO]&gt;</code>; declare a row to cap what a function may touch.</li>
           <li>Failure is part of the signature. <code>!IOError</code> is the entire contract; unchecked exceptions do not exist.</li>
-          <li>Facts move toward safety silently. Every move away is one written word, at the site, on the record.</li>
+          <li>Safety facts are explicit at the sites where expert controls are used.</li>
         </ul>
         <div class="lens-run"><span class="ps">$ jet run hero.jet</span><br><span class="out">Lisbon, party of 3<br>listening on 8080</span></div>
       </div>
@@ -88,8 +88,8 @@
 }</code></pre></div></div>
       </div>
       <div class="pillar">
-        <h3>One way to do each thing</h3>
-        <p>There is exactly one way to perform each operation, so two programs that do the same thing read the same way. Code you did not write still looks like code you did.</p>
+        <h3>A documented form for each operation</h3>
+        <p>The examples use one documented form for each operation, so the syntax stays visible.</p>
         <div class="code"><div class="code-head"><span>examples/features/basics/pattern_matching.jet</span></div><div class="code-body"><pre><code><span class="k">if</span> c == {
     .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> { <span class="k">return</span> <span class="s">"live:{id}"</span> }
     .Idle(_) <span class="g">-&gt;</span> { <span class="k">return</span> <span class="s">"idle"</span> }
@@ -115,7 +115,7 @@
   <section class="wrap section" id="spec">
     <p class="eyebrow">// proof over promises</p>
     <h2>The examples are the spec.</h2>
-    <p class="section-lead">Every feature ships as a runnable example with golden-tested output. The samples on this site are copied from those files or verified by running them on the build that generated this page. When one stops compiling, the compiler's own test suite goes red before this page does.</p>
+    <p class="section-lead">Feature examples are runnable corpus files with golden-tested output. This page names the source files and labels the outputs shown here; the golden harness catches drift in those examples.</p>
     <div class="duo">
       <div class="duo-item">
         <h3>Defaults ride the type</h3>
@@ -129,8 +129,8 @@
 }</code></pre></div><div class="code-out"><span class="ps">$ jet run cube.jet</span><br>4x4x4<br>4x2x2<br>4x2x1</div></div>
       </div>
       <div class="duo-item">
-        <h3>Concurrency that cannot leak</h3>
-        <p>A spawned task owes an answer. Join it, hand it to <code>all</code>, <code>race</code>, or <code>any</code>, or detach it on purpose; forgetting it is a compile error, not a 3 a.m. page.</p>
+        <h3>Explicit task lifetimes</h3>
+        <p>The example shows explicit join, <code>all</code>, <code>race</code>, <code>any</code>, and detach handling for spawned tasks.</p>
         <div class="code"><div class="code-head"><span>examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
 <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
@@ -141,13 +141,13 @@ results <span class="g">::</span> <span class="k">task</span>.all {<span class="
   </section>
 
   <section class="wrap section" id="live">
-    <p class="eyebrow">// alive in your browser</p>
-    <h2>This box is not a video.</h2>
-    <p class="section-lead">It is a Jet program, compiled to WebAssembly by <code>jet build --target web</code>, running in your browser right now. The web backend is early and covers a checked subset; what it does run is the same language, with the same meaning.</p>
+    <p class="eyebrow">// web target example</p>
+    <h2>A web target, still a checked subset.</h2>
+    <p>The site presents a web-widget example for the early <code>jet build --target web</code> target; broader browser/UI parity remains open.</p>
     <div class="live">
       <div class="live-frame">
-        <iframe src="widget/index.html" title="A Jet program running in the browser" loading="lazy"></iframe>
-        <div class="live-tag">widget/counter.jet, compiled to wasm</div>
+        <iframe src="widget/index.html" title="A Jet web-widget example" loading="lazy"></iframe>
+        <div class="live-tag">widget/counter.jet, web-target example</div>
       </div>
       <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.ui <span class="k">as</span> ui
 <span class="k">use</span> core.reactive <span class="k">as</span> reactive
@@ -177,9 +177,9 @@ results <span class="g">::</span> <span class="k">task</span>.all {<span class="
     <h2>The environment is part of the program.</h2>
     <div class="split">
       <div class="prose">
-        <p><strong>jetpack is Jet's environment engine.</strong> A project declares its tools in <code>env.jet</code>; <code>jetpack env</code> realizes them and drops you into a shell where they exist, current and trusted. No global installs, no version drift, no "works on my machine".</p>
-        <p><strong>Try a tool without adopting it.</strong> <code>jetpack use</code> builds an ephemeral shell for exactly the packages you name, runs your command, and leaves nothing behind.</p>
-        <p><strong>The same work never runs twice.</strong> <code>jet build</code> writes a receipt keyed by the exact sources, imports, and toolchain that went in. Ask again with nothing changed and the answer replays instead of rebuilding.</p>
+        <p><strong>jetpack is Jet's environment engine.</strong> Projects declare tools in <code>env.jet</code>; <code>jetpack env</code> realizes the declared environment as a project shell.</p>
+        <p><strong>Try a named tool.</strong> <code>jetpack use</code> can build an ephemeral shell for the packages you name; support remains subject to the current environment backend.</p>
+        <p><strong>Builds record their inputs.</strong> <code>jet build</code> writes a receipt keyed by the sources, imports, and toolchain that went in, so unchanged work can be replayed.</p>
       </div>
       <div class="term"><span class="ps">$</span> <span class="cmd">jetpack env</span> <span class="dim"># enter the project's declared shell</span>
 <span class="ps">$</span> <span class="cmd">jetpack use ripgrep@nixpkgs -- rg --version</span> <span class="dim"># borrow a tool</span>
@@ -191,7 +191,7 @@ results <span class="g">::</span> <span class="k">task</span>.all {<span class="
 
   <section class="wrap section" id="start">
     <p class="eyebrow">// start now</p>
-    <h2>Your first hour is one command long.</h2>
+    <h2>Start with a short command sequence.</h2>
     <div class="start">
       <div class="term"><span class="dim"># install (x86_64 Linux and macOS, via Nix)</span>
 <span class="ps">$</span> <span class="cmd">nix profile install github:jet-language/jet</span>
@@ -202,7 +202,7 @@ results <span class="g">::</span> <span class="k">task</span>.all {<span class="
 <span class="ps">$</span> <span class="cmd">jet run</span>
 <span class="out">hello, world</span></div>
     </div>
-    <p class="fineprint">Jet is pre-release and changes weekly. There is no package registry yet, and some corners are unfinished on purpose. If this site ever disagrees with the compiler, the compiler is right; <code>jet explain</code> knows more than any web page.</p>
+    <p class="fineprint">Jet is pre-release and changes weekly. Package workflows, Windows support, and stability guarantees remain under active development. If this site ever disagrees with the compiler, the compiler is right; <code>jet explain</code> knows more than any web page.</p>
   </section>
 </main>
 

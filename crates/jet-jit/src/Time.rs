@@ -13,6 +13,7 @@ use jet_codegen::AST::CtValue;
 
 pub(crate) mod time_rt {
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
     include!("../../jet-codegen/src/Prelude/Core/TimeInstant.rs");
 }
@@ -112,6 +113,15 @@ fn result_err(msg: String) -> i64 {
     result_err_msg(&msg)
 }
 
+fn result_err_record(message: String) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let error = rt.heap.alloc_record(1);
+        let message = rt.heap.alloc_string(message);
+        let _ = rt.heap.record_set_string(error, 0, message);
+        crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+    })
+}
+
 fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
     push(TimeValue::Date(time_rt::JetDate::new(y, m, d)))
 }
@@ -166,6 +176,45 @@ fn jet_jit_time_from_unix_ms(ms: i64) -> i64 {
     push(TimeValue::DateTime(time_rt::JetDateTime::from_unix_ms(ms)))
 }
 
+fn jet_jit_time_from_unix_seconds(seconds: i64) -> i64 {
+    push(TimeValue::DateTime(
+        time_rt::JetDateTime::from_unix_seconds(seconds),
+    ))
+}
+
+fn jet_jit_time_from_unix_microseconds(microseconds: i64) -> i64 {
+    push(TimeValue::DateTime(
+        time_rt::JetDateTime::from_unix_microseconds(microseconds),
+    ))
+}
+
+fn jet_jit_time_from_unix_nanoseconds(nanoseconds: i64) -> i64 {
+    push(TimeValue::DateTime(
+        time_rt::JetDateTime::from_unix_nanoseconds(nanoseconds),
+    ))
+}
+
+fn jet_jit_time_parse_iso_week_date(value: i64) -> i64 {
+    match time_rt::JetDate::parse_iso_week_date(&clone_string(value)) {
+        Ok(date) => result_ok(push(TimeValue::Date(date)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_time_from_iso_week(year: i64, week: i64, weekday: i64) -> i64 {
+    match time_rt::jet_time_from_iso_week(year, week, weekday) {
+        Ok(date) => result_ok(push(TimeValue::Date(date)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_time_parse_zoned(value: i64) -> i64 {
+    match time_rt::jet_time_parse_zoned(&clone_string(value)) {
+        Ok(zoned) => result_ok(push(TimeValue::Zoned(zoned)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
 fn jet_jit_time_utc() -> i64 {
     push(TimeValue::Zone(time_rt::JetZone::utc()))
 }
@@ -195,7 +244,7 @@ fn jet_jit_time_zone(name: i64) -> i64 {
     }
 }
 
-fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
+fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64, disambiguation: i64) -> i64 {
     let date = with_time(date, |value| match value {
         TimeValue::Date(date) => Some(date.clone()),
         _ => None,
@@ -208,11 +257,20 @@ fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
         TimeValue::Zone(zone) => Some(zone.clone()),
         _ => None,
     });
+    let disambiguation = clone_string(disambiguation);
     match (date, time, zone) {
-        (Some(date), Some(time), Some(zone)) => push(TimeValue::Zoned(
-            time_rt::JetZonedDateTime::from_local(&date, &time, &zone),
-        )),
-        _ => 0,
+        (Some(date), Some(time), Some(zone)) => {
+            match time_rt::JetZonedDateTime::from_local_with_disambiguation(
+                &date,
+                &time,
+                &zone,
+                &disambiguation,
+            ) {
+                Ok(zoned) => result_ok(push(TimeValue::Zoned(zoned)) as u64),
+                Err(error) => result_err(error),
+            }
+        }
+        _ => result_err("invalid zoned_local arguments".to_string()),
     }
 }
 
@@ -323,6 +381,22 @@ fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
     )))
 }
 
+fn jet_jit_period_total_in(period: i64, unit: i64, anchor: i64) -> f64 {
+    let period = with_time(period, |value| match value {
+        TimeValue::Period(period) => Some(*period),
+        _ => None,
+    });
+    let unit = clone_string(unit);
+    match period {
+        Some(period) => with_time(anchor, |value| match value {
+            TimeValue::Date(date) => period.total_in_date(&unit, date),
+            TimeValue::DateTime(datetime) => period.total_in_datetime(&unit, datetime),
+            _ => 0.0,
+        }),
+        None => 0.0,
+    }
+}
+
 /// The receiver kind a civil-time handle carries, for defect reports.
 fn time_value_kind(value: &TimeValue) -> &'static str {
     match value {
@@ -369,6 +443,26 @@ fn time_ordering_tag(value: std::cmp::Ordering) -> i64 {
     }
 }
 
+fn time_optional_string(handle: i64, default: &str) -> String {
+    if handle == 0 {
+        default.to_string()
+    } else {
+        clone_string(handle)
+    }
+}
+
+fn time_optional_increment(value: i64) -> i64 {
+    if value == 0 {
+        1
+    } else {
+        value
+    }
+}
+
+fn time_option_int(value: Option<i64>) -> i64 {
+    value.map(|value| value.wrapping_add(1)).unwrap_or(0)
+}
+
 /// Civil-time method dispatch. `recv` is a `TimeValue` handle whose variant IS
 /// the receiver kind; `method` is a string handle; `arg0..arg5` are the args
 /// (unused slots are 0). Every `(receiver, method)` pair the residency gate
@@ -383,7 +477,9 @@ fn jet_jit_civil_time_method(
     arg3: i64,
     arg4: i64,
     arg5: i64,
+    arg6: i64,
 ) -> i64 {
+    let _ = arg6;
     let method = clone_string(method);
     with_time(recv, |v| match (v, method.as_str()) {
         (TimeValue::Date(d), "year") => d.year(),
@@ -446,8 +542,47 @@ fn jet_jit_civil_time_method(
                 None => civil_method_defect(v, &method, "argument is not a Period"),
             }
         }
+        (TimeValue::Date(d), "subtract_period") => {
+            let period = with_time(arg0, |o| match o {
+                TimeValue::Period(p) => Some(p.clone()),
+                _ => None,
+            });
+            match period {
+                Some(p) => push(TimeValue::Date(d.subtract_period(&p))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
         (TimeValue::Date(d), "truncate") => push(TimeValue::Date(d.truncate(&clone_string(arg0)))),
         (TimeValue::Date(d), "format") => alloc_string(d.format_pattern(&clone_string(arg0))),
+        (TimeValue::Date(d), "format_checked") => match d.format_checked(&clone_string(arg0)) {
+            Ok(value) => result_ok(alloc_string(value) as u64),
+            Err(error) => result_err_record(error),
+        },
+        (TimeValue::Date(d), "iso_week_year") => d.iso_week_year(),
+        (TimeValue::Date(d), "until" | "since") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Date(other) => Some(other.clone()),
+                _ => None,
+            });
+            let largest = time_optional_string(arg1, "day");
+            let smallest = time_optional_string(arg2, "day");
+            let mode = time_optional_string(arg3, "trunc");
+            let increment = time_optional_increment(arg4);
+            match other {
+                Some(other) if method == "until" => {
+                    d.until_ns(&other, &largest, &smallest, &mode, increment)
+                }
+                Some(other) => d.since_ns(&other, &largest, &smallest, &mode, increment),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
+        }
+        (TimeValue::Date(d), "with") => {
+            let overflow = time_optional_string(arg3, "constrain");
+            match d.with_overflow(arg0, arg1, arg2, &overflow) {
+                Ok(value) => result_ok(push(TimeValue::Date(value)) as u64),
+                Err(error) => result_err(error),
+            }
+        }
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
         (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time())),
@@ -480,16 +615,31 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
         (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
         (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
+        (TimeValue::DateTime(dt), "to_unix_s") => dt.to_unix_seconds(),
+        (TimeValue::DateTime(dt), "to_unix_us") => match dt.to_unix_microseconds() {
+            Ok(value) => result_ok(value as u64),
+            Err(error) => result_err_record(error),
+        },
+        (TimeValue::DateTime(dt), "to_unix_ns") => match dt.to_unix_nanoseconds() {
+            Ok(value) => result_ok(value as u64),
+            Err(error) => result_err_record(error),
+        },
         (TimeValue::DateTime(dt), "format") => alloc_string(dt.format_pattern(&clone_string(arg0))),
-        (TimeValue::DateTime(dt), "truncate" | "floor") => {
-            push(TimeValue::DateTime(dt.floor(&clone_string(arg0))))
+        (TimeValue::DateTime(dt), "truncate" | "floor" | "ceil") => {
+            let unit = clone_string(arg0);
+            let increment = time_optional_increment(arg1);
+            let value = match method.as_str() {
+                "truncate" => dt.truncate_with(&unit, increment),
+                "floor" => dt.floor_with(&unit, increment),
+                _ => dt.ceil_with(&unit, increment),
+            };
+            push(TimeValue::DateTime(value))
         }
-        (TimeValue::DateTime(dt), "ceil") => {
-            push(TimeValue::DateTime(dt.ceil(&clone_string(arg0))))
-        }
-        (TimeValue::DateTime(dt), "round") => {
-            push(TimeValue::DateTime(dt.round(&clone_string(arg0))))
-        }
+        (TimeValue::DateTime(dt), "round") => push(TimeValue::DateTime(dt.round_with(
+            &clone_string(arg0),
+            time_optional_increment(arg1),
+            &time_optional_string(arg2, "half_expand"),
+        ))),
         (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(
             dt.replace(arg0, arg1, arg2, arg3, arg4, arg5),
         )),
@@ -507,6 +657,22 @@ fn jet_jit_civil_time_method(
             // Duration is raw ns i64 after Result unwrap (I9 Duration ABI).
             push(TimeValue::DateTime(dt.plus_duration_ns(arg0)))
         }
+        (TimeValue::DateTime(dt), "subtract_duration") => {
+            push(TimeValue::DateTime(dt.subtract_duration_ns(arg0)))
+        }
+        (TimeValue::DateTime(dt), "add_period" | "subtract_period") => {
+            let period = with_time(arg0, |o| match o {
+                TimeValue::Period(p) => Some(p.clone()),
+                _ => None,
+            });
+            match period {
+                Some(period) if method == "add_period" => {
+                    push(TimeValue::DateTime(dt.add_period(&period)))
+                }
+                Some(period) => push(TimeValue::DateTime(dt.subtract_period(&period))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
         (TimeValue::DateTime(dt), "difference") => {
             let other = with_time(arg0, |o| match o {
                 TimeValue::DateTime(od) => Some(od.clone()),
@@ -515,6 +681,36 @@ fn jet_jit_civil_time_method(
             match other {
                 Some(o) => dt.difference_ns(&o),
                 None => civil_method_defect(v, &method, "argument is not a DateTime"),
+            }
+        }
+        (TimeValue::DateTime(dt), "until" | "since") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::DateTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            let largest = time_optional_string(arg1, "second");
+            let smallest = time_optional_string(arg2, "nanosecond");
+            let mode = time_optional_string(arg3, "trunc");
+            let increment = time_optional_increment(arg4);
+            match other {
+                Some(other) if method == "until" => {
+                    dt.until_ns(&other, &largest, &smallest, &mode, increment)
+                }
+                Some(other) => dt.since_ns(&other, &largest, &smallest, &mode, increment),
+                None => civil_method_defect(v, &method, "argument is not a DateTime"),
+            }
+        }
+        (TimeValue::DateTime(dt), "with") => {
+            let overflow = time_optional_string(arg6, "constrain");
+            match dt.with_overflow(arg0, arg1, arg2, arg3, arg4, arg5, &overflow) {
+                Ok(value) => result_ok(push(TimeValue::DateTime(value)) as u64),
+                Err(error) => result_err(error),
+            }
+        }
+        (TimeValue::DateTime(dt), "format_checked") => {
+            match dt.format_checked(&clone_string(arg0)) {
+                Ok(value) => result_ok(alloc_string(value) as u64),
+                Err(error) => result_err_record(error),
             }
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
@@ -539,11 +735,83 @@ fn jet_jit_civil_time_method(
                 None => civil_method_defect(v, &method, "argument is not an Instant"),
             }
         }
+        (TimeValue::Period(period), "years") => period.years_value(),
+        (TimeValue::Period(period), "months") => period.months_value(),
+        (TimeValue::Period(period), "days") => period.days_value(),
+        (TimeValue::Period(period), "sign") => period.sign(),
+        (TimeValue::Period(period), "is_zero") => time_bool_tag(period.is_zero()),
+        (TimeValue::Period(period), "abs" | "negated") => {
+            let value = if method == "abs" {
+                period.abs()
+            } else {
+                period.negated()
+            };
+            push(TimeValue::Period(value))
+        }
+        (TimeValue::Period(period), "add" | "sub") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Period(other) => Some(*other),
+                _ => None,
+            });
+            match other {
+                Some(other) if method == "add" => push(TimeValue::Period(period.add(&other))),
+                Some(other) => push(TimeValue::Period(period.sub(&other))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
         (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
         (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
         (TimeValue::LocalTime(t), "hour") => t.hour(),
         (TimeValue::LocalTime(t), "minute") => t.minute(),
         (TimeValue::LocalTime(t), "second") => t.second(),
+        (TimeValue::LocalTime(t), "millisecond") => t.millisecond(),
+        (TimeValue::LocalTime(t), "microsecond") => t.microsecond(),
+        (TimeValue::LocalTime(t), "nanosecond") => t.nanosecond(),
+        (TimeValue::LocalTime(t), "add_duration") => {
+            push(TimeValue::LocalTime(t.add_duration_ns(arg0)))
+        }
+        (TimeValue::LocalTime(t), "subtract_duration") => {
+            push(TimeValue::LocalTime(t.subtract_duration_ns(arg0)))
+        }
+        (TimeValue::LocalTime(t), "round") => push(TimeValue::LocalTime(t.round_with(
+            &clone_string(arg0),
+            time_optional_increment(arg1),
+            &time_optional_string(arg2, "half_expand"),
+        ))),
+        (TimeValue::LocalTime(t), "truncate" | "floor" | "ceil") => {
+            let unit = clone_string(arg0);
+            let increment = time_optional_increment(arg1);
+            let value = match method.as_str() {
+                "truncate" => t.truncate_with(&unit, increment),
+                "floor" => t.floor_with(&unit, increment),
+                _ => t.ceil_with(&unit, increment),
+            };
+            push(TimeValue::LocalTime(value))
+        }
+        (TimeValue::LocalTime(t), "until" | "since") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::LocalTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            let largest = time_optional_string(arg1, "second");
+            let smallest = time_optional_string(arg2, "nanosecond");
+            let mode = time_optional_string(arg3, "trunc");
+            let increment = time_optional_increment(arg4);
+            match other {
+                Some(other) if method == "until" => {
+                    t.until_ns(&other, &largest, &smallest, &mode, increment)
+                }
+                Some(other) => t.since_ns(&other, &largest, &smallest, &mode, increment),
+                None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+            }
+        }
+        (TimeValue::LocalTime(t), "format") => alloc_string(t.format_pattern(&clone_string(arg0))),
+        (TimeValue::LocalTime(t), "format_checked") => {
+            match t.format_checked(&clone_string(arg0)) {
+                Ok(value) => result_ok(alloc_string(value) as u64),
+                Err(error) => result_err_record(error),
+            }
+        }
         (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
         (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
@@ -588,6 +856,11 @@ fn jet_jit_civil_time_method(
             }
         }
         (TimeValue::Zoned(z), "format") => alloc_string(z.format_pattern(&clone_string(arg0))),
+        (TimeValue::Zoned(z), "format_checked") => match z.format_checked(&clone_string(arg0)) {
+            Ok(value) => result_ok(alloc_string(value) as u64),
+            Err(error) => result_err_record(error),
+        },
+        (TimeValue::Zoned(z), "format_rfc9557") => alloc_string(z.format_rfc9557()),
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
         (TimeValue::Zoned(z), "is_dst") => {
             if z.is_dst() {
@@ -606,6 +879,9 @@ fn jet_jit_civil_time_method(
         // and keeps the zone, `add_period` re-resolves the local wall clock, so a
         // DST transition lands correctly without any offset policy living here.
         (TimeValue::Zoned(z), "add_duration") => push(TimeValue::Zoned(z.add_duration_ns(arg0))),
+        (TimeValue::Zoned(z), "subtract_duration") => {
+            push(TimeValue::Zoned(z.subtract_duration_ns(arg0)))
+        }
         (TimeValue::Zoned(z), "add_period") => {
             let period = with_time(arg0, |o| match o {
                 TimeValue::Period(p) => Some(p.clone()),
@@ -616,7 +892,94 @@ fn jet_jit_civil_time_method(
                 None => civil_method_defect(v, &method, "argument is not a Period"),
             }
         }
+        (TimeValue::Zoned(z), "subtract_period") => {
+            let period = with_time(arg0, |o| match o {
+                TimeValue::Period(p) => Some(p.clone()),
+                _ => None,
+            });
+            match period {
+                Some(p) => push(TimeValue::Zoned(z.subtract_period(&p))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
+        (TimeValue::Zoned(z), "with_time") => {
+            let time = with_time(arg0, |o| match o {
+                TimeValue::LocalTime(time) => Some(time.clone()),
+                _ => None,
+            });
+            let disambiguation = time_optional_string(arg1, "compatible");
+            match time {
+                Some(time) => match z.with_time(&time, &disambiguation) {
+                    Ok(value) => result_ok(push(TimeValue::Zoned(value)) as u64),
+                    Err(error) => result_err(error),
+                },
+                None => result_err("argument is not a LocalTime".to_string()),
+            }
+        }
+        (TimeValue::Zoned(z), "with_zone") => {
+            let zone = with_time(arg0, |o| match o {
+                TimeValue::Zone(zone) => Some(zone.clone()),
+                _ => None,
+            });
+            match zone {
+                Some(zone) => push(TimeValue::Zoned(z.with_zone(&zone))),
+                None => civil_method_defect(v, &method, "argument is not a Zone"),
+            }
+        }
+        (TimeValue::Zoned(z), "until" | "since") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Zoned(other) => Some(other.clone()),
+                _ => None,
+            });
+            let largest = time_optional_string(arg1, "second");
+            let smallest = time_optional_string(arg2, "nanosecond");
+            let mode = time_optional_string(arg3, "trunc");
+            let increment = time_optional_increment(arg4);
+            match other {
+                Some(other) if method == "until" => {
+                    z.until_ns(&other, &largest, &smallest, &mode, increment)
+                }
+                Some(other) => z.since_ns(&other, &largest, &smallest, &mode, increment),
+                None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+            }
+        }
+        (TimeValue::Zoned(z), "next_transition" | "previous_transition") => {
+            time_option_int(if method == "next_transition" {
+                z.next_transition()
+            } else {
+                z.previous_transition()
+            })
+        }
+        (TimeValue::Zoned(z), "start_of_day") => push(TimeValue::Zoned(z.start_of_day())),
+        (TimeValue::Zoned(z), "hours_in_day") => z.hours_in_day(),
         (TimeValue::Zone(zone), "name") => alloc_string(zone.name()),
+        (TimeValue::Zone(zone), "next_transition" | "previous_transition") => {
+            time_option_int(if method == "next_transition" {
+                zone.next_transition(arg0)
+            } else {
+                zone.previous_transition(arg0)
+            })
+        }
+        (TimeValue::Zone(zone), "start_of_day") => {
+            let date = with_time(arg0, |o| match o {
+                TimeValue::Date(date) => Some(date.clone()),
+                _ => None,
+            });
+            match date {
+                Some(date) => push(TimeValue::Zoned(zone.start_of_day_zoned(&date))),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
+        }
+        (TimeValue::Zone(zone), "hours_in_day") => {
+            let date = with_time(arg0, |o| match o {
+                TimeValue::Date(date) => Some(date.clone()),
+                _ => None,
+            });
+            match date {
+                Some(date) => zone.hours_in_day(&date),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
+        }
         _ => civil_method_defect(v, &method, "no marshalling arm"),
     })
 }
@@ -657,11 +1020,16 @@ host_fns! {
         let mut unary_i8 = Signature::new(cc);
         unary_i8.params.push(AbiParam::new(types::I64));
         unary_i8.returns.push(AbiParam::new(types::I8));
-        let mut octonary = Signature::new(cc);
-        for _ in 0..8 {
-            octonary.params.push(AbiParam::new(types::I64));
+        let mut nonary = Signature::new(cc);
+        for _ in 0..9 {
+            nonary.params.push(AbiParam::new(types::I64));
         }
-        octonary.returns.push(AbiParam::new(types::I64));
+        nonary.returns.push(AbiParam::new(types::I64));
+        let mut period_total_in = Signature::new(cc);
+        for _ in 0..3 {
+            period_total_in.params.push(AbiParam::new(types::I64));
+        }
+        period_total_in.returns.push(AbiParam::new(types::F64));
 
 
     }
@@ -675,13 +1043,19 @@ host_fns! {
     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
+    from_unix_seconds: "jet_jit_time_from_unix_seconds" => jet_jit_time_from_unix_seconds: unary;
+    from_unix_microseconds: "jet_jit_time_from_unix_microseconds" => jet_jit_time_from_unix_microseconds: unary;
+    from_unix_nanoseconds: "jet_jit_time_from_unix_nanoseconds" => jet_jit_time_from_unix_nanoseconds: unary;
+    parse_iso_week_date: "jet_jit_time_parse_iso_week_date" => jet_jit_time_parse_iso_week_date: unary;
+    from_iso_week: "jet_jit_time_from_iso_week" => jet_jit_time_from_iso_week: ternary;
+    parse_zoned: "jet_jit_time_parse_zoned" => jet_jit_time_parse_zoned: unary;
     utc: "jet_jit_time_utc" => jet_jit_time_utc: nullary;
     period: "jet_jit_time_period" => jet_jit_time_period: ternary;
     period_days: "jet_jit_time_period_days" => jet_jit_time_period_days: unary;
     period_months: "jet_jit_time_period_months" => jet_jit_time_period_months: unary;
     period_years: "jet_jit_time_period_years" => jet_jit_time_period_years: unary;
     zone: "jet_jit_time_zone" => jet_jit_time_zone: unary;
-    zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: ternary;
+    zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: quaternary;
     parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
     instant_add_duration: "jet_jit_instant_add_duration" => jet_jit_instant_add_duration: binary;
@@ -693,5 +1067,6 @@ host_fns! {
     is_leap_year: "jet_jit_time_is_leap_year" => jet_jit_time_is_leap_year: unary_i8;
     datetime: "jet_jit_time_datetime" => jet_jit_time_datetime: hexary;
     local_time: "jet_jit_time_local_time" => jet_jit_time_local_time: ternary;
-    civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
+    period_total_in: "jet_jit_period_total_in" => jet_jit_period_total_in: period_total_in;
+    civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: nonary;
 }

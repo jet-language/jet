@@ -569,6 +569,47 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
     map
 }
 
+/// Resolve every ordinary file-module alias path reachable from module_idx.
+/// Synthetic calls can retain the whole source path even though the emitted
+/// Rust function lives in the final module's namespace.
+fn imported_module_paths(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(String, usize)> {
+    let mut paths = Vec::new();
+    let mut pending = vec![(
+        String::new(),
+        module_idx,
+        HashSet::from([module_idx]),
+    )];
+    while let Some((prefix, owner, seen)) = pending.pop() {
+        for imp in &bundle.modules[owner].imports {
+            if is_foreign_member_list(imp)
+                || is_c_import_after_frontend(imp)
+                || matches!(imp.kind, ImportKind::Unqualified { .. })
+                || imp.core_module_path().is_some()
+            {
+                continue;
+            }
+            let alias = imp.import_alias();
+            let target = required_import_target(bundle, owner, imp);
+            let path = if prefix.is_empty() {
+                alias
+            } else {
+                format!("{prefix}.{alias}")
+            };
+            paths.push((path.clone(), target));
+            if seen.contains(&target) {
+                continue;
+            }
+            let mut next_seen = seen.clone();
+            next_seen.insert(target);
+            pending.push((path, target, next_seen));
+        }
+    }
+    paths
+}
+
 /// Return selective-import aliases that name a visible bodyless child module.
 /// Sema installs the same child edge in its module-import map; codegen only
 /// projects that edge to the generated Rust module name.
@@ -810,6 +851,9 @@ pub(crate) fn unqualified_import_maps(
                 file_map.insert(local, (mangle(&bundle.modules[target].alias), real_name));
             }
         }
+    }
+    for (path, rust_mod, function, _, _) in nested_file_function_entries(bundle, module_idx) {
+        file_map.insert(format!("{path}.{function}"), (rust_mod, function));
     }
     (inline_map, file_map)
 }
@@ -1356,6 +1400,59 @@ fn unqualified_file_function_entries(
     entries
 }
 
+fn nested_file_function_entries(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(
+    String,
+    String,
+    String,
+    Vec<(AccessConvention, Type)>,
+    Option<Type>,
+)> {
+    let mut entries = Vec::new();
+    for (path, target) in imported_module_paths(bundle, module_idx) {
+        for item in &bundle.modules[target].items {
+            let Item::Func(function) = item else {
+                continue;
+            };
+            if !bundle
+                .name_ledger
+                .visible(module_idx, target, &function.name)
+            {
+                continue;
+            }
+            let params = function
+                .params
+                .iter()
+                .map(|param| {
+                    let ty = if param.variadic {
+                        Type::List(Box::new(param.ty.clone()))
+                    } else {
+                        param.ty.clone()
+                    };
+                    (
+                        param.convention,
+                        qualify_imported_call_type(bundle, target, &path, &ty),
+                    )
+                })
+                .collect();
+            let ret = function
+                .return_type
+                .as_ref()
+                .map(|ty| qualify_imported_call_type(bundle, target, &path, ty));
+            entries.push((
+                path.clone(),
+                mangle(&bundle.modules[target].alias),
+                function.name.clone(),
+                params,
+                ret,
+            ));
+        }
+    }
+    entries
+}
+
 pub(crate) fn import_sig_map(
     bundle: &ProgramBundle,
     module_idx: usize,
@@ -1493,6 +1590,9 @@ pub(crate) fn import_sig_map(
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
+    for (path, _, function, params, _) in nested_file_function_entries(bundle, module_idx) {
+        map.insert((format!("{path}.{function}"), function), params);
+    }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle
@@ -1623,6 +1723,9 @@ pub(crate) fn import_ret_map(
                 }
             }
         }
+    }
+    for (path, _, function, _, ret) in nested_file_function_entries(bundle, module_idx) {
+        map.insert((format!("{path}.{function}"), function), ret);
     }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);

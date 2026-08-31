@@ -17,11 +17,21 @@ Jet exact-canonicalizes and validates fixed paths and the exact manifest. It rej
 
 ## Source facts
 
-The Jet API has read-only `GET` state, card, closed, history, lint, version, and stream routes. It rejects `POST`, `PUT`, `PATCH`, and `DELETE`.
+The Jet API has read-only `GET` state, card, closed, history, lint, version, and stream routes. Every `POST`, `PUT`, `PATCH`, and `DELETE` request is refused by a final `/*path` guard, including paths outside `/api`.
 
 The Jet UI source covers Board, Focus, Papercuts, Status, progress, milestones, burndown, ideas, filters and sorts, residual full-record fields, and immutable snapshot identity.
 
 These source facts are not runtime proof.
+
+## Evidence contract
+
+The comparison unit is one immutable fixture directory. Each fixture has the same six files and a manifest; the three dated directories are the only accepted inputs. The combined fixture hash above identifies the recorded input set.
+
+The loader reads each selected file once, verifies its manifest hash before parsing, and keeps all parsed values in local state. It never opens `plugins/tower/.tower`, writes a snapshot, or consults a live Tower store.
+
+Node timing, RSS, serialized-size, source-size, diagnostic, and LSP values below are recorded canary measurements. This lane did not rerun validation or timing commands after the read-only route guard edit; unavailable values remain unavailable, not zero.
+
+Source-size counts are the captured baseline for the listed source maps. They are not a post-edit claim and are not parity evidence.
 
 ## Source size
 
@@ -52,9 +62,24 @@ Condition: run five times sequentially and use the median on the `2026-08-28` fi
 
 These Node values are successful baseline measurements.
 
-## Validation
+## Canary ledger
 
-These commands pass:
+| Required measure | Recorded evidence | Status |
+| --- | --- | --- |
+| Cold and warm builds | Historical source builds: 18,768 ms cold and 18,935 ms warm; both exit 101. | Blocked by #2350/#2356 |
+| Default run startup | 21.00 s; E0956 at `core.files.canonicalize`; no bind. | Blocked by #2252 |
+| Dev startup | 120 s wait; no banner or port; same E0956. | Blocked by #2252 |
+| LSP | 2,583.733 ms; exit 0; 3 frames including `publishDiagnostics`. | Recorded |
+| Diagnostic cascade | 1,201.678 ms; exit 1; exactly one E0003. | Recorded |
+| LOC and tokens | Captured source maps: Node 5,761 LOC/68,066 tokens; Jet 6,565 LOC/55,508 tokens. | Recorded baseline |
+| RSS, request latency, API, SSE, and UI smoke | No Jet runtime values. | Unavailable until runtime binds |
+
+This ledger records the canary evidence without converting a compiler or evaluator failure into a zero or pass.
+
+
+## Recorded validation
+
+The following checks passed in the captured canary before this lane's route-guard edit:
 
 ```text
 scripts/agent/jet-env node --check dogfood/tower/src/board/board.js
@@ -63,7 +88,7 @@ scripts/agent/jet-env node --check dogfood/tower/tests/metrics/node_baseline.mjs
 scripts/agent/jet-env jet fmt --check dogfood/tower/run.jet
 ```
 
-`scripts/agent/jet-env jet check dogfood/tower` exits 0 with 14 warnings:
+The captured canary's `scripts/agent/jet-env jet check dogfood/tower` exited 0 with 14 warnings:
 
 - 4 L0507 branch-style warnings;
 - 3 L2901 false empty-test warnings; assertions are in a helper;
@@ -126,9 +151,13 @@ Side-by-side snapshot-only source exists. Semantic, runtime, route, and UI parit
 
 ## Open blockers
 
-- #2252 — default/dev evaluator `core.files.canonicalize`; final `jet run` and `jet dev` stop before bind.
-- #2350/#2356 — AOT/test generated Rust exits 101.
-- #2352 — directory package build reports E1334.
-- #2357 — canonical formatter/L0508 contradiction.
-- #2331/#2332/#2333 — delivery cards remain open.
-- #2327 — standing parent remains open.
+| Card | External blocker or delivery state |
+| --- | --- |
+| #2252 | External evaluator bug at `core.files.canonicalize`; default and dev commands stop before bind. |
+| #2350/#2356 | External AOT/test compiler bugs; generated Rust exits 101. |
+| #2352 | External compiler/package-build bug; directory build reports E1334. |
+| #2357 | External formatter/linter contract bug; canonical L0508 contradiction remains. |
+| #2331/#2332/#2333 | Dogfood delivery cards remain open; no compiler workaround is claimed. |
+| #2327 | Standing parent remains open. |
+
+The first four rows are external blockers, not defects in the dogfood source. No shim, exclusion, or fallback is used to hide them.

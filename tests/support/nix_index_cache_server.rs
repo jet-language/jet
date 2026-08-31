@@ -1,4 +1,4 @@
-//! Signed loopback index/cache peer for the index-backed Nix provider tests.
+//! Signed loopback and static index/cache peers for the index-backed Nix provider tests.
 //!
 //! The peer serves only bytes. It never writes a Hangar, creates a fixture
 //! directory, or invokes a Nix process. Request counters make cache-repair
@@ -17,6 +17,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+#[path = "static_file_server.rs"]
+mod static_file_server;
+use static_file_server::StaticFileServer;
 
 pub const CHANNEL: &str = "nixpkgs-unstable";
 pub const SYSTEM: &str = "x86_64-linux";
@@ -59,78 +63,36 @@ impl NixIndexCacheServer {
         let address = listener.local_addr().expect("Nix test server address");
         let endpoint = format!("http://127.0.0.1:{}", address.port());
         let index_endpoint = format!("{endpoint}/index");
-        let signed_index = test_nix_index::signed(
-            SIGNING_SEED,
-            INDEX_KEY_ID,
-            &index_endpoint,
-            CHANNEL,
-            REVISION,
-            SYSTEM,
-            // Keep the decoded canonical JSON length aligned to a full
-            // xxh64 lane.  The producer helper is shared with #2157; this
-            // value also remains an otherwise inert publication timestamp.
-            100_000_000_000,
-            1,
-            100_000_000_000,
-            400_000_000_000,
-            vec![TestIndexRecord {
-                attrpath: vec!["ripgrep".to_string()],
-                version: "15.2.0".to_string(),
-                drv_path: DRV_PATH.to_string(),
-                outputs: BTreeMap::from([(String::from("out"), ROOT_PATH.to_string())]),
-            }],
-            Vec::new(),
-        )
-        .expect("build signed Nix test index");
-        let source = scratch.join("nix-index-cache-nar-source");
-        let objects = [
-            (ROOT_PATH, ObjectKind::Root, "root.nar"),
-            (LIB_PATH, ObjectKind::Library, "lib.nar"),
-            (RUNTIME_PATH, ObjectKind::Runtime, "runtime.nar"),
-        ];
-        let mut nars = BTreeMap::new();
-        for (store_path, kind, _nar_name) in objects {
-            let nar = make_nar(&source, kind);
-            nars.insert(store_path.to_string(), nar);
-        }
-        let mut normalized_routes = index_routes(&signed_index, &endpoint, CHANNEL);
-        normalized_routes.insert(
-            "/nix-cache-info".to_string(),
-            b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
-        );
-        for (store_path, kind, nar_name) in objects {
-            let nar = nars.get(store_path).expect("Nix test NAR was built");
-            let basename = store_path
-                .strip_prefix("/nix/store/")
-                .expect("test store path prefix");
-            normalized_routes.insert(
-                format!("/{}.narinfo", &basename[..32]),
-                signed_narinfo(
-                    store_path,
-                    nar_name,
-                    nar,
-                    match kind {
-                        ObjectKind::Root => vec![LIB_PATH],
-                        ObjectKind::Library => vec![RUNTIME_PATH],
-                        ObjectKind::Runtime => Vec::new(),
-                    }
-                    .as_slice(),
-                    CACHE_KEY_ID,
-                    SIGNING_SEED,
-                ),
-            );
-            normalized_routes.insert(format!("/nar/{nar_name}"), nar.clone());
-        }
-        let _ = fs::remove_dir_all(&source);
+        let (signed_index, normalized_routes, root_store_path, transitive_store_paths) =
+            ripgrep_fixture(&endpoint, &index_endpoint, scratch);
         Self::finish(
             listener,
             endpoint,
             index_endpoint,
             signed_index,
             normalized_routes,
-            ROOT_PATH,
-            vec![LIB_PATH.to_string(), RUNTIME_PATH.to_string()],
+            root_store_path,
+            transitive_store_paths,
         )
+    }
+
+    pub fn start_static_ripgrep(
+        scratch: &Path,
+        publication: &Path,
+    ) -> StaticNixIndexCacheServer {
+        let static_server = StaticFileServer::start(publication);
+        let endpoint = static_server.endpoint.clone();
+        let (signed_index, routes, root_store_path, transitive_store_paths) =
+            ripgrep_fixture(&endpoint, &endpoint, scratch);
+        write_static_routes(publication, &routes);
+        StaticNixIndexCacheServer {
+            endpoint,
+            index_endpoint: static_server.endpoint.clone(),
+            root_store_path: root_store_path.to_string(),
+            transitive_store_paths,
+            signed_index,
+            _server: static_server,
+        }
     }
 
     pub fn start_unindexed(scratch: &Path) -> Self {
@@ -217,36 +179,7 @@ impl NixIndexCacheServer {
     }
 
     pub fn install(&self, root: &Path) {
-        fs::create_dir_all(root.join("config")).expect("Nix index config directory");
-        fs::create_dir_all(root.join("trust")).expect("Nix index trust directory");
-        fs::write(
-            root.join("config/nix-index-v1.endpoint"),
-            format!("{}\n", self.index_endpoint),
-        )
-        .expect("Nix index endpoint");
-        fs::write(
-            root.join("trust/nix-index-v1.ed25519.pub"),
-            format!(
-                "{}:{}\n",
-                INDEX_KEY_ID,
-                base64_encode(&self.signed_index.public_key)
-            ),
-        )
-        .expect("Nix index trust key");
-        fs::write(
-            root.join("config/nix-cache-v1.endpoint"),
-            format!("{}\n", self.endpoint),
-        )
-        .expect("Nix cache endpoint");
-        fs::write(
-            root.join("trust/nix-cache-v1.ed25519.pub"),
-            format!(
-                "{}:{}\n",
-                CACHE_KEY_ID,
-                base64_encode(&test_nix_index::public_key(SIGNING_SEED))
-            ),
-        )
-        .expect("Nix cache trust key");
+        install_fixture_config(root, &self.index_endpoint, &self.endpoint, &self.signed_index);
     }
 
     pub fn install_local_catalog(&self, root: &Path) {
@@ -309,6 +242,21 @@ impl NixIndexCacheServer {
     }
 }
 
+pub struct StaticNixIndexCacheServer {
+    pub endpoint: String,
+    pub index_endpoint: String,
+    pub root_store_path: String,
+    pub transitive_store_paths: Vec<String>,
+    pub signed_index: TestSignedIndex,
+    _server: StaticFileServer,
+}
+
+impl StaticNixIndexCacheServer {
+    pub fn install(&self, root: &Path) {
+        install_fixture_config(root, &self.index_endpoint, &self.endpoint, &self.signed_index);
+    }
+}
+
 impl Drop for NixIndexCacheServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
@@ -328,12 +276,16 @@ fn index_routes(
     endpoint: &str,
     channel: &str,
 ) -> BTreeMap<String, Vec<u8>> {
-    let manifest = format!("/index/v1/{channel}/manifest.json");
     let target_path = signed
         .target_url
         .strip_prefix(endpoint)
         .expect("index target belongs to server")
         .to_string();
+    let index_prefix = target_path
+        .split_once("/index-v1/")
+        .map(|(prefix, _)| prefix)
+        .expect("index target has the v1 path");
+    let manifest = format!("{index_prefix}/v1/{channel}/manifest.json");
     let target_signature_path = signed
         .target_signature_url
         .strip_prefix(endpoint)
@@ -348,6 +300,131 @@ fn index_routes(
         (target_path, signed.index_bytes.clone()),
         (target_signature_path, signed.index_signature.clone()),
     ])
+}
+
+fn install_fixture_config(
+    root: &Path,
+    index_endpoint: &str,
+    cache_endpoint: &str,
+    signed_index: &TestSignedIndex,
+) {
+    fs::create_dir_all(root.join("config")).expect("Nix index config directory");
+    fs::create_dir_all(root.join("trust")).expect("Nix index trust directory");
+    fs::write(
+        root.join("config/nix-index-v1.endpoint"),
+        format!("{index_endpoint}\n"),
+    )
+    .expect("Nix index endpoint");
+    fs::write(
+        root.join("trust/nix-index-v1.ed25519.pub"),
+        format!(
+            "{}:{}\n",
+            INDEX_KEY_ID,
+            base64_encode(&signed_index.public_key)
+        ),
+    )
+    .expect("Nix index trust key");
+    fs::write(
+        root.join("config/nix-cache-v1.endpoint"),
+        format!("{cache_endpoint}\n"),
+    )
+    .expect("Nix cache endpoint");
+    fs::write(
+        root.join("trust/nix-cache-v1.ed25519.pub"),
+        format!(
+            "{}:{}\n",
+            CACHE_KEY_ID,
+            base64_encode(&test_nix_index::public_key(SIGNING_SEED))
+        ),
+    )
+    .expect("Nix cache trust key");
+}
+
+fn ripgrep_fixture(
+    endpoint: &str,
+    index_endpoint: &str,
+    scratch: &Path,
+) -> (TestSignedIndex, BTreeMap<String, Vec<u8>>, &'static str, Vec<String>) {
+    let signed_index = test_nix_index::signed(
+        SIGNING_SEED,
+        INDEX_KEY_ID,
+        index_endpoint,
+        CHANNEL,
+        REVISION,
+        SYSTEM,
+        // Keep the decoded canonical JSON length aligned to a full xxh64
+        // lane. This value remains an otherwise inert publication timestamp.
+        100_000_000_000,
+        1,
+        100_000_000_000,
+        400_000_000_000,
+        vec![TestIndexRecord {
+            attrpath: vec!["ripgrep".to_string()],
+            version: "15.2.0".to_string(),
+            drv_path: DRV_PATH.to_string(),
+            outputs: BTreeMap::from([(String::from("out"), ROOT_PATH.to_string())]),
+        }],
+        Vec::new(),
+    )
+    .expect("build signed Nix test index");
+    let source = scratch.join("nix-index-cache-nar-source");
+    let objects = [
+        (ROOT_PATH, ObjectKind::Root, "root.nar"),
+        (LIB_PATH, ObjectKind::Library, "lib.nar"),
+        (RUNTIME_PATH, ObjectKind::Runtime, "runtime.nar"),
+    ];
+    let mut nars = BTreeMap::new();
+    for (store_path, kind, _nar_name) in objects {
+        let nar = make_nar(&source, kind);
+        nars.insert(store_path.to_string(), nar);
+    }
+    let mut routes = index_routes(&signed_index, endpoint, CHANNEL);
+    routes.insert(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    );
+    for (store_path, kind, nar_name) in objects {
+        let nar = nars.get(store_path).expect("Nix test NAR was built");
+        let basename = store_path
+            .strip_prefix("/nix/store/")
+            .expect("test store path prefix");
+        routes.insert(
+            format!("/{}.narinfo", &basename[..32]),
+            signed_narinfo(
+                store_path,
+                nar_name,
+                nar,
+                match kind {
+                    ObjectKind::Root => vec![LIB_PATH],
+                    ObjectKind::Library => vec![RUNTIME_PATH],
+                    ObjectKind::Runtime => Vec::new(),
+                }
+                .as_slice(),
+                CACHE_KEY_ID,
+                SIGNING_SEED,
+            ),
+        );
+        routes.insert(format!("/nar/{nar_name}"), nar.clone());
+    }
+    let _ = fs::remove_dir_all(&source);
+    (
+        signed_index,
+        routes,
+        ROOT_PATH,
+        vec![LIB_PATH.to_string(), RUNTIME_PATH.to_string()],
+    )
+}
+
+fn write_static_routes(root: &Path, routes: &BTreeMap<String, Vec<u8>>) {
+    for (route, bytes) in routes {
+        let relative = route
+            .strip_prefix('/')
+            .expect("static route starts with slash");
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().expect("static route parent"))
+            .expect("static route directory");
+        fs::write(path, bytes).expect("static route bytes");
+    }
 }
 
 fn make_nar(root: &Path, kind: ObjectKind) -> Vec<u8> {

@@ -3573,6 +3573,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         AST::Expr::Int(_, _, _, _)
         | AST::Expr::Float(_, _, _, _)
         | AST::Expr::Bool(_, _)
+        | AST::Expr::Unit(_)
         | AST::Expr::Char(_, _)
         | AST::Expr::Absent(_)
         | AST::Expr::ReduceMarker(_, _)

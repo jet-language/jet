@@ -378,23 +378,20 @@ pub(crate) fn compute_completions(
     // Member completion: `expr.`
     if let Some((_receiver_name, prefix)) = context_is_compiler_fact_access(src, offset) {
         for fact in Syntax::fact_read_members().filter(|fact| fact.starts_with(&prefix)) {
-            let fact_type = Syntax::fact_read_kind(&fact)
-                .and_then(|read| read.public_read_type());
+            let fact_type = Syntax::fact_read_kind(&fact).and_then(|read| read.public_read_type());
             let detail = match fact.as_str() {
                 Syntax::COMPILER_FACT_LAYOUT => {
                     format!("compiler fact: {}", Syntax::TYPE_LAYOUT_INFO)
                 }
-                _ => {
-                    fact_type.map_or_else(
-                        || {
-                            let kind = Syntax::fact_read_kind(&fact)
-                                .and_then(|read| read.reflection_kind())
-                                .unwrap_or("typed");
-                            format!("compiler fact: {kind}")
-                        },
-                        |type_name| format!("compiler fact: {type_name}"),
-                    )
-                }
+                _ => fact_type.map_or_else(
+                    || {
+                        let kind = Syntax::fact_read_kind(&fact)
+                            .and_then(|read| read.reflection_kind())
+                            .unwrap_or("typed");
+                        format!("compiler fact: {kind}")
+                    },
+                    |type_name| format!("compiler fact: {type_name}"),
+                ),
             };
             let documentation = match fact.as_str() {
                 Syntax::COMPILER_FACT_LAYOUT => {
@@ -462,11 +459,10 @@ pub(crate) fn compute_completions(
                     offset: Some(offset),
                     session_top_level: false,
                 };
-                (!db
-                    .symbols
+                (!db.symbols
                     .complete_visible_at("", Some(&receiver_name), anchor)
                     .is_empty())
-                    .then_some(receiver_name.clone())
+                .then_some(receiver_name.clone())
             })
         };
         if let Some(owner) = owner {

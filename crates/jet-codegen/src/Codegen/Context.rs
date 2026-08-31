@@ -110,8 +110,7 @@ pub(crate) struct PhaseTimes {
 
 impl PhaseTimes {
     fn add_tir(&self, us: u128) {
-        self.tir_us
-            .set(self.tir_us.get().saturating_add(us));
+        self.tir_us.set(self.tir_us.get().saturating_add(us));
     }
 
     fn add_emission(&self, us: u128) {
@@ -156,6 +155,12 @@ pub(crate) struct Cx {
     /// structured literal to every engine instead of the rendered Rust text.
     pub(crate) const_values: HashMap<String, CtValue>,
     pub(crate) type_names: HashSet<String>,
+    /// D-SERDE2: source-level names of locally declared imported nominals map to
+    /// their canonical bundle identities while lowering the declaring module.
+    /// This is separate from `local_type_names`: that set controls source lookup
+    /// precedence, while this map gives TIR/JIT shape consumers the one identity
+    /// registered for the imported module's own records and enums.
+    pub(crate) local_type_identities: HashMap<String, String>,
     /// Nominals declared by the module being emitted. Imported canonical
     /// identities and convenience leaves also live in `type_names`; this set
     /// preserves source lookup precedence when a local shadows an import.
@@ -245,6 +250,10 @@ pub(crate) struct Cx {
     pub(crate) coverage_branch_numbers: std::cell::RefCell<HashMap<String, usize>>,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
+    /// Generated C-module functions whose wrappers return their declared C
+    /// value directly. They do not use the hidden Jet `Result` carrier.
+    /// Keys use the emitted module/function path (`__jet_module::function`).
+    pub(crate) direct_c_functions: HashSet<String>,
     /// Canonical cross-module nominal identity -> Rust module path. The key
     /// includes package and source-module identity; import aliases are only
     /// source lookup projections and never semantic type identities.
@@ -337,6 +346,9 @@ pub(crate) struct Cx {
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
+    /// Source line for the function currently being emitted. FFI call sites
+    /// use this Jet frame when the lowered call has no finer-grained span.
+    pub(crate) current_fn_line: std::cell::Cell<u32>,
     /// D-SIMD3=B: active `#Scalar` codegen boundary. Loop emitters use this
     /// only to insert the shared scalar compiler barrier; it is not a runtime
     /// semantic fact.
@@ -596,6 +608,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "JSONLWriter" => Some("JSONLWriter"),
         "CSVReader" => Some("CSVReader"),
         "CSVWriter" => Some("CSVWriter"),
+        "CSVRow" => Some("CSVRow"),
         "XMLReader" => Some("XMLReader"),
         "XMLWriter" => Some("XMLWriter"),
         "CBORReader" => Some("CBORReader"),
@@ -838,6 +851,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "NetReady" => Some("JetNetReady"),
         "HTTPRequest" => Some("JetHTTPRequest"),
         "HTTPResponse" => Some("JetHTTPResponse"),
+        "HTTPBodyChunks" => Some("JetHTTPBodyChunks"),
         "HTTPClient" => Some("JetHTTPClient"),
         "HTTPProxy" => Some("JetHTTPProxy"),
         "HTTPRedirectPolicy" => Some("JetHTTPRedirectPolicy"),
@@ -985,9 +999,7 @@ impl Cx {
         self.distinct_types
             .get(&identity)
             .is_some_and(|(base, _)| matches!(base, Type::String))
-            && self
-                .trait_methods
-                .contains(&(identity, method.to_string()))
+            && self.trait_methods.contains(&(identity, method.to_string()))
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -1239,6 +1251,7 @@ impl Cx {
             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
             (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
+            (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),
@@ -3495,6 +3508,21 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
 /// declarations because loaded dependency items may also be present in a
 /// module's merged item list. Dependency ownership uses sema's longest-root rule.
 pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    cx.direct_c_functions = bundle
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module.items.iter().filter_map(|item| {
+                let Item::CModule(c_module) = item else {
+                    return None;
+                };
+                Some(c_module.functions.iter().map(|function| {
+                    format!("{}::{}", mangle(&module.alias), function.name)
+                }))
+            })
+        })
+        .flatten()
+        .collect();
     cx.local_type_names
         .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
     register_imported_methods(cx, bundle, module_idx);
@@ -4178,6 +4206,7 @@ pub(crate) fn build_cx_items(
         persist_types: HashMap::new(),
         const_values: HashMap::new(),
         type_names: HashSet::new(),
+        local_type_identities: HashMap::new(),
         local_type_names: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
@@ -4203,6 +4232,7 @@ pub(crate) fn build_cx_items(
         patchable: HashSet::new(),
         computed_fields: HashMap::new(),
         memo_fields: HashMap::new(),
+        current_fn_line: std::cell::Cell::new(0),
         memo_dependencies: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
@@ -4215,6 +4245,7 @@ pub(crate) fn build_cx_items(
         coverage_branch_numbers: std::cell::RefCell::new(HashMap::new()),
         debug_linemap: false,
         import_mods: HashMap::new(),
+        direct_c_functions: HashSet::new(),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),

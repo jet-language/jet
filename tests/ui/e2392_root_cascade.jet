@@ -1,0 +1,40 @@
+// E2392: repeated helper-domain failures collapse to one root while an
+// independent failure domain remains visible.
+#Error
+enum SourceErr {
+    Missing
+}
+
+#Error
+enum TargetErr {
+    Wrapped
+}
+
+#Error
+enum OtherSourceErr {
+    Missing
+}
+
+#Error
+enum OtherTargetErr {
+    Wrapped
+}
+
+fn load_row() Int !SourceErr -> { return Err(SourceErr.Missing) }
+
+fn load_other() Int !OtherSourceErr -> { return Err(OtherSourceErr.Missing) }
+
+fn run() Int !TargetErr -> {
+    load_row()
+    load_row()
+    load_row()
+    load_row()
+    load_row()
+    return Ok(0)
+}
+
+fn other_run() Int !OtherTargetErr -> {
+    load_other()
+    load_other()
+    return Ok(0)
+}

@@ -1,0 +1,8 @@
+Warning [L0515] (process_args_view): the direct process.argv().skip(1) projection repeats the process argument view
+  --> tests/ui_lint/process_args_view.jet:6:28
+    |
+  6 |     args :: process.argv().skip(1)
+    |                            ^^^^
+ Why: process.args() owns the program argument view after argv[0], so the boundary stays in one Core API
+ Fix: replace process.argv().skip(1) with process.args()
+More: jet-lang.dev/e/L0515

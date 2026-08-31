@@ -7,7 +7,6 @@
 use core.encoding.csv as csv
 use core.encoding.json as json
 
-#Codable
 struct Sale {
     item: String
     qty: Int
@@ -25,9 +24,8 @@ fn run() ![FieldError] {
     // Every row that fails accumulates instead of stopping the decode, and the
     // whole list prints in one hole — no hand loop over `.path`/`.reason`.
     bad_raw :: "item,qty\npen,x\nink,y"
-    attempted :: csv.decode<Sale>(bad_raw)
-    if attempted == {
-        .Ok(rows) -> { print("decoded {rows.len()} rows") }
-        .Err(errs) -> { print("{errs}") }
+    _attempted :: csv.decode<Sale>(bad_raw) ?? {
+        print("{err}")
+        []
     }
 }

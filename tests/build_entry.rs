@@ -42,6 +42,7 @@ fn opts() -> BuildRunOptions {
         remote: None,
         package_scope: true,
         build_override: true,
+        entry_fn: None,
     }
 }
 
@@ -250,8 +251,8 @@ fn build(b: BuildContext) BuildPlan -> {
 }
 
 #[test]
-fn multi_dependency_build_restores_every_unchanged_compiler_artifact() {
-    let (root, _) = multi_dependency_fixture("package-artifact-restore");
+fn multi_dependency_build_restores_semantic_noop_compiler_artifact() {
+    let (root, dep_b_source) = multi_dependency_fixture("package-artifact-restore");
     let entry = root.join("main.jet");
 
     let first = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
@@ -280,6 +281,12 @@ fn multi_dependency_build_restores_every_unchanged_compiler_artifact() {
         3
     );
 
+    // A comment-only edit is not package source meaning and must keep every
+    // compiler-owned artifact cacheable.
+    write(
+        &dep_b_source,
+        "// semantic no-op\npub fn value() Int -> { return 2 }\n",
+    );
     let second = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     let second_build = second.build.expect("warm dependency build should run");
     assert_eq!(second_build.execution.metrics.cache_restored_actions, 3);
@@ -401,18 +408,22 @@ fn compiler_speed_phase_timing_reports_real_release_build() {
     );
 
     let frontend = fs::read_to_string(timing.join("jet-timing.json")).unwrap();
-    for phase in ["parse", "sema", "ffi", "tir", "emission", "rust_bytes"] {
-        assert!(
-            frontend.contains(&format!("\"name\":\"{phase}\"")),
-            "frontend timing report is missing {phase}: {frontend}"
-        );
+    let phase_us = |report: &str, phase: &str| -> u64 {
+        let marker = format!("\"name\":\"{phase}\",\"us\":");
+        let value = report
+            .split_once(&marker)
+            .and_then(|(_, tail)| tail.split([',', '}']).next())
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_else(|| panic!("timing report has no positive {phase} duration: {report}"));
+        assert!(value > 0, "timing report recorded zero {phase} duration: {report}");
+        value
+    };
+    for phase in ["parse", "sema", "ffi", "tir", "emission", "cache_key", "rust_bytes"] {
+        phase_us(&frontend, phase);
     }
     let backend = fs::read_to_string(timing.join("build/jet-timing-backend.json")).unwrap();
-    assert!(
-        backend.contains("\"name\":\"backend\"")
-            && backend.contains("\"name\":\"link\""),
-        "backend timing report is missing backend/link: {backend}"
-    );
+    phase_us(&backend, "backend");
+    phase_us(&backend, "link");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("jet-timing binary_bytes="),
@@ -420,6 +431,120 @@ fn compiler_speed_phase_timing_reports_real_release_build() {
     );
     assert!(root.join("build/main").is_file());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiler_speed_plan_and_corpus_are_removal_sensitive() {
+    const PLAN: &str = include_str!("../docs/plans/compiler-speed.md");
+    const CORPUS: &str = include_str!("../tools/perf/corpus.tsv");
+    const DASHBOARD: &str = include_str!("../tools/perf/dashboard.sh");
+    const JOB_SOURCE: &str = include_str!("../examples/features/devloop/job_runner.jet");
+
+    let corpus_programs: Vec<_> = CORPUS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            line.split('\t')
+                .next()
+                .expect("compiler-speed corpus row must name a program")
+        })
+        .collect();
+    assert_eq!(
+        corpus_programs,
+        vec![
+            "examples/features/basics/hello.jet",
+            "examples/features/collections/wordcount.jet",
+            "examples/features/serde/json.jet",
+            "examples/features/basics/pattern_matching.jet",
+            "examples/features/devloop/job_runner.jet",
+        ],
+        "compiler-speed corpus must keep its exact five-row order with job_runner fifth"
+    );
+
+    let row = CORPUS
+        .lines()
+        .find(|line| line.starts_with("examples/features/devloop/job_runner.jet\t"))
+        .expect("compiler-speed corpus must keep the representative project row");
+    let fields: Vec<_> = row.split('\t').collect();
+    assert_eq!(fields.len(), 8, "representative project row must pin all identities");
+    assert_eq!(fields[1], "examples/features/expected/devloop/job_runner.greet.out");
+    assert_eq!(fields[4], "tools/perf/edits/job_runner.jet");
+    assert_eq!(fields[5], "tools/perf/edits/job_runner.out");
+    assert_ne!(fields[3], fields[7], "changed job behavior must change its golden");
+    assert_ne!(fields[0], fields[4]);
+    assert_eq!(
+        include_str!("../examples/features/expected/devloop/job_runner.greet.out"),
+        "hello from job\n"
+    );
+    assert_eq!(include_str!("../tools/perf/edits/job_runner.out"), "hello from edited job\n");
+    for requirement in [
+        "#[Job(.Ship)",
+        "#[Job(.Dev)",
+        "#Job(.Internal)",
+        "Every(5min)",
+        "seed_data()",
+        "greet()",
+    ] {
+        assert!(
+            JOB_SOURCE.contains(requirement),
+            "job-runner corpus witness lost {requirement}"
+        );
+    }
+    for &digest in [fields[2], fields[3], fields[6], fields[7]].iter() {
+        assert_eq!(digest.len(), 64, "corpus digest is not SHA-256: {digest}");
+        assert!(
+            digest.chars().all(|character| character.is_ascii_hexdigit()),
+            "corpus digest is not hexadecimal: {digest}"
+        );
+    }
+
+    let plan_requirements = [
+        "## #1023 checked corpus and phase-timing canary",
+        "tests/build_entry.rs::compiler_speed_phase_timing_reports_real_release_build",
+        "tests/build_entry.rs::compiler_speed_plan_and_corpus_are_removal_sensitive",
+        "The corpus includes a representative project witness,",
+        "The active corpus rows are ordered",
+        "`examples/features/devloop/job_runner.jet`; the representative job is fifth.",
+        "changes the selected `greet` job output and its checked golden.",
+        "warm default-tier edit-to-output",
+        "the `jet run run.jet -- greet`",
+        "through `jet dev` by the parity rail",
+        "The named-job contract also runs",
+        "`seed_data` through default `jet run`,",
+        "`jet jobs` pins the",
+        "release runs `greet` and rejects the stripped",
+    ];
+    let plan_is_intact = |plan: &str| {
+        plan_requirements
+            .iter()
+            .all(|requirement| plan.contains(requirement))
+    };
+    assert!(plan_is_intact(PLAN), "compiler-speed plan contract is incomplete");
+
+    let bypassed = PLAN.replacen(
+        "warm default-tier edit-to-output",
+        "warm default-tier timing",
+        1,
+    );
+    assert_ne!(bypassed, PLAN, "compiler-speed plan canary mutation did not apply");
+    assert!(
+        !plan_is_intact(&bypassed),
+        "the corpus speed proof must fail when its plan contract is bypassed"
+    );
+
+    for requirement in [
+        "job_argument_for_program()",
+        "examples/features/devloop/job_runner.jet|tools/perf/edits/job_runner.jet",
+        "\"$JET_BIN\" run run.jet -- seed_data",
+        "\"$JET_BIN\" run --interpret run.jet -- seed_data",
+        "\"$JET_BIN\" jobs",
+        "parity_check_job_runner_case edit tools/perf/edits/job_runner.jet",
+    ] {
+        assert!(
+            DASHBOARD.contains(requirement),
+            "job-runner measurement contract lost {requirement}"
+        );
+    }
 }
 
 #[test]

@@ -64,11 +64,7 @@ fn append_checked_signature(hover: &mut String, checked_signature: &str) {
     hover.push_str(&checked_signature);
 }
 
-fn state_graph_hover_at(
-    db: &SymbolDB,
-    module_path: &str,
-    span: Span,
-) -> Option<String> {
+fn state_graph_hover_at(db: &SymbolDB, module_path: &str, span: Span) -> Option<String> {
     db.hover
         .iter()
         .find(|hover| {
@@ -148,7 +144,9 @@ pub(crate) fn compute_hover(
     }) {
         if let Some(target) = &reference.target {
             if target.kind == "state" {
-                if let Some(hover) = state_graph_hover_at(db, &target.module_path, target.def_span.into()) {
+                if let Some(hover) =
+                    state_graph_hover_at(db, &target.module_path, target.def_span.into())
+                {
                     return Some(hover);
                 }
             }
@@ -317,9 +315,10 @@ pub(crate) fn semantic_symbol_at_span<'a>(
     path: &str,
     span: Span,
 ) -> Option<&'a jet_semindex::SemanticSymbol> {
-    db.symbols.symbols().iter().find(|symbol| {
-        symbol.module_path == path && symbol.span == Some(span.into())
-    })
+    db.symbols
+        .symbols()
+        .iter()
+        .find(|symbol| symbol.module_path == path && symbol.span == Some(span.into()))
 }
 
 /// Stable LSP extension for nominal definitions. Standard navigation results
@@ -329,15 +328,12 @@ pub(crate) fn semantic_symbol_metadata_json(
     db: &SymbolDB,
     symbol: &jet_semindex::SemanticSymbol,
 ) -> Option<String> {
-    let definition = db
-        .index
-        .lookup_identity(&symbol.identity)
-        .or_else(|| {
-            let span = symbol.span?;
-            db.index.definitions().iter().find(|definition| {
-                definition.module_path == symbol.module_path && definition.def_span == span
-            })
-        })?;
+    let definition = db.index.lookup_identity(&symbol.identity).or_else(|| {
+        let span = symbol.span?;
+        db.index.definitions().iter().find(|definition| {
+            definition.module_path == symbol.module_path && definition.def_span == span
+        })
+    })?;
     if definition.nominal_base.is_none() && definition.trait_contracts.is_empty() {
         return None;
     }
@@ -784,10 +780,8 @@ mod generic_instance_tests {
 
     #[test]
     fn typestate_navigation_and_completion_keep_the_struct_owner() {
-        let root = std::env::temp_dir().join(format!(
-            "jet_lsp_typestate_owner_{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet_lsp_typestate_owner_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
@@ -814,24 +808,27 @@ mod generic_instance_tests {
         let (definition_path, definition_span) =
             compute_definition(&db, &tokens, source, &shown, closed).expect("state definition");
         assert_eq!(definition_path, shown);
-        assert_eq!(&source[definition_span.start..definition_span.end], "Closed");
+        assert_eq!(
+            &source[definition_span.start..definition_span.end],
+            "Closed"
+        );
 
         let references = compute_references(&db, &tokens, &shown, closed, true);
-        assert!(references.iter().any(|(path, span)| {
-            path == &shown && &source[span.start..span.end] == "Closed"
-        }));
+        assert!(references
+            .iter()
+            .any(|(path, span)| { path == &shown && &source[span.start..span.end] == "Closed" }));
         assert!(references.iter().any(|(path, span)| {
             path == &shown && &source[span.start..span.end] == "Door.State.Closed"
         }));
 
-        let renamed = compute_rename(&db, &tokens, &shown, closed, "Sealed")
-            .expect("state rename");
-        assert!(renamed.iter().all(|(path, span)| {
-            path == &shown && &source[span.start..span.end] == "Closed"
-        }));
+        let renamed = compute_rename(&db, &tokens, &shown, closed, "Sealed").expect("state rename");
+        assert!(renamed
+            .iter()
+            .all(|(path, span)| { path == &shown && &source[span.start..span.end] == "Closed" }));
 
         let completion_source = format!("{source}fn editor() {{\n    Door.State.\n}}\n");
-        let completion_offset = completion_source.find("Door.State.\n").unwrap() + "Door.State.".len();
+        let completion_offset =
+            completion_source.find("Door.State.\n").unwrap() + "Door.State.".len();
         let labels = compute_completions(
             &db,
             &completion_source,
@@ -916,7 +913,10 @@ fn state_anchor_matches(
 }
 
 fn state_leaf_span(reference: &jet_semindex::SymRef) -> Option<Span> {
-    let target = reference.target.as_ref().filter(|target| target.kind == "state")?;
+    let target = reference
+        .target
+        .as_ref()
+        .filter(|target| target.kind == "state")?;
     let leaf_len = target.def_span.end.saturating_sub(target.def_span.start);
     Some(Span::new(
         reference.span.end.saturating_sub(leaf_len),
@@ -1118,7 +1118,8 @@ pub(crate) fn compute_refactor_actions(
     excluded_import_paths: &std::collections::HashSet<String>,
     requested: Span,
 ) -> Vec<RefactorAction> {
-    let mut actions = import_actions(
+    let mut actions = adjacent_subject_dispatch_actions(diagnostics, requested);
+    actions.extend(import_actions(
         db,
         diagnostics,
         src,
@@ -1127,7 +1128,7 @@ pub(crate) fn compute_refactor_actions(
         import_sources,
         excluded_import_paths,
         requested,
-    );
+    ));
     let Some(selected) = trim_span(src, requested) else {
         actions.extend(inline_actions(db, tokens, src, path, requested));
         return actions;
@@ -1173,6 +1174,31 @@ pub(crate) fn compute_refactor_actions(
         actions.extend(inline_actions(db, tokens, src, path, selected));
     }
     actions
+}
+
+fn adjacent_subject_dispatch_actions(
+    diagnostics: &[Diagnostic],
+    requested: Span,
+) -> Vec<RefactorAction> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "L0514")
+        .filter(|diagnostic| {
+            diagnostic
+                .edit
+                .as_ref()
+                .map(|edit| spans_touch(edit.span, requested))
+                .or_else(|| diagnostic.span.map(|span| spans_touch(span, requested)))
+                .unwrap_or(false)
+        })
+        .filter_map(|diagnostic| {
+            diagnostic.edit.clone().map(|edit| RefactorAction {
+                title: "Rewrite adjacent guards as an ordered subject table".to_string(),
+                kind: "refactor.rewrite",
+                edits: vec![edit],
+            })
+        })
+        .collect()
 }
 
 fn import_actions(
@@ -2223,10 +2249,7 @@ fn encode_semantic_tokens_where(
     data
 }
 
-fn arithmetic_modifier(
-    token: &Span,
-    arithmetic: &[jet_semindex::ArithmeticOperationFact],
-) -> u32 {
+fn arithmetic_modifier(token: &Span, arithmetic: &[jet_semindex::ArithmeticOperationFact]) -> u32 {
     arithmetic
         .iter()
         .filter(|fact| {

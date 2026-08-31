@@ -12,6 +12,12 @@ impl<'a> Checker<'a> {
         let Some(modules) = self.modules else {
             return false;
         };
+        if let Some((_, leaf)) = name.rsplit_once("::") {
+            return self.name_ledger.nominal_module(name).is_some_and(|idx| {
+                modules[idx].trait_reg.implements_trait(leaf, trait_name)
+                    && self.type_is_pub_in(idx, leaf)
+            });
+        }
         if let Some((alias, leaf)) = name.split_once('.') {
             return self.imports.get(alias).is_some_and(|idx| {
                 modules[*idx].trait_reg.implements_trait(leaf, trait_name)

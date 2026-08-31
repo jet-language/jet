@@ -13,8 +13,8 @@ use crate::AST::{Expr, Item, Namespace, StrPart};
 use super::super::Merge;
 use super::super::RefSpec::{self, ProviderKind, RefError, Source, SourceTable};
 use super::Diagnostics::{
-    bad_import_directive, bad_source_ref, discovered_module_imports, find_dir_missing,
-    fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
+    bad_import_directive, bad_source_ref, discovered_module_imports, fleet_unknown_system,
+    image_from_unknown_system, merge_error_to_diagnostic,
     oci_from_non_executable, retired_nixpkgs_source_ref,
 };
 use super::Environment::{
@@ -28,6 +28,106 @@ use super::Types::{
     SecretSpec, SystemPlan,
 };
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+use jet_pkg_model::Package::PackageFacts;
+
+/// Read-only source access for an environment graph. Paths passed to the
+/// loader are relative to the pinned environment root; returned file paths
+/// use that same relative coordinate system. The compiler-facing package
+/// reader supplies an authority-backed implementation so profile evaluation
+/// cannot fall back to ambient filesystem reads.
+pub trait SourceLoader {
+    fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic>;
+
+    fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic>;
+
+    /// Package cross-checks are needed only for image declarations. A loader
+    /// may decline them when the graph has no image that names a package.
+    fn package_facts(&mut self) -> Result<Option<PackageFacts>, Diagnostic> {
+        Ok(None)
+    }
+}
+
+struct FileSystemSourceLoader {
+    root: PathBuf,
+}
+
+impl SourceLoader for FileSystemSourceLoader {
+    fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic> {
+        let path = self.checked_path(relative)?;
+        std::fs::read_to_string(&path).map_err(|error| source_loader_error(&path, error.to_string()))
+    }
+
+    fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+        let directory = self.checked_path(relative)?;
+        let entries = std::fs::read_dir(&directory)
+            .map_err(|error| source_loader_error(&directory, error.to_string()))?;
+        let mut files = Vec::new();
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| source_loader_error(&directory, error.to_string()))?;
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str())
+                != Some(Syntax::FILE_EXT)
+            {
+                continue;
+            }
+            let canonical = std::fs::canonicalize(&path)
+                .map_err(|error| source_loader_error(&path, error.to_string()))?;
+            if !canonical.starts_with(&self.root) || !canonical.is_file() {
+                return Err(source_loader_error(
+                    &path,
+                    "source import resolves outside the environment root".to_string(),
+                ));
+            }
+            let relative = canonical
+                .strip_prefix(&self.root)
+                .map_err(|_| source_loader_error(&canonical, "source import escapes root"))?
+                .to_path_buf();
+            files.push(relative);
+        }
+        files.sort();
+        Ok(files)
+    }
+
+    fn package_facts(&mut self) -> Result<Option<PackageFacts>, Diagnostic> {
+        Ok(PackageFacts::load(&self.root).and_then(|result| result.ok()))
+    }
+}
+
+impl FileSystemSourceLoader {
+    fn checked_path(&self, relative: &Path) -> Result<PathBuf, Diagnostic> {
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+        {
+            return Err(source_loader_error(
+                relative,
+                "source import path must stay below the environment root",
+            ));
+        }
+        let path = self.root.join(relative);
+        let canonical = std::fs::canonicalize(&path)
+            .map_err(|error| source_loader_error(&path, error.to_string()))?;
+        if !canonical.starts_with(&self.root) {
+            return Err(source_loader_error(
+                &path,
+                "source import resolves outside the environment root",
+            ));
+        }
+        Ok(canonical)
+    }
+}
+
+fn source_loader_error(path: &Path, cause: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(
+        "E1331",
+        format!("environment source `{}` cannot be read", path.display()),
+        cause.into(),
+        "restore a regular source file below the environment root".to_string(),
+        None,
+    )
+}
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -362,6 +462,38 @@ pub fn evaluate_env_with_selections(
     requested_preset: Option<&str>,
     requested_environment: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
+    let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+        Diagnostic::error(
+            "E1331",
+            format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
+            "one environment graph must resolve from a real project directory before it follows imports or path-backed facts".to_string(),
+            "run the command from an existing project directory".to_string(),
+            None,
+        )
+    })?;
+    let mut loader = FileSystemSourceLoader {
+        root: environment_root.clone(),
+    };
+    evaluate_env_with_source_loader(
+        src,
+        &environment_root,
+        &mut loader,
+        requested_preset,
+        requested_environment,
+    )
+}
+
+/// Evaluate an environment with caller-owned, authority-checked source access.
+/// This is the same graph evaluator as [`evaluate_env_with_selections`]; only
+/// the file and directory boundary changes. Package tooling uses it to keep
+/// every imported profile source inside the already-pinned package root.
+pub fn evaluate_env_with_source_loader(
+    src: &str,
+    base_dir: &Path,
+    loader: &mut dyn SourceLoader,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
         Diagnostic::error(
@@ -382,7 +514,7 @@ pub fn evaluate_env_with_selections(
         base_dir: environment_root.clone(),
         source_path: environment_root.join(Syntax::ENV_FILE),
     }];
-    let discovered = discover_imports(&units[0], &environment_root)?;
+    let discovered = discover_imports(&units[0], &environment_root, loader)?;
     units.extend(discovered);
     let source_files = units
         .iter()
@@ -634,7 +766,14 @@ pub fn evaluate_env_with_selections(
     // this project's own `pkg.jet` `packages:` block (E1267) — a different
     // manifest than the `env.jet`/`config.jet` this pass is evaluating, so it's
     // loaded fresh here rather than threaded through as a plan field.
-    let manifest = super::super::Package::PackageFacts::load(base_dir).and_then(|r| r.ok());
+    let needs_package_facts = images.iter().any(|image| {
+        matches!(image.kind, ImageKind::Oci) && !image.from_environment
+    });
+    let manifest = if needs_package_facts {
+        loader.package_facts()?
+    } else {
+        None
+    };
     for image in &images {
         match image.kind {
             ImageKind::Iso => {
@@ -925,7 +1064,11 @@ struct EvalUnit {
 /// discovery). Discovery is one level deep: a discovered file may not itself
 /// import (the liftability law — modules contribute to the merged whole, they
 /// don't import each other; violations are E0971).
-fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, Diagnostic> {
+fn discover_imports(
+    root: &EvalUnit,
+    base_dir: &Path,
+    loader: &mut dyn SourceLoader,
+) -> Result<Vec<EvalUnit>, Diagnostic> {
     let mut out = Vec::new();
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
         Diagnostic::error(
@@ -971,40 +1114,32 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
                     Some(imp.span()),
                 ));
             }
-            let dir = base_dir.join(&rel);
-            let real_dir =
-                std::fs::canonicalize(&dir).map_err(|_| find_dir_missing(&dir, imp.span()))?;
-            if !real_dir.starts_with(&environment_root) {
-                return Err(Diagnostic::error(
-                    "E1331",
-                    format!("module import `{rel}` resolves outside the environment root"),
-                    "imports follow physical paths and cannot cross the project boundary".to_string(),
-                    "remove the escaping symlink or move the imported directory below the project root".to_string(),
-                    Some(imp.span()),
-                ));
-            }
-            for file in list_jet_files(&real_dir, imp)? {
-                let canonical_file = std::fs::canonicalize(&file)
-                    .map_err(|_| find_dir_missing(&real_dir, imp.span()))?;
-                if !canonical_file.starts_with(&environment_root) || !canonical_file.is_file() {
+            let files = loader.list_jet_files(relative)?;
+            for file_relative in files {
+                if file_relative.is_absolute()
+                    || !file_relative.starts_with(relative)
+                    || file_relative
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
+                {
                     return Err(Diagnostic::error(
                         "E1331",
                         format!(
-                            "discovered module `{}` resolves outside the environment root",
-                            file.display()
+                            "discovered module `{}` escapes the environment root",
+                            file_relative.display()
                         ),
                         "imports follow physical paths and cannot cross the project boundary"
                             .to_string(),
-                        "remove the escaping symlink or move the module below the environment root"
+                        "remove the escaping import or move the module below the environment root"
                             .to_string(),
                         Some(imp.span()),
                     ));
                 }
+                let canonical_file = environment_root.join(&file_relative);
                 if !seen_files.insert(canonical_file.clone()) {
                     continue;
                 }
-                let file_src = std::fs::read_to_string(&canonical_file)
-                    .map_err(|_| find_dir_missing(&real_dir, imp.span()))?;
+                let file_src = loader.read_file(&file_relative)?;
                 let prog = parse_program(&file_src)?;
                 // Liftability law (U4): a discovered module may not import.
                 for nested in &prog.items {
@@ -1062,21 +1197,6 @@ fn find_dir_arg(imp: &Expr) -> Result<String, Diagnostic> {
         }
     }
     Ok(path)
-}
-
-/// List the `*.jet` files directly under `dir`, sorted for determinism. A
-/// missing/unreadable directory is E0970.
-fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
-    let entries = std::fs::read_dir(dir).map_err(|_| find_dir_missing(dir, imp.span()))?;
-    let mut files = Vec::new();
-    for entry in entries {
-        let path = entry.map_err(|_| find_dir_missing(dir, imp.span()))?.path();
-        if path.extension().and_then(|e| e.to_str()) == Some(Syntax::FILE_EXT) {
-            files.push(path);
-        }
-    }
-    files.sort();
-    Ok(files)
 }
 
 /// Merge every enabled module's `sources:` block — across the root and every

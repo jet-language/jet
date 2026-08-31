@@ -208,11 +208,173 @@ fn run() {
     counts := [String:Int]{}
     counts["missing"] = (counts.get("missing") ?? 0) + 1
     counts["other"] = (counts.get("other") ?? 0) - 1
+    counts["product"] = (counts.get("product") ?? 1) * 2
     print(counts["missing"])
     print(counts["other"])
+    print(counts["product"])
 }
 "#;
-    assert_tiers_agree("tir_map_get_update", src, "1\n-1\n");
+    let rust = compile("tir_map_get_update", src);
+    assert!(
+        rust.contains("jet_std::jet_int_add_hot!")
+            && rust.contains("jet_std::jet_int_sub_hot!")
+            && rust.contains("jet_std::jet_int_mul_hot!")
+            && rust.contains("jet_map_update_string"),
+        "map updates must use the shared inline packed-Int kernels:\n{rust}"
+    );
+    assert_tiers_agree("tir_map_get_update", src, "1\n-1\n2\n");
+}
+
+#[test]
+fn card_2254_variable_operands_use_shared_hot_kernels() {
+    let src = r#"
+fn kernels(left: Int, right: Int, suffix: String) {
+    print(left + right)
+    print(left - right)
+    print(left * right)
+    print(left < right)
+    text := "a"
+    print("{text}{suffix}")
+    text += suffix
+    print(text)
+}
+fn run() {
+    kernels(7, 2, "b")
+}
+"#;
+    let rust = compile("card_2254_variable_kernels", src);
+    assert!(
+        rust.contains("jet_std::jet_int_add_hot!")
+            && rust.contains("jet_std::jet_int_sub_hot!")
+            && rust.contains("jet_std::jet_int_mul_hot!")
+            && rust.contains("jet_std::jet_int_compare_hot!")
+            && rust.contains("jet_string_concat_hot!(&("),
+        "variable operands must use the shared hot kernels:\n{rust}"
+    );
+    assert_tiers_agree(
+        "card_2254_variable_kernels",
+        src,
+        "9\n5\n14\nfalse\nab\nab\n",
+    );
+}
+
+#[test]
+fn card_2254_map_hoist_requires_unique_owner() {
+    let src = r#"
+fn run() {
+    counts := [String:Int]{}
+    alias := counts.copy()
+    loop key in ["hot"] {
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    print(alias.get("hot") ?? 0)
+    print(counts.get("hot") ?? 0)
+}
+"#;
+    let rust = compile("card_2254_map_alias", src);
+    assert!(
+        !rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+        "an aliased map must keep the ordinary COW path:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_map_alias", src, "0\n1\n");
+}
+
+#[test]
+fn card_2254_map_hoist_rejects_unknown_calls() {
+    let src = r#"
+fn observe(value: Int) Int -> {
+    return value
+}
+fn run() {
+    counts := [String:Int]{}
+    loop key in ["hot"] {
+        observe(1)
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    print(counts.get("hot") ?? 0)
+}
+"#;
+    let rust = compile("card_2254_map_call", src);
+    assert!(
+        !rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+        "a loop with an unknown call must keep the ordinary map path:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_map_call", src, "1\n");
+}
+
+#[test]
+fn card_2254_witnesses_keep_tier_parity() {
+    let int_src = include_str!("fixtures/card_2254_int_loop.jet");
+    let int_rust = compile("card_2254_int_loop_shape", int_src);
+    assert!(
+        int_rust.contains("jet_std::jet_int_add_hot!") && int_rust.contains("jet_keep"),
+        "integer witness must keep the packed fast path and its observable value:\n{int_rust}"
+    );
+    let map_src = include_str!("fixtures/card_2254_map_insert.jet");
+    let map_rust = compile("card_2254_map_insert_shape", map_src);
+    assert!(
+        map_rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+        "map witness must hoist one make_mut borrow outside its mutation loop:\n{map_rust}"
+    );
+    assert_tiers_agree(
+        "card_2254_int_loop",
+        int_src,
+        "49999995000000\n",
+    );
+    assert_tiers_agree(
+        "card_2254_sized_int_loop",
+        include_str!("fixtures/card_2254_sized_int_loop.jet"),
+        "100000\n",
+    );
+    assert_tiers_agree(
+        "card_2254_map_insert",
+        map_src,
+        "1000\n",
+    );
+}
+
+#[test]
+fn card_2254_list_hoist_requires_unique_owner() {
+    let src = r#"
+fn run() {
+    values := [Int]{0, 0, 0, 0}
+    loop i in [0, 1, 2, 3] {
+        values[i] = i + 1
+    }
+    print(values)
+}
+"#;
+    let rust = compile("card_2254_list_unique", src);
+    assert!(
+        rust.contains("let mut __jet_values = &mut *(__jet_values);"),
+        "list witness must hoist one make_mut borrow outside its mutation loop:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_list_unique", src, "[1, 2, 3, 4]\n");
+}
+
+#[test]
+fn card_2254_list_hoist_rejects_aliases() {
+    let src = r#"
+fn run() {
+    values := [Int]{0, 0, 0, 0}
+    alias := values.copy()
+    loop i in [0, 1, 2, 3] {
+        values[i] = i + 1
+    }
+    print(alias)
+    print(values)
+}
+"#;
+    let rust = compile("card_2254_list_alias", src);
+    assert!(
+        !rust.contains("let mut __jet_values = &mut *(__jet_values);"),
+        "an aliased list must keep the ordinary COW path:\n{rust}"
+    );
+    assert_tiers_agree(
+        "card_2254_list_alias",
+        src,
+        "[0, 0, 0, 0]\n[1, 2, 3, 4]\n",
+    );
 }
 
 // --- c109 Phase 6: methods + clones -----------------------------------------
@@ -713,6 +875,25 @@ fn run() {
     );
 }
 
+/// A copied String receiver must keep String builtin dispatch. The same shape
+/// appears in `dogfood/tower/run.jet:683`; losing the type at `Expr::Copy`
+/// selected the list slice helper and handed rustc `&String` where `&[T]` was
+/// required. Unicode output also proves the canonical scalar-position slice.
+#[test]
+fn copied_string_slice_uses_string_builtin() {
+    let src = "\
+fn strip_hash(reference: String) String -> {
+    text := ~reference
+    if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len())
+    return text
+}
+fn run() {
+    print(strip_hash(\"#é🙂\"))
+}
+";
+    assert_tiers_agree("tir_copied_string_slice", src, "é🙂\n");
+}
+
 /// E3 breadth: String owns the common search, trim, padding, classification,
 /// title, and single-split operations. The test runs through the TIR lowering
 /// path and proves the tuple-shaped `split_once` result is usable by name.
@@ -1084,6 +1265,39 @@ fn run() {
         lint_count, 1,
         "local #allow should suppress one nested lint; got {lint_count}"
     );
+}
+
+/// D-FMT-PLAIN1=A: the old `Fixed(n)` comma cleanup gets one exact fix. The
+/// explicit `Grouped(n)` form, arbitrary replacement text, and a local allow
+/// stay quiet.
+#[test]
+fn redundant_fixed_cleanup_lint_has_exact_fix_and_allow() {
+    let source = r#"
+fn run() {
+    value :: Float{1234.5}
+    print("{value:Fixed(2)}".replace(",", ""))
+    #allow(redundant_fixed_cleanup) print("{value:Fixed(2)}".replace(",", ""))
+    print("{value:Grouped(2)}".replace(",", ""))
+    print("1,234".replace(",", ""))
+    print("{value:Fixed(2)}".replace(",", ","))
+}
+"#;
+    let compiled = jet::compile(source).expect("the formatting lint fixture should compile");
+    let lints: Vec<_> = compiled
+        .lints
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "L0518")
+        .collect();
+    assert_eq!(lints.len(), 1, "only the exact unallowed workaround should warn");
+    let edit = lints[0]
+        .edit
+        .as_ref()
+        .expect("L0518 must carry a mechanical deletion fix");
+    assert_eq!(&source[edit.span.start..edit.span.end], ".replace(\",\", \"\")");
+    assert_eq!(edit.new_text, "");
+    let fixed = jet::FixEngine::apply_edits(source, std::slice::from_ref(edit))
+        .expect("the L0518 edit must apply");
+    assert!(fixed.contains("print(\"{value:Fixed(2)}\")"), "fixed source:\n{fixed}");
 }
 
 /// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.

@@ -4,7 +4,7 @@
   "cells": ["netserv.service"],
   "mode": "service",
   "perf": true,
-  "languages": ["jet", "go", "rust", "python"],
+  "languages": ["jet", "go", "rust", "python", "node"],
   "spec": {
     "behavior": "Serve a tiny single-process JSON key-value HTTP service. GET /health returns health, PUT /kv/<key> stores the raw request body, GET /kv/<key> reads it or returns a 404 JSON error, and GET /shutdown returns a goodbye response then exits cleanly. Every response uses Content-Type application/json.",
     "args": ["18080"],
@@ -26,6 +26,7 @@
     "jet": {"author": "luna-max", "turns": 14, "retries": 14, "diagnosticsHit": ["E1206: package.jet needs a name field", "E0002: braces in JSON strings need doubled literal braces", "E0505: list indexes must be Int, not String", "E0311: get isn't a method on Shared list/map value", "E1803: authority undecided for Exec, Mem.Rc, Panic", "rustc E0308: generated user-struct equal/compare/encode returned Result where plain values were expected", "E0119: Map is not a generic type", "rustc E0308: generated Shared list inferred Vec<i64> instead of Vec<String>", "rustc E0382: generated Rust borrowed moved key", "E0121: value is given away inside a loop", "E2404: stopped call propagated Err into the run error union", "E0405: ?? only works on a fallible value", "E0003: parenthesized loop condition parsed as loop variables", "E3001: panic: serve failed", "E0956: HTTP server callback registration requires a host callback marshaller"], "notes": "Uses raw process.argv plus Shared guards and a serve_once_listener loop. package authority expands the supplied probe budget with Exec, Mem.Rc, and Panic because argv/shared state require them. Default jet run fails verbatim with E0956: HTTP server callback registration requires a host callback marshaller; jet build AOT passes on the requested port. jet run --release passes only when probed on fallback port 18080: forwarded port 18113 was not visible to process.argv, causing connection refused and then E3001 on the idle listener. An initial AOT smoke found shared read-guard deadlock at shutdown and a one-element sentinel alignment bug; both were fixed. L0202 shared_auto_clone remains a warning."},
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses net/http."},
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0502: cannot borrow line as mutable because it is also borrowed as immutable"], "notes": "Std-only TcpListener and hand-written HTTP/1.1; Rust std has no HTTP server."},
-    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses http.server.HTTPServer subclass."}
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses http.server.HTTPServer subclass."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in node:http server with the same JSON bodies, status codes, and clean GET /shutdown path."}
   }
 }

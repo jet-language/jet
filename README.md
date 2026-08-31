@@ -6,7 +6,7 @@
 
 Jet is a compiled, memory-safe language: magic out-of-the-box for beginners,
 full expert control behind explicit opt-in. You write Jet; the compiler checks
-everything in plain language, then generates Rust for speed. No hidden `unsafe`,
+source in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
 Jet's [release policy](docs/spec/release-policy.md) explains 1.0 stability,
@@ -17,7 +17,7 @@ feature-complete scope, and release cadence.
 <!-- FEATURE_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
 <!-- FEATURE_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
 <!-- FEATURE_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
-<!-- FEATURE_CLAIM: claim.tier-parity | AOT, JIT, interpreter, and web share one Prelude/CoreLib meaning (I9/R12); engines only marshal and call it. -->
+<!-- FEATURE_CLAIM: claim.tier-parity | Tier behavior is measured across AOT, JIT, interpreter, and web; current parity remains an open checked subset. -->
 <!-- FEATURE_CLAIM: claim.static-guarantees | Static guarantees share one facts model. -->
 <!-- FEATURE_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
 <!-- FEATURE_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
@@ -125,13 +125,17 @@ headers (`if`, `loop`, `fn`) don't need them; line continuation works when
 the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 
 **Can I use this in production?**  
-The language, compiler, and core library are post-v1.0. Pin your toolchain with
-`edition:` in `package.jet` and read [versioning](docs/reference/versioning.md).
-Registry delivery is available: `jet registry publish` atomically commits immutable
-metadata and source artifacts, and `jet fetch` verifies and installs them through
-the Hangar-backed lock path. `jetpack hangar clean` and `jet self doctor --online` remain
-separate package-manager work. HTTPS clients use rustls with
-system roots by default; `core.net.tls` provides advanced client TLS configuration.
+Not as a blanket production-readiness promise yet. Jet is pre-release, and the
+current default-tier gaps are recorded in the [gauntlet audit](docs/audits/gauntlet-2026-08-27.md).
+The [release policy](docs/spec/release-policy.md) records the intended 1.0
+compatibility and edition rules. Pin your toolchain with `edition:` in
+`package.jet` when using a project.
+Package publication is still in development: `jet registry publish` runs the
+local pre-publish gate, but registry upload is not implemented yet. Use
+git-based dependencies; `jet fetch` resolves and records their lock data.
+`jetpack hangar clean` and `jet self doctor --online` remain separate
+package-manager work. HTTPS clients use rustls with system roots by default;
+`core.net.tls` provides advanced client TLS configuration.
 
 ## Repo map
 

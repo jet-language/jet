@@ -1,28 +1,19 @@
-Error [E0805]: `yield` outside a generator
-  --> tests/ui/print_lazy_iter_view.jet:9:5
-    |
-  9 |     yield 1
-    |     ^^^^^
- Why: `yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it
- Fix: declare `Stream<T> ->` on this function, or remove the `yield`
-More: jet-lang.dev/e/E0805
-
 Error [E0112]: `print` cannot show the one-pass source `HTTPBodyChunks`
   --> tests/ui/print_lazy_iter_view.jet:20:11
     |
  20 |     print(chunks)
     |           ^^^^^^
- Why: reading this value consumes it, so showing it would spend the only pass
- Fix: consume it with a `loop` and print each item instead
+ Why: Reading this value consumes it, so showing it would spend the only pass
+ Fix: Consume it with a `loop` and print each item instead
 More: jet-lang.dev/e/E0112
 
-Error [E0915]: the one-pass source `HTTPBodyChunks` has no `Display` implementation
+Error [E0915]: The one-pass source `HTTPBodyChunks` has no `Display` implementation
   --> tests/ui/print_lazy_iter_view.jet:21:21
     |
  21 |     print("chunks: {chunks}")
     |                     ^^^^^^
- Why: reading this value consumes it, so showing it would spend the only pass
- Fix: consume it with a `loop` and show each item instead
+ Why: Reading this value consumes it, so showing it would spend the only pass
+ Fix: Consume it with a `loop` and show each item instead
 More: jet-lang.dev/e/E0915
 
 Error [E0112]: `print` cannot show the one-pass source `Stream`<Int>
@@ -30,17 +21,17 @@ Error [E0112]: `print` cannot show the one-pass source `Stream`<Int>
     |
  24 |     print(stream)
     |           ^^^^^^
- Why: reading this value consumes it, so showing it would spend the only pass
- Fix: consume it with a `loop` and print each item instead
+ Why: Reading this value consumes it, so showing it would spend the only pass
+ Fix: Consume it with a `loop` and print each item instead
 More: jet-lang.dev/e/E0112
 
-Error [E0915]: the one-pass source `Stream`<Int> has no `Display` implementation
+Error [E0915]: The one-pass source `Stream`<Int> has no `Display` implementation
   --> tests/ui/print_lazy_iter_view.jet:25:21
     |
  25 |     print("stream: {stream}")
     |                     ^^^^^^
- Why: reading this value consumes it, so showing it would spend the only pass
- Fix: consume it with a `loop` and show each item instead
+ Why: Reading this value consumes it, so showing it would spend the only pass
+ Fix: Consume it with a `loop` and show each item instead
 More: jet-lang.dev/e/E0915
 
 Error [E0112]: `print` doesn't know how to show `Box`<Int>
@@ -48,8 +39,8 @@ Error [E0112]: `print` doesn't know how to show `Box`<Int>
     |
  29 |     print(Box<Int>{value: 1})
     |           ^^^^^^^^^^^^^^^^^^
- Why: print shows values that have a display
- Fix: print one of its parts instead
+ Why: Print shows values that have a display
+ Fix: Print one of its parts instead
 More: jet-lang.dev/e/E0112
 
 Error [E0112]: `print` cannot show the one-pass source `Iter`<Int>
@@ -57,6 +48,6 @@ Error [E0112]: `print` cannot show the one-pass source `Iter`<Int>
     |
  31 |     print(lazy_nums)
     |           ^^^^^^^^^
- Why: reading this value consumes it, so showing it would spend the only pass
- Fix: materialize it first: add `.to_list()` before printing; `.lazy()` or another Iter source enters the one-pass plane
+ Why: Reading this value consumes it, so showing it would spend the only pass
+ Fix: Materialize it first: add `.to_list()` before printing; `.lazy()` or another Iter source enters the one-pass plane
 More: jet-lang.dev/e/E0112

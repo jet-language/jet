@@ -10,6 +10,26 @@ use crate::Syntax;
 use crate::AST::CtKey;
 use crate::AST::{CtFloat, Type};
 
+mod ascii_kernel {
+    include!("../../../Prelude/Core/Ascii.rs");
+}
+
+fn eval_ascii_case(
+    recv: &CtValue,
+    upper: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let CtValue::Str(value) = recv else {
+        return Err(unsupported("ASCII case conversion receiver", span));
+    };
+    let value = if upper {
+        ascii_kernel::jet_text_ascii_upper(value)
+    } else {
+        ascii_kernel::jet_text_ascii_lower(value)
+    };
+    Ok(CtValue::Str(value))
+}
+
 fn eval_zip_source(value: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     if let Some((items, _)) = super::progress_iter_parts(value) {
         return Ok(items);
@@ -289,16 +309,16 @@ pub(super) fn eval_builtin(
                     });
                 if time_kind.is_some() {
                     let mut sort_error = None;
-                    items.sort_by(|left, right| {
-                        match civil_time_order_values(left, right, span) {
+                    items.sort_by(
+                        |left, right| match civil_time_order_values(left, right, span) {
                             Ok(Some(order)) => order,
                             Ok(None) => std::cmp::Ordering::Equal,
                             Err(error) => {
                                 sort_error.get_or_insert(error);
                                 std::cmp::Ordering::Equal
                             }
-                        }
-                    });
+                        },
+                    );
                     if let Some(error) = sort_error {
                         return Err(error);
                     }
@@ -325,13 +345,10 @@ pub(super) fn eval_builtin(
             apply_static_type_method("String", "from_bytes", vec![recv.clone()], span)
                 .unwrap_or_else(|| Err(unsupported("String.from_bytes", span)))
         }
-        TBuiltinOp::StringFromBytesLossy => apply_static_type_method(
-            "String",
-            "from_bytes_lossy",
-            vec![recv.clone()],
-            span,
-        )
-        .unwrap_or_else(|| Err(unsupported("String.from_bytes_lossy", span))),
+        TBuiltinOp::StringFromBytesLossy => {
+            apply_static_type_method("String", "from_bytes_lossy", vec![recv.clone()], span)
+                .unwrap_or_else(|| Err(unsupported("String.from_bytes_lossy", span)))
+        }
         TBuiltinOp::Trim => apply_method(recv, "trim", args, span),
         TBuiltinOp::TrimStart => apply_method(recv, "trim_start", args, span),
         TBuiltinOp::TrimEnd => apply_method(recv, "trim_end", args, span),
@@ -343,6 +360,13 @@ pub(super) fn eval_builtin(
         TBuiltinOp::ParseFloat => {
             apply_static_type_method("Float", "parse", vec![recv.clone()], span)
                 .unwrap_or_else(|| Err(unsupported("Float.parse", span)))
+        }
+        TBuiltinOp::IntToRadix { .. } => apply_method(recv, "to_radix", args, span),
+        TBuiltinOp::IntFromRadix { .. } => {
+            let mut values = vec![recv.clone()];
+            values.extend(args.iter().cloned());
+            apply_static_type_method("Int", "from_radix", values, span)
+                .unwrap_or_else(|| Err(unsupported("Int.from_radix", span)))
         }
         TBuiltinOp::StartsWith => apply_method(recv, "starts_with", args, span),
         TBuiltinOp::EndsWith => apply_method(recv, "ends_with", args, span),
@@ -361,6 +385,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::StringCutLast { .. } => apply_method(recv, "cut_last", args, span),
         TBuiltinOp::ToUpper => apply_method(recv, "to_upper", args, span),
         TBuiltinOp::ToLower => apply_method(recv, "to_lower", args, span),
+        TBuiltinOp::ToAsciiUpper => eval_ascii_case(recv, true, span),
+        TBuiltinOp::ToAsciiLower => eval_ascii_case(recv, false, span),
         TBuiltinOp::Repeat => apply_method(recv, "repeat", args, span),
         TBuiltinOp::Slice { .. } => apply_method(recv, "slice", args, span),
         TBuiltinOp::After => apply_method(recv, "after", args, span),

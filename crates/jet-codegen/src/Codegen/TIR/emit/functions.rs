@@ -1,5 +1,6 @@
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
 use crate::Codegen::Cx;
@@ -7,8 +8,8 @@ use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::{emit_tir_expr, emit_tir_stmts};
-use crate::AST::{AccessConvention, Type, ViewSource};
+use crate::Codegen::TIR::{emit_tir_expr, emit_tir_stmts, TExpr, TExprKind, TLocal, TPurity};
+use crate::AST::{AccessConvention, BinOp, Type, UnOp, ViewSource};
 
 fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     // A synthesized function keeps file/line/name attribution, but the source
@@ -34,6 +35,21 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
+fn emit_sentry_frame(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    if tir.uses_stack_sentry {
+        // The Prelude owns stack-address liveness. This is a marshalling hook:
+        // the engine installs one frame token for the TIR-proved lifetime and
+        // does not duplicate sentry policy here (I9). It follows the gate so
+        // fenced release code can activate the runtime witness before the
+        // token checks whether instrumentation is available.
+        out.push_str(&format!(
+            "{}let _jet_sentry_frame = {}jet_mem::jet_sentry_frame();\n",
+            "    ".repeat(indent),
+            cx.root_prefix,
+        ));
+    }
+}
+
 fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     let Some(gate) = tir.unsafe_gate.as_ref() else {
         return;
@@ -50,11 +66,593 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
-/// D-SIMD3=B: render the vectorizable inline boundary only when sema supplied
-/// the complete elementwise proof. `#Scalar` suppresses it; its loop barrier is
-/// emitted instead. This is a native codegen hint, not a second semantic check.
+#[derive(Clone, Copy)]
+enum NativeFloat {
+    F32,
+    F64,
+}
+
+impl NativeFloat {
+    fn from_type(ty: &Type) -> Option<Self> {
+        match ty {
+            Type::Float32 => Some(Self::F32),
+            Type::Float => Some(Self::F64),
+            _ => None,
+        }
+    }
+
+    fn scalar_name(self) -> &'static str {
+        match self {
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+
+    fn width(self, extent: usize) -> Option<usize> {
+        match self {
+            Self::F32 if extent >= 8 => Some(8),
+            Self::F32 if extent >= 4 => Some(4),
+            Self::F64 if extent >= 4 => Some(4),
+            Self::F64 if extent >= 2 => Some(2),
+            _ => None,
+        }
+    }
+
+    fn max_width(self) -> usize {
+        match self {
+            Self::F32 => 8,
+            Self::F64 => 4,
+        }
+    }
+}
+
+struct NativeVectorPlan<'a> {
+    facts: &'a crate::AST::AutoVectorizationFacts,
+    element: NativeFloat,
+    width: usize,
+    extent: Option<usize>,
+    end: &'a TExpr,
+    var: &'a str,
+    body: &'a [TStmt],
+    stores: Vec<(&'a TLocal, &'a TExpr)>,
+}
+
+fn same_native_local(left: &TLocal, right: &TLocal) -> bool {
+    left.rust_name() == right.rust_name() && left.deref == right.deref
+}
+
+fn native_scalar_type(ty: &Type, element: NativeFloat) -> bool {
+    matches!(
+        (element, ty),
+        (NativeFloat::F32, Type::Float32) | (NativeFloat::F64, Type::Float)
+    )
+}
+
+fn native_vector_expr_supported(
+    expr: &TExpr,
+    var: &str,
+    element: NativeFloat,
+    extent: Option<usize>,
+    outputs: &[&TLocal],
+    current_output: &TLocal,
+) -> bool {
+    if !native_scalar_type(&expr.ty, element) {
+        return false;
+    }
+    match &expr.kind {
+        TExprKind::IntLit(..) | TExprKind::FloatLit(..) => true,
+        TExprKind::Local(local) => {
+            !local.is_persistent()
+                && !local.uninit_scalar
+                && !local.uninit_fixed
+                && local.name != var
+                && !outputs
+                    .iter()
+                    .any(|output| same_native_local(local, output))
+        }
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            uninit_fixed,
+            ..
+        } => {
+            if *is_map || *uninit_fixed {
+                return false;
+            }
+            let TExprKind::Local(base_local) = &base.kind else {
+                return false;
+            };
+            let TExprKind::Local(index_local) = &index.kind else {
+                return false;
+            };
+            let elem = match &base.ty {
+                Type::FixedList { elem, len } => {
+                    let Some(length) = len.literal_value() else {
+                        return false;
+                    };
+                    if usize::try_from(length).ok() != extent {
+                        return false;
+                    }
+                    elem
+                }
+                Type::List(elem) => elem,
+                _ => return false,
+            };
+            !base_local.is_persistent()
+                && !base_local.uninit_fixed
+                && !outputs.iter().any(|output| {
+                    same_native_local(base_local, output)
+                        && !same_native_local(base_local, current_output)
+                })
+                && index_local.name == var
+                && !index_local.deref
+                && !index_local.is_persistent()
+                && native_scalar_type(elem, element)
+        }
+        TExprKind::Binary { op, lhs, rhs, .. } => {
+            matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                && native_vector_expr_supported(lhs, var, element, extent, outputs, current_output)
+                && native_vector_expr_supported(rhs, var, element, extent, outputs, current_output)
+        }
+        TExprKind::Unary {
+            op: UnOp::Neg,
+            operand,
+        } => native_vector_expr_supported(operand, var, element, extent, outputs, current_output),
+        _ => false,
+    }
+}
+
+/// Build the lowering plan from a sema-attached loop fact. The shape checks
+/// below select a renderer; they do not infer aliasing, purity, bounds, or
+/// control-flow legality. Any unsupported shape returns to the ordinary TIR
+/// emitter.
+fn native_vectorization_plan(stmt: &TStmt) -> Option<NativeVectorPlan<'_>> {
+    let TStmt::Range {
+        label: None,
+        var,
+        source: None,
+        start,
+        end,
+        step: None,
+        exclusive: true,
+        auto_vectorization: Some(facts),
+        body,
+    } = stmt
+    else {
+        return None;
+    };
+    if !is_complete_auto_vectorization(facts) || stmt.fact_channel().purity != TPurity::Pure {
+        return None;
+    }
+    if !matches!(&start.kind, TExprKind::IntLit(0, _)) {
+        return None;
+    }
+    let mut extent = match &end.kind {
+        TExprKind::IntLit(value, _) if *value >= 0 => Some(usize::try_from(*value).ok()?),
+        _ => None,
+    };
+    let element = NativeFloat::from_type(&facts.element_type)?;
+
+    let mut stores: Vec<(&TLocal, &TExpr)> = Vec::with_capacity(body.len());
+    let mut dynamic_roots = 0;
+    for stmt in body {
+        // Scoped lowering keeps source/debug metadata in the body. These nodes
+        // have no runtime meaning and must not make a proven shape look like a
+        // different loop; the original body remains available for the scalar
+        // tail, where the ordinary emitter preserves its metadata.
+        if matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)) {
+            continue;
+        }
+        let TStmt::IndexAssign {
+            uninit: false,
+            base,
+            index,
+            is_map: false,
+            value,
+        } = stmt
+        else {
+            return None;
+        };
+        let TExprKind::Local(base_local) = &base.kind else {
+            return None;
+        };
+        let TExprKind::Local(index_local) = &index.kind else {
+            return None;
+        };
+        let elem = match &base.ty {
+            Type::FixedList { elem, len } => {
+                if dynamic_roots != 0 {
+                    return None;
+                }
+                let length = usize::try_from(len.literal_value()?).ok()?;
+                if extent.is_some_and(|known| known != length) {
+                    return None;
+                }
+                extent = Some(length);
+                elem
+            }
+            Type::List(elem) => {
+                if extent.is_some() || dynamic_roots != 0 {
+                    return None;
+                }
+                dynamic_roots += 1;
+                elem
+            }
+            _ => return None,
+        };
+        if !base_local.mutable && !base_local.deref
+            || base_local.is_persistent()
+            || index_local.name.as_str() != var.as_str()
+            || index_local.deref
+            || index_local.is_persistent()
+            || !native_scalar_type(elem, element)
+            || !native_scalar_type(&value.ty, element)
+            || stores
+                .iter()
+                .any(|(output, _)| same_native_local(output, base_local))
+        {
+            return None;
+        }
+        stores.push((base_local, value));
+    }
+    if stores.is_empty() {
+        return None;
+    }
+    let width = match extent {
+        Some(extent) => element.width(extent)?,
+        None => element.max_width(),
+    };
+    let outputs = stores.iter().map(|(local, _)| *local).collect::<Vec<_>>();
+    if stores.iter().any(|(output, value)| {
+        !native_vector_expr_supported(value, var, element, extent, &outputs, output)
+    }) {
+        return None;
+    }
+    Some(NativeVectorPlan {
+        facts,
+        element,
+        width,
+        extent,
+        end,
+        var,
+        body,
+        stores,
+    })
+}
+
+fn native_simd_helper(element: NativeFloat, width: usize, op: BinOp) -> Option<&'static str> {
+    match (element, width, op) {
+        (NativeFloat::F32, 4, BinOp::Add) => Some("jet_simd_f32x4_add_array"),
+        (NativeFloat::F32, 4, BinOp::Sub) => Some("jet_simd_f32x4_sub_array"),
+        (NativeFloat::F32, 4, BinOp::Mul) => Some("jet_simd_f32x4_mul_array"),
+        (NativeFloat::F32, 4, BinOp::Div) => Some("jet_simd_f32x4_div_array"),
+        (NativeFloat::F32, 8, BinOp::Add) => Some("jet_simd_f32x8_add_array"),
+        (NativeFloat::F32, 8, BinOp::Sub) => Some("jet_simd_f32x8_sub_array"),
+        (NativeFloat::F32, 8, BinOp::Mul) => Some("jet_simd_f32x8_mul_array"),
+        (NativeFloat::F32, 8, BinOp::Div) => Some("jet_simd_f32x8_div_array"),
+        (NativeFloat::F64, 2, BinOp::Add) => Some("jet_simd_f64x2_add_array"),
+        (NativeFloat::F64, 2, BinOp::Sub) => Some("jet_simd_f64x2_sub_array"),
+        (NativeFloat::F64, 2, BinOp::Mul) => Some("jet_simd_f64x2_mul_array"),
+        (NativeFloat::F64, 2, BinOp::Div) => Some("jet_simd_f64x2_div_array"),
+        (NativeFloat::F64, 4, BinOp::Add) => Some("jet_simd_f64x4_add_array"),
+        (NativeFloat::F64, 4, BinOp::Sub) => Some("jet_simd_f64x4_sub_array"),
+        (NativeFloat::F64, 4, BinOp::Mul) => Some("jet_simd_f64x4_mul_array"),
+        (NativeFloat::F64, 4, BinOp::Div) => Some("jet_simd_f64x4_div_array"),
+        _ => None,
+    }
+}
+/// A proven F64x4 loop can keep its intermediate values in the Prelude's
+/// native carrier. The carrier is still a Prelude adapter: on targets without
+/// AVX it aliases the same fixed-array implementation, so this changes only
+/// register marshalling and never Jet's float operation semantics.
+fn uses_native_f64x4_carrier(plan: &NativeVectorPlan<'_>) -> bool {
+    matches!((plan.element, plan.width), (NativeFloat::F64, 4))
+}
+
+
+fn emit_native_vector_expr(
+    expr: &TExpr,
+    plan: &NativeVectorPlan<'_>,
+    index: &str,
+    cx: &Cx,
+) -> String {
+    let use_native = uses_native_f64x4_carrier(plan);
+    match &expr.kind {
+        TExprKind::IntLit(..) => {
+            let value = emit_tir_expr(expr, cx);
+            if use_native {
+                format!(
+                    "{}jet_simd_f64x4_splat_native(({}) as f64)",
+                    cx.root_prefix, value
+                )
+            } else {
+                format!(
+                    "[({}) as {}; {}]",
+                    value,
+                    plan.element.scalar_name(),
+                    plan.width
+                )
+            }
+        }
+        TExprKind::FloatLit(..) | TExprKind::Local(_) => {
+            let value = emit_tir_expr(expr, cx);
+            if use_native {
+                format!("{}jet_simd_f64x4_splat_native({})", cx.root_prefix, value)
+            } else {
+                format!("[({}); {}]", value, plan.width)
+            }
+        }
+        TExprKind::Index { base, .. } => {
+            let TExprKind::Local(local) = &base.kind else {
+                unreachable!("native vector expression plan validated the index base")
+            };
+            let lanes = (0..plan.width)
+                .map(|lane| format!("({})[{} + {}]", local.rust_place(), index, lane))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if use_native {
+                format!(
+                    "{}jet_simd_f64x4_new_native([{lanes}])",
+                    cx.root_prefix
+                )
+            } else {
+                format!("[{lanes}]")
+            }
+        }
+        TExprKind::Unary { operand, .. } => {
+            let operand = emit_native_vector_expr(operand, plan, index, cx);
+            if use_native {
+                // The native carrier has no public negation adapter yet. Keep
+                // this uncommon shape on the shared array helper, converting
+                // only at the unary boundary.
+                format!(
+                    "{}jet_simd_f64x4_new_native({}jet_simd_f64x4_neg_array(&{}jet_simd_f64x4_to_array_native({operand})))",
+                    cx.root_prefix, cx.root_prefix, cx.root_prefix
+                )
+            } else {
+                let helper = match (plan.element, plan.width) {
+                    (NativeFloat::F32, 4) => "jet_simd_f32x4_neg_array",
+                    (NativeFloat::F32, 8) => "jet_simd_f32x8_neg_array",
+                    (NativeFloat::F64, 2) => "jet_simd_f64x2_neg_array",
+                    (NativeFloat::F64, 4) => "jet_simd_f64x4_neg_array",
+                    _ => unreachable!("native vector negation width was validated"),
+                };
+                format!("{}{}(&({operand}))", cx.root_prefix, helper)
+            }
+        }
+        TExprKind::Binary { op, lhs, rhs, .. } => {
+            let lhs = emit_native_vector_expr(lhs, plan, index, cx);
+            let rhs = emit_native_vector_expr(rhs, plan, index, cx);
+            if use_native {
+                let helper = match op {
+                    BinOp::Add => "add",
+                    BinOp::Sub => "sub",
+                    BinOp::Mul => "mul",
+                    BinOp::Div => "div",
+                    _ => unreachable!("native vector binary operator was validated"),
+                };
+                format!(
+                    "{}jet_simd_f64x4_{helper}_native(({lhs}), ({rhs}))",
+                    cx.root_prefix
+                )
+            } else {
+                let helper = native_simd_helper(plan.element, plan.width, *op)
+                    .expect("native vector expression plan validated the binary operator");
+                format!("{}{}(&({lhs}), &({rhs}))", cx.root_prefix, helper)
+            }
+        }
+        _ => unreachable!("native vector expression plan validated the expression shape"),
+    }
+}
+
+
+fn emit_native_vectorized_range(
+    plan: &NativeVectorPlan<'_>,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+) {
+    let pad = "    ".repeat(indent);
+    let index = mangle_generated("simd_index");
+    let end = mangle_generated("simd_end");
+    let extent = plan
+        .extent
+        .map_or_else(|| "dynamic".to_string(), |extent| extent.to_string());
+    out.push_str(&format!(
+        "{pad}/* jet-auto-vectorize-loop: backend=prelude-runtime-dispatch element={} width={} extent={} */\n",
+        plan.facts.element_type.name(), plan.width, extent
+    ));
+    out.push_str(&format!("{pad}let mut {index}: usize = 0;\n"));
+    out.push_str(&format!(
+        "{pad}let {end}: usize = ({}) as usize;\n",
+        emit_tir_expr(plan.end, cx)
+    ));
+    out.push_str(&format!(
+        "{pad}while {index} + {} <= {end} {{\n",
+        plan.width
+    ));
+    let use_native = uses_native_f64x4_carrier(plan);
+    let vector_values = plan
+        .stores
+        .iter()
+        .enumerate()
+        .map(|(slot, (_, value))| {
+            let name = mangle_generated(&format!("simd_value_{slot}"));
+            let value = emit_native_vector_expr(value, plan, &index, cx);
+            out.push_str(&format!(
+                "{}let {name} = {value};\n",
+                "    ".repeat(indent + 1)
+            ));
+            if use_native {
+                let array_name = mangle_generated(&format!("simd_array_{slot}"));
+                out.push_str(&format!(
+                    "{}let {array_name} = {}jet_simd_f64x4_to_array_native({name});\n",
+                    "    ".repeat(indent + 1),
+                    cx.root_prefix,
+                ));
+                array_name
+            } else {
+                name
+            }
+        })
+        .collect::<Vec<_>>();
+    for (slot, (local, _)) in plan.stores.iter().enumerate() {
+        for lane in 0..plan.width {
+            out.push_str(&format!(
+                "{}{}[{} + {}] = {}[{}];\n",
+                "    ".repeat(indent + 1),
+                local.rust_place(),
+                index,
+                lane,
+                vector_values[slot],
+                lane
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "{}{} += {};\n",
+        "    ".repeat(indent + 1),
+        index,
+        plan.width
+    ));
+    out.push_str(&format!("{pad}}}\n"));
+    if plan.extent.map_or(true, |extent| extent % plan.width != 0) {
+        let loop_var = mangle(plan.var);
+        out.push_str(&format!(
+            "{pad}for {loop_var} in ({index} as i64)..({end} as i64) {{\n"
+        ));
+        emit_tir_stmts(plan.body, cx, out, indent + 1);
+        out.push_str(&format!("{pad}}}\n"));
+    }
+}
+
+/// A vectorized body is emitted in three independent lexical slices. That is
+/// safe only when no resource/deferred-close state crosses the candidate;
+/// otherwise the ordinary emitter retains its cleanup stack and semantics.
+fn contains_native_cleanup_boundary(stmts: &[TStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        TStmt::DeferClose { .. } => true,
+        TStmt::Let { init, .. } => matches!(&init.kind, TExprKind::ResourceNew(_)),
+        TStmt::RefutableBind { fallback, .. } => contains_native_cleanup_boundary(fallback),
+        TStmt::GcEdit { stmt, .. } => {
+            contains_native_cleanup_boundary(std::slice::from_ref(stmt.as_ref()))
+        }
+        TStmt::ContractScope { body, .. }
+        | TStmt::TaskGroup { body, .. }
+        | TStmt::Loop { body, .. }
+        | TStmt::While { body, .. }
+        | TStmt::Range { body, .. }
+        | TStmt::ForIn { body, .. }
+        | TStmt::Inline(body)
+        | TStmt::DebugOnly(body)
+        | TStmt::Unsafe { body, .. }
+        | TStmt::SentryPolicy { body, .. }
+        | TStmt::Impure(body)
+        | TStmt::Region(body)
+        | TStmt::Layout { body, .. }
+        | TStmt::ContextBlock { body, .. }
+        | TStmt::Live { body }
+        | TStmt::Shield { body }
+        | TStmt::ScopeMember { body, .. }
+        | TStmt::Transact { body, .. } => contains_native_cleanup_boundary(body),
+        TStmt::CountedLoop {
+            init, step, body, ..
+        } => {
+            contains_native_cleanup_boundary(std::slice::from_ref(init.as_ref()))
+                || step.as_deref().is_some_and(|step| {
+                    contains_native_cleanup_boundary(std::slice::from_ref(step))
+                })
+                || contains_native_cleanup_boundary(body)
+        }
+        TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            contains_native_cleanup_boundary(then_body)
+                || else_body
+                    .as_deref()
+                    .is_some_and(contains_native_cleanup_boundary)
+        }
+        TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .any(|arm| contains_native_cleanup_boundary(&arm.body))
+                || else_body
+                    .as_deref()
+                    .is_some_and(contains_native_cleanup_boundary)
+        }
+        TStmt::RangeSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .any(|(_, _, body)| contains_native_cleanup_boundary(body))
+                || contains_native_cleanup_boundary(else_body)
+        }
+        TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .any(|(_, body)| contains_native_cleanup_boundary(body))
+                || else_body
+                    .as_deref()
+                    .is_some_and(contains_native_cleanup_boundary)
+        }
+        _ => false,
+    })
+}
+
+fn native_vectorization_candidate(stmts: &[TStmt]) -> Option<(usize, NativeVectorPlan<'_>)> {
+    if contains_native_cleanup_boundary(stmts) {
+        return None;
+    }
+    stmts.iter().enumerate().find_map(|(index, stmt)| {
+        let plan = native_vectorization_plan(stmt)?;
+        Some((index, plan))
+    })
+}
+
+fn emit_tir_stmts_with_native_vectorization(
+    stmts: &[TStmt],
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+) -> bool {
+    if cx.scalar_function.get() {
+        return false;
+    }
+    if contains_native_cleanup_boundary(stmts) {
+        return false;
+    }
+    let mut emitted = false;
+    let mut ordinary_start = 0;
+    for index in 0..stmts.len() {
+        let Some(plan) = native_vectorization_plan(&stmts[index]) else {
+            continue;
+        };
+        emit_tir_stmts(&stmts[ordinary_start..index], cx, out, indent);
+        emit_native_vectorized_range(&plan, cx, out, indent);
+        ordinary_start = index + 1;
+        emitted = true;
+    }
+    if !emitted {
+        return false;
+    }
+    emit_tir_stmts(&stmts[ordinary_start..], cx, out, indent);
+    true
+}
+
+/// D-SIMD3=B: render the actual native vector boundary only when sema supplied
+/// the complete proof and this emitter has a matching fixed-array lowering.
+/// #Scalar suppresses it; its loop barrier is emitted instead.
 fn auto_vectorization_attr(tir: &TFunc, indent: usize) -> String {
-    let Some(facts) = first_auto_vectorization(&tir.body).filter(|_| !tir.is_scalar) else {
+    let is_wrapped_body = tir.is_reactive
+        || matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM);
+    let Some(facts) =
+        first_auto_vectorization(&tir.body).filter(|_| !tir.is_scalar && !is_wrapped_body)
+    else {
         return String::new();
     };
     let pad = "    ".repeat(indent);
@@ -64,7 +662,7 @@ fn auto_vectorization_attr(tir: &TFunc, indent: usize) -> String {
         "#[inline(always)]\n"
     };
     format!(
-        "{pad}/* jet-auto-vectorize: element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n\
+        "{pad}/* jet-auto-vectorize: backend=prelude-runtime-dispatch element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n\
 {pad}{inline}",
         facts.element_type.name(),
         facts.no_aliasing,
@@ -74,47 +672,24 @@ fn auto_vectorization_attr(tir: &TFunc, indent: usize) -> String {
     )
 }
 
-/// Read only the fact sema attached to a TIR loop. This traversal never
+/// Read only the fact sema attached to a TIR loop. This candidate check never
 /// reconstructs legality from lowered expressions; it only finds the first
 /// proof so the enclosing native function gets the same codegen hint.
 fn first_auto_vectorization(
     stmts: &[crate::Codegen::TIR::TStmt],
 ) -> Option<crate::AST::AutoVectorizationFacts> {
-    for stmt in stmts {
-        if let crate::Codegen::TIR::TStmt::Range {
-            auto_vectorization: Some(facts),
-            ..
-        } = stmt
-        {
-            return Some(facts.clone());
-        }
-        let nested = match stmt {
-            crate::Codegen::TIR::TStmt::ContractScope { body, .. }
-            | crate::Codegen::TIR::TStmt::TaskGroup { body, .. }
-            | crate::Codegen::TIR::TStmt::Loop { body, .. }
-            | crate::Codegen::TIR::TStmt::While { body, .. }
-            | crate::Codegen::TIR::TStmt::Range { body, .. }
-            | crate::Codegen::TIR::TStmt::ForIn { body, .. }
-            | crate::Codegen::TIR::TStmt::CountedLoop { body, .. } => {
-                Some(body.as_slice())
-            }
-            crate::Codegen::TIR::TStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                if let Some(facts) = first_auto_vectorization(then_body) {
-                    return Some(facts);
-                }
-                else_body.as_deref()
-            }
-            _ => None,
-        };
-        if let Some(facts) = nested.and_then(first_auto_vectorization) {
-            return Some(facts);
-        }
-    }
-    None
+    native_vectorization_candidate(stmts).map(|(_, plan)| plan.facts.clone())
+}
+
+/// A vectorization hint is valid only for the complete sema proof. The
+/// channel's purity and dependency bits are useful cross-consumer facts, but
+/// they do not replace the aliasing and control-flow obligations carried by
+/// this record.
+fn is_complete_auto_vectorization(facts: &crate::AST::AutoVectorizationFacts) -> bool {
+    facts.no_aliasing
+        && facts.no_early_exit
+        && facts.effect_free_body
+        && facts.no_cross_iteration_deps
 }
 
 /// D-CMD-OVERRIDE1=C: `TestSuite` is a `Copy` snapshot, and the
@@ -200,7 +775,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
                 rust_return_type(cx, t)
             };
             let rust = if tir.gc_return {
-                format!("jet_gc::AutomaticRoot<{rust}>")
+                format!("{}jet_gc::AutomaticRoot<{rust}>", cx.root_prefix)
             } else {
                 rust
             };
@@ -275,6 +850,8 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // E2-M12 D-OBS1: track the current function name for rich panic reports —
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    cx.current_fn_line
+        .set(u32::try_from(tir.line).unwrap_or(u32::MAX));
     let generics = if has_view_return {
         add_hidden_view_generic(&tir.generics)
     } else {
@@ -313,7 +890,10 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         // D-FFI-UNIFY1 / card #1121: no Rust unwind may cross a foreign
         // callback frame. Prelude owns failure conversion; this emitter only
         // supplies the callback body and ABI spelling.
-        out.push_str("    jet_ffi_callback_boundary(|| {\n");
+        out.push_str(&format!(
+            "    {}jet_ffi_callback_boundary(|| {{\n",
+            cx.root_prefix
+        ));
         emit_tir_function_body(tir, cx, out, 2);
         out.push_str("    })\n");
     } else {
@@ -423,12 +1003,14 @@ fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize)
     let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
     emit_stack_guard(tir, cx, out, indent);
     emit_sentry_gate(tir, cx, out, indent);
+    emit_sentry_frame(tir, cx, out, indent);
     emit_owned_snapshot_params(tir, cx, out, indent);
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
         out.push_str(&format!(
-            "{}jet_cov({});\n",
+            "{}{}jet_cov({});\n",
             "    ".repeat(indent),
+            cx.root_prefix,
             tir.line
         ));
     }
@@ -438,7 +1020,9 @@ fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize)
     {
         emit_generator_wrapped_body(&tir.body, cx, out, indent);
     } else {
-        emit_tir_stmts(&tir.body, cx, out, indent);
+        if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent) {
+            emit_tir_stmts(&tir.body, cx, out, indent);
+        }
     }
     if is_fallible_void_return(&tir.ret) {
         out.push_str(&format!("{}Ok(())\n", "    ".repeat(indent)));
@@ -481,8 +1065,8 @@ fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent
     let pad = "    ".repeat(indent);
     let inner = indent + 1;
     out.push_str(&jet_format!(
-        "{}jet_std::jet_stream_task(move |{jet_prefix}yield_tx| {{\n",
-        pad
+        "{pad}{root_prefix}jet_std::jet_stream_task(move |{jet_prefix}yield_tx| {{\n",
+        root_prefix = cx.root_prefix
     ));
     emit_tir_stmts(body, cx, out, inner);
     out.push_str(&format!("{}}})\n", pad));
@@ -536,7 +1120,7 @@ pub(crate) fn emit_tir_method(
                 rust_return_type(cx, t)
             };
             let rust = if tir.gc_return {
-                format!("jet_gc::AutomaticRoot<{rust}>")
+                format!("{}jet_gc::AutomaticRoot<{rust}>", cx.root_prefix)
             } else {
                 rust
             };
@@ -596,6 +1180,8 @@ pub(crate) fn emit_tir_method(
     let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    cx.current_fn_line
+        .set(u32::try_from(tir.line).unwrap_or(u32::MAX));
     for line in &tir.reactive_upgrades {
         out.push_str(&format!("{pad}/* jet-reactive-upgrade: {line} */\n"));
     }
@@ -627,10 +1213,14 @@ pub(crate) fn emit_tir_method(
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
     emit_sentry_gate(tir, cx, out, indent + 1);
+    emit_sentry_frame(tir, cx, out, indent + 1);
     emit_owned_snapshot_params(tir, cx, out, indent + 1);
     // D-COV1: probe at the method head.
     if cx.coverage {
-        out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+        out.push_str(&format!(
+            "{pad}    {}jet_cov({});\n",
+            cx.root_prefix, tir.line
+        ));
     }
     if tir.is_reactive {
         emit_reactive_wrapped_body(&tir.body, cx, out, indent + 1);
@@ -656,10 +1246,17 @@ pub(crate) fn emit_tir_method(
                 "{pad}    (self).{storage}.get_or_insert_with(|| {{ {value} }})\n"
             ));
         } else {
-            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent + 1) {
+                emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            }
         }
     } else {
-        emit_tir_stmts(&tir.body, cx, out, indent + 1);
+        if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent + 1) {
+            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+        }
+    }
+    if is_fallible_void_return(&tir.ret) {
+        out.push_str(&format!("{pad}    Ok(())\n"));
     }
     cx.scalar_function.set(previous_scalar);
     out.push_str(&format!("{pad}}}\n"));
@@ -709,7 +1306,7 @@ pub(crate) fn emit_tir_trait_method(
                 rust_return_type(cx, t)
             };
             let ret = if tir.gc_return {
-                format!("jet_gc::AutomaticRoot<{ret}>")
+                format!("{}jet_gc::AutomaticRoot<{ret}>", cx.root_prefix)
             } else {
                 ret
             };
@@ -761,6 +1358,8 @@ pub(crate) fn emit_tir_trait_method(
     let auto_vectorization = auto_vectorization_attr(tir, indent);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    cx.current_fn_line
+        .set(u32::try_from(tir.line).unwrap_or(u32::MAX));
     out.push_str(&format!(
         "{auto_vectorization}{scalar_attr}{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
         name = tir.name,
@@ -775,13 +1374,19 @@ pub(crate) fn emit_tir_trait_method(
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
     emit_sentry_gate(tir, cx, out, indent + 1);
+    emit_sentry_frame(tir, cx, out, indent + 1);
     emit_owned_snapshot_params(tir, cx, out, indent + 1);
     // D-COV1: probe at the trait-method head.
     if cx.coverage {
-        out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+        out.push_str(&format!(
+            "{pad}    {}jet_cov({});\n",
+            cx.root_prefix, tir.line
+        ));
     }
     let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
-    emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent + 1) {
+        emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    }
     cx.scalar_function.set(previous_scalar);
     out.push_str(&format!("{pad}}}\n"));
 }
@@ -826,18 +1431,29 @@ pub(crate) fn emit_tir_serde_method_named(
     let auto_vectorization = auto_vectorization_attr(tir, indent);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    cx.current_fn_line
+        .set(u32::try_from(tir.line).unwrap_or(u32::MAX));
     match codec {
         SerdeCodec::Encode => {
             out.push_str(&auto_vectorization);
             out.push_str(&scalar_attr);
-            out.push_str(&format!("{pad}fn {name}(&self) -> jet_std::DataTree {{\n"));
+            out.push_str(&format!(
+                "{pad}fn {name}(&self) -> {}jet_std::DataTree {{\n",
+                cx.root_prefix
+            ));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);
+            emit_sentry_frame(tir, cx, out, indent + 1);
             if cx.coverage {
-                out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+                out.push_str(&format!(
+                    "{pad}    {}jet_cov({});\n",
+                    cx.root_prefix, tir.line
+                ));
             }
             let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
-            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent + 1) {
+                emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            }
             cx.scalar_function.set(previous_scalar);
             out.push_str(&format!("{pad}}}\n"));
         }
@@ -852,21 +1468,28 @@ pub(crate) fn emit_tir_serde_method_named(
                 .unwrap_or_else(|| "tree".to_string());
             let ret = match &tir.ret {
                 Some(t) => rust_return_type(cx, t),
-                None => "Result<Self, Vec<jet_std::FieldError>>".to_string(),
+                None => format!("Result<Self, Vec<{}jet_std::FieldError>>", cx.root_prefix),
             };
             out.push_str(&auto_vectorization);
             out.push_str(&scalar_attr);
             out.push_str(&format!(
-                "{pad}fn {name}({tree}: &jet_std::DataTree) -> {ret} {{\n"
+                "{pad}fn {name}({tree}: &{root}jet_std::DataTree) -> {ret} {{\n",
+                root = cx.root_prefix
             ));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);
+            emit_sentry_frame(tir, cx, out, indent + 1);
             if cx.coverage {
-                out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+                out.push_str(&format!(
+                    "{pad}    {}jet_cov({});\n",
+                    cx.root_prefix, tir.line
+                ));
             }
             out.push_str(&format!("{pad}    let {tree} = ({tree}).clone();\n"));
             let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
-            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            if !emit_tir_stmts_with_native_vectorization(&tir.body, cx, out, indent + 1) {
+                emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            }
             cx.scalar_function.set(previous_scalar);
             out.push_str(&format!("{pad}}}\n"));
         }
@@ -889,6 +1512,8 @@ pub(crate) fn emit_tir_delegation(
     // E2-M12 D-OBS1: track the current function name (parity with the AST path, though a
     // delegation body has no panic site of its own).
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    cx.current_fn_line
+        .set(u32::try_from(tir.line).unwrap_or(u32::MAX));
     out.push_str(sig);
     if has_return {
         out.push_str(&format!("        {}\n", fwd));

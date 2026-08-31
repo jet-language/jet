@@ -1,0 +1,65 @@
+use core.crypto as crypto
+
+// Canonical signed, endian, and floating-point Bytes writers.
+fn run() {
+    expected :: [U8]{
+        0xff,
+        0xcc, 0xed, 0xed, 0xcc,
+        0x88, 0xa9, 0xcb, 0xed, 0xed, 0xcb, 0xa9, 0x88,
+        0xf8, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe,
+        0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8, 0xf8,
+        0x00, 0x00, 0xc0, 0x3f, 0x3f, 0xc0, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xc0,
+        0xc0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    }
+    encoded := Bytes.new()
+    encoded.write_i8(I8{-1})
+    encoded.write_i16_le(I16{-4660})
+    encoded.write_i16_be(I16{-4660})
+    encoded.write_i32_le(I32{-305419896})
+    encoded.write_i32_be(I32{-305419896})
+    encoded.write_i64_le(I64{-72623859790382856})
+    encoded.write_i64_be(I64{-72623859790382856})
+    encoded.write_f32_le(F32{1.5})
+    encoded.write_f32_be(F32{1.5})
+    encoded.write_f64_le(Float{-2.25})
+    encoded.write_f64_be(Float{-2.25})
+    print(encoded.to_bytes() == expected)
+
+    codecs :: Reader.over(expected)
+    signed8 :: codecs.read_i8() ?? return Err("bad I8")
+    signed16le :: codecs.read_i16_le() ?? return Err("bad I16 LE")
+    signed16be :: codecs.read_i16_be() ?? return Err("bad I16 BE")
+    signed32le :: codecs.read_i32_le() ?? return Err("bad I32 LE")
+    signed32be :: codecs.read_i32_be() ?? return Err("bad I32 BE")
+    signed64le :: codecs.read_i64_le() ?? return Err("bad I64 LE")
+    signed64be :: codecs.read_i64_be() ?? return Err("bad I64 BE")
+    float32le :: codecs.read_f32_le() ?? return Err("bad F32 LE")
+    float32be :: codecs.read_f32_be() ?? return Err("bad F32 BE")
+    float64le :: codecs.read_f64_le() ?? return Err("bad Float LE")
+    float64be :: codecs.read_f64_be() ?? return Err("bad Float BE")
+    print("codec_reads={signed8}/{signed16le}/{signed16be}/{signed32le}/{signed32be}/{signed64le}/{signed64be}/{float32le}/{float32be}/{float64le}/{float64be} remaining={codecs.remaining()}")
+
+    cursor :: Reader.over([U8]{0x10, 0x20, 0x30, 0x40})
+    cursor_first :: cursor.peek() ?? return Err("bad peek")
+    cursor.skip(1) ?? return Err("bad skip")
+    cursor_after_skip :: cursor.peek() ?? return Err("bad peek after skip")
+    cursor.seek(3) ?? return Err("bad seek")
+    cursor_last :: cursor.peek() ?? return Err("bad peek after seek")
+    cursor.seek(1) ?? return Err("bad seek back")
+    cursor_middle :: cursor.read_u8() ?? return Err("bad cursor read")
+    print("cursor={cursor_first}/{cursor_after_skip}/{cursor_last}/{cursor_middle} remaining={cursor.remaining()}")
+
+    hmac_value :: crypto.hmac_sha256("Jefe".bytes(), "what do ya want for nothing?".bytes())
+    hmac_expected :: [U8]{
+        0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
+        0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
+        0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
+        0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43
+    }
+    print(hmac_value == hmac_expected)
+
+    radix_text :: 255.to_radix(16)
+    radix_value :: Int.from_radix(radix_text, 16)
+    print("{radix_text}/{radix_value}")
+}

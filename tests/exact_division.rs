@@ -9,9 +9,10 @@ fn exact_integer_division_is_fraction_and_multiplies_back() {
 fn run() {
     third :: 1 / 3
     print(third)
+    print("interpolated {third}")
     print(third * 3 == 1)
 }
 "#,
-        "1/3\ntrue\n",
+        "1/3\ninterpolated 1/3\ntrue\n",
     );
 }

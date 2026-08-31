@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use jet_codegen::Codegen::TIR::{
     JitProgram, SerdeCodec, TExpr, TExprKind, TFnValueKind, TFunc, TFuncKind, THandleOp,
@@ -351,7 +350,7 @@ pub(crate) fn clif_ty_with_distinct(
 }
 
 pub(crate) fn func_signature(
-    module: &JITModule,
+    module: &dyn Module,
     tir: &TFunc,
     meta: &JitMeta<'_>,
 ) -> Result<Signature, String> {
@@ -400,7 +399,7 @@ pub(crate) fn func_signature(
 }
 
 pub(crate) fn fn_value_signature(
-    module: &JITModule,
+    module: &dyn Module,
     ty: &Type,
     meta: &JitMeta<'_>,
 ) -> Result<Signature, String> {
@@ -426,7 +425,7 @@ pub(crate) fn fn_value_signature(
 }
 
 pub(crate) fn interrupt_callback_signature(
-    module: &JITModule,
+    module: &dyn Module,
     ty: &Type,
     meta: &JitMeta<'_>,
 ) -> Result<Signature, String> {
@@ -743,6 +742,9 @@ pub(crate) struct JitMeta<'a> {
     result_option_params: HashSet<(String, usize)>,
     target_returns: HashMap<String, Type>,
     reflect_paths: &'a HashMap<String, String>,
+    /// #2252: `JitProgram::nominal_identities` - the one projection from a TIR
+    /// nominal spelling to the canonical identity these tables are keyed by.
+    nominal_identities: &'a HashMap<String, String>,
     /// D-MEMO1=A: the ratified cache bound of each `#Memo fn`, so `f.cache()`
     /// can hand the one Prelude memo store the same bound AOT's
     /// `JetMemo::with_bound` gets. An untouched function has no entry in that
@@ -781,6 +783,7 @@ impl<'a> JitMeta<'a> {
                 })
                 .collect(),
             reflect_paths: &program.reflect_paths,
+            nominal_identities: &program.nominal_identities,
             memo_bounds: program
                 .funcs
                 .iter()
@@ -831,6 +834,23 @@ impl<'a> JitMeta<'a> {
         }
     }
 
+    /// Project a TIR nominal spelling onto the canonical identity the shape,
+    /// codec, and method tables use. A name with no projection entry - a
+    /// Prelude type, a local nominal, or a spelling two modules could claim -
+    /// is returned unchanged, so an honest miss stays a miss.
+    ///
+    /// #2252: TIR keeps the spelling the consumer wrote (`plan.ListReport`),
+    /// while `register_imported_struct_shapes` registers the rows under the
+    /// declaring module's identity. Every reader of a nominal-keyed table below
+    /// projects its name through here first, so no reader searches table keys
+    /// for a matching suffix.
+    pub(crate) fn canonical_nominal<'name>(&'name self, name: &'name str) -> &'name str {
+        self.nominal_identities
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or(name)
+    }
+
     pub(crate) fn trait_method_owners(&self, trait_name: &str, method_name: &str) -> Vec<&str> {
         self.trait_method_owners
             .get(&(trait_name.to_string(), method_name.to_string()))
@@ -850,6 +870,7 @@ impl<'a> JitMeta<'a> {
         enum_name: &str,
         variant: &str,
     ) -> Option<&[Type]> {
+        let enum_name = self.canonical_nominal(enum_name);
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return Some(datatree_payload(variant));
         }
@@ -994,9 +1015,11 @@ impl<'a> JitMeta<'a> {
         self.has_generic_instances
     }
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
+        let name = self.canonical_nominal(name);
         self.distinct_bases.get(name)
     }
     pub(crate) fn distinct_range(&self, name: &str) -> Option<(i64, i64)> {
+        let name = self.canonical_nominal(name);
         self.distinct_ranges.get(name).copied()
     }
 
@@ -1004,10 +1027,12 @@ impl<'a> JitMeta<'a> {
     /// A user type owns its spelling; only a name with no user row may be
     /// resolved onto a Prelude row through `core_alias_leaf`.
     pub(crate) fn user_record_or_enum(&self, name: &str) -> bool {
+        let name = self.canonical_nominal(name);
         self.struct_fields.contains_key(name) || self.enum_variants.contains_key(name)
     }
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
+        let type_name = self.canonical_nominal(type_name);
         if let Some(fields) = self.struct_fields.get(type_name) {
             let mangled = mangle(field);
             if let Some(i) = fields.iter().position(|f| {
@@ -1029,6 +1054,7 @@ impl<'a> JitMeta<'a> {
     /// over the Core table even for the few types whose field types are not
     /// all known (`struct_layout` still declines those).
     pub(crate) fn struct_field_count(&self, type_name: &str) -> Option<usize> {
+        let type_name = self.canonical_nominal(type_name);
         if let Some(names) = self.struct_fields.get(type_name) {
             return Some(names.len());
         }
@@ -1037,6 +1063,7 @@ impl<'a> JitMeta<'a> {
 
     /// Mangled field names + parallel types for `__jet_Type { __jet_f: … }` Debug show.
     pub(crate) fn struct_layout(&self, type_name: &str) -> Option<(&[String], &[Type])> {
+        let type_name = self.canonical_nominal(type_name);
         if let Some(names) = self.struct_fields.get(type_name) {
             let tys = self.struct_field_types.get(type_name)?;
             if names.len() != tys.len() {
@@ -1051,14 +1078,17 @@ impl<'a> JitMeta<'a> {
         &self,
         type_name: &str,
     ) -> Option<&[jet_foundation::Reflection::ReflectionField]> {
+        let type_name = self.canonical_nominal(type_name);
         self.reflection_fields.get(type_name).map(Vec::as_slice)
     }
 
     pub(crate) fn struct_type_params(&self, type_name: &str) -> Option<&[String]> {
+        let type_name = self.canonical_nominal(type_name);
         self.struct_type_params.get(type_name).map(Vec::as_slice)
     }
 
     pub(crate) fn struct_type_id(&self, type_name: &str) -> Option<i64> {
+        let type_name = self.canonical_nominal(type_name);
         let mut names: Vec<&str> = self.struct_fields.keys().map(String::as_str).collect();
         names.sort_unstable();
         names
@@ -1069,6 +1099,7 @@ impl<'a> JitMeta<'a> {
 
     /// Field type by Jet or mangled Rust field name.
     pub(crate) fn struct_field_ty(&self, type_name: &str, field: &str) -> Option<Type> {
+        let type_name = self.canonical_nominal(type_name);
         let idx = self.struct_field_index(type_name, field)?;
         self.struct_field_types
             .get(type_name)
@@ -1078,6 +1109,7 @@ impl<'a> JitMeta<'a> {
 
     /// Discriminant index from the Prelude declaration order or a user enum table.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
+        let enum_name = self.canonical_nominal(enum_name);
         if let Some(index) = prelude_enum_variant_index(enum_name, variant) {
             return Some(index);
         }
@@ -1086,6 +1118,7 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn enum_variant_indices(&self, enum_name: &str, variant: &str) -> Vec<i64> {
+        let enum_name = self.canonical_nominal(enum_name);
         if let Some(index) = self.enum_variant_index(enum_name, variant) {
             return vec![index];
         }
@@ -1110,6 +1143,7 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn is_enum(&self, name: &str) -> bool {
         // A user enum owns its own spelling; a Core enum reached through an
         // import alias answers under its declared Prelude name.
+        let name = self.canonical_nominal(name);
         let name = if self.enum_variants.contains_key(name) {
             name
         } else {
@@ -1122,7 +1156,6 @@ impl<'a> JitMeta<'a> {
                 | "TOML"
                 | "YAML"
                 | "CSV"
-                | "ProcessStreamMode"
                 | "ProcessResourceLimit"
                 | "TerminalMode"
                 | "EncodingFormat"
@@ -1197,6 +1230,7 @@ impl<'a> JitMeta<'a> {
     /// answer: the host (or `pack_enum_scalar` at the union sites) fixes each
     /// variant's shape and the JIT only marshals what it is handed.
     pub(crate) fn enum_uses_heap(&self, enum_name: &str, variant: &str) -> bool {
+        let enum_name = self.canonical_nominal(enum_name);
         if matches!(
             enum_name,
             "AuthError" | "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "EmailError"
@@ -1230,6 +1264,7 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
+        let name = self.canonical_nominal(name);
         PRELUDE_ENUM_VARIANTS
             .get(name)
             .map(|variants| variants.as_slice())
@@ -1396,6 +1431,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
             "is_dir",
             "is_symlink",
             "kind",
+            "mode",
         ],
     ),
     (&["WalkEntry"], &["path", "relative", "is_dir", "depth"]),
@@ -1405,6 +1441,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (&["Rng"], &["state"]),
     (&["Fake"], &["state", "locale"]),
     (&["TestSuite"], &["iteration", "result"]),
+    (&["Session"], &["id", "user_id", "expires_at", "cookie"]),
     (
         &["TLSCertificate"],
         &[

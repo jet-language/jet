@@ -970,6 +970,10 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
         return expr_in_subset(receiver, cx, locals);
     }
+    if recv_type.as_deref() == Some("Int") && method == "to_radix" && args.len() == 1 {
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
+    }
+
     // Shape (g) [c109 Phase 12]: a numeric query or fixed-width overflow-policy
     // method (`is_nan`/`count_ones`/`checked_add` — D-INTBIG1/D-NUMOPS1). Sema sets
     // `recv_type == Some(<numeric name>)` for a numeric receiver (CheckerInfer
@@ -1463,6 +1467,11 @@ pub(crate) fn static_method_call_in_subset(
     ) {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
+    if type_name == "Int" && method == "from_radix" && args.len() == 2 {
+        return args
+            .iter()
+            .all(|argument| expr_in_subset(&argument.expr, cx, locals));
+    }
     if matches!(
         (type_name, method, args.len()),
         ("String", "from_bytes" | "from_bytes_lossy", 1)
@@ -1607,7 +1616,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "contains" | "has" | "index_of" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
         | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
-        | "to_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
+        | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
         | "merge"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
         | "sort_by" | "sort_by_desc" | "reduce"
@@ -1722,7 +1731,9 @@ pub(crate) fn closure_method_in_subset(
         // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 +
         // D-PARCAPTURE1 closure adapters.
         "map" => args.len() == 1 && map_callback(&args[0].expr),
-        _ => args.len() == 1
-            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals)),
+        _ => {
+            args.len() == 1
+                && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+        }
     }
 }

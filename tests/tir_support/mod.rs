@@ -107,7 +107,8 @@ fn jit_run_with_package(
         .arg("run")
         .arg(&jet_path)
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("cache"));
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"));
     for (key, value) in vars {
         command.env(key, value);
     }
@@ -130,6 +131,7 @@ pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
         .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
         .current_dir(&dir)
         .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
     let _ = fs::remove_dir_all(&dir);
@@ -170,7 +172,8 @@ pub fn jit_run_with_env_args(
         .current_dir(&dir)
         // Keep every run out of the shared build cache, which is keyed on the
         // AST hash and would otherwise serve a binary built before this change.
-        .env("JET_CACHE_DIR", dir.join("cache"));
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"));
     for (key, value) in vars {
         command.env(key, value);
     }
@@ -207,19 +210,21 @@ fn interpreter_run_with_package(
         package_source.unwrap_or(TIR_TEST_PACKAGE),
     )
     .unwrap();
-    let shown = path.to_string_lossy().into_owned();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg("--interpret")
+        .arg(&path)
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"))
+        .output()
+        .unwrap();
     let _ = fs::remove_dir_all(&dir);
-    match outcome {
-        jet::Interpreter::RunOutcome::Ran {
-            exit_code,
-            stdout,
-            stderr,
-        } => (exit_code, stdout, stderr),
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("interpreter rejected the tier-comparison source: {diagnostics:?}")
-        }
-    }
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 /// The same snippet on both tiers, asserting they agree. This is the shape I9
@@ -311,7 +316,12 @@ where
     F: Fn(&str),
 {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features").join(format!("{stem}.jet"));
+    let stem_path = root.join("examples/features").join(stem);
+    let source = if stem_path.is_dir() {
+        stem_path.join("run.jet")
+    } else {
+        stem_path.with_extension("jet")
+    };
     assert!(
         source.is_file(),
         "missing executable allocator example: {}",
@@ -339,6 +349,7 @@ where
             .arg(&source)
             .current_dir(&root)
             .env("JET_CACHE_DIR", cache.join("cache"))
+            .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1")
             // The test itself already runs inside scripts/agent/jet-env. Mark
             // the child as active there so the project-env gate does not turn
@@ -414,6 +425,7 @@ pub fn assert_example_cli_error_tiers_agree(
             .arg(&relative)
             .current_dir(&root)
             .env("JET_CACHE_DIR", cache.join("cache"))
+            .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1");
         let output = command.output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -555,6 +567,49 @@ pub fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (
     )
 }
 
+/// Build a multi-file program through the public release-profile AOT path,
+/// then execute the emitted artifact.
+pub fn build_release_and_run_multi(
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    let dir = unique_tmp(&format!("jet_release_multi_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, src).unwrap();
+    }
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "--release", entry])
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    if !build.status.success() {
+        return (
+            build.status.code().unwrap_or(1),
+            String::new(),
+            String::from_utf8_lossy(&build.stderr).into_owned(),
+        );
+    }
+    let artifact = dir.join("build").join(
+        std::path::Path::new(entry)
+            .file_stem()
+            .expect("release entry has a file stem"),
+    );
+    let run = Command::new(artifact).current_dir(&dir).output().unwrap();
+    (
+        run.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+        String::from_utf8_lossy(&run.stderr).into_owned(),
+    )
+}
+
 /// Run a multi-file program through the default `jet run` lens.
 pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String, String) {
     let dir = unique_tmp(&format!("jet_jit_multi_{name}"));
@@ -566,17 +621,65 @@ pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i3
         }
         fs::write(&path, src).unwrap();
     }
+    let package = dir.join("package.jet");
+    if !package.exists() {
+        fs::write(&package, TIR_TEST_PACKAGE).unwrap();
+    }
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", entry, "--trace-tiers"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
-    (
+    let result = (
         run.status.code().unwrap_or(1),
         String::from_utf8_lossy(&run.stdout).into_owned(),
         String::from_utf8_lossy(&run.stderr).into_owned(),
-    )
+    );
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
+/// Run a multi-file program through the forced TIR interpreter (`--interpret`).
+/// I9: the default lens can hide a rule that only one engine knows, so a
+/// cross-module fact has to answer on this lens too, with no Cranelift host to
+/// fall back on.
+#[allow(dead_code)]
+pub fn run_interpret_multi(
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    let dir = unique_tmp(&format!("jet_interp_multi_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, src).unwrap();
+    }
+    let package = dir.join("package.jet");
+    if !package.exists() {
+        fs::write(&package, TIR_TEST_PACKAGE).unwrap();
+    }
+    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--interpret", entry, "--trace-tiers"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JETPACK_ROOT", dir.join("jetpack"))
+        .output()
+        .unwrap();
+    let result = (
+        run.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+        String::from_utf8_lossy(&run.stderr).into_owned(),
+    );
+    let _ = fs::remove_dir_all(&dir);
+    result
 }
 
 pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {

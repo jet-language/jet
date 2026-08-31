@@ -15,6 +15,7 @@ pub struct Session {
     value: Int
 }
 
+#Error
 pub enum RubyError {
     NotRunning
     Timeout
@@ -38,9 +39,7 @@ pub fn open() Session !RubyError -> {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree !RubyError -> {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
-    code :: abi.take_error()
+fn decode_response(raw: String, code: Int) DataTree !RubyError -> {
     if code == 1 -> return Err(RubyError.NotRunning)
     if code == 2 -> return Err(RubyError.Timeout)
     if code == 3 -> return Err(RubyError.Cancelled)
@@ -50,32 +49,22 @@ pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree !
     succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RubyError.CommandFailed)
     return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree !RubyError -> {
+    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    return decode_response(raw, code)
 }
 
 pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree !RubyError -> {
     raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 -> return Err(RubyError.NotRunning)
-    if code == 2 -> return Err(RubyError.Timeout)
-    if code == 3 -> return Err(RubyError.Cancelled)
-    if code == 5 -> return Err(RubyError.Limit)
-    if code != 0 -> return Err(RubyError.Protocol)
-    response := json.parse(raw) ?? return Err(RubyError.Protocol)
-    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded -> return Err(RubyError.CommandFailed)
-    return Ok(response.field("value") ?? DataTree.Null)
+    return decode_response(raw, code)
 }
 
 pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree !RubyError -> {
     raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 -> return Err(RubyError.NotRunning)
-    if code == 2 -> return Err(RubyError.Timeout)
-    if code == 3 -> return Err(RubyError.Cancelled)
-    if code == 5 -> return Err(RubyError.Limit)
-    if code != 0 -> return Err(RubyError.Protocol)
-    response := json.parse(raw) ?? return Err(RubyError.Protocol)
-    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded -> return Err(RubyError.CommandFailed)
-    return Ok(response.field("value") ?? DataTree.Null)
+    return decode_response(raw, code)
 }

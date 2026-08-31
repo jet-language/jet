@@ -365,11 +365,21 @@ fn source_import_dry_run_idempotence_and_three_way_update_are_honest() {
     );
     assert_eq!(fs::read_to_string(&generated).unwrap(), edited);
 
+    let report = root.join("jet/app/import-report.json");
+    let report_original = fs::read_to_string(&report).unwrap();
+    let report_edited = format!("{report_original}\n{{\"owner_note\":true}}\n");
+    fs::write(&report, &report_edited).unwrap();
+    let report_preserve = run(&root, &["import", "py", "python/app", "--update"]);
+    assert_eq!(report_preserve.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&report_preserve.stderr).contains("JT0199"));
+    assert_eq!(fs::read_to_string(&report).unwrap(), report_edited);
+
     fs::write(&source, "def answer() -> int:\n    return 43\n").unwrap();
     let both_changed = run(&root, &["import", "py", "python/app", "--update"]);
     assert_eq!(both_changed.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&both_changed.stderr).contains("JT0199"));
     assert_eq!(fs::read_to_string(&generated).unwrap(), edited);
+    assert_eq!(fs::read_to_string(&report).unwrap(), report_edited);
 }
 
 #[test]
@@ -398,4 +408,268 @@ fn source_import_rejects_unknown_language_and_does_not_follow_symlinks() {
             1
         );
     }
+}
+
+#[test]
+fn enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged() {
+    let cases = [
+        (
+            "java",
+            "java",
+            include_str!("fixtures/source_import/enterprise/java/Math.java"),
+            "fn add(left: Int, right: Int) Int ->",
+            "5\n",
+        ),
+        (
+            "csharp",
+            "cs",
+            include_str!("fixtures/source_import/enterprise/csharp/Math.cs"),
+            "fn add(left: Int, right: Int) Int ->",
+            "5\n",
+        ),
+        (
+            "ts",
+            "ts",
+            include_str!("fixtures/source_import/enterprise/ts/math.ts"),
+            "fn add(left: Float, right: Float) Float ->",
+            "5.0\n",
+        ),
+        (
+            "js",
+            "js",
+            include_str!("fixtures/source_import/enterprise/js/math.js"),
+            "fn add(left: Float, right: Float) Float ->",
+            "5.0\n",
+        ),
+        (
+            "go",
+            "go",
+            include_str!("fixtures/source_import/enterprise/go/math.go"),
+            "fn add(left: Int, right: Int) Int ->",
+            "5\n",
+        ),
+    ];
+
+    for (language, extension, source, signature, expected_output) in cases {
+        let root = workspace(&format!("enterprise-{language}"));
+        let source_dir = root.join(language).join("app");
+        fs::create_dir_all(&source_dir).unwrap();
+        let source_path = source_dir.join(format!("program.{extension}"));
+        fs::write(&source_path, source).unwrap();
+        let source_arg = format!("{language}/app");
+
+        let imported = run(&root, &["import", language, &source_arg]);
+        assert_eq!(
+            imported.status.code(),
+            Some(0),
+            "{language}: {}",
+            String::from_utf8_lossy(&imported.stderr)
+        );
+        let generated_path = root.join("jet/app/program.jet");
+        let generated = fs::read_to_string(&generated_path).unwrap();
+        assert!(generated.contains(signature), "{language}: {generated}");
+        assert!(
+            generated.contains("// Source span:"),
+            "{language}: {generated}"
+        );
+        assert!(
+            generated.contains("D-MIGRATE-SRC1"),
+            "{language}: {generated}"
+        );
+        assert!(
+            !generated.contains("fn unsupported"),
+            "{language}: {generated}"
+        );
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+
+        let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+        assert!(
+            report.contains("\"law\":\"D-MIGRATE-SRC1\""),
+            "{language}: {report}"
+        );
+        assert!(report.contains("\"source_span\":"), "{language}: {report}");
+        assert!(
+            report.contains("\"generated_target\":"),
+            "{language}: {report}"
+        );
+        assert!(
+            report.contains("\"code\":\"JT0101\""),
+            "{language}: {report}"
+        );
+
+        let checked = run(&root, &["check", "jet/app/program.jet"]);
+        assert_eq!(
+            checked.status.code(),
+            Some(0),
+            "{language}: generated Jet failed its own front end:\n{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+        let translated = run(&root, &["run", "jet/app/program.jet"]);
+        assert_eq!(
+            translated.status.code(),
+            Some(0),
+            "{language}: {}",
+            String::from_utf8_lossy(&translated.stderr)
+        );
+        assert_eq!(translated.stdout, expected_output.as_bytes(), "{language}");
+
+        let rerun = run(&root, &["import", language, &source_arg]);
+        assert_eq!(rerun.status.code(), Some(0), "{language}: rerun failed");
+        assert_eq!(fs::read_to_string(generated_path).unwrap(), generated);
+    }
+}
+
+#[test]
+fn enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer() {
+    let root = workspace("enterprise-failures");
+    let source_dir = root.join("java/app");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source_path = source_dir.join("Ambiguous.java");
+    let source = include_str!("fixtures/source_import/enterprise/failures/ambiguous.java");
+    fs::write(&source_path, source).unwrap();
+
+    let imported = run(&root, &["import", "java", "java/app"]);
+    assert_eq!(imported.status.code(), Some(0));
+    let generated_path = root.join("jet/app/Ambiguous.jet");
+    let generated = fs::read_to_string(&generated_path).unwrap();
+    assert!(
+        generated.contains("fn keep(value: Int) Int ->"),
+        "{generated}"
+    );
+    assert!(
+        !generated.contains("fn add"),
+        "ambiguous overload was guessed: {generated}"
+    );
+    assert!(
+        !generated.contains("fn quotient"),
+        "foreign division was guessed: {generated}"
+    );
+    assert!(
+        !generated.contains("fn broken"),
+        "malformed body was guessed: {generated}"
+    );
+    assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+
+    let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+    assert!(
+        report.contains("unsupported java dependency declaration"),
+        "{report}"
+    );
+    assert!(
+        report.contains("ambiguous overloaded java function"),
+        "{report}"
+    );
+    assert!(
+        report.contains("foreign division or remainder semantics"),
+        "{report}"
+    );
+    assert!(report.contains("malformed java function"), "{report}");
+    assert!(
+        report.contains("\"migration_status\":\"omitted-reported\""),
+        "{report}"
+    );
+
+    let checked = run(&root, &["check", "jet/app/Ambiguous.jet"]);
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    for language in ["c", "c++"] {
+        let unavailable = run(&root, &["import", language, "java/app"]);
+        assert_eq!(unavailable.status.code(), Some(2), "{language}");
+        let stderr = String::from_utf8_lossy(&unavailable.stderr);
+        assert!(
+            stderr.contains("intentionally unavailable"),
+            "{language}: {stderr}"
+        );
+        assert!(stderr.contains("binder"), "{language}: {stderr}");
+    }
+}
+
+#[test]
+fn javascript_import_does_not_rewrite_foreign_names_inside_strings() {
+    let root = workspace("javascript-string");
+    let source_dir = root.join("javascript/app");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = r#"/** @returns {string} */
+function label() {
+    return "console.log(";
+}
+"#;
+    let source_path = source_dir.join("labels.js");
+    fs::write(&source_path, source).unwrap();
+
+    let imported = run(&root, &["import", "js", "javascript/app"]);
+    assert_eq!(imported.status.code(), Some(0));
+    let generated = fs::read_to_string(root.join("jet/app/labels.jet")).unwrap();
+    assert!(generated.contains("return \"console.log(\""), "{generated}");
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source);
+
+    let translated = run(&root, &["run", "jet/app/labels.jet"]);
+    assert_eq!(translated.status.code(), Some(0));
+    assert_eq!(translated.stdout, b"console.log(\n");
+}
+
+#[test]
+fn enterprise_import_preserves_source_for_partial_failure() {
+    let root = workspace("enterprise-partial-failure");
+    let source_dir = root.join("ts/app");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = include_str!("fixtures/source_import/enterprise/failures/partial.ts");
+    let source_path = source_dir.join("partial.ts");
+    fs::write(&source_path, source).unwrap();
+
+    let imported = run(&root, &["import", "ts", "ts/app"]);
+    assert_eq!(
+        imported.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+
+    let generated_path = root.join("jet/app/partial.jet");
+    let generated = fs::read_to_string(&generated_path).unwrap();
+    assert!(
+        generated.contains("fn keep(value: Float) Float ->"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("increment := value + 1.0"),
+        "{generated}"
+    );
+    for omitted in ["unsupported", "broken", "duplicate", "readFile"] {
+        assert!(
+            !generated.contains(&format!("fn {omitted}")),
+            "unproven function `{omitted}` was guessed: {generated}"
+        );
+    }
+    assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+
+    let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+    for reason in [
+        "unsupported ts dependency declaration",
+        "foreign type `number[]` is outside the scalar importer subset",
+        "ts body `broken` was not translated",
+        "ambiguous overloaded ts function `duplicate`",
+    ] {
+        assert!(report.contains(reason), "{reason}: {report}");
+    }
+    assert!(
+        report
+            .matches("\"migration_status\":\"omitted-reported\"")
+            .count()
+            >= 4,
+        "{report}"
+    );
+
+    let checked = run(&root, &["check", "jet/app/partial.jet"]);
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "partial import generated invalid Jet:\n{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
 }

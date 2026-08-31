@@ -7,7 +7,7 @@ mod statements;
 mod switches;
 pub(crate) use switches::{
     atomic_absent_optional_subject, contextual_literal, normalize_contextual_pattern,
-    ContextualLiteral,
+    pattern_consumes_result_carrier, ContextualLiteral,
 };
 mod bindings;
 mod types;

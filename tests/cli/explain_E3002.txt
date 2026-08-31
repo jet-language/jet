@@ -1,12 +1,12 @@
 E3002
 
 What this means:
-  `error propagated from: {fn} ({file}:{line}) via ?` with an optional `: {note}` suffix — one journey frame appended when a `?` re-raises an error.
+  `Trail [E3002] (N hops via ?, origin first):` followed by one numbered `{fn} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats.
 
 Why Jet enforces it:
-  Each failed `?` joins the failure's journey, with or without a note, making the full error path visible.
+  Each failed `?` joins the failure's trail, so the report can show where the failure started and which callers forwarded it.
 
 How to fix it:
-  Follow the journey from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it.
+  Read the root failure above the trail first — it says what went wrong. Then read the trail from hop 1, the origin, down to the last hop at the entry.
 
 This explanation comes from jet's diagnostics reference.

@@ -16,6 +16,13 @@ const H0: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
 
+// Tree identity is a hostile-input boundary. Keep the per-file read and the
+// total accepted payload bounded while hashing from a fixed-size buffer.
+pub const MAX_TREE_FILE_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_TREE_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub const MAX_TREE_FILES: usize = 1_000_000;
+pub const MAX_TREE_DEPTH: usize = 256;
+
 /// Incremental SHA-256. Keeps at most one partial 64-byte block, allowing
 /// compiler/tool identities to hash large artifacts without whole-file reads.
 pub struct StreamingSha256 {
@@ -83,17 +90,120 @@ impl Default for StreamingSha256 {
 
 pub fn sha256_file_hex(path: &std::path::Path) -> std::io::Result<String> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
+    let (mut file, expected) = open_regular_nofollow(path)?;
+    if expected.len() > MAX_TREE_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds the tree hashing bound",
+        ));
+    }
     let mut hasher = StreamingSha256::new();
     let mut buffer = [0u8; 64 * 1024];
+    let mut actual_len = 0u64;
+    let mut limited = (&mut file).take(MAX_TREE_FILE_BYTES.saturating_add(1));
     loop {
-        let count = file.read(&mut buffer)?;
+        let count = limited.read(&mut buffer)?;
         if count == 0 {
             break;
         }
+        actual_len = actual_len.saturating_add(count as u64);
+        if actual_len > MAX_TREE_FILE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "file grew beyond the tree hashing bound",
+            ));
+        }
         hasher.update(&buffer[..count]);
     }
+    let after = file.metadata()?;
+    let path_after = std::fs::symlink_metadata(path)?;
+    if actual_len != expected.len()
+        || !same_file_identity(&expected, &after)
+        || !same_file_identity(&expected, &path_after)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "file changed while hashing",
+        ));
+    }
     Ok(hex(hasher.finalize()))
+}
+
+/// Read one regular file through a held no-follow descriptor. The caller must
+/// provide a finite bound; the shared tree-file bound is the hard ceiling for
+/// every package identity read.
+pub fn read_file_nofollow(
+    path: &std::path::Path,
+    max_bytes: u64,
+) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+
+    if max_bytes > MAX_TREE_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "file read bound exceeds the tree hashing bound",
+        ));
+    }
+    let (mut file, expected) = open_regular_nofollow(path)?;
+    if expected.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds its read bound",
+        ));
+    }
+    let capacity = usize::try_from(expected.len())
+        .unwrap_or(usize::MAX)
+        .min(64 * 1024);
+    let mut content = Vec::with_capacity(capacity);
+    let mut limited = (&mut file).take(max_bytes.saturating_add(1));
+    limited.read_to_end(&mut content)?;
+    if content.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds its read bound",
+        ));
+    }
+    let after = file.metadata()?;
+    let path_after = std::fs::symlink_metadata(path)?;
+    if content.len() as u64 != expected.len()
+        || !same_file_identity(&expected, &after)
+        || !same_file_identity(&expected, &path_after)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "file changed while reading",
+        ));
+    }
+    Ok(content)
+}
+
+fn open_regular_nofollow(
+    path: &std::path::Path,
+) -> std::io::Result<(std::fs::File, std::fs::Metadata)> {
+    let expected = std::fs::symlink_metadata(path)?;
+    if expected.file_type().is_symlink() || !expected.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file is not a regular file",
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    if !add_nofollow_flags(&mut options) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no-follow regular-file reads are unavailable on this platform",
+        ));
+    }
+    let file = options.open(path)?;
+    let opened = file.metadata()?;
+    if !opened.is_file() || !same_file_identity(&expected, &opened) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "file changed before reading",
+        ));
+    }
+    Ok((file, expected))
 }
 
 fn hex(bytes: [u8; 32]) -> String {
@@ -186,54 +296,283 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// Compute a canonical tree hash of a source directory.
 /// All copied source files are hashed in sorted order (relative paths + contents).
 pub fn tree_hash(root: &std::path::Path) -> String {
-    let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
-    collect_tree_files(root, root, &mut entries);
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    try_tree_hash(root).unwrap_or_else(|error| {
+        panic!("cannot hash source tree `{}`: {error}", root.display())
+    })
+}
 
-    let mut hasher_input: Vec<u8> = Vec::new();
-    for (rel, content) in &entries {
-        hasher_input.extend_from_slice(rel.as_bytes());
-        hasher_input.push(0); // null separator
-        hasher_input.extend_from_slice(&(content.len() as u64).to_be_bytes());
-        hasher_input.extend_from_slice(content);
+/// Failure while proving a source tree's contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeHashError {
+    Io { path: std::path::PathBuf, detail: String },
+    Symlink(std::path::PathBuf),
+    Special(std::path::PathBuf),
+    InvalidName(std::path::PathBuf),
+    TooLarge {
+        path: std::path::PathBuf,
+        limit: u64,
+    },
+}
+
+impl std::fmt::Display for TreeHashError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { path, detail } => write!(formatter, "could not read `{}`: {detail}", path.display()),
+            Self::Symlink(path) => write!(formatter, "`{}` is a symlink", path.display()),
+            Self::Special(path) => write!(formatter, "`{}` is not a regular file or directory", path.display()),
+            Self::InvalidName(path) => write!(formatter, "`{}` has a non-UTF-8 name", path.display()),
+            Self::TooLarge { path, limit } => write!(
+                formatter,
+                "`{}` exceeds the {}-byte tree hashing bound",
+                path.display(),
+                limit
+            ),
+        }
     }
-    format!("sha256-{}", sha256_hex(&hasher_input))
+}
+
+impl std::error::Error for TreeHashError {}
+
+/// Compute a canonical tree hash and fail closed on every unreadable,
+/// linked, or special filesystem entry. Entries excluded from package
+/// identity are still inspected first, so an attacker cannot hide a link or
+/// device node behind an ignored name.
+pub fn try_tree_hash(root: &std::path::Path) -> Result<String, TreeHashError> {
+    let mut entries = Vec::new();
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| TreeHashError::Io {
+        path: root.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(TreeHashError::Symlink(root.to_path_buf()));
+    }
+    if !metadata.is_dir() {
+        return Err(TreeHashError::Special(root.to_path_buf()));
+    }
+    collect_tree_files(root, root, &mut entries, 0)?;
+    entries.sort_by(|left, right| left.relative.cmp(&right.relative));
+
+    let mut hasher = StreamingSha256::new();
+    let mut total_bytes = 0u64;
+    for entry in entries {
+        hasher.update(entry.relative.as_bytes());
+        hasher.update(&[0]); // null separator
+        hash_regular_nofollow(
+            &entry.path,
+            &entry.metadata,
+            &mut hasher,
+            &mut total_bytes,
+        )?;
+    }
+    Ok(format!("sha256-{}", hex(hasher.finalize())))
+}
+
+struct TreeFile {
+    relative: String,
+    path: std::path::PathBuf,
+    metadata: std::fs::Metadata,
 }
 
 fn collect_tree_files(
     dir: &std::path::Path,
     root: &std::path::Path,
-    out: &mut Vec<(String, Vec<u8>)>,
-) {
+    out: &mut Vec<TreeFile>,
+    depth: usize,
+) -> Result<(), TreeHashError> {
     // Internal modules remain hash inputs: D-SHAPE-MODULEINTERNAL1=A changes
     // automatic membership, not explicit imports or source-tree identity.
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in rd.flatten() {
+    let rd = std::fs::read_dir(dir).map_err(|error| TreeHashError::Io {
+        path: dir.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    for entry in rd {
+        let entry = entry.map_err(|error| TreeHashError::Io {
+            path: dir.to_path_buf(),
+            detail: error.to_string(),
+        })?;
         let p = entry.path();
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let name = p
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| TreeHashError::InvalidName(p.clone()))?;
+        let metadata = std::fs::symlink_metadata(&p).map_err(|error| TreeHashError::Io {
+            path: p.clone(),
+            detail: error.to_string(),
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(TreeHashError::Symlink(p));
+        }
+        if !metadata.is_dir() && !metadata.is_file() {
+            return Err(TreeHashError::Special(p));
+        }
         if name.starts_with('.') || name == "build" || name == "target" {
             continue;
         }
-        let Ok(metadata) = std::fs::symlink_metadata(&p) else {
-            continue;
-        };
-        if metadata.file_type().is_symlink() {
-            continue;
-        }
         if metadata.is_dir() {
-            collect_tree_files(&p, root, out);
-        } else if metadata.is_file() {
-            if let Ok(content) = std::fs::read(&p) {
-                let rel = p
-                    .strip_prefix(root)
-                    .unwrap_or(&p)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                out.push((rel, content));
+            if depth >= MAX_TREE_DEPTH {
+                return Err(TreeHashError::TooLarge {
+                    path: p,
+                    limit: MAX_TREE_DEPTH as u64,
+                });
             }
+            collect_tree_files(&p, root, out, depth + 1)?;
+        } else {
+            if out.len() >= MAX_TREE_FILES {
+                return Err(TreeHashError::TooLarge {
+                    path: root.to_path_buf(),
+                    limit: MAX_TREE_FILES as u64,
+                });
+            }
+            let rel = p
+                .strip_prefix(root)
+                .map_err(|_| TreeHashError::InvalidName(p.clone()))?
+                .to_str()
+                .ok_or_else(|| TreeHashError::InvalidName(p.clone()))?
+                .replace('\\', "/");
+            out.push(TreeFile {
+                relative: rel,
+                path: p,
+                metadata,
+            });
         }
+    }
+    Ok(())
+}
+
+fn hash_regular_nofollow(
+    path: &std::path::Path,
+    expected: &std::fs::Metadata,
+    hasher: &mut StreamingSha256,
+    total_bytes: &mut u64,
+) -> Result<(), TreeHashError> {
+    use std::io::Read;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    if !add_nofollow_flags(&mut options) {
+        return Err(TreeHashError::Io {
+            path: path.to_path_buf(),
+            detail: "no-follow regular-file reads are unavailable on this platform".to_string(),
+        });
+    }
+    let mut file = options.open(path).map_err(|error| TreeHashError::Io {
+        path: path.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    let opened = file.metadata().map_err(|error| TreeHashError::Io {
+        path: path.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    if !opened.is_file() || !same_file_identity(expected, &opened) {
+        return Err(TreeHashError::Io {
+            path: path.to_path_buf(),
+            detail: "file changed before hashing".to_string(),
+        });
+    }
+    if opened.len() > MAX_TREE_FILE_BYTES {
+        return Err(TreeHashError::TooLarge {
+            path: path.to_path_buf(),
+            limit: MAX_TREE_FILE_BYTES,
+        });
+    }
+    let next_total = total_bytes
+        .checked_add(opened.len())
+        .ok_or_else(|| TreeHashError::TooLarge {
+            path: path.to_path_buf(),
+            limit: MAX_TREE_TOTAL_BYTES,
+        })?;
+    if next_total > MAX_TREE_TOTAL_BYTES {
+        return Err(TreeHashError::TooLarge {
+            path: path.to_path_buf(),
+            limit: MAX_TREE_TOTAL_BYTES,
+        });
+    }
+    hasher.update(&opened.len().to_be_bytes());
+    let mut actual_len = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut limited = (&mut file).take(opened.len().saturating_add(1));
+    loop {
+        let count = limited.read(&mut buffer).map_err(|error| TreeHashError::Io {
+            path: path.to_path_buf(),
+            detail: error.to_string(),
+        })?;
+        if count == 0 {
+            break;
+        }
+        actual_len = actual_len.saturating_add(count as u64);
+        hasher.update(&buffer[..count]);
+        if actual_len > opened.len() {
+            return Err(TreeHashError::Io {
+                path: path.to_path_buf(),
+                detail: "file grew while hashing".to_string(),
+            });
+        }
+    }
+    let after = file.metadata().map_err(|error| TreeHashError::Io {
+        path: path.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    if !same_file_identity(expected, &after) || after.len() != actual_len {
+        return Err(TreeHashError::Io {
+            path: path.to_path_buf(),
+            detail: "file changed while hashing".to_string(),
+        });
+    }
+    *total_bytes = next_total;
+    Ok(())
+}
+
+fn add_nofollow_flags(options: &mut std::fs::OpenOptions) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0o2000000;
+        const O_NOFOLLOW: i32 = 0o400000;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0x01000000;
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        return true;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    )))]
+    {
+        let _ = options;
+        false
+    }
+}
+
+fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
     }
 }
 
@@ -284,7 +623,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn tree_hash_skips_recursive_symlink_nodes() {
+    fn tree_hash_rejects_recursive_symlink_nodes() {
         use std::os::unix::fs::symlink;
 
         let root = std::env::temp_dir().join(format!(
@@ -297,9 +636,32 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/value.txt"), b"stable\n").unwrap();
-        let expected = tree_hash(&root);
         symlink(".", root.join("src/loop")).unwrap();
-        assert_eq!(tree_hash(&root), expected);
+        assert!(matches!(
+            try_tree_hash(&root),
+            Err(TreeHashError::Symlink(_))
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_hash_rejects_special_nodes() {
+        use std::os::unix::net::UnixListener;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-sha-tree-special-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        assert!(matches!(
+            try_tree_hash(&root),
+            Err(TreeHashError::Special(path)) if path == socket
+        ));
+        drop(listener);
         let _ = std::fs::remove_dir_all(root);
     }
 }

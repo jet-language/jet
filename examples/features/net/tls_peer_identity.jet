@@ -90,14 +90,14 @@ fn run() !(HTTPError | IOError | NetError | RangeError | TaskFailure) {
     trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots))
     config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13)
     tcp :: net.tcp_connect(addr)
-    budget :: Duration.seconds(2)
+    budget :: 2s
     secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget)
     peer :: secure.peer_identity()
     print(peer.verified_server_name)
     print(peer.cipher_suite.starts_with("TLS13_"))
     print(peer.tls_version)
     secure.close()
-    grace :: Duration.milliseconds(200)
+    grace :: 200ms
     _ :: server.shutdown(grace)
     serving.join()
 }

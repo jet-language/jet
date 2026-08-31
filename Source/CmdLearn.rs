@@ -202,12 +202,7 @@ fn run_arc(root: &Path, mut index: usize, once: bool, mode: OutputMode) -> i32 {
                     let display = path.display().to_string();
                     eprint!(
                         "{}",
-                        jet::render_all_colored(
-                            &display,
-                            "",
-                            &[diagnostic],
-                            mode.color_stderr(),
-                        )
+                        jet::render_all_colored(&display, "", &[diagnostic], mode.color_stderr(),)
                     );
                     return ExitCodes::USER_ERROR;
                 }
@@ -241,11 +236,9 @@ fn evaluate(exercise: &Exercise, path: &Path) -> Evaluation {
             stderr: _,
             exit_code,
         } if exit_code == 0 && stdout == exercise.expected_output => Evaluation::Complete,
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            ..
-        } => Evaluation::WrongOutput { stdout, stderr },
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
+            Evaluation::WrongOutput { stdout, stderr }
+        }
     }
 }
 
@@ -265,7 +258,12 @@ fn print_exercise(index: usize, exercise: &Exercise, path: &Path, mode: OutputMo
         return;
     }
     println!("Jet Learn — First Arc");
-    println!("Exercise {}/{}: {}", index + 1, EXERCISES.len(), exercise.title);
+    println!(
+        "Exercise {}/{}: {}",
+        index + 1,
+        EXERCISES.len(),
+        exercise.title
+    );
     println!("{}", exercise.prompt);
     println!("Edit {} and save.", path.display());
 }
@@ -337,7 +335,10 @@ fn exit_check_curriculum(mode: OutputMode) -> ! {
                 .unwrap_or_default()
         ));
     if let Err(error) = fs::create_dir_all(&root) {
-        crate::cli_error!("E2105", "couldn't create curriculum check directory: {error}");
+        crate::cli_error!(
+            "E2105",
+            "couldn't create curriculum check directory: {error}"
+        );
         std::process::exit(ExitCodes::USER_ERROR);
     }
     let result = validate_curriculum(&root);

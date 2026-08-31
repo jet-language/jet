@@ -97,23 +97,13 @@ fn decode_hex(value: &str) -> String {
 }
 
 #[test]
-fn jetos_scratch_uses_configured_tmpdir() {
-    let Some(tmpdir) = std::env::var_os("TMPDIR") else {
-        return;
-    };
-    let configured = std::path::PathBuf::from(tmpdir);
+fn jetos_scratch_uses_disk_backed_root() {
     let scratch = Scratch::new("jetos-scratch-root-guard");
-    let configured = fs::canonicalize(&configured).unwrap();
     let scratch_path = fs::canonicalize(&scratch.path).unwrap();
-    assert!(
-        scratch_path.starts_with(&configured),
-        "jetpack_jetos Scratch escaped TMPDIR: {} (TMPDIR={})",
-        scratch_path.display(),
-        configured.display()
-    );
+    common::assert_test_path_on_disk(&scratch_path, "jetpack_jetos Scratch");
     assert!(
         !scratch_path.starts_with(Path::new("/tmp")),
-        "jetpack_jetos Scratch must stay off /tmp when TMPDIR is set: {}",
+        "jetpack_jetos Scratch must stay off /tmp: {}",
         scratch_path.display()
     );
 }

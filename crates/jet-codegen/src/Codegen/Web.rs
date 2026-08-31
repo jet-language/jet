@@ -10,7 +10,10 @@ use crate::Codegen::mangle_generated;
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::AST::{AccessConvention, CtFloat, FfiLink, Func, Item, ProgramBundle, Type};
+use crate::AST::{
+    AccessConvention, CtFloat, EnumDef, FfiLink, Func, Item, ProgramBundle, StructDef, Type,
+    VariantPayload,
+};
 use jet_foundation::WebPartition::{partition_key, WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -74,6 +77,107 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/ComputeWebGpu.js"),
 );
+
+/// D-CONC-ALLNAMED1=A: the web adapter consumes the existing task spawn/join
+/// carrier. It joins in authored order, then projects named values in the
+/// canonical tuple order carried by the type.
+const JS_TASK_GROUP_PRELUDE: &str = r#"
+function jet_task_group_body_failed() {
+  return { tag: "Err", values: [{ tag: "Panicked", values: ["task body failed"] }] };
+}
+
+async function jet_task_all(tasks, resultCarriers = []) {
+  const values = [];
+  for (let index = 0; index < tasks.length; index += 1) {
+    const joined = await jet_task_join(tasks[index]);
+    if (joined?.tag !== "Ok") return joined;
+    let value = joined.values[0];
+    const resultCarrier = resultCarriers.length === 1
+      ? resultCarriers[0]
+      : resultCarriers[index];
+    if (resultCarrier) {
+      if (value?.tag !== "Ok") return jet_task_group_body_failed();
+      value = value.values[0];
+    }
+    values.push(value);
+  }
+  return { tag: "Ok", values: [values] };
+}
+
+async function jet_task_all_named(tasks, authoredFields, resultFields, resultCarriers = []) {
+  const values = Object.create(null);
+  for (let index = 0; index < authoredFields.length; index += 1) {
+    const field = authoredFields[index];
+    const joined = await jet_task_join(tasks[field]);
+    if (joined?.tag !== "Ok") return joined;
+    let value = joined.values[0];
+    if (resultCarriers[index]) {
+      if (value?.tag !== "Ok") return jet_task_group_body_failed();
+      value = value.values[0];
+    }
+    values[field] = value;
+  }
+  const result = {};
+  for (const field of resultFields) result[field] = values[field];
+  return { tag: "Ok", values: [result] };
+}
+"#;
+
+fn task_result_carrier(ty: &Type) -> bool {
+    let Type::Apply { name, args } = ty.without_user_tags() else {
+        return false;
+    };
+    name == Syntax::TYPE_TASK
+        && args
+            .first()
+            .is_some_and(|arg| matches!(arg.without_user_tags(), Type::Result { .. }))
+}
+
+fn task_result_list_carrier(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::List(inner) => task_result_carrier(inner),
+        _ => false,
+    }
+}
+
+fn taskgroup_result_field_type(ty: &Type) -> Type {
+    match ty.without_user_tags() {
+        Type::Apply { name, args } if name == Syntax::TYPE_TASK && args.len() == 1 => {
+            match args[0].without_user_tags() {
+                Type::Result { ok, .. } => ok.as_ref().clone(),
+                other => other.clone(),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+fn js_field_name(name: &str) -> String {
+    let mangled = mangle(name);
+    web_name(&mangled).to_string()
+}
+
+fn js_bool_list(values: impl IntoIterator<Item = bool>) -> String {
+    format!(
+        "[{}]",
+        values
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn js_string_list(values: impl IntoIterator<Item = String>) -> String {
+    format!(
+        "[{}]",
+        values
+            .into_iter()
+            .map(|value| json_quote(&value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
 fn result_has_optional_success(ty: &Type) -> bool {
@@ -466,11 +570,6 @@ fn validate_web_func_tir(
         }
         cx.current_type_params.borrow_mut().clear();
     } else {
-        eprintln!(
-            "[probe-web-coverage] {}: {}",
-            f.name,
-            TIR::refusal::describe(cx)
-        );
         cx.current_type_params.borrow_mut().clear();
     }
     diags.push(WebTirUnsupported {
@@ -620,6 +719,9 @@ fn web_type_uses_authority(ty: &Type) -> bool {
         | Type::List(inner)
         | Type::Option(inner) => web_type_uses_authority(inner),
         Type::FixedList { elem, .. } => web_type_uses_authority(elem),
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| web_type_uses_authority(field)),
         Type::Result { ok, err } => web_type_uses_authority(ok) || web_type_uses_authority(err),
         Type::Map { key, value, .. } => {
             web_type_uses_authority(key) || web_type_uses_authority(value)
@@ -668,6 +770,17 @@ fn web_close_key_for_name(type_name: &str) -> String {
 
 fn is_string_like(ty: &Type) -> bool {
     matches!(ty, Type::String)
+}
+
+fn js_display_is_native_scalar(ty: &Type) -> bool {
+    matches!(
+        ty.without_user_tags(),
+        Type::Int
+            | Type::IntN { .. }
+            | Type::Bool
+            | Type::Char
+            | Type::String
+    )
 }
 
 fn is_list_string(ty: &Type) -> bool {
@@ -918,6 +1031,68 @@ fn web_wasm_inline_block_supported(
         }
 }
 
+fn web_wasm_text_type_supported(ty: &Type, bundle: &ProgramBundle) -> bool {
+    let ty = ty.without_user_tags();
+    let supported = match ty {
+        Type::Int
+        | Type::IntN { .. }
+        | Type::Float
+        | Type::Float32
+        | Type::Bool
+        | Type::Char
+        | Type::String => true,
+        Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. } => web_wasm_text_type_supported(inner, bundle),
+        Type::Result { ok, err } => {
+            web_wasm_text_type_supported(ok, bundle) && web_wasm_text_type_supported(err, bundle)
+        }
+        Type::Map { key, value, .. } => {
+            web_wasm_text_type_supported(key, bundle) && web_wasm_text_type_supported(value, bundle)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| web_wasm_text_type_supported(field, bundle)),
+        Type::Union(members) => {
+            bundle_has_named_web_type(bundle, &crate::AST::union_enum_name(members))
+                && members
+                    .iter()
+                    .all(|member| web_wasm_text_type_supported(member, bundle))
+        }
+        Type::Named(name)
+            if matches!(
+                name.as_str(),
+                Syntax::TYPE_COMPLEX
+                    | Syntax::TYPE_FRACTION
+                    | Syntax::TYPE_DECIMAL
+                    | Syntax::DURATION_TYPE
+                    | Syntax::TYPE_INSTANT
+                    | "Date"
+                    | "LocalDate"
+                    | "LocalTime"
+                    | "DateTime"
+                    | "Zone"
+                    | "ZonedDateTime"
+                    | "Period"
+            ) =>
+        {
+            true
+        }
+        Type::Named(name) if bundle_has_named_web_type(bundle, name) => true,
+        Type::Named(name) => bundle_distinct_web_base(bundle, name)
+            .is_some_and(|base| web_wasm_text_type_supported(&base, bundle)),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
+        {
+            true
+        }
+        _ => false,
+    };
+    supported && wasm_internal_ty(ty, bundle).is_some()
+}
+
 fn web_wasm_expr_supported(
     expr: &TIR::TExpr,
     bundle: &ProgramBundle,
@@ -945,23 +1120,14 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
             TIR::TStrPart::Lit(_) => true,
             TIR::TStrPart::Interp(value, _) => {
-                (is_measurement_type(&value.ty)
-                    || matches!(
-                        value.ty,
-                        Type::Int
-                            | Type::IntN { .. }
-                            | Type::InlineRange { .. }
-                            | Type::Float
-                            | Type::Float32
-                            | Type::Bool
-                    )
-                    || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
-                    || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
-                    || is_string_like(&value.ty))
+                web_wasm_text_type_supported(&value.ty, bundle)
                     && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
             }
         }),
-        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::Binary { lhs, rhs, .. } => {
+            web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::PatternMatches { subj, pattern } => {
             web_match_pattern_supported(pattern)
                 && web_wasm_expr_supported(subj, bundle, file_prefix, reconstructions)
@@ -982,29 +1148,57 @@ fn web_wasm_expr_supported(
         } if module == "core.prelude" && method == "keep" && args.len() == 1 => {
             web_wasm_expr_supported(&args[0], bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::CoreCall { module, method, args, .. }
-            if module == "core.time" && method == "instant" && args.is_empty() => true,
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.text.fmt"
+            && matches!(method.as_str(), "decimal" | "grouped")
+            && args.len() == 2 => {
+            args.iter()
+                .all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions))
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.text.fmt" && method == "pretty" && args.len() == 1 => {
+            web_wasm_expr_supported(&args[0], bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.time" && web_time_core_supported(method, args.len()) => args
+            .iter()
+            .all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::HandleMethod { recv, op, args }
-            if web_wasm_handle_method_supported(op, args.len()) => {
+            if web_wasm_handle_method_supported(op, args.len()) =>
+        {
             web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
-                && args.iter().all(|arg| {
-                    web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
-                })
+                && args
+                    .iter()
+                    .all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions))
         }
         TIR::TExprKind::PreciseBuiltin {
             type_name,
             func,
             args,
-        } if web_complex_precise_supported(type_name, func, args.len()) => {
-            args.iter().all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions))
-        }
+        } if web_complex_precise_supported(type_name, func, args.len()) => args
+            .iter()
+            .all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::Unary { operand, .. }
         | TIR::TExprKind::Clone(operand)
         | TIR::TExprKind::ExplicitCopy(operand)
         | TIR::TExprKind::MaterializeView(operand)
         | TIR::TExprKind::DistinctRaw(operand)
         | TIR::TExprKind::Print(operand) => {
-            web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
+            (!matches!(&expr.kind, TIR::TExprKind::Print(_))
+                || web_wasm_text_type_supported(&operand.ty, bundle))
+                && web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::DistinctCtor { arg, .. } => {
             web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
@@ -1016,18 +1210,24 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Borrow { place, .. } => {
             web_wasm_expr_supported(place, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Field { recv, boxed: false, .. } => {
-            web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
-        }
-        TIR::TExprKind::StructLit { fields, .. } => fields
-            .iter()
-            .all(|(_, value, _)| web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)),
-        TIR::TExprKind::ListLit(elements) => elements.iter().all(|e| {
-            web_wasm_expr_supported(e, bundle, file_prefix, reconstructions)
+        TIR::TExprKind::Field {
+            recv, boxed: false, ..
+        } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::StructLit { fields, .. } => fields.iter().all(|(_, value, _)| {
+            web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
         }),
-        TIR::TExprKind::Present(inner)
-        | TIR::TExprKind::Ok(inner)
-        | TIR::TExprKind::Err(inner) => {
+        TIR::TExprKind::ListLit(elements) => elements
+            .iter()
+            .all(|e| web_wasm_expr_supported(e, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::TaskGroupAll { tasks } => {
+            matches!(tasks.ty.without_user_tags(), Type::List(_) | Type::Tuple(_))
+                && wasm_internal_ty(&expr.ty, bundle).is_some()
+                && web_wasm_expr_supported(tasks, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::Present(inner) | TIR::TExprKind::Ok(inner) | TIR::TExprKind::Err(inner) => {
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Try { inner, .. } => {
@@ -1063,7 +1263,9 @@ fn web_wasm_expr_supported(
                 && web_wasm_expr_supported(b, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::FnValue { kind } => match kind {
-            TIR::TFnValueKind::NamedFn { name: Some(name), .. } => {
+            TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            } => {
                 wasm_callee_bucket(bundle, &local_web_key(file_prefix, name))
                     == Some(WebBucket::Wasm)
             }
@@ -1087,7 +1289,11 @@ fn web_wasm_expr_supported(
                 lambda: None,
                 ..
             } => false,
-            TIR::TFnValueKind::Policy { callee, policy_args, .. } => {
+            TIR::TFnValueKind::Policy {
+                callee,
+                policy_args,
+                ..
+            } => {
                 web_wasm_expr_supported(callee, bundle, file_prefix, reconstructions)
                     && policy_args.iter().all(|arg| {
                         web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
@@ -1115,18 +1321,17 @@ fn web_wasm_expr_supported(
             }
         },
         TIR::TExprKind::HandleMethod { recv, op, args } => {
-            matches!(
-                op,
-                TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach
-            ) && args.is_empty()
+            matches!(op, TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach)
+                && args.is_empty()
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::CoreClosureCall {
-            kind: TIR::TCoreClosureKind::Spawn {
-                group: None,
-                executable,
-                ..
-            },
+            kind:
+                TIR::TCoreClosureKind::Spawn {
+                    group: None,
+                    executable,
+                    ..
+                },
         } => match &executable.executable {
             TIR::TLambdaBody::Expr(body) => {
                 web_wasm_expr_supported(body, bundle, file_prefix, reconstructions)
@@ -1140,15 +1345,15 @@ fn web_wasm_expr_supported(
         },
         TIR::TExprKind::NumericMethod {
             recv,
-            op: TIR::TNumericOp::CastAs { .. }
+            op:
+                TIR::TNumericOp::CastAs { .. }
                 | TIR::TNumericOp::CheckedIntToFixed { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
         TIR::TExprKind::NumericBinaryMethod {
             recv,
             arg,
-            op: TIR::TNumericOp::EuclideanDiv { .. }
-                | TIR::TNumericOp::EuclideanRem { .. },
+            op: TIR::TNumericOp::EuclideanDiv { .. } | TIR::TNumericOp::EuclideanRem { .. },
         } => {
             matches!(&recv.ty, Type::Int)
                 && matches!(&arg.ty, Type::Int)
@@ -1176,8 +1381,7 @@ fn web_wasm_expr_supported(
                 web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                     && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
             }
-            TIR::THostCall::SwitchSubjectField { .. }
-            | TIR::THostCall::SwitchSubjectValue => true,
+            TIR::THostCall::SwitchSubjectField { .. } | TIR::THostCall::SwitchSubjectValue => true,
             _ => false,
         },
         TIR::TExprKind::EnumLit { payload, .. } => match payload {
@@ -1189,11 +1393,7 @@ fn web_wasm_expr_supported(
                 web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
             }),
         },
-        TIR::TExprKind::Index {
-            base,
-            index,
-            ..
-        } => {
+        TIR::TExprKind::Index { base, index, .. } => {
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
@@ -1210,7 +1410,10 @@ fn web_wasm_expr_supported(
             bundle,
             file_prefix,
             reconstructions,
-        ) => true,
+        ) =>
+        {
+            true
+        }
         TIR::TExprKind::StaticCall {
             owner: TIR::TStaticOwner::Prelude { path, .. },
             method,
@@ -1222,14 +1425,15 @@ fn web_wasm_expr_supported(
             method,
             args,
             ..
-        } if path == "JetAuthority"
-            && method.name == "from_rights"
-            && args.len() == 1 =>
-        {
+        } if path == "JetAuthority" && method.name == "from_rights" && args.len() == 1 => {
             web_wasm_expr_supported(&args[0].value, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Call { name, args, .. } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
-            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::Call { name, args, .. } => {
+            wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
+                && args.iter().all(|a| {
+                    web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)
+                })
+        }
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
         } => {
@@ -1271,14 +1475,10 @@ fn web_wasm_expr_supported(
                 }
                 TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
             };
-            bundle
-                .web_partitions
-                .get(&key)
-                .copied()
-                == Some(WebBucket::Wasm)
-                && args
-                    .iter()
-                    .all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions))
+            bundle.web_partitions.get(&key).copied() == Some(WebBucket::Wasm)
+                && args.iter().all(|a| {
+                    web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)
+                })
         }
         TIR::TExprKind::CoreCall {
             module,
@@ -1286,14 +1486,15 @@ fn web_wasm_expr_supported(
             args,
             ..
         } => {
-            ((is_measurement_type(&expr.ty)
-                && module == "core.units"
-                && method == "from"
-                && args.len() == 2)
+            ((module == "core.time" && web_time_core_supported(method, args.len()))
+                || (is_measurement_type(&expr.ty)
+                    && module == "core.units"
+                    && method == "from"
+                    && args.len() == 2)
                 || wasm_math_core_helper(module, method, args, &expr.ty).is_some())
-                && args.iter().all(|arg| {
-                    web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
-                })
+                && args
+                    .iter()
+                    .all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions))
         }
         TIR::TExprKind::IfExpr {
             cond,
@@ -1303,30 +1504,10 @@ fn web_wasm_expr_supported(
             else_value,
         } => {
             web_wasm_if_cond_supported(cond, bundle, file_prefix, reconstructions)
-                && web_wasm_stmts_supported(
-                    then_body,
-                    bundle,
-                    file_prefix,
-                    reconstructions,
-                )
-                && web_wasm_expr_supported(
-                    then_value,
-                    bundle,
-                    file_prefix,
-                    reconstructions,
-                )
-                && web_wasm_stmts_supported(
-                    else_body,
-                    bundle,
-                    file_prefix,
-                    reconstructions,
-                )
-                && web_wasm_expr_supported(
-                    else_value,
-                    bundle,
-                    file_prefix,
-                    reconstructions,
-                )
+                && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(then_value, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(else_body, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(else_value, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Unit => true,
         _ => false,
@@ -1376,6 +1557,8 @@ fn web_tir_expr_kind_name(kind: &TIR::TExprKind) -> &'static str {
         E::InlineBlock(_) => "InlineBlock",
         E::HostCall(_) => "HostCall",
         E::MethodCall { .. } => "MethodCall",
+        E::TupleLit { .. } => "TupleLit",
+        E::TaskGroupAll { .. } => "TaskGroupAll",
         E::CoreCall { .. } => "CoreCall",
         E::ResourceNew(_) => "ResourceNew",
         E::ResourceTake(_) => "ResourceTake",
@@ -1645,10 +1828,13 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::DurationDifference => argc == 1,
         TIR::THandleOp::DurationSecondsValue => argc == 0,
         TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => argc == 1,
+        TIR::THandleOp::DurationAbs
+        | TIR::THandleOp::DurationNegated
+        | TIR::THandleOp::DurationSign => argc == 0,
+        TIR::THandleOp::DurationTotalIn => argc == 1,
+        TIR::THandleOp::DurationRound => (1..=3).contains(&argc),
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
-            kind == "Instant"
-                && argc == 0
-                && matches!(method.as_str(), "elapsed_millis" | "elapsed")
+            web_civil_time_method_supported(kind, method, argc)
         }
         TIR::THandleOp::MeasurementMethod { method } => matches!(
             (method.as_str(), argc),
@@ -1664,6 +1850,83 @@ fn web_time_type(ty: &Type) -> bool {
         Type::Named(name)
             if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT
     )
+}
+
+fn web_civil_time_method_supported(kind: &str, method: &str, argc: usize) -> bool {
+    if kind == "Instant" {
+        return argc == 0 && matches!(method, "elapsed_millis" | "elapsed");
+    }
+    match kind {
+        "Date" | "LocalDate" => match method {
+            "year" | "month" | "day" | "to_string" | "weekday" | "iso_weekday" | "day_of_year"
+            | "iso_week" | "iso_week_year" | "quarter_of_year" | "days_in_month"
+            | "is_leap_year" => argc == 0,
+            "replace" => argc == 3,
+            "add_days" | "add_months" | "diff_days" | "add_period" | "subtract_period"
+            | "truncate" | "format" | "format_checked" => argc == 1,
+            "until" | "since" => argc == 5,
+            "with" => argc == 4,
+            _ => false,
+        },
+        "LocalTime" => match method {
+            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond"
+            | "to_string" => argc == 0,
+            "add_duration" | "subtract_duration" => argc == 1,
+            "round" => argc == 3,
+            "truncate" | "floor" | "ceil" => argc == 2,
+            "until" | "since" => argc == 5,
+            "format" | "format_checked" => argc == 1,
+            _ => false,
+        },
+        "DateTime" => match method {
+            "to_timestamp" | "to_unix_ms" | "to_unix_s" | "to_unix_us" | "to_unix_ns"
+            | "to_string" | "date" | "time" | "hour" | "minute" | "second" | "millisecond"
+            | "microsecond" | "nanosecond" | "format_rfc3339" => argc == 0,
+            "format" | "format_checked" | "plus_duration" | "subtract_duration" | "add_period"
+            | "subtract_period" | "difference" | "in_zone" => argc == 1,
+            "truncate" | "floor" | "ceil" => argc == 2,
+            "round" => argc == 3,
+            "until" | "since" => argc == 5,
+            "replace" => argc == 6,
+            "with" => argc == 7,
+            _ => false,
+        },
+        "Zone" => match method {
+            "name" => argc == 0,
+            "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day" => {
+                argc == 1
+            }
+            _ => false,
+        },
+        "ZonedDateTime" => match method {
+            "date"
+            | "time"
+            | "offset_seconds"
+            | "is_dst"
+            | "to_datetime"
+            | "zone"
+            | "to_string"
+            | "next_transition"
+            | "previous_transition"
+            | "start_of_day"
+            | "hours_in_day"
+            | "format_rfc9557" => argc == 0,
+            "format" | "format_checked" | "add_duration" | "subtract_duration" | "add_period"
+            | "subtract_period" | "with_zone" => argc == 1,
+            "with_time" => argc == 2,
+            "until" | "since" => argc == 5,
+            _ => false,
+        },
+        "Period" => match method {
+            "to_string" | "years" | "months" | "days" | "sign" | "is_zero" | "abs" | "negated" => {
+                argc == 0
+            }
+            "add" | "sub" => argc == 1,
+            "total_in" => argc == 2,
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn web_duration_scale(unit: &str) -> Option<i64> {
@@ -1686,10 +1949,13 @@ fn web_wasm_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::DurationDifference => argc == 1,
         TIR::THandleOp::DurationSecondsValue => argc == 0,
         TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => argc == 1,
+        TIR::THandleOp::DurationAbs
+        | TIR::THandleOp::DurationNegated
+        | TIR::THandleOp::DurationSign => argc == 0,
+        TIR::THandleOp::DurationTotalIn => argc == 1,
+        TIR::THandleOp::DurationRound => (1..=3).contains(&argc),
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
-            kind == "Instant"
-                && argc == 0
-                && matches!(method.as_str(), "elapsed_millis" | "elapsed")
+            web_civil_time_method_supported(kind, method, argc)
         }
         TIR::THandleOp::MeasurementMethod { method } => matches!(
             (method.as_str(), argc),
@@ -1924,6 +2190,10 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Index { base, index, .. } => web_expr_supported(base) && web_expr_supported(index),
         E::HostCall(host) => web_host_call_supported(host),
         E::TupleLit { fields, .. } => fields.iter().all(|(_, value)| web_expr_supported(value)),
+        E::TaskGroupAll { tasks } => {
+            matches!(tasks.ty.without_user_tags(), Type::List(_) | Type::Tuple(_))
+                && web_expr_supported(tasks)
+        }
         E::StaticCall {
             owner: TIR::TStaticOwner::Prelude { path, .. },
             method,
@@ -2036,6 +2306,14 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             method,
             args,
             ..
+        } if module == "core.time" && web_time_core_supported(method, args.len()) => {
+            args.iter().all(web_expr_supported)
+        }
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
         } => {
             let arity_ok = if module == "core.term" && method == "print" {
                 // D-PRELUDEX1 / D-VERDICT-1321-1: the qualified print twin
@@ -2082,8 +2360,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::NumericBinaryMethod {
             recv,
             arg,
-            op: TIR::TNumericOp::EuclideanDiv { .. }
-                | TIR::TNumericOp::EuclideanRem { .. },
+            op: TIR::TNumericOp::EuclideanDiv { .. } | TIR::TNumericOp::EuclideanRem { .. },
         } => {
             matches!(&recv.ty, Type::Int)
                 && matches!(&arg.ty, Type::Int)
@@ -2672,7 +2949,10 @@ fn js_template_text(s: &str) -> String {
         match c {
             '\\' => out.push_str("\\\\"),
             '`' => out.push_str("\\`"),
-            '$' if chars.peek() == Some(&'{') => out.push_str("\\${"),
+            '$' if chars.peek() == Some(&'{') => {
+                chars.next();
+                out.push_str("\\${");
+            }
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
@@ -3368,6 +3648,30 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
     }
 }
 
+fn emit_wasm_tuple_types(bundle: &ProgramBundle, out: &mut String) {
+    let mut shapes = std::collections::BTreeMap::new();
+    for module in &bundle.modules {
+        shapes.extend(super::collect_tuple_shapes(&module.items));
+    }
+    for (name, fields) in shapes {
+        let Some(rendered) = fields
+            .iter()
+            .map(|(field, ty)| {
+                Some(format!(
+                    "    {}: {},\n",
+                    mangle(field),
+                    wasm_internal_ty(ty, bundle)?
+                ))
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|parts| parts.concat())
+        else {
+            continue;
+        };
+        out.push_str(&format!("struct {name} {{\n{rendered}}}\n\n"));
+    }
+}
+
 fn emit_wasm_user_types(bundle: &ProgramBundle, out: &mut String) -> WebEmitResult<()> {
     let mut unions = std::collections::BTreeMap::new();
     fn generated_union_names(items: &[Item], names: &mut std::collections::HashSet<String>) {
@@ -3521,12 +3825,209 @@ fn wasm_reflect_value(cx: &Cx, ty: &Type, value: &str) -> String {
     )
 }
 
-fn emit_wasm_display_impls(items: &[Item], cx: &Cx, out: &mut String) {
+fn emit_wasm_auto_text_impls(
+    type_name: &str,
+    has_shared_guard: bool,
+    auto_printable: bool,
+    auto_debug: bool,
+    display_body: &str,
+    debug_body: &str,
+    out: &mut String,
+) {
+    if has_shared_guard {
+        return;
+    }
+    if auto_debug {
+        out.push_str(&format!(
+            "impl JetDebug for {} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            mangle_path(type_name),
+            debug_body,
+        ));
+    }
+    if auto_printable {
+        out.push_str(&format!(
+            "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
+            mangle_path(type_name),
+            display_body,
+        ));
+    }
+}
+
+fn wasm_struct_has_shared_guard(cx: &Cx, def: &StructDef) -> bool {
+    def.fields
+        .iter()
+        .any(|field| cx.type_contains_shared_guard(&field.ty))
+}
+
+fn wasm_enum_has_shared_guard(cx: &Cx, def: &EnumDef) -> bool {
+    def.variants.iter().any(|variant| match &variant.payload {
+        VariantPayload::Unit => false,
+        VariantPayload::Single(ty, _) => cx.type_contains_shared_guard(ty),
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .any(|field| cx.type_contains_shared_guard(&field.ty)),
+    })
+}
+
+fn wasm_variant_text_capable(cx: &Cx, payload: &VariantPayload, debug: bool) -> bool {
+    match payload {
+        VariantPayload::Unit => true,
+        VariantPayload::Single(ty, _) => {
+            if debug {
+                crate::Codegen::jet_debuggable_type(cx, ty)
+            } else {
+                crate::Codegen::jet_displayable_type(cx, ty)
+            }
+        }
+        VariantPayload::Named(fields) => fields.iter().all(|field| {
+            if debug {
+                crate::Codegen::jet_debuggable_type(cx, &field.ty)
+            } else {
+                crate::Codegen::jet_displayable_type(cx, &field.ty)
+            }
+        }),
+    }
+}
+
+fn emit_wasm_generated_union_text_impls(def: &EnumDef, cx: &Cx, out: &mut String) {
+    if wasm_enum_has_shared_guard(cx, def) {
+        return;
+    }
+    let rust_name = mangle_path(&def.name);
+    if def
+        .variants
+        .iter()
+        .all(|variant| wasm_variant_text_capable(cx, &variant.payload, false))
+    {
+        out.push_str(&format!(
+            "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
+            super::Items::enum_jet_display_body(def),
+        ));
+    }
+    if def
+        .variants
+        .iter()
+        .all(|variant| wasm_variant_text_capable(cx, &variant.payload, true))
+    {
+        out.push_str(&format!(
+            "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            super::Items::enum_jet_render_body(def),
+        ));
+    }
+}
+
+fn emit_wasm_unit_text_impls(family: &crate::AST::UnitFamilyDef, cx: &Cx, out: &mut String) {
+    for definition in family.distinct_defs() {
+        let rust_name = mangle_path(&definition.name);
+        if !cx.has_auto_debug_type(&definition.name) {
+            out.push_str(&format!(
+                "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{ format!(\"{}({{}})\", (self.0).jet_debug()) }}\n}}\n\n",
+                definition.name,
+            ));
+        }
+        if !cx.has_display_type(&definition.name) {
+            if let Some(label) = cx.unit_labels.get(&definition.name) {
+                out.push_str(&format!(
+                    "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).jet_display()) }}\n}}\n\n",
+                    symbol = label.symbol,
+                ));
+            }
+        }
+    }
+}
+
+fn emit_wasm_tuple_text_impls(
+    bundle: &ProgramBundle,
+    cx: &Cx,
+    emitted: &mut std::collections::HashSet<String>,
+    out: &mut String,
+) {
+    let mut shapes = std::collections::BTreeMap::new();
+    for module in &bundle.modules {
+        shapes.extend(super::collect_tuple_shapes(&module.items));
+    }
+    for (name, fields) in shapes {
+        if !emitted.insert(name.clone()) {
+            continue;
+        }
+        let label = format!(
+            "({})",
+            fields
+                .iter()
+                .map(|(field, _)| field.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let field_specs = fields
+            .iter()
+            .map(|(field, _)| format!("{field}: {{}}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let emit = |method: &str| {
+            let values = fields
+                .iter()
+                .map(|(field, _)| format!("(self).{}.{method}()", mangle(field)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let format_string = format!("{label} {{{{ {field_specs} }}}}");
+            format!("format!({format_string:?}, {values})")
+        };
+        if fields
+            .iter()
+            .all(|(_, field)| crate::Codegen::jet_displayable_type(cx, field))
+        {
+            out.push_str(&format!(
+                "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
+                emit("jet_display"),
+            ));
+        }
+        if fields
+            .iter()
+            .all(|(_, field)| crate::Codegen::jet_debuggable_type(cx, field))
+        {
+            out.push_str(&format!(
+                "impl JetDebug for {name} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+                emit("jet_debug"),
+            ));
+        }
+    }
+}
+
+fn emit_wasm_text_impls(items: &[Item], cx: &Cx, out: &mut String) {
     for item in items {
         match item {
+            Item::Enum(def)
+                if def.type_params.is_empty() && def.name.starts_with("__JetUnion_") =>
+            {
+                emit_wasm_generated_union_text_impls(def, cx, out);
+            }
             Item::Struct(def) if def.type_params.is_empty() => {
+                let debug_body = super::Items::struct_jet_debug_body(
+                    def,
+                    def.fields
+                        .iter()
+                        .any(|field| matches!(&field.ty, Type::Fn { .. })),
+                );
+                let display_body = super::Items::struct_jet_display_body(
+                    def,
+                    def.fields
+                        .iter()
+                        .any(|field| matches!(&field.ty, Type::Fn { .. })),
+                );
+                emit_wasm_auto_text_impls(
+                    &def.name,
+                    wasm_struct_has_shared_guard(cx, def),
+                    cx.auto_printable.contains(&def.name) && !cx.has_display_type(&def.name),
+                    cx.auto_debug.contains(&def.name),
+                    &display_body,
+                    &debug_body,
+                    out,
+                );
                 for block in &def.trait_impls {
-                    if block.trait_name == Syntax::TRAIT_DISPLAY {
+                    if matches!(
+                        block.trait_name.as_str(),
+                        Syntax::TRAIT_DISPLAY | Syntax::TRAIT_DEBUG
+                    ) {
                         super::Items::emit_trait_impl(
                             cx,
                             &def.name,
@@ -3538,9 +4039,67 @@ fn emit_wasm_display_impls(items: &[Item], cx: &Cx, out: &mut String) {
                     }
                 }
             }
+            Item::Enum(def) if def.type_params.is_empty() => {
+                let debug_body = super::Items::enum_jet_render_body(def);
+                let display_body = super::Items::enum_jet_display_body(def);
+                emit_wasm_auto_text_impls(
+                    &def.name,
+                    wasm_enum_has_shared_guard(cx, def),
+                    cx.auto_printable.contains(&def.name) && !cx.has_display_type(&def.name),
+                    cx.auto_debug.contains(&def.name),
+                    &display_body,
+                    &debug_body,
+                    out,
+                );
+                for block in &def.trait_impls {
+                    if matches!(
+                        block.trait_name.as_str(),
+                        Syntax::TRAIT_DISPLAY | Syntax::TRAIT_DEBUG
+                    ) {
+                        super::Items::emit_trait_impl(
+                            cx,
+                            &def.name,
+                            &def.type_params,
+                            block,
+                            None,
+                            out,
+                        );
+                    }
+                }
+            }
+            Item::UnitFamily(family) => emit_wasm_unit_text_impls(family, cx, out),
+            Item::Impl(def)
+                if matches!(
+                    def.trait_name.as_deref(),
+                    Some(Syntax::TRAIT_DISPLAY) | Some(Syntax::TRAIT_DEBUG)
+                ) =>
+            {
+                let target = items.iter().find_map(|item| match item {
+                    Item::Struct(struct_def) if struct_def.name == def.type_name => {
+                        Some((true, Some(struct_def)))
+                    }
+                    Item::Enum(enum_def)
+                        if enum_def.name == def.type_name && enum_def.type_params.is_empty() =>
+                    {
+                        Some((true, None))
+                    }
+                    Item::UnitFamily(family)
+                        if family
+                            .distinct_defs()
+                            .iter()
+                            .any(|unit| unit.name == def.type_name) =>
+                    {
+                        Some((true, None))
+                    }
+                    _ => None,
+                });
+                if let Some((true, struct_def)) = target {
+                    super::Items::emit_external_trait_impl(cx, def, struct_def, out);
+                }
+            }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
-                    emit_wasm_display_impls(body, cx, out);
+                    emit_wasm_text_impls(body, cx, out);
                 }
             }
             _ => {}
@@ -3701,10 +4260,18 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     out.push_str(
         "trait __jet_Display { fn display(&self) -> String; }\n\
          trait __jet_Debug { fn debug(&self) -> String; }\n\
-         trait JetDisplay { fn jet_display(&self) -> String; }\n\
-         trait JetDebug { fn jet_debug(&self) -> String; }\n\n",
+         trait JetDisplay {\n\
+             fn jet_display(&self) -> String;\n\
+             fn jet_report_is_clean() -> bool where Self: Sized { false }\n\
+         }\n\
+         trait JetDebug {\n\
+             fn jet_debug(&self) -> String;\n\
+             fn jet_report_is_clean() -> bool where Self: Sized { false }\n\
+         }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
+    out.push_str(&wasm_time_zone_prelude().map_err(|_| web_tzdb_error())?);
+    out.push_str(WASM_TASK_GROUP_PRELUDE);
     let authority_funcs = wasm_funcs
         .iter()
         .filter(|func| {
@@ -3751,7 +4318,46 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
          }\n\
          impl JetDisplay for JetWasmInt {\n\
          \x20   fn jet_display(&self) -> String { self.to_string() }\n\
+         }\n\
+         macro_rules! jet_web_scalar_debug {\n\
+         \x20   ($($ty:ty),+ $(,)?) => { $(\n\
+         \x20       impl JetDebug for $ty {\n\
+         \x20           fn jet_debug(&self) -> String { self.to_string() }\n\
+         \x20       }\n\
+         \x20   )+ };\n\
+         }\n\
+         jet_web_scalar_debug!(i8, i16, i32, i64, u8, u16, u32, u64, bool, char);\n\
+         impl JetDebug for f32 {\n\
+         \x20   fn jet_debug(&self) -> String { format!(\"{:?}\", self) }\n\
+         }\n\
+         impl JetDebug for f64 {\n\
+         \x20   fn jet_debug(&self) -> String { format!(\"{:?}\", self) }\n\
+         }\n\
+         impl JetDebug for String {\n\
+         \x20   fn jet_debug(&self) -> String { format!(\"{self:?}\") }\n\
+         }\n\
+         impl JetDebug for str {\n\
+         \x20   fn jet_debug(&self) -> String { format!(\"{self:?}\") }\n\
+         }\n\
+         impl JetDebug for JetWasmInt {\n\
+         \x20   fn jet_debug(&self) -> String { self.to_string() }\n\
          }\n\n",
+    );
+    out.push_str(
+        r#"impl JetDisplay for JetDate { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetDate { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+impl JetDisplay for JetLocalTime { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetLocalTime { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+impl JetDisplay for JetDateTime { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetDateTime { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+impl JetDisplay for JetZone { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetZone { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+impl JetDisplay for JetZonedDateTime { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetZonedDateTime { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+impl JetDisplay for JetPeriod { fn jet_display(&self) -> String { self.to_string_fmt() } }
+impl JetDebug for JetPeriod { fn jet_debug(&self) -> String { self.to_string_fmt() } }
+
+"#,
     );
     if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
         out.push_str(
@@ -4170,6 +4776,8 @@ fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
         );
     }
     emit_wasm_user_types(bundle, &mut out)?;
+    emit_wasm_tuple_types(bundle, &mut out);
+    let mut emitted_tuple_text = std::collections::HashSet::new();
     let extern_funcs = bundle_extern_funcs(bundle);
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let mut cx = build_cx_items(
@@ -4181,8 +4789,9 @@ fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
         );
         cx.web_wasm_noncopy_int = true;
         populate_cx_from_bundle(&mut cx, bundle, module_index);
+        emit_wasm_text_impls(&module.items, &cx, &mut out);
+        emit_wasm_tuple_text_impls(bundle, &cx, &mut emitted_tuple_text, &mut out);
         if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
-            emit_wasm_display_impls(&module.items, &cx, &mut out);
             emit_wasm_reflection_impls(&module.items, &cx, &mut out);
         }
         emit_wasm_inherent_methods(&module.items, &cx, &mut out);
@@ -4194,15 +4803,6 @@ fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
             if let Item::ErrorConv(conversion) = item {
                 let tir = TIR::lower_error_conv(conversion, &cx);
                 TIR::emit_tir_func(&tir, &cx, &mut out);
-            }
-        }
-        for item in &module.items {
-            if let Item::Impl(implementation) = item {
-                if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
-                    && cx.unit_labels.contains_key(&implementation.type_name)
-                {
-                    super::Items::emit_external_trait_impl(&cx, implementation, None, &mut out);
-                }
             }
         }
     }
@@ -4478,12 +5078,34 @@ fn emit_wasm_fn(
         f.tir.ret.as_ref(),
         Some(Type::Result { ok, .. })
             if matches!(ok.as_ref(), Type::Named(name) if name == "Unit")
-    )
-    {
+    ) {
         out.push_str("    Ok(())\n");
     }
     out.push_str("}\n\n");
     Ok(())
+}
+
+fn web_temporal_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Zone" | "ZonedDateTime" | "Period"
+    )
+}
+
+fn web_temporal_type(ty: &Type) -> bool {
+    matches!(ty.without_user_tags(), Type::Named(name) if web_temporal_name(name))
+}
+
+fn web_temporal_rust_ty(name: &str) -> Option<&'static str> {
+    match name {
+        "Date" | "LocalDate" => Some("JetDate"),
+        "LocalTime" => Some("JetLocalTime"),
+        "DateTime" => Some("JetDateTime"),
+        "Zone" => Some("JetZone"),
+        "ZonedDateTime" => Some("JetZonedDateTime"),
+        "Period" => Some("JetPeriod"),
+        _ => None,
+    }
 }
 
 fn wasm_ty(ty: &Type) -> Option<&'static str> {
@@ -4493,6 +5115,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::Int => Some("JetWasmInt"),
         Type::IntN { signed: true, .. } => Some("i64"),
         Type::Named(name) if name == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
+        Type::Named(name) if web_temporal_name(name) => Some(web_temporal_rust_ty(name)?),
         Type::Named(name) if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => {
             Some("i64")
         }
@@ -4524,8 +5147,19 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::InlineRange { base, .. } => wasm_storage_ty(base)?,
+        Type::Apply { name, args } if name == Syntax::TYPE_TASK && args.len() == 1 => {
+            format!("JetWebTask<{}>", wasm_storage_ty(&args[0])?)
+        }
+        Type::Tuple(fields) => {
+            fields
+                .iter()
+                .map(|(_, field)| wasm_storage_ty(field))
+                .collect::<Option<Vec<_>>>()?;
+            crate::Codegen::tuple_struct_name(&crate::Codegen::tuple_fields_plain(fields))
+        }
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Named(name) if name == Syntax::TYPE_AUTHORITY => "JetAuthority".to_string(),
+        Type::Named(name) if web_temporal_name(name) => web_temporal_rust_ty(name)?.to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
         Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
@@ -4542,6 +5176,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
             "JetRangeError".to_string()
         }
+        Type::Named(name) if name == Syntax::TYPE_TASK_FAILURE => "JetTaskFailure".to_string(),
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
         Type::Bool => "bool".to_string(),
@@ -4576,8 +5211,19 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
+        Type::Apply { name, args } if name == Syntax::TYPE_TASK && args.len() == 1 => {
+            format!("JetWebTask<{}>", wasm_internal_ty(&args[0], bundle)?)
+        }
+        Type::Tuple(fields) => {
+            fields
+                .iter()
+                .map(|(_, field)| wasm_internal_ty(field, bundle))
+                .collect::<Option<Vec<_>>>()?;
+            crate::Codegen::tuple_struct_name(&crate::Codegen::tuple_fields_plain(fields))
+        }
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Named(name) if name == Syntax::TYPE_AUTHORITY => "JetAuthority".to_string(),
+        Type::Named(name) if web_temporal_name(name) => web_temporal_rust_ty(name)?.to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
         Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
@@ -4592,6 +5238,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
             "JetRangeError".to_string()
         }
+        Type::Named(name) if name == Syntax::TYPE_TASK_FAILURE => "JetTaskFailure".to_string(),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
@@ -4631,7 +5278,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
 fn wasm_param_rust_ty(ty: &Type, conv: AccessConvention, bundle: &ProgramBundle) -> Option<String> {
     let owned = wasm_internal_ty(ty, bundle)?;
     match (conv, ty) {
-        (_, ty) if web_time_type(ty) => Some(owned),
+        (_, ty) if web_temporal_type(ty) => Some(owned),
         (AccessConvention::Read, Type::String) => Some("&String".to_string()),
         (AccessConvention::Write, Type::String) => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::String) => Some("String".to_string()),
@@ -4704,7 +5351,7 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
 }
 
 fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
-    if is_measurement_type(ty) {
+    if is_measurement_type(ty) || web_temporal_type(ty) {
         return None;
     }
     match ty {
@@ -4738,6 +5385,7 @@ fn wasm_edge_ok_json_expr(ty: &Type, value: &str) -> Option<String> {
         Type::Named(name) if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => {
             Some(format!("{value}.to_string()"))
         }
+        Type::Named(name) if web_temporal_name(name) => Some(format!("({value}).to_string_fmt()")),
         Type::Int | Type::IntN { .. } | Type::Bool => Some(format!("{value}.to_string()")),
         Type::Float | Type::Float32 => Some(format!("jet_wasm_json_float({value})")),
         Type::String => Some(format!("jet_wasm_json(&{value})")),
@@ -4833,9 +5481,9 @@ fn wasm_emit_call_arg(
     if arg.fn_coerce.is_some() {
         return Err(());
     }
-    if arg.borrow && uninit_borrow.is_none() && !web_time_type(&arg.value.ty) {
+    if arg.borrow && uninit_borrow.is_none() && !web_temporal_type(&arg.value.ty) {
         value = format!("&({value})");
-    } else if arg.mut_borrow && uninit_borrow.is_none() && !web_time_type(&arg.value.ty) {
+    } else if arg.mut_borrow && uninit_borrow.is_none() && !web_temporal_type(&arg.value.ty) {
         value = format!("&mut ({value})");
     }
     Ok(value)
@@ -5700,6 +6348,16 @@ fn emit_wasm_body(
                 ));
                 for (i, (lo, hi, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
+                    let lo = if matches!(subject.ty.without_user_tags(), Type::Int) {
+                        format!("JetWasmInt::from_i64({lo})")
+                    } else {
+                        lo.to_string()
+                    };
+                    let hi = if matches!(subject.ty.without_user_tags(), Type::Int) {
+                        format!("JetWasmInt::from_i64({hi})")
+                    } else {
+                        hi.to_string()
+                    };
                     out.push_str(&format!(
                         "{inner}{kw} ({subject_str} >= {lo} && {subject_str} <= {hi}) {{\n"
                     ));
@@ -6025,9 +6683,9 @@ fn wasm_emit_call_arg_value(arg: &TIR::TCallArg, mut value: String) -> Result<St
     if arg.fn_coerce.is_some() {
         return Err(());
     }
-    if arg.borrow && !web_time_type(&arg.value.ty) {
+    if arg.borrow && !web_temporal_type(&arg.value.ty) {
         value = format!("&({value})");
-    } else if arg.mut_borrow && !web_time_type(&arg.value.ty) {
+    } else if arg.mut_borrow && !web_temporal_type(&arg.value.ty) {
         value = format!("&mut ({value})");
     }
     Ok(value)
@@ -6084,9 +6742,7 @@ fn wasm_emit_known_call(
     call: String,
     funcs: &[FuncWeb],
 ) -> Result<String, ()> {
-    if wasm_callee_returns_outcome(key, funcs)?
-        && !matches!(expr_ty, Type::Result { .. })
-    {
+    if wasm_callee_returns_outcome(key, funcs)? && !matches!(expr_ty, Type::Result { .. }) {
         Ok(format!("({call})?"))
     } else {
         Ok(call)
@@ -6128,9 +6784,8 @@ fn wasm_emit_raw_call(
             Some(rendered)
         }
         TIR::TExprKind::Clone(inner) | TIR::TExprKind::ExplicitCopy(inner) => {
-            wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?.map(|value| {
-                format!("({value}).clone()")
-            })
+            wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?
+                .map(|value| format!("({value}).clone()"))
         }
         TIR::TExprKind::DistinctRaw(inner) => {
             wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?
@@ -6147,9 +6802,7 @@ fn wasm_emit_raw_call(
         return Ok(wrapped);
     }
     let (key, args) = match &expr.kind {
-        TIR::TExprKind::Call { name, args, .. } => {
-            (local_web_key(file_prefix, name), args)
-        }
+        TIR::TExprKind::Call { name, args, .. } => (local_web_key(file_prefix, name), args),
         TIR::TExprKind::ModuleCall { form, args, .. } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
@@ -6197,13 +6850,7 @@ fn wasm_emit_direct_call(
             _ => wasm_emit_expr(init, funcs, file_prefix, reconstructions)?,
         };
         let value = wasm_emit_call_arg_value(&args[0], value)?;
-        wasm_emit_known_call(
-            &expr.ty,
-            &key,
-            format!("jet_wasm_{key}({value})"),
-            funcs,
-        )
-        .map(Some)
+        wasm_emit_known_call(&expr.ty, &key, format!("jet_wasm_{key}({value})"), funcs).map(Some)
     };
     match &expr.kind {
         TIR::TExprKind::Call { name, args, .. } => {
@@ -6224,10 +6871,130 @@ fn wasm_emit_direct_call(
             else {
                 return Ok(None);
             };
-            Ok(Some(format!("jet_wasm_print({rendered})")))
+            Ok(Some(if is_string_like(&inner.ty) {
+                format!("jet_wasm_print({rendered})")
+            } else {
+                format!("jet_wasm_print(({rendered}).jet_display())")
+            }))
         }
         _ => Ok(None),
     }
+}
+
+fn wasm_emit_task_group_all_named_body(
+    mut out: String,
+    task_fields: Vec<(String, String, Type, bool)>,
+    tuple_fields: &[(String, Box<Type>)],
+) -> String {
+    for (index, (_, expression, _, _)) in task_fields.iter().enumerate() {
+        let task = mangle_generated(&format!("named_all_{index}"));
+        out.push_str(&format!(
+            "let {task} = {expression}; ",
+            task = task,
+            expression = expression,
+        ));
+    }
+    for (index, (_, _, _, result_carrier)) in task_fields.iter().enumerate() {
+        let task = mangle_generated(&format!("named_all_{index}"));
+        let joined = if *result_carrier {
+            format!("jet_task_join_result({task})", task = task)
+        } else {
+            format!("jet_task_join({task})", task = task)
+        };
+        let result = mangle_generated(&format!("named_all_result_{index}"));
+        out.push_str(&format!(
+            "let {result} = {joined}; ",
+            result = result,
+            joined = joined,
+        ));
+    }
+    out.push_str("(|| { ");
+    for index in 0..task_fields.len() {
+        let value = mangle_generated(&format!("named_all_value_{index}"));
+        let result = mangle_generated(&format!("named_all_result_{index}"));
+        out.push_str(&format!(
+            "let {value} = {result}?; ",
+            value = value,
+            result = result,
+        ));
+    }
+    let result_fields = tuple_fields
+        .iter()
+        .map(|(name, task_ty)| (name.clone(), taskgroup_result_field_type(task_ty)))
+        .collect::<Vec<_>>();
+    let tuple_struct = crate::Codegen::tuple_struct_name(&result_fields);
+    out.push_str(&format!("Ok::<_, JetTaskFailure>({tuple_struct} {{ "));
+    for (name, _) in tuple_fields {
+        let index = task_fields
+            .iter()
+            .position(|(candidate, _, _, _)| candidate == name)
+            .expect("named task.all field missing from lowered carrier");
+        out.push_str(&format!(
+            "{}: {}, ",
+            mangle(name),
+            mangle_generated(&format!("named_all_value_{index}")),
+        ));
+    }
+    out.push_str("}) })() }");
+    out
+}
+
+fn wasm_emit_task_group_all(
+    tasks: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let carrier = wasm_emit_expr(tasks, funcs, file_prefix, reconstructions)?;
+    let Type::Tuple(tuple_fields) = tasks.ty.without_user_tags() else {
+        let helper = if task_result_list_carrier(&tasks.ty) {
+            "jet_task_all_result"
+        } else {
+            "jet_task_all"
+        };
+        return Ok(format!("{helper}({carrier})"));
+    };
+
+    let mut task_fields = Vec::new();
+    if let TIR::TExprKind::TupleLit { fields, .. } = &tasks.kind {
+        for (field_name, value) in fields {
+            let Some((name, field_ty)) = tuple_fields
+                .iter()
+                .find(|(name, _)| mangle(name) == *field_name)
+            else {
+                return Err(());
+            };
+            task_fields.push((
+                name.clone(),
+                wasm_emit_expr(value, funcs, file_prefix, reconstructions)?,
+                taskgroup_result_field_type(field_ty),
+                task_result_carrier(&value.ty),
+            ));
+        }
+    } else {
+        let binding = mangle_generated("named_all_group");
+        task_fields = tuple_fields
+            .iter()
+            .map(|(name, field_ty)| {
+                (
+                    name.clone(),
+                    format!("{binding}.{}", mangle(name)),
+                    taskgroup_result_field_type(field_ty),
+                    task_result_carrier(field_ty),
+                )
+            })
+            .collect();
+        return Ok(wasm_emit_task_group_all_named_body(
+            format!("{{ let {binding} = {carrier}; "),
+            task_fields,
+            tuple_fields,
+        ));
+    }
+    Ok(wasm_emit_task_group_all_named_body(
+        "{ ".to_string(),
+        task_fields,
+        tuple_fields,
+    ))
 }
 
 fn wasm_emit_expr(
@@ -6288,10 +7055,13 @@ fn wasm_emit_expr(
                                 "{jet_prefix}s.push_str(&({rendered}).jet_display()); "
                             )),
                             crate::AST::StrFormat::Debug => value.push_str(&jet_format!(
-                                "{jet_prefix}s.push_str(&format!(\"{{:?}}\", {rendered})); "
+                                "{jet_prefix}s.push_str(&({rendered}).jet_debug()); "
                             )),
-                            crate::AST::StrFormat::Pretty
-                            | crate::AST::StrFormat::Fixed(_)
+                            crate::AST::StrFormat::Pretty => value.push_str(&jet_format!(
+                                "{jet_prefix}s.push_str(&jet_fmt_pretty(&({rendered}))); "
+                            )),
+                            crate::AST::StrFormat::Fixed(_)
+                            | crate::AST::StrFormat::Grouped(_)
                             | crate::AST::StrFormat::Hex(_)
                             | crate::AST::StrFormat::Pad { .. }
                             | crate::AST::StrFormat::PadLeft { .. }
@@ -6522,8 +7292,60 @@ fn wasm_emit_expr(
             method,
             args,
             ..
-        } if module == "core.time" && method == "instant" && args.is_empty() => {
-            "jet_time_monotonic_now_ns()".to_string()
+        } if module == "core.text.fmt"
+            && matches!(method.as_str(), "decimal" | "grouped")
+            && args.len() == 2 => {
+            let rendered = args
+                .iter()
+                .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?;
+            let precision = if matches!(&args[1].ty, Type::Int) {
+                format!(
+                    "({}).to_i64().expect(\"formatter precision exceeds the Wasm i64 carrier\")",
+                    rendered[1]
+                )
+            } else {
+                rendered[1].clone()
+            };
+            if matches!(&args[0].ty, Type::Int) {
+                let helper = if method == "grouped" {
+                    "jet_fmt_grouped_int"
+                } else {
+                    "jet_fmt_decimal_int"
+                };
+                format!(
+                    "{helper}(&({}).to_string(), {precision})",
+                    rendered[0]
+                )
+            } else {
+                let helper = if method == "grouped" {
+                    "jet_fmt_grouped"
+                } else {
+                    "jet_fmt_decimal"
+                };
+                format!("{helper}({}, {precision})", rendered[0])
+            }
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.text.fmt" && method == "pretty" && args.len() == 1 => {
+            let value = wasm_emit_expr(&args[0], funcs, file_prefix, reconstructions)?;
+            format!("jet_fmt_pretty(&({value}))")
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.time" && web_time_core_supported(method, args.len()) => {
+            let rendered = args
+                .iter()
+                .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?;
+            wasm_time_core_call(method, &rendered).ok_or(())?
         }
         TIR::TExprKind::HandleMethod { recv, op, args } => {
             let recv = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
@@ -6578,11 +7400,36 @@ fn wasm_emit_expr(
                         reconstructions,
                     )?;
                     let helper = match op {
-                        TIR::THandleOp::DurationScale => "jet_web_duration_scale",
-                        TIR::THandleOp::DurationDivide => "jet_web_duration_divide",
-                        _ => unreachable!(),
-                    };
+                        TIR::THandleOp::DurationScale => Some("jet_web_duration_scale"),
+                        TIR::THandleOp::DurationDivide => Some("jet_web_duration_divide"),
+                        _ => None,
+                    }
+                    .ok_or(())?;
                     format!("{helper}({recv}, {factor})")
+                }
+                TIR::THandleOp::DurationAbs => "jet_duration_kernel_abs({recv})".to_string(),
+                TIR::THandleOp::DurationNegated => {
+                    "jet_duration_kernel_negated({recv})".to_string()
+                }
+                TIR::THandleOp::DurationSign => "jet_duration_kernel_sign({recv})".to_string(),
+                TIR::THandleOp::DurationTotalIn if args.len() == 1 => {
+                    let unit = wasm_emit_expr(&args[0], funcs, file_prefix, reconstructions)?;
+                    format!("jet_duration_kernel_total_in({recv}, &({unit}))")
+                }
+                TIR::THandleOp::DurationRound if (1..=3).contains(&args.len()) => {
+                    let rendered = args
+                        .iter()
+                        .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let increment = rendered.get(1).map(String::as_str).unwrap_or("1");
+                    let mode = rendered
+                        .get(2)
+                        .map(String::as_str)
+                        .unwrap_or("\"half_expand\"");
+                    format!(
+                        "jet_duration_kernel_round({recv}, &({}), {}, &({})).unwrap_or({recv})",
+                        rendered[0], increment, mode
+                    )
                 }
                 TIR::THandleOp::CivilTimeMethod { kind, method }
                     if kind == "Instant" && method == "elapsed_millis" => {
@@ -6592,6 +7439,25 @@ fn wasm_emit_expr(
                     if kind == "Instant" && method == "elapsed" => {
                         format!("jet_time_monotonic_now_ns().saturating_sub({recv})")
                     }
+                TIR::THandleOp::CivilTimeMethod { kind, method } => {
+                    let rendered = args
+                        .iter()
+                        .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if kind == "Period" && method == "total_in" {
+                        wasm_civil_time_method_call(
+                            kind,
+                            method,
+                            &recv,
+                            &rendered,
+                            args.get(1).map(|arg| &arg.ty),
+                        )
+                        .ok_or(())?
+                    } else {
+                        wasm_civil_time_method_call(kind, method, &recv, &rendered, None)
+                            .ok_or(())?
+                    }
+                }
                 TIR::THandleOp::ReflectValueTypeName => format!("({recv}).type_name()"),
                 TIR::THandleOp::ReflectValuePath => format!("({recv}).path()"),
                 TIR::THandleOp::ReflectValueDisplay => format!("({recv}).display()"),
@@ -6650,14 +7516,20 @@ fn wasm_emit_expr(
         }
         TIR::TExprKind::Print(inner) => {
             let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
-            if matches!(&inner.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL) {
-                format!("jet_wasm_print(&({value}))")
-            } else {
+            if is_string_like(&inner.ty) {
                 format!("jet_wasm_print({value})")
+            } else {
+                format!("jet_wasm_print(({value}).jet_display())")
             }
         }
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let recv_expr = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            let core_error_field = matches!(
+                &recv.ty,
+                Type::Named(name)
+                    if (name == "TextError" && field == "message")
+                        || (name == "RangeError" && field == "reason")
+            );
             if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
                 match field.as_str() {
                     "message" => format!("jet_err_message(&({recv_expr}))"),
@@ -6665,6 +7537,8 @@ fn wasm_emit_expr(
                     "cause" => format!("jet_err_cause(&({recv_expr}))"),
                     _ => return Err(()),
                 }
+            } else if core_error_field {
+                format!("({recv_expr}).{field}")
             } else {
                 format!("({}).{}", recv_expr, mangle(field))
             }
@@ -6717,6 +7591,21 @@ fn wasm_emit_expr(
                 rendered_fields.join(", ")
             )
         }
+        TIR::TExprKind::TupleLit {
+            struct_name, fields
+        } => {
+            let fields = fields
+                .iter()
+                .map(|(field, value)| {
+                    Ok(format!(
+                        "{field}: {}",
+                        wasm_emit_expr(value, funcs, file_prefix, reconstructions)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ");
+            format!("{struct_name} {{ {fields} }}")
+        }
         TIR::TExprKind::ListLit(elements) => {
             let elements = elements
                 .iter()
@@ -6762,10 +7651,21 @@ fn wasm_emit_expr(
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Absent => "Err(JetAbsent)".to_string(),
-        TIR::TExprKind::Ok(inner) => format!(
-            "Ok({})",
-            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
-        ),
+        TIR::TExprKind::Ok(inner) => {
+            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            if matches!(
+                expr.ty.without_user_tags(),
+                Type::Result { err, .. }
+                    if matches!(
+                        err.without_user_tags(),
+                        Type::Named(name) if name == Syntax::TYPE_ERR
+                    )
+            ) {
+                format!("Ok::<_, JetErr>({value})")
+            } else {
+                format!("Ok({value})")
+            }
+        }
         TIR::TExprKind::Err(inner) => format!(
             "Err({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
@@ -6827,12 +7727,20 @@ fn wasm_emit_expr(
                 TIR::TTryConvert::DefaultErr => {
                     format!("({value}).map_err(jet_err_from_message)")
                 }
-                TIR::TTryConvert::Typed(conv_fn) => match web_error_conversion_pair(conv_fn) {
-                    Some((source, target)) if target == Syntax::TYPE_ERR => format!(
-                        "({value}).map_err(|error| {{ let mut converted = {conv_fn}(error); jet_err_apply_conversion(&mut converted, {source:?}.to_string(), {target:?}.to_string()); converted }})"
-                    ),
-                    _ => format!("({value}).map_err({conv_fn})"),
-                },
+                TIR::TTryConvert::Typed {
+                    fn_name,
+                    source,
+                    target,
+                } if TIR::try_target_is_default_error(inner, convert) => {
+                    let source = source.name();
+                    let target = target.name();
+                    format!(
+                        "({value}).map_err(|error| {{ let mut converted = {fn_name}(error); jet_err_apply_conversion(&mut converted, {source:?}.to_string(), {target:?}.to_string()); converted }})"
+                    )
+                }
+                TIR::TTryConvert::Typed { fn_name, .. } => {
+                    format!("({value}).map_err({fn_name})")
+                }
                 TIR::TTryConvert::WidenUnion { enum_name, tag } => {
                     format!("({value}).map_err(|e| {}::{tag}(e))", mangle_path(enum_name))
                 }
@@ -6984,6 +7892,9 @@ fn wasm_emit_expr(
         },
         TIR::TExprKind::Lambda(lam) => {
             wasm_tir_lambda(lam, funcs, file_prefix, reconstructions)?
+        }
+        TIR::TExprKind::TaskGroupAll { tasks } => {
+            wasm_emit_task_group_all(tasks, funcs, file_prefix, reconstructions)?
         }
         TIR::TExprKind::CoreClosureCall {
             kind: TIR::TCoreClosureKind::Spawn {
@@ -7352,7 +8263,9 @@ fn emit_js_app(
     );
     out.push_str("const JET_EDGE_TARGET = \"web\";\n");
     out.push_str(JS_POWER_PRELUDE);
+    out.push_str(&js_time_zone_prelude().map_err(|_| web_tzdb_error())?);
     out.push_str(JS_EXECUTION_PRELUDE);
+    out.push_str(JS_TASK_GROUP_PRELUDE);
     out.push_str(&js_runtime_stop_metadata());
     let mut handlers = Vec::new();
     let exports: Vec<&FuncWeb> = funcs
@@ -7619,7 +8532,11 @@ fn emit_js_error_conv(
         func_name: conversion.key.clone(),
         span: conversion.tir.source_span,
     })?;
-    let async_kw = if body.contains("await ") { "async " } else { "" };
+    let async_kw = if body.contains("await ") {
+        "async "
+    } else {
+        ""
+    };
     let params = conversion
         .tir
         .params
@@ -7855,11 +8772,6 @@ fn web_name(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-fn web_error_conversion_pair(name: &str) -> Option<(&str, &str)> {
-    name.strip_prefix(&mangle_generated("errconv_"))?
-        .split_once("_to_")
-}
-
 fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
     partition_key(None, Some(web_name(rust_mod)), web_name(rust_fn))
 }
@@ -8064,15 +8976,7 @@ fn emit_js_if(
     let pad = "  ".repeat(indent);
     if let TIR::TIfCond::WithPrelude { prelude, cond } = cond {
         emit_tir_js_body(prelude, out, funcs, file_prefix, indent)?;
-        return emit_js_if(
-            cond,
-            then_body,
-            else_body,
-            out,
-            funcs,
-            file_prefix,
-            indent,
-        );
+        return emit_js_if(cond, then_body, else_body, out, funcs, file_prefix, indent);
     }
     if let TIR::TIfCond::And { left, right } = cond {
         let extra = emit_js_if_head(left, out, funcs, file_prefix, indent)?;
@@ -8240,7 +9144,9 @@ fn emit_js_contract_scope(
     let result_carrier_mangled = mangle_generated("result_carrier");
     let result_carrier = web_name(&result_carrier_mangled);
     if nested.contains("await ") {
-        out.push_str(&format!("{pad}const {result_carrier} = await (async () => {{\n"));
+        out.push_str(&format!(
+            "{pad}const {result_carrier} = await (async () => {{\n"
+        ));
     } else {
         out.push_str(&format!("{pad}const {result_carrier} = (() => {{\n"));
     }
@@ -8757,6 +9663,8 @@ fn emit_tir_js_body_inner(
                 ));
                 for (i, (lo, hi, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
+                    let lo = format!("{lo}n");
+                    let hi = format!("{hi}n");
                     out.push_str(&jet_format!(
                         "{inner}{kw} ({jet_prefix}switch_subject >= {lo} && {jet_prefix}switch_subject <= {hi}) {{\n"
                     ));
@@ -9078,6 +9986,67 @@ fn tir_js_ct_value(value: &crate::AST::CtValue) -> Result<String, ()> {
     })
 }
 
+fn tir_js_task_group_all(
+    tasks: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    let carrier = tir_js_expr(tasks, funcs, file_prefix)?;
+    match tasks.ty.without_user_tags() {
+        Type::Tuple(tuple_fields) => {
+            let (authored_fields, result_carriers) = match &tasks.kind {
+                TIR::TExprKind::TupleLit { fields, .. } => (
+                    fields
+                        .iter()
+                        .map(|(field, _)| {
+                            if tuple_fields.iter().any(|(name, _)| mangle(name) == *field) {
+                                Ok(web_name(field).to_string())
+                            } else {
+                                Err(())
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    fields
+                        .iter()
+                        .map(|(_, value)| task_result_carrier(&value.ty))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => (
+                    tuple_fields
+                        .iter()
+                        .map(|(name, _)| js_field_name(name))
+                        .collect(),
+                    tuple_fields
+                        .iter()
+                        .map(|(_, ty)| task_result_carrier(ty))
+                        .collect(),
+                ),
+            };
+            let result_fields = tuple_fields.iter().map(|(name, _)| js_field_name(name));
+            Ok(format!(
+                "await jet_task_all_named({}, {}, {}, {})",
+                carrier,
+                js_string_list(authored_fields),
+                js_string_list(result_fields),
+                js_bool_list(result_carriers),
+            ))
+        }
+        Type::List(inner) => {
+            let carriers = match &tasks.kind {
+                TIR::TExprKind::ListLit(elements) => js_bool_list(
+                    elements
+                        .iter()
+                        .map(|element| task_result_carrier(&element.ty)),
+                ),
+                _ if task_result_carrier(inner) => "[true]".to_string(),
+                _ => "[]".to_string(),
+            };
+            Ok(format!("await jet_task_all({}, {})", carrier, carriers))
+        }
+        _ => Err(()),
+    }
+}
+
 fn tir_js_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
@@ -9382,6 +10351,7 @@ fn tir_js_expr(
                 .collect::<Result<Vec<_>, ()>>()?
                 .join(", ")
         ),
+        E::TaskGroupAll { tasks } => tir_js_task_group_all(tasks, funcs, file_prefix)?,
         E::EnumLit {
             variant, payload, ..
         } => {
@@ -9440,15 +10410,22 @@ fn tir_js_expr(
                 .unwrap_or_else(|| "null".to_string());
             let converter = match convert {
                 TIR::TTryConvert::DefaultErr => "jet_web_default_error".to_string(),
-                TIR::TTryConvert::Typed(conv_fn) => {
-                    let key = local_web_key(file_prefix, conv_fn);
-                    match web_error_conversion_pair(conv_fn) {
-                        Some((source, target)) if target == Syntax::TYPE_ERR => format!(
+                TIR::TTryConvert::Typed {
+                    fn_name,
+                    source,
+                    target,
+                } => {
+                    let key = local_web_key(file_prefix, fn_name);
+                    if TIR::try_target_is_default_error(inner, convert) {
+                        let source = source.name();
+                        let target = target.name();
+                        format!(
                             "(error, original) => jet_web_error_from_conversion({key}(error), {}, {}, original)",
-                            json_quote(source),
-                            json_quote(target),
-                        ),
-                        _ => key,
+                            json_quote(&source),
+                            json_quote(&target),
+                        )
+                    } else {
+                        key
                     }
                 }
                 TIR::TTryConvert::WidenUnion { tag, .. } => format!(
@@ -9555,17 +10532,10 @@ fn tir_js_expr(
         E::Call { name, args, .. } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;
-            if name == "print" {
-                format!("jetDom.print({args})")
-            } else if is_wasm_export(&name, funcs) {
+            if is_wasm_export(&name, funcs) {
                 format!("await bridge_{name}({args})")
             } else {
-                js_emit_known_call(
-                    &expr.ty,
-                    &name,
-                    format!("{name}({args})"),
-                    funcs,
-                )?
+                js_emit_known_call(&expr.ty, &name, format!("{name}({args})"), funcs)?
             }
         }
         E::ModuleCall { form, args, .. } => {
@@ -9579,12 +10549,7 @@ fn tir_js_expr(
             if is_wasm_export(&key, funcs) {
                 format!("await bridge_{key}({args})")
             } else {
-                js_emit_known_call(
-                    &expr.ty,
-                    &key,
-                    format!("{key}({args})"),
-                    funcs,
-                )?
+                js_emit_known_call(&expr.ty, &key, format!("{key}({args})"), funcs)?
             }
         }
         E::Print(value) => {
@@ -9661,6 +10626,19 @@ fn tir_js_expr(
             ..
         } if module == "core.time" && method == "instant" && args.is_empty() => {
             "jet_time_monotonic_now_ns()".to_string()
+        }
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.time" && web_time_core_supported(method, args.len()) => {
+            let args = tir_plain_args(args, funcs, file_prefix)?;
+            format!(
+                "jet_time_core({}, [{}])",
+                json_quote(method),
+                args.join(", ")
+            )
         }
         E::CoreCall {
             module,
@@ -9807,11 +10785,26 @@ fn tir_js_expr(
                 TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => {
                     let factor = a.first().ok_or(())?;
                     let helper = match op {
-                        TIR::THandleOp::DurationScale => "jet_duration_scale",
-                        TIR::THandleOp::DurationDivide => "jet_duration_divide",
-                        _ => unreachable!(),
-                    };
+                        TIR::THandleOp::DurationScale => Some("jet_duration_scale"),
+                        TIR::THandleOp::DurationDivide => Some("jet_duration_divide"),
+                        _ => None,
+                    }
+                    .ok_or(())?;
                     format!("{helper}({recv}, {factor})")
+                }
+                TIR::THandleOp::DurationAbs => format!("jet_time_duration_abs({recv})"),
+                TIR::THandleOp::DurationNegated => format!("jet_time_duration_negated({recv})"),
+                TIR::THandleOp::DurationSign => format!("jet_time_duration_sign({recv})"),
+                TIR::THandleOp::DurationTotalIn if a.len() == 1 => {
+                    format!("jet_time_duration_total_in({recv}, {})", a[0])
+                }
+                TIR::THandleOp::DurationRound if (1..=3).contains(&a.len()) => {
+                    format!(
+                        "jet_time_duration_round({recv}, {}, {}, {})",
+                        a[0],
+                        a.get(1).map(String::as_str).unwrap_or("1n"),
+                        a.get(2).map(String::as_str).unwrap_or("\"half_expand\"")
+                    )
                 }
                 TIR::THandleOp::CivilTimeMethod { kind, method }
                     if kind == "Instant" && method == "elapsed_millis" =>
@@ -9822,6 +10815,15 @@ fn tir_js_expr(
                     if kind == "Instant" && method == "elapsed" =>
                 {
                     format!("jet_time_sub(jet_time_monotonic_now_ns(), {recv})")
+                }
+                TIR::THandleOp::CivilTimeMethod { kind, method } => {
+                    format!(
+                        "jet_time_method({}, {}, {}, [{}])",
+                        recv,
+                        json_quote(kind),
+                        json_quote(method),
+                        a.join(", ")
+                    )
                 }
                 TIR::THandleOp::TaskJoin if a.is_empty() => {
                     format!("await jet_task_join({recv})")
@@ -10118,17 +11120,10 @@ fn tir_js_direct_call(
         }
         let value = tir_js_expr(init, funcs, file_prefix)?;
         let value = tir_js_call_arg_value(&args[0], value)?;
-        Ok(Some(if key == "print" {
-            format!("jetDom.print({value})")
-        } else if is_wasm_export(&key, funcs) {
+        Ok(Some(if is_wasm_export(&key, funcs) {
             format!("await bridge_{key}({value})")
         } else {
-            js_emit_known_call(
-                &expr.ty,
-                &key,
-                format!("{key}({value})"),
-                funcs,
-            )?
+            js_emit_known_call(&expr.ty, &key, format!("{key}({value})"), funcs)?
         }))
     };
     match &expr.kind {
@@ -10230,17 +11225,31 @@ fn tir_js_string(
         for part in parts {
             match part {
                 TIR::TStrPart::Lit(text) => out.push_str(&js_template_text(text)),
-                TIR::TStrPart::Interp(value, _) => {
+                TIR::TStrPart::Interp(value, format) => {
                     let is_float = value.ty.is_float();
                     let is_measurement = is_measurement_type(&value.ty);
                     let rendered = tir_js_expr(value, funcs, file_prefix)?;
-                    if is_float {
-                        out.push_str(&format!("${{jet_float_display({rendered})}}"));
-                    } else if is_measurement {
-                        out.push_str(&format!("${{jet_measurement_show({rendered})}}"));
-                    } else {
-                        out.push_str(&format!("${{{rendered}}}"));
-                    }
+                    let text = match format {
+                        crate::AST::StrFormat::Display if is_float => {
+                            format!("jet_float_display({rendered})")
+                        }
+                        crate::AST::StrFormat::Display if is_measurement => {
+                            format!("jet_measurement_show({rendered})")
+                        }
+                        crate::AST::StrFormat::Display if js_display_is_native_scalar(&value.ty) => {
+                            rendered
+                        }
+                        crate::AST::StrFormat::Display => format!("jet_display({rendered})"),
+                        crate::AST::StrFormat::Debug if is_measurement => {
+                            format!("jet_measurement_show({rendered})")
+                        }
+                        crate::AST::StrFormat::Debug => format!("jet_debug({rendered})"),
+                        crate::AST::StrFormat::Pretty => {
+                            format!("jet_fmt_pretty(jet_debug({rendered}))")
+                        }
+                        _ => return Err(()),
+                    };
+                    out.push_str(&format!("${{{text}}}"));
                 }
             }
         }
@@ -10268,6 +11277,16 @@ fn tir_core_call(
 ) -> Result<String, ()> {
     let a = tir_plain_args(args, funcs, file_prefix)?;
     let module = module.strip_prefix("core.").unwrap_or(module);
+    if module == "time" {
+        if !web_time_core_supported(method, a.len()) {
+            return Err(());
+        }
+        return Ok(format!(
+            "jet_time_core({}, [{}])",
+            json_quote(method),
+            a.join(", ")
+        ));
+    }
     if module == "compute" {
         if !web_core_call_supported(module, method, a.len()) {
             return Err(());
@@ -10298,6 +11317,26 @@ fn tir_core_call(
             .collect::<Vec<_>>()
             .join(", ");
         return Ok(format!("jetDom.print({shown})"));
+    }
+    if module == "text.fmt" && method == "pretty" {
+        if a.len() != 1 {
+            return Err(());
+        }
+        return Ok(format!("jet_fmt_pretty({})", a[0]));
+    }
+    if module == "text.fmt" && matches!(method, "decimal" | "grouped") {
+        if a.len() != 2 {
+            return Err(());
+        }
+        let integer = matches!(&args[0].ty, Type::Int);
+        let helper = match (method, integer) {
+            ("decimal", true) => "jet_fmt_decimal_int",
+            ("decimal", false) => "jet_fmt_decimal",
+            ("grouped", true) => "jet_fmt_grouped_int",
+            ("grouped", false) => "jet_fmt_grouped",
+            _ => return Err(()),
+        };
+        return Ok(format!("{helper}({}, {})", a[0], a[1]));
     }
     if module == "prelude" && method == "keep" {
         if a.len() != 1 {
@@ -10407,6 +11446,8 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
         (true, "set") => Some(2),
         (true, "clear") => Some(0),
         (false, "null_backend") => Some(0),
+        (false, "pretty") => Some(1),
+        (false, "decimal" | "grouped") => Some(2),
         (false, "node") => Some(3),
         (false, "node_color" | "node_role" | "constraint" | "rect") => Some(4),
         (false, "resize_event") => Some(2),
@@ -10465,6 +11506,436 @@ fn web_core_call_supported(module: &str, method: &str, argc: usize) -> bool {
         | "device_metal" | "device_cuda" | "device_vulkan" | "device_webgpu" => argc == 0,
         _ => false,
     }
+}
+
+/// D-TIMEDEPTH1: web artifacts carry the repository's exact TZif inputs so
+/// named zones do not fall back to host filesystem access in a browser. The
+/// generated Rust and JS adapters both feed these bytes to their copy of the
+/// shared temporal Prelude parser.
+fn web_tzdb_error() -> WebTirUnsupported {
+    WebTirUnsupported {
+        func_name: "<web timezone data>".to_string(),
+        span: Span::new(0, 0),
+    }
+}
+
+fn web_tzdb_files() -> Result<Vec<(String, Vec<u8>)>, std::io::Error> {
+    fn collect(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        files: &mut Vec<(String, Vec<u8>)>,
+    ) -> Result<(), std::io::Error> {
+        let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                collect(root, &path, files)?;
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let bytes = std::fs::read(&path)?;
+            if !bytes.starts_with(b"TZif") {
+                continue;
+            }
+            let name = path
+                .strip_prefix(root)
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "TZif path must be below the TZif root",
+                    )
+                })?
+                .components()
+                .filter_map(|component| component.as_os_str().to_str())
+                .collect::<Vec<_>>()
+                .join("/");
+            files.push((name, bytes));
+        }
+        Ok(())
+    }
+
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corelib/tzdb");
+    let mut files = Vec::new();
+    collect(&root, &root, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(files)
+}
+
+fn wasm_time_zone_prelude() -> Result<String, std::io::Error> {
+    use std::fmt::Write as _;
+
+    let mut out = String::from(
+        "\n#[cfg(target_arch = \"wasm32\")]\n\
+         fn jet_time_embedded_zone_bytes(name: &str) -> Option<&'static [u8]> {\n\
+             let name = name.strip_prefix(\"posix/\").unwrap_or(name);\n\
+             let name = name.strip_prefix(\"right/\").unwrap_or(name);\n\
+             match name {\n",
+    );
+    for (name, bytes) in web_tzdb_files()? {
+        writeln!(
+            out,
+            "                 {} => Some(&[",
+            escape_rust_str(&name)
+        )
+        .expect("writing generated TZif Rust");
+        for byte in bytes {
+            write!(out, "{byte}u8,").expect("writing generated TZif Rust byte");
+        }
+        out.push_str("]),\n");
+    }
+    out.push_str("                 _ => None,\n             }\n         }\n");
+    Ok(out)
+}
+
+fn js_time_zone_prelude() -> Result<String, std::io::Error> {
+    use std::fmt::Write as _;
+
+    let mut out =
+        String::from("\n// D-TIMEDEPTH1: exact repository TZif inputs for browser named zones.\n");
+    for (name, bytes) in web_tzdb_files()? {
+        write!(
+            out,
+            "JET_TIME_ZONE_DATA[{}] = new Uint8Array([",
+            json_quote(&name)
+        )
+        .expect("writing generated TZif JavaScript");
+        for byte in bytes {
+            write!(out, "{byte},").expect("writing generated TZif JavaScript byte");
+        }
+        out.push_str("]);\n");
+    }
+    Ok(out)
+}
+
+fn web_time_core_supported(method: &str, argc: usize) -> bool {
+    match method {
+        "now" | "now_utc" | "today" | "instant" | "utc" => argc == 0,
+        "from_timestamp"
+        | "from_unix_ms"
+        | "from_unix_seconds"
+        | "from_unix_microseconds"
+        | "from_unix_nanoseconds"
+        | "parse"
+        | "parse_time"
+        | "parse_rfc3339"
+        | "parse_iso_week_date"
+        | "parse_zoned"
+        | "zone"
+        | "period_days"
+        | "period_months"
+        | "period_years" => argc == 1,
+        "new" | "time" | "local_time" | "from_iso_week" | "period" => argc == 3,
+        "datetime" => argc == 6,
+        "days_in_month" => argc == 2,
+        "is_leap_year" => argc == 1,
+        "zoned" => argc == 2,
+        "zoned_local" => matches!(argc, 3 | 4),
+        _ => false,
+    }
+}
+
+fn wasm_time_core_call(method: &str, args: &[String]) -> Option<String> {
+    let a = |index: usize| args.get(index).map(String::as_str);
+    let i = |index: usize| {
+        a(index).map(|value| {
+            format!("({value}).to_i64().expect(\"time Int exceeds the WebAssembly i64 carrier\")")
+        })
+    };
+    Some(match method {
+        "now" => "JetDateTime::now().to_unix_ms()".to_string(),
+        "now_utc" => "JetDateTime::now()".to_string(),
+        "today" => "JetDate::today_utc()".to_string(),
+        "instant" => "jet_time_monotonic_now_ns()".to_string(),
+        "utc" => "JetZone::utc()".to_string(),
+        "new" => format!("JetDate::new({}, {}, {})", i(0)?, i(1)?, i(2)?),
+        "from_timestamp" => format!("JetDateTime::from_timestamp({})", i(0)?),
+        "from_unix_ms" => format!("JetDateTime::from_unix_ms({})", i(0)?),
+        "from_unix_seconds" => format!("JetDateTime::from_unix_seconds({})", i(0)?),
+        "from_unix_microseconds" => format!("JetDateTime::from_unix_microseconds({})", i(0)?),
+        "from_unix_nanoseconds" => format!("JetDateTime::from_unix_nanoseconds({})", i(0)?),
+        "parse" => format!("JetDate::parse(&({}))", a(0)?),
+        "parse_time" => format!("JetLocalTime::parse(&({}))", a(0)?),
+        "parse_rfc3339" => format!("jet_time_parse_rfc3339(&({}))", a(0)?),
+        "parse_iso_week_date" => format!("JetDate::parse_iso_week_date(&({}))", a(0)?),
+        "from_iso_week" => format!("jet_time_from_iso_week({}, {}, {})", i(0)?, i(1)?, i(2)?),
+        "parse_zoned" => format!("jet_time_parse_zoned(&({}))", a(0)?),
+        "datetime" => format!(
+            "JetDateTime::from_parts({}, {}, {}, {}, {}, {}, 0)",
+            i(0)?,
+            i(1)?,
+            i(2)?,
+            i(3)?,
+            i(4)?,
+            i(5)?
+        ),
+        "time" | "local_time" => {
+            format!("JetLocalTime::new({}, {}, {})", i(0)?, i(1)?, i(2)?)
+        }
+        "days_in_month" => {
+            format!(
+                "JetDate::days_in_month_of({}, {}.clamp(1, 12))",
+                i(0)?,
+                i(1)?
+            )
+        }
+        "is_leap_year" => format!("JetDate::is_leap({})", i(0)?),
+        "period" => format!("JetPeriod::new({}, {}, {})", i(0)?, i(1)?, i(2)?),
+        "period_days" => format!("JetPeriod::days({})", i(0)?),
+        "period_months" => format!("JetPeriod::months({})", i(0)?),
+        "period_years" => format!("JetPeriod::years({})", i(0)?),
+        "zone" => format!("JetZone::named(&({}))", a(0)?),
+        "zoned" => format!("({}).in_zone(&({}))", a(0)?, a(1)?),
+        "zoned_local" if args.len() == 3 => format!(
+            "JetZonedDateTime::from_local(&({}), &({}), &({}))",
+            a(0)?,
+            a(1)?,
+            a(2)?
+        ),
+        "zoned_local" => format!(
+            "JetZonedDateTime::from_local_with_disambiguation(&({}), &({}), &({}), &({}))",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?
+        ),
+        _ => return None,
+    })
+}
+
+fn wasm_civil_time_method_call(
+    kind: &str,
+    method: &str,
+    recv: &str,
+    args: &[String],
+    anchor_ty: Option<&Type>,
+) -> Option<String> {
+    let a = |index: usize| args.get(index).map(String::as_str);
+    if kind == "Period" && method == "total_in" {
+        let anchor_kind = match anchor_ty?.without_user_tags() {
+            Type::Named(name) if name == "Date" || name == "LocalDate" => "date",
+            Type::Named(name) if name == "DateTime" => "datetime",
+            _ => return None,
+        };
+        return Some(if anchor_kind == "date" {
+            format!("({recv}).total_in_date(&({}), &({}))", a(0)?, a(1)?)
+        } else {
+            format!("({recv}).total_in_datetime(&({}), &({}))", a(0)?, a(1)?)
+        });
+    }
+    Some(match (kind, method) {
+        ("Date" | "LocalDate", "year") => format!("({recv}).year()"),
+        ("Date" | "LocalDate", "month") => format!("({recv}).month()"),
+        ("Date" | "LocalDate", "day") => format!("({recv}).day()"),
+        ("Date" | "LocalDate", "to_string") => format!("({recv}).to_string_fmt()"),
+        ("Date" | "LocalDate", "weekday") => format!("({recv}).weekday()"),
+        ("Date" | "LocalDate", "iso_weekday") => format!("({recv}).iso_weekday()"),
+        ("Date" | "LocalDate", "day_of_year") => format!("({recv}).day_of_year()"),
+        ("Date" | "LocalDate", "iso_week") => format!("({recv}).iso_week()"),
+        ("Date" | "LocalDate", "iso_week_year") => format!("({recv}).iso_week_year()"),
+        ("Date" | "LocalDate", "quarter_of_year") => format!("({recv}).quarter_of_year()"),
+        ("Date" | "LocalDate", "days_in_month") => format!("({recv}).days_in_month()"),
+        ("Date" | "LocalDate", "is_leap_year") => format!("({recv}).is_leap_year()"),
+        ("Date" | "LocalDate", "replace") => {
+            format!("({recv}).replace({}, {}, {})", a(0)?, a(1)?, a(2)?)
+        }
+        ("Date" | "LocalDate", "add_days") => format!("({recv}).add_days({})", a(0)?),
+        ("Date" | "LocalDate", "add_months") => format!("({recv}).add_months({})", a(0)?),
+        ("Date" | "LocalDate", "diff_days") => format!("({recv}).diff_days(&({}))", a(0)?),
+        ("Date" | "LocalDate", "add_period") => format!("({recv}).add_period(&({}))", a(0)?),
+        ("Date" | "LocalDate", "subtract_period") => {
+            format!("({recv}).subtract_period(&({}))", a(0)?)
+        }
+        ("Date" | "LocalDate", "truncate") => {
+            format!("({recv}).truncate(&({}))", a(0)?)
+        }
+        ("Date" | "LocalDate", "format") => {
+            format!("({recv}).format_pattern(&({}))", a(0)?)
+        }
+        ("Date" | "LocalDate", "format_checked") => {
+            format!(
+                "({recv}).format_checked(&({})).map_err(|message| JetTextError {{ message }})",
+                a(0)?
+            )
+        }
+        ("Date" | "LocalDate", "until" | "since") => format!(
+            "({recv}).{method}_ns(&({}), &({}), &({}), &({}), {})",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?
+        ),
+        ("Date" | "LocalDate", "with") => format!(
+            "({recv}).with_overflow({}, {}, {}, &({}))",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?
+        ),
+        ("LocalTime", "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond") => {
+            format!("({recv}).{method}()")
+        }
+        ("LocalTime", "to_string") => format!("({recv}).to_string_fmt()"),
+        ("LocalTime", "add_duration") => format!("({recv}).add_duration_ns({})", a(0)?),
+        ("LocalTime", "subtract_duration") => {
+            format!("({recv}).subtract_duration_ns({})", a(0)?)
+        }
+        ("LocalTime", "round") => {
+            format!("({recv}).round_with(&({}), {}, &({}))", a(0)?, a(1)?, a(2)?)
+        }
+        ("LocalTime", "truncate") => {
+            format!("({recv}).truncate_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("LocalTime", "floor") => {
+            format!("({recv}).floor_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("LocalTime", "ceil") => {
+            format!("({recv}).ceil_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("LocalTime", "until" | "since") => format!(
+            "({recv}).{method}_ns(&({}), &({}), &({}), &({}), {})",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?
+        ),
+        ("LocalTime", "format") => format!("({recv}).format_pattern(&({}))", a(0)?),
+        ("LocalTime", "format_checked") => format!(
+            "({recv}).format_checked(&({})).map_err(|message| JetTextError {{ message }})",
+            a(0)?
+        ),
+        ("DateTime", "to_timestamp") => {
+            format!("JetWasmInt::from_i64(({recv}).to_timestamp())")
+        }
+        ("DateTime", "to_unix_ms") => {
+            format!("JetWasmInt::from_i64(({recv}).to_unix_ms())")
+        }
+        ("DateTime", "to_unix_s") => {
+            format!("JetWasmInt::from_i64(({recv}).to_unix_seconds())")
+        }
+        ("DateTime", "to_unix_us") => format!(
+            "({recv}).to_unix_microseconds().map(JetWasmInt::from_i64).map_err(|reason| JetRangeError {{ reason }})"
+        ),
+        ("DateTime", "to_unix_ns") => format!(
+            "({recv}).to_unix_nanoseconds().map(JetWasmInt::from_i64).map_err(|reason| JetRangeError {{ reason }})"
+        ),
+        ("DateTime", "to_string") => format!("({recv}).to_string_fmt()"),
+        ("DateTime", "date" | "time" | "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond") => {
+            format!("({recv}).{method}()")
+        }
+        ("DateTime", "format_rfc3339") => format!("({recv}).format_rfc3339()"),
+        ("DateTime", "format") => format!("({recv}).format_pattern(&({}))", a(0)?),
+        ("DateTime", "format_checked") => format!(
+            "({recv}).format_checked(&({})).map_err(|message| JetTextError {{ message }})",
+            a(0)?
+        ),
+        ("DateTime", "plus_duration") => format!("({recv}).plus_duration_ns({})", a(0)?),
+        ("DateTime", "subtract_duration") => {
+            format!("({recv}).subtract_duration_ns({})", a(0)?)
+        }
+        ("DateTime", "add_period") => format!("({recv}).add_period(&({}))", a(0)?),
+        ("DateTime", "subtract_period") => {
+            format!("({recv}).subtract_period(&({}))", a(0)?)
+        }
+        ("DateTime", "difference") => format!("({recv}).difference_ns(&({}))", a(0)?),
+        ("DateTime", "truncate") => {
+            format!("({recv}).truncate_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("DateTime", "floor") => {
+            format!("({recv}).floor_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("DateTime", "ceil") => {
+            format!("({recv}).ceil_with(&({}), {})", a(0)?, a(1)?)
+        }
+        ("DateTime", "round") => {
+            format!("({recv}).round_with(&({}), {}, &({}))", a(0)?, a(1)?, a(2)?)
+        }
+        ("DateTime", "until" | "since") => format!(
+            "({recv}).{method}_ns(&({}), &({}), &({}), &({}), {})",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?
+        ),
+        ("DateTime", "replace") => format!(
+            "({recv}).replace({}, {}, {}, {}, {}, {})",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?,
+            a(5)?
+        ),
+        ("DateTime", "in_zone") => format!("({recv}).in_zone(&({}))", a(0)?),
+        ("DateTime", "with") => format!(
+            "({recv}).with_overflow({}, {}, {}, {}, {}, {}, &({}))",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?,
+            a(5)?,
+            a(6)?
+        ),
+        ("Zone", "name") => format!("({recv}).name()"),
+        ("Zone", "next_transition" | "previous_transition") => {
+            format!("({recv}).{method}({})", a(0)?)
+        }
+        ("Zone", "start_of_day") => format!("({recv}).start_of_day_zoned(&({}))", a(0)?),
+        ("Zone", "hours_in_day") => format!("({recv}).hours_in_day(&({}))", a(0)?),
+        ("ZonedDateTime", "date" | "time" | "offset_seconds" | "is_dst" | "to_datetime" | "zone") => {
+            format!("({recv}).{method}()")
+        }
+        ("ZonedDateTime", "to_string") => format!("({recv}).to_string_fmt()"),
+        ("ZonedDateTime", "format") => format!("({recv}).format_pattern(&({}))", a(0)?),
+        ("ZonedDateTime", "format_checked") => {
+            format!(
+                "({recv}).format_checked(&({})).map_err(|message| JetTextError {{ message }})",
+                a(0)?
+            )
+        }
+        ("ZonedDateTime", "format_rfc9557") => format!("({recv}).format_rfc9557()"),
+        ("ZonedDateTime", "add_duration") => {
+            format!("({recv}).add_duration_ns({})", a(0)?)
+        }
+        ("ZonedDateTime", "subtract_duration") => {
+            format!("({recv}).subtract_duration_ns({})", a(0)?)
+        }
+        ("ZonedDateTime", "add_period") => format!("({recv}).add_period(&({}))", a(0)?),
+        ("ZonedDateTime", "subtract_period") => {
+            format!("({recv}).subtract_period(&({}))", a(0)?)
+        }
+        ("ZonedDateTime", "with_time") => {
+            format!("({recv}).with_time(&({}), &({}))", a(0)?, a(1)?)
+        }
+        ("ZonedDateTime", "with_zone") => format!("({recv}).with_zone(&({}))", a(0)?),
+        ("ZonedDateTime", "until" | "since") => format!(
+            "({recv}).{method}_ns(&({}), &({}), &({}), &({}), {})",
+            a(0)?,
+            a(1)?,
+            a(2)?,
+            a(3)?,
+            a(4)?
+        ),
+        ("ZonedDateTime", "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day") => {
+            format!("({recv}).{method}()")
+        }
+        ("Period", "to_string") => format!("({recv}).to_string_fmt()"),
+        ("Period", "years" | "months" | "days") => {
+            format!("({recv}).{method}_value()")
+        }
+        ("Period", "sign" | "is_zero" | "abs" | "negated") => {
+            format!("({recv}).{method}()")
+        }
+        ("Period", "add" | "sub") => format!("({recv}).{method}(&({}))", a(0)?),
+        _ => return None,
+    })
 }
 
 fn wasm_math_core_helper(
@@ -10530,9 +12001,7 @@ fn js_emit_known_call(
     call: String,
     funcs: &[FuncWeb],
 ) -> Result<String, ()> {
-    if js_callee_returns_outcome(key, funcs)?
-        && !matches!(expr_ty, Type::Result { .. })
-    {
+    if js_callee_returns_outcome(key, funcs)? && !matches!(expr_ty, Type::Result { .. }) {
         Ok(format!(
             "jet_web_try({}, {}, 0, {}, null, null, false)",
             if call.contains("await") {
@@ -10554,9 +12023,7 @@ fn js_emit_raw_call(
     file_prefix: Option<&str>,
 ) -> Result<Option<String>, ()> {
     let (key, args) = match &expr.kind {
-        TIR::TExprKind::Call { name, args, .. } => {
-            (local_web_key(file_prefix, name), args)
-        }
+        TIR::TExprKind::Call { name, args, .. } => (local_web_key(file_prefix, name), args),
         TIR::TExprKind::ModuleCall { form, args, .. } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
@@ -10583,10 +12050,11 @@ fn js_emit_raw_call(
 /// host's edge slot; journey and frame remain adapter metadata.
 const WASM_ARITH_PRELUDE: &str = concat!(
     "#[link(wasm_import_module = \"env\")]\nunsafe extern \"C\" { fn jet_web_print(ptr: u32, len: u32); }\n\n",
-    "fn jet_wasm_print(value: impl std::fmt::Display) {\n",
-    "    let text = value.to_string();\n",
+    "fn jet_wasm_print(text: String) {\n",
     "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
     "}\n\n",
+    include_str!("../Prelude/Core/Fmt.rs"),
+    "\n",
     include_str!("../Prelude/Core/Measurement.rs"),
     "\n",
     include_str!("../Prelude/Core/Keep.rs"),
@@ -10636,6 +12104,11 @@ const WASM_ARITH_PRELUDE: &str = concat!(
      }\n\
      impl JetDisplay for JetMeasurement {\n\
          fn jet_display(&self) -> String {\n\
+             jet_measurement_kernel_show((self.value, self.uncertainty))\n\
+         }\n\
+     }\n\
+     impl JetDebug for JetMeasurement {\n\
+         fn jet_debug(&self) -> String {\n\
              jet_measurement_kernel_show((self.value, self.uncertainty))\n\
          }\n\
      }\n\
@@ -10803,10 +12276,14 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     // Duration carrier to the wasm i64 ABI at the boundary.
     include_str!("../Prelude/Core/Duration.rs"),
     "\n",
+    include_str!("../Prelude/Core/Time.rs"),
+    "\n",
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
     "\n",
     "#[derive(Clone, Debug)]\n",
     "struct JetRangeError { reason: String }\n\n",
+    "#[derive(Clone, Debug)]\n",
+    "struct JetTextError { message: String }\n\n",
     "fn jet_web_duration_from_int(value: i64, scale: i64) -> Result<i64, JetRangeError> {\n",
     "    jet_duration_kernel_from_int(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_int_error_reason().to_string() })\n",
     "}\n\n",
@@ -10814,10 +12291,10 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    jet_duration_kernel_from_float(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_float_error_reason().to_string() })\n",
     "}\n\n",
     "fn jet_web_duration_scale(value: i64, factor: i64) -> i64 {\n",
-    "    jet_duration_kernel_scale(value, factor).unwrap_or_else(|| panic!(\"{}\", jet_duration_kernel_scale_error_reason()))\n",
+    "    jet_duration_kernel_scale(value, factor).unwrap_or_else(|| jet_arithmetic_stop(\"\", 0, jet_duration_kernel_scale_error_reason()))\n",
     "}\n\n",
     "fn jet_web_duration_divide(value: i64, factor: i64) -> i64 {\n",
-    "    jet_duration_kernel_divide(value, factor).unwrap_or_else(|| panic!(\"{}\", jet_duration_kernel_scale_error_reason()))\n",
+    "    jet_duration_kernel_divide(value, factor).unwrap_or_else(|| jet_arithmetic_stop(\"\", 0, jet_duration_kernel_scale_error_reason()))\n",
     "}\n\n",
     include_str!("../Prelude/Core/Contracts.rs"),
     "\n",
@@ -10857,8 +12334,32 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Memo.rs"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.rs"),
+    "\n",
+    include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
+    "\n",
+    include_str!("../Prelude/Core/TextValues.rs"),
     "\n"
 );
+
+const WASM_TASK_GROUP_PRELUDE: &str = r#"
+fn jet_task_join_result<T, E: std::fmt::Debug>(
+    task: JetWebTask<Result<T, E>>,
+) -> Result<T, JetTaskFailure> {
+    jet_task_join(task).and_then(|value| {
+        value.map_err(|error| JetTaskFailure::Panicked(format!("{error:?}")))
+    })
+}
+
+fn jet_task_all<T>(tasks: Vec<JetWebTask<T>>) -> Result<Vec<T>, JetTaskFailure> {
+    tasks.into_iter().map(jet_task_join).collect()
+}
+
+fn jet_task_all_result<T, E: std::fmt::Debug>(
+    tasks: Vec<JetWebTask<Result<T, E>>>,
+) -> Result<Vec<T>, JetTaskFailure> {
+    tasks.into_iter().map(jet_task_join_result).collect()
+}
+"#;
 
 /// D-EXPSEM1=A / D-FLOORDIV1=A: operators whose Rust spelling or ownership
 /// rules do not directly carry Jet's meaning. Each one calls the same Prelude
@@ -11170,8 +12671,14 @@ mod tir_contract_tests {
     fn hostile_template_text_cannot_close_or_interpolate() {
         let escaped = js_template_text("`\\${owned}\n");
         assert!(escaped.contains(r"\`"), "backtick must stay in the literal");
-        assert!(escaped.contains(r"\${"), "template interpolation must stay text");
-        assert!(escaped.contains(r"\\"), "backslash must stay in the literal");
+        assert!(
+            escaped.contains(r"\${"),
+            "template interpolation must stay text"
+        );
+        assert!(
+            escaped.contains(r"\\"),
+            "backslash must stay in the literal"
+        );
         assert!(escaped.contains(r"\n"), "newline must stay in the literal");
     }
 

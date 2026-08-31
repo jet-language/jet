@@ -3,24 +3,15 @@ Error [E0112]: `hkdf_sha256_raw` wants [U8] for argument 2, but this is Bool (tr
     |
   6 |         _ :: expert.hkdf_sha256_raw([], true, [], 8161)
     |                                         ^^^^
- Why: every argument must match its parameter's type
- Fix: use [U8] here
+ Why: Every argument must match its parameter's type
+ Fix: Use [U8] here
 More: jet-lang.dev/e/E0112
 
-Error [E0112]: `hkdf_sha256_raw` wants [U8] for argument 2, but this is Bool (true or false)
-  --> tests/ui/crypto_hkdf_output_type_precedence.jet:6:41
-    |
-  6 |         _ :: expert.hkdf_sha256_raw([], true, [], 8161)
-    |                                         ^^^^
- Why: every argument must match its parameter's type
- Fix: use [U8] here
-More: jet-lang.dev/e/E0112
-
-Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
   --> tests/ui/crypto_hkdf_output_type_precedence.jet:6:21
     |
   6 |         _ :: expert.hkdf_sha256_raw([], true, [], 8161)
     |                     ^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
- Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

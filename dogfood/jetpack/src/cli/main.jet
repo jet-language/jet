@@ -3,8 +3,10 @@ use core.files as fs
 use core.process as process
 use core.sys as env
 use core.term as io
+use ingest as store
 use plan
 use read_only
+use realize as realization
 
 #Error
 pub struct CLIError {
@@ -16,16 +18,15 @@ pub struct CommandResult {
     pub exit_code: Int
 }
 
-
-struct ParsedCommand {
-    verb: String
-    name: String
-}
-
 fn error_result(action: String, message: String) CommandResult !Never -> {
-    action_json :: json.to_string(DataTree.Text(~action))
-    error_json :: json.to_string(DataTree.Text(~message))
-    wire :: "{{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"error\",\"ok\":false,\"action\":{action_json},\"error\":{error_json}}}"
+    wire :: json.to_string(DataTree.Object([
+        "schema": DataTree.Text("jet.report/v1"),
+        "moment": DataTree.Text("tool"),
+        "status": DataTree.Text("error"),
+        "ok": DataTree.Bool(false),
+        "action": DataTree.Text(~action),
+        "error": DataTree.Text(~message)
+    ]))
     return CommandResult{stdout: "{wire}\n", exit_code: 2}
 }
 
@@ -33,46 +34,74 @@ fn success_result(wire: String) CommandResult !Never -> {
     return CommandResult{stdout: "{wire}\n", exit_code: 0}
 }
 
-fn command_action(argv: [String]) String !Never -> {
-    return argv.get(0) ?? "cli"
-}
+#CLI
+struct JetpackArgs {
+    json: Bool
+    no_color: Bool
+    offline: Bool
 
-fn parse_command(argv: [String]) ParsedCommand !CLIError -> {
-    verb :: argv.get(0) ?? return Err(CLIError{message: "a command is required"})
-    if verb != "plan" && verb != "list" && verb != "inspect" {
-        return Err(CLIError{message: "unsupported command {verb}"})
+    #Doc("resolve a profile")
+    fn plan(self, name: String{"dogfood"}) {
+        emit(plan_command(configured_project_root(), configured_store_root(), name))
     }
 
-    name := ""
-    seen_name := false
-    loop arg in argv.skip(1).to_list() {
-        if arg.starts_with("-") {
-            if arg == "--json" || arg == "--offline" {
-                next
-            }
-            return Err(CLIError{message: "unsupported flag {arg}"})
-        }
-        if verb == "plan" && !seen_name {
-            name = arg
-            seen_name = true
-            next
-        }
-        return Err(CLIError{message: "unexpected argument {arg}"})
+    #Doc("list profiles")
+    fn list(self) {
+        emit(list_command(configured_store_root()))
     }
-    if verb == "plan" && !seen_name {
-        name = "dogfood"
+
+    #Doc("inspect a profile")
+    fn inspect(self) {
+        emit(inspect_command(configured_store_root()))
     }
-    return Ok(ParsedCommand{verb: verb, name: name})
+
+    #Doc("ingest a source tree")
+    fn ingest(self, source: String, name: ?String, version: ?String, ref: ?String) {
+        name_value :: name ?? ""
+        version_value :: version ?? ""
+        reference_value :: ref ?? ""
+        emit(ingest_command(
+            source,
+            name_value,
+            version_value,
+            reference_value,
+            configured_project_root(),
+            configured_store_root()
+        ))
+    }
+
+    #Doc("realize a source tree")
+    fn realize(self, source: String, provider: String, name: ?String, version: ?String, ref: ?String, digest: ?String) {
+        name_value :: name ?? ""
+        version_value :: version ?? ""
+        reference_value :: ref ?? ""
+        digest_value :: digest ?? ""
+        emit(realize_command(
+            source,
+            provider,
+            name_value,
+            version_value,
+            reference_value,
+            digest_value,
+            configured_project_root(),
+            configured_store_root()
+        ))
+    }
 }
 
-fn slash(path: String) String !CLIError -> {
-    return Ok(path.replace("\\", "/"))
+fn configured_project_root() String !Never -> {
+    return env.get("JETPACK_PROJECT_ROOT") ?? "."
 }
 
-fn is_under(path: String, base: String) Bool !CLIError -> {
-    path_text :: slash(path)
-    base_text :: slash(base)
-    return Ok(path_text == base_text || path_text.starts_with("{base_text}/"))
+fn configured_store_root() String !Never -> {
+    return env.get("JETPACK_DOGFOOD_ROOT") ?? Path.home().join(".cache").join("jet-dogfood").join("jetpack-store").to_string()
+}
+
+fn emit(result: CommandResult) {
+    out :: io.stdout()
+    out.write(result.stdout) ?? panic("stdout write failed")
+    out.flush() ?? panic("stdout flush failed")
+    process.exit(result.exit_code)
 }
 
 fn reject_symlink_components(path: Path, label: String) Bool !CLIError -> {
@@ -92,15 +121,14 @@ fn reject_symlink_components(path: Path, label: String) Bool !CLIError -> {
             }
         }
         parent :: current.parent()
-        if parent == {
-            .Val(next) -> {
-                if next.to_string() == current.to_string() {
-                    break
-                }
-                current = next
+        if parent == .Val(parent_path) {
+            if parent_path.to_string() == current.to_string() {
+                break
             }
-            .None -> break
+            current = parent_path
+            next
         }
+        if parent == .None -> break
     }
     return Ok(true)
 }
@@ -110,12 +138,12 @@ fn normalized_absolute(raw: String, label: String) String !CLIError -> {
         return Err(CLIError{message: "{label} is required"})
     }
     candidate :: Path.from(raw).normalize()
-    absolute :: fs.absolute(candidate) ?? return Err(CLIError{message: "{label} cannot be resolved: {raw}"})
-    normalized :: Path.from(absolute).normalize()
+    absolute :: fs.absolute(~candidate) ?? return Err(CLIError{message: "{label} cannot be resolved: {raw}"})
+    normalized :: Path.from(~absolute).normalize()
     _symlink_check :: reject_symlink_components(~normalized, ~label)
     if fs.exists(~normalized) {
-        canonical :: fs.canonicalize(normalized) ?? return Err(CLIError{message: "{label} cannot be canonicalized: {normalized.to_string()}"})
-        return Ok(canonical)
+        canonical :: fs.canonicalize(~normalized) ?? return Err(CLIError{message: "{label} cannot be canonicalized: {normalized.to_string()}"})
+        return Ok(~canonical)
     }
     return Ok(normalized.to_string())
 }
@@ -124,50 +152,160 @@ fn checked_store_root(raw: String) String !CLIError -> {
     checked :: normalized_absolute(raw, "store root")
     base_path :: Path.home().join(".cache").join("jet-dogfood")
     base :: normalized_absolute(base_path.to_string(), "Jet dogfood cache")
-    if !is_under(~checked, ~base) {
+    if !Path.from(~checked).is_within(Path.from(~base)) {
         return Err(CLIError{message: "store root must be under the Jet dogfood cache at {base}; choose a child path"})
     }
     return Ok(checked)
 }
 
-pub fn execute(argv: [String], project_root: String, store_root: String) CommandResult !Never -> {
-    action :: command_action(~argv)
-    if parse_command(argv) == {
-        .Err(error) -> return error_result(action, error.message)
-        .Ok(command) -> {
-            if checked_store_root(store_root) == {
-                .Err(error) -> return error_result(command.verb, error.message)
-                .Ok(root) -> {
-                    if command.verb == "plan" {
-                        if plan.render(~project_root, ~command.name) == {
-                            .Err(error) -> return error_result("plan", error.message)
-                            .Ok(wire) -> return success_result(wire)
-                        }
-                    }
-                    if command.verb == "list" {
-                        if read_only.list_json(~root) == {
-                            .Err(error) -> return error_result("list", error.message)
-                            .Ok(wire) -> return success_result(wire)
-                        }
-                    }
-                    if read_only.inspect_json(~root) == {
-                        .Err(error) -> return error_result("inspect", error.message)
-                        .Ok(wire) -> return success_result(wire)
+fn resolve_source(raw: String, project_root: String, action: String) String !CLIError -> {
+    if raw.trim() == "" -> return Err(CLIError{message: "{action} source is required"})
+    if project_root.trim() == "" -> return Err(CLIError{message: "project root is required"})
+    project_absolute :: fs.absolute(Path.from(~project_root).normalize()) ?? return Err(CLIError{message: "project root cannot be resolved"})
+    project_canonical :: fs.canonicalize(~project_absolute) ?? return Err(CLIError{message: "project root cannot be canonicalized"})
+    candidate := Path.from(~raw)
+    if !raw.starts_with("/") && !raw.starts_with("\\") {
+        candidate = Path.from(~project_absolute).join(~raw)
+    }
+    absolute :: fs.absolute(candidate.normalize()) ?? return Err(CLIError{message: "{action} source cannot be resolved"})
+    if !Path.from(~absolute).is_within(Path.from(~project_absolute)) {
+        return Err(CLIError{message: "{action} source must be below the project root"})
+    }
+    if !fs.exists(~absolute) -> return Err(CLIError{message: "{action} source does not exist"})
+    canonical :: fs.canonicalize(~absolute) ?? return Err(CLIError{message: "{action} source cannot be canonicalized"})
+    if !Path.from(~canonical).is_within(Path.from(~project_canonical)) {
+        return Err(CLIError{message: "{action} source must stay below the project root"})
+    }
+    return Ok(~absolute)
+}
+
+fn ingest_wire(result: store.IngestResult) String !Never -> {
+    return json.to_string(DataTree.Object([
+        "schema": DataTree.Text("jet.report/v1"),
+        "moment": DataTree.Text("tool"),
+        "status": DataTree.Text("ok"),
+        "ok": DataTree.Bool(true),
+        "action": DataTree.Text("ingest"),
+        "id": DataTree.Text(~result.id),
+        "output_hash": DataTree.Text(~result.output_hash),
+        "deduplicated": DataTree.Bool(result.deduplicated)
+    ]))
+}
+
+fn realize_wire(result: realization.RealizeResult) String !Never -> {
+    return json.to_string(DataTree.Object([
+        "schema": DataTree.Text("jet.report/v1"),
+        "moment": DataTree.Text("tool"),
+        "status": DataTree.Text("ok"),
+        "ok": DataTree.Bool(true),
+        "action": DataTree.Text("realize"),
+        "provider": DataTree.Text(~result.provider),
+        "reference": DataTree.Text(~result.reference),
+        "id": DataTree.Text(~result.id),
+        "output_hash": DataTree.Text(~result.output_hash),
+        "deduplicated": DataTree.Bool(result.deduplicated)
+    ]))
+}
+
+pub fn plan_command(project_root: String, store_root: String, name: String) CommandResult !Never -> {
+    if checked_store_root(store_root) == {
+        .Err(error) -> return error_result("plan", error.message)
+        .Ok(_) -> {
+            if plan.render(~project_root, ~name) == {
+                .Err(error) -> return error_result("plan", error.message)
+                .Ok(wire) -> return success_result(wire)
+            }
+        }
+    }
+    panic("unreachable plan result")
+}
+
+pub fn list_command(store_root: String) CommandResult !Never -> {
+    if checked_store_root(store_root) == {
+        .Err(error) -> return error_result("list", error.message)
+        .Ok(root) -> {
+            if read_only.list_json(~root) == {
+                .Err(error) -> return error_result("list", error.message)
+                .Ok(wire) -> return success_result(wire)
+            }
+        }
+    }
+    panic("unreachable list result")
+}
+
+pub fn inspect_command(store_root: String) CommandResult !Never -> {
+    if checked_store_root(store_root) == {
+        .Err(error) -> return error_result("inspect", error.message)
+        .Ok(root) -> {
+            if read_only.inspect_json(~root) == {
+                .Err(error) -> return error_result("inspect", error.message)
+                .Ok(wire) -> return success_result(wire)
+            }
+        }
+    }
+    panic("unreachable inspect result")
+}
+
+pub fn ingest_command(source: String, name: String, version: String, reference: String, project_root: String, store_root: String) CommandResult !Never -> {
+    if source.trim() == "" -> return error_result("ingest", "ingest source is required")
+    if name.trim() == "" -> return error_result("ingest", "ingest --name is required")
+    if checked_store_root(store_root) == {
+        .Err(error) -> return error_result("ingest", error.message)
+        .Ok(root) -> {
+            if resolve_source(~source, ~project_root, "ingest") == {
+                .Err(error) -> return error_result("ingest", error.message)
+                .Ok(source_path) -> {
+                    if store.ingest(~root, store.IngestRequest{
+                        name: name,
+                        version: version,
+                        reference: reference,
+                        source: ~source_path,
+                        expected_hash: ""
+                    }) == {
+                        .Err(error) -> return error_result("ingest", error.message)
+                        .Ok(result) -> return success_result(ingest_wire(result))
                     }
                 }
             }
         }
     }
-    panic("unreachable command result")
+    panic("unreachable ingest result")
 }
 
-pub fn cli_run() {
-    argv :: process.argv().skip(1).to_list()
-    configured :: env.get("JETPACK_DOGFOOD_ROOT") ?? Path.home().join(".cache").join("jet-dogfood").join("jetpack-store").to_string()
-    project :: env.get("JETPACK_PROJECT_ROOT") ?? "."
-    result :: execute(argv, project, configured)
-    out :: io.stdout()
-    out.write(result.stdout) ?? panic("stdout write failed")
-    out.flush() ?? panic("stdout flush failed")
-    process.exit(result.exit_code)
+pub fn realize_command(source: String, provider: String, name: String, version: String, reference: String, expected_hash: String, project_root: String, store_root: String) CommandResult !Never -> {
+    if source.trim() == "" -> return error_result("realize", "realize source is required")
+    if provider.trim() == "" -> return error_result("realize", "realize --provider is required")
+    if provider != "local" && provider != "prefetched" && provider != "recorded" {
+        return error_result("realize", "realize --provider must be local, prefetched, or recorded")
+    }
+    if provider != "recorded" {
+        if name.trim() == "" -> return error_result("realize", "realize --name is required")
+        if version.trim() == "" -> return error_result("realize", "realize --version is required")
+        if reference.trim() == "" -> return error_result("realize", "realize --ref is required")
+        if expected_hash.trim() == "" -> return error_result("realize", "realize --digest is required")
+    }
+    if checked_store_root(store_root) == {
+        .Err(error) -> return error_result("realize", error.message)
+        .Ok(root) -> {
+            if resolve_source(~source, ~project_root, "realize") == {
+                .Err(error) -> return error_result("realize", error.message)
+                .Ok(source_path) -> {
+                    if realization.realize(~root, realization.RealizeRequest{
+                        provider: provider,
+                        name: name,
+                        version: version,
+                        reference: reference,
+                        source: ~source_path,
+                        expected_hash: expected_hash
+                    }) == {
+                        .Err(error) -> return error_result("realize", error.message)
+                        .Ok(result) -> return success_result(realize_wire(result))
+                    }
+                }
+            }
+        }
+    }
+    panic("unreachable realize result")
 }
+
+pub fn run(_args: JetpackArgs) {}

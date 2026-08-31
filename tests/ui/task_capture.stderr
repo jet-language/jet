@@ -3,15 +3,15 @@ Error [E1101]: `count` cannot cross the `task capture` boundary: the value write
     |
   3 |     t :: task {
     |               ^
- Why: the `task capture` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
- Fix: give it with `^`, freeze it with `freeze`, or share it with `shared`
+ Why: The `task capture` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+ Fix: Give it with `^`, freeze it with `freeze`, or share it with `shared`
 More: jet-lang.dev/e/E1101
 
-Error [E0402]: this call can fail and nothing checks it
+Error [E2402]: This implicit fallible call can't convert `TaskFailure` into `Err` — no declared conversion exists
   --> tests/ui/task_capture.jet:6:7
     |
   6 |     t.join()
     |       ^^^^
- Why: a fallible result can't be ignored — handle it or say failure is impossible
- Fix: use `?`, `??`, `panic ...`, or `.drop("reason")` to intentionally discard
-More: jet-lang.dev/e/E0402
+ Why: Ordinary fallible calls propagate automatically; `TaskFailure` can reach `Err` only through `impl TaskFailure -> Err`
+ Fix: Handle this call locally with `??`, add `impl TaskFailure -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402

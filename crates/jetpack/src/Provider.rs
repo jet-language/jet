@@ -29,8 +29,160 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Build the one hardened Git command used by every provider and Source Fetch
+/// operation. The working directory, Git configuration, credential helpers,
+/// prompts, hooks, proxies, and trace helpers are all fixed here so a caller
+/// cannot accidentally create a weaker subprocess policy.
+pub fn hardened_git_command() -> Command {
+    let mut command = Command::new("git");
+    command
+        .current_dir(git_safe_cwd())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_SYSTEM", git_null_device())
+        .env("GIT_CONFIG_GLOBAL", git_null_device())
+        .env("GIT_CONFIG_LOCAL", git_null_device())
+        .env("GIT_CONFIG_COUNT", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", git_null_device())
+        .env("GIT_SSH_COMMAND", hardened_ssh_command())
+        // Command-line config wins over a repository-local credential helper.
+        .args([
+            "-c",
+            "credential.helper=",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "protocol.file.allow=always",
+        ]);
+    for variable in [
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG",
+        "GIT_EXEC_PATH",
+        "GIT_TEMPLATE_DIR",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_NAMESPACE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_ALLOW_PROTOCOL",
+        "GIT_PROTOCOL_FROM_USER",
+        "GIT_SSH",
+        "GIT_SSH_VARIANT",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSL_NO_VERIFY",
+        "SSH_ASKPASS",
+        "GIT_PAGER",
+        "GIT_EDITOR",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_DIFF_OPTS",
+        "GIT_TRACE",
+        "GIT_TRACE_PERFORMANCE",
+        "GIT_TRACE_SETUP",
+        "GIT_TRACE_PACKET",
+        "GIT_TRACE_CURL",
+        "GIT_TRACE_CURL_NO_DATA",
+        "GIT_TRACE2",
+        "GIT_TRACE2_EVENT",
+        "GIT_TRACE2_PERF",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+    ] {
+        command.env_remove(variable);
+    }
+    command
+}
+
+/// The non-interactive SSH policy shared by every hardened Git command.
+pub fn hardened_ssh_command() -> &'static str {
+    if cfg!(windows) {
+        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    } else {
+        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
+    }
+}
+
+fn git_null_device() -> &'static str {
+    if cfg!(windows) {
+        "NUL"
+    } else {
+        "/dev/null"
+    }
+}
+
+fn git_safe_cwd() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/")
+    }
+    #[cfg(windows)]
+    {
+        PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        PathBuf::from(".")
+    }
+}
+
+/// Create a CSPRNG-named directory without deleting or reusing a collision.
+/// The caller owns cleanup, normally through [`TempDirGuard`].
+pub fn exclusive_temp_dir(parent: &Path, prefix: &str) -> std::io::Result<PathBuf> {
+    if prefix.is_empty()
+        || prefix == "."
+        || prefix == ".."
+        || prefix.chars().any(char::is_control)
+        || prefix.contains(['/', '\\'])
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "temporary-directory prefix must be one safe path component",
+        ));
+    }
+    std::fs::create_dir_all(parent)?;
+    for _ in 0..16 {
+        let bytes = crate::TrustRoot::os_random_bytes::<16>()?;
+        let mut suffix = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use std::fmt::Write as _;
+            let _ = write!(suffix, "{byte:02x}");
+        }
+        let candidate = parent.join(format!("{prefix}-{suffix}"));
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate an exclusive temporary directory",
+    ))
+}
+
+pub(crate) struct TempDirGuard(PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 mod adapter;
 mod cran;
+pub(crate) mod cc_toolchain;
 mod fetch;
 mod luarocks;
 mod nix;
@@ -1707,6 +1859,9 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::Releases) {
         return ProviderKind::JetPackage;
     }
+    if cc_toolchain::is_reference(spec) {
+        return ProviderKind::JetPackage;
+    }
     let Source::Named(name) = &spec.source else {
         return ProviderKind::Nix;
     };
@@ -1755,12 +1910,15 @@ pub fn uses_nix_provider_for_project(
     cache_dir: &Path,
     project_dir: Option<&Path>,
 ) -> bool {
-    has_locked_nix_index_key(spec, table, project_dir, host_nix_system())
-        || uses_nix_provider(spec, table, offline, cache_dir)
+    !cc_toolchain::is_reference(spec)
+        && (has_locked_nix_index_key(spec, table, project_dir, host_nix_system())
+            || uses_nix_provider(spec, table, offline, cache_dir))
 }
 
 fn resolve_kind_in_context(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> ProviderKind {
-    if has_locked_nix_index_key(spec, table, ctx.project_dir, host_nix_system()) {
+    if cc_toolchain::is_reference(spec) {
+        ProviderKind::JetPackage
+    } else if has_locked_nix_index_key(spec, table, ctx.project_dir, host_nix_system()) {
         ProviderKind::Nix
     } else {
         resolve_kind(spec, table, ctx.offline, ctx.store_dir)
@@ -2032,23 +2190,17 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     if network_denied() {
         return false;
     }
-    if Command::new("git").arg("--version").output().is_err() {
+    if hardened_git_command().arg("--version").output().is_err() {
         return false;
     }
-    let tmp = std::env::temp_dir().join(format!(
-        "jetpack-peek-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = std::fs::remove_dir_all(&tmp);
-    if std::fs::create_dir_all(&tmp).is_err() {
-        return false;
-    }
+    let tmp = match exclusive_temp_dir(&std::env::temp_dir(), "jetpack-peek") {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+    let _guard = TempDirGuard(tmp.clone());
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        hardened_git_command()
             .arg("-C")
             .arg(&tmp)
             .args(args)
@@ -2060,7 +2212,6 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     // so the deferred root tree can be lazily fetched on `ls-tree`.
     let rev = remote.rev.as_deref().unwrap_or("HEAD");
     if !remote_revision_is_safe(remote.rev.as_deref()) {
-        let _ = std::fs::remove_dir_all(&tmp);
         return false;
     }
     let set_up = git(&["init", "--quiet"]) && git(&["remote", "add", "origin", &remote.url]);
@@ -2075,7 +2226,7 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
             rev,
         ]);
     let has_pack = fetched
-        && Command::new("git")
+        && hardened_git_command()
             .arg("-C")
             .arg(&tmp)
             .args([
@@ -2088,7 +2239,6 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
             .map(|o| o.status.success() && !o.stdout.is_empty())
             .unwrap_or(false);
 
-    let _ = std::fs::remove_dir_all(&tmp);
     has_pack
 }
 
@@ -2261,6 +2411,77 @@ mod tests {
 
     fn empty() -> SourceTable {
         SourceTable::empty()
+    }
+
+    #[test]
+    fn provider_git_uses_the_shared_source_fetch_policy() {
+        let command = hardened_git_command();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-c" && pair[1] == "credential.helper="));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-c" && pair[1] == "protocol.ext.allow=never"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-c" && pair[1] == "protocol.file.allow=always"));
+
+        let environment = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        assert_eq!(
+            environment.get("GIT_CONFIG_SYSTEM"),
+            Some(&Some(null_device.to_string()))
+        );
+        assert_eq!(
+            environment.get("GIT_CONFIG_GLOBAL"),
+            Some(&Some(null_device.to_string()))
+        );
+        assert_eq!(environment.get("GIT_CONFIG_COUNT"), Some(&Some("0".to_string())));
+        assert_eq!(
+            environment.get("GIT_TERMINAL_PROMPT"),
+            Some(&Some("0".to_string()))
+        );
+        assert_eq!(
+            environment.get("GIT_ASKPASS"),
+            Some(&Some(null_device.to_string()))
+        );
+        for key in [
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_PROXY_COMMAND",
+            "http_proxy",
+            "https_proxy",
+            "GIT_EDITOR",
+            "SSH_ASKPASS",
+        ] {
+            assert!(matches!(environment.get(key), Some(None)), "{key} was inherited");
+        }
+    }
+
+    #[test]
+    fn exclusive_temp_directories_are_random_and_collision_safe() {
+        let root = exclusive_temp_dir(
+            &std::env::temp_dir(),
+            "jetpack-exclusive-temp-test",
+        )
+        .unwrap();
+        let first = exclusive_temp_dir(&root, "git").unwrap();
+        std::fs::write(first.join("sentinel"), "keep").unwrap();
+        let second = exclusive_temp_dir(&root, "git").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read_to_string(first.join("sentinel")).unwrap(), "keep");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

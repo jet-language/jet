@@ -1,0 +1,6 @@
+<Project DefaultTargets="Build">
+  <PropertyGroup><IntermediateOutputPath>obj\</IntermediateOutputPath><JetLibraryEntry>library.jet</JetLibraryEntry><JetLibraryOutput>core</JetLibraryOutput><JetLibraryName>loadable</JetLibraryName><JetLibraryKind>both</JetLibraryKind><JetLibraryLoadable>true</JetLibraryLoadable><JetLibraryInputs>package.jet;.jet\lock;library.jet;extra.jet</JetLibraryInputs><JetHostCompiler>g++</JetHostCompiler></PropertyGroup>
+  <Import Project="../../../../tools/foreign-build-hosts/msbuild/Jet.Library.targets" />
+  <Target Name="Build" DependsOnTargets="JetLibrary" Inputs="$(MSBuildProjectDirectory)\host.cpp;$(MSBuildProjectDirectory)\lifecycle.cpp;$(JetLibraryStatic);$(JetLibraryHeader);$(JetLibraryStamp)" Outputs="$(IntermediateOutputPath)host.exe;$(IntermediateOutputPath)lifecycle.exe"><Exec Command="&quot;$(JetHostCompiler)&quot; -std=c++17 -I&quot;$(JetLibraryIntermediate)&quot; &quot;$(MSBuildProjectDirectory)\host.cpp&quot; &quot;$(JetLibraryStatic)&quot; -o &quot;$(IntermediateOutputPath)host.exe&quot;" /><Exec Command="&quot;$(JetHostCompiler)&quot; -std=c++17 &quot;$(MSBuildProjectDirectory)\lifecycle.cpp&quot; -pthread -o &quot;$(IntermediateOutputPath)lifecycle.exe&quot;" /></Target>
+  <Target Name="Clean"><RemoveDir Directories="$(IntermediateOutputPath)" /></Target>
+</Project>

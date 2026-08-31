@@ -33,9 +33,14 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/octave");
-    for file in ["scale.m", "main.jet", "expected.out"] {
+    for file in ["scale.m", "run.jet", "expected.out"] {
         fs::copy(example.join(file), root.join(file)).unwrap();
     }
+    fs::write(
+        root.join("package.jet"),
+        "name: \"octave_e2e\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: .{\n    holds: { allow: [GPU, IO, Mem.Alloc] },\n}\n",
+    )
+    .unwrap();
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "bind", "octave", "scale.m", "--pkg", "scale"])
         .current_dir(&root)
@@ -49,8 +54,11 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
     let generated = fs::read_to_string(root.join(".jet/bindings/octave/scale.jet")).unwrap();
     assert!(generated.contains("Tensor"));
     assert!(generated.contains("FFI.Octave"));
+    assert_eq!(generated.matches("fn decode_response(").count(), 1);
+    assert_eq!(generated.matches("raw :: abi.scale(").count(), 1);
+    assert_eq!(generated.matches("decode_response(raw, code)").count(), 1);
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "main.jet"])
+        .args(["run", "run.jet"])
         .current_dir(&root)
         .output()
         .unwrap();
@@ -141,7 +149,7 @@ fn forged_fortran_library_prefix_cannot_admit_list_abi() {
     let root = std::env::temp_dir().join(format!("jet_fortran_prefix_{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     let main = root.join("main.jet");
-    let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
+    let source = "use c.jet_fortran_forged as raw\n#Import module c.jet_fortran_forged { fn probe(a: [Float]) Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
     fs::write(&main, source).unwrap();
     let diagnostics = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_err();
     assert!(
@@ -161,7 +169,7 @@ struct Point {
     x: Int
     y: Int
 }
-#Extern module c.demo {
+#Import module c.demo {
     fn make_point() Point = "demo_make_point";
 }
 fn run() {}
@@ -243,7 +251,7 @@ fn ffi_capability_boundary_is_safe_for_qualified_c_calls() {
     fs::create_dir_all(&root).unwrap();
     let source = r#"
 use c.cap as c
-#Extern module c.cap {
+#Import module c.cap {
     fn borrow(value: &Int) = "jet_cap_borrow"
 }
 fn run() {
@@ -292,7 +300,7 @@ struct Pair {
     x: Int
     y: Int
 }
-#Extern module c.cap {
+#Import module c.cap {
     fn increment(value: &Int) = "jet_cap_increment"
     fn make() Pair = "jet_cap_make"
     fn consume(value: ^Pair) Int = "jet_cap_consume"
@@ -381,7 +389,7 @@ use c.close as c
 struct Handle {
     value: I64
 }
-#Extern module c.close {
+#Import module c.close {
     #Close(release)
     fn acquire() Handle = "jet_close_acquire";
     fn release(handle: ^Handle) = "jet_close_release";
@@ -723,10 +731,10 @@ fn c_member_lists_resolve_each_library_and_alias_through_cffi() {
     let main = root.join("main.jet");
     let source = r#"use c.[c as libc, m]
 
-#Extern module c.c {
+#Import module c.c {
     fn clamp(left: Int, middle: Int, right: Int) Int = "libc_clamp"
 }
-#Extern module c.m {
+#Import module c.m {
     fn version(left: Int, middle: Int, right: Int) Int = "libm_version"
 }
 
@@ -799,10 +807,10 @@ fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
     let main = root.join("main.jet");
     let source = r#"use c.[c, m]
 
-#Extern module c.c {
+#Import module c.c {
     fn first() Int = "libc_first"
 }
-#Extern module c.m {
+#Import module c.m {
     fn second() Int = "libm_second"
 }
 
@@ -1438,6 +1446,9 @@ fn cffi_end_to_end_links_and_runs() {
         return;
     };
     declare_local_c_dep(&root, &lib_name);
+    let mut manifest = fs::read_to_string(root.join("package.jet")).unwrap();
+    manifest.push_str("authority: .{\n    holds: { allow: [IO] },\n}\n");
+    fs::write(root.join("package.jet"), manifest).unwrap();
 
     // Hand-written bindgen cache fixture (simulates `jet inspect bind` output).
     fs::write(
@@ -1576,7 +1587,7 @@ fn default_int_outside_i64_stops_at_c_boundary_with_e1003() {
     declare_local_c_dep(&root, &lib_name);
     let main = root.join("main.jet");
     let source = r#"use c.jetc as c
-#Extern module c.jetc {
+#Import module c.jetc {
     fn twice(value: Int) Int = "jetc_twice"
 }
 fn run() {
@@ -1734,7 +1745,7 @@ struct Coord {
 
 Meters :: distinct Int;
 
-#Extern module c.jetc436 {
+#Import module c.jetc436 {
     fn add_u8(a: U8, b: U8) U8 = "jetc436_add_u8";
     fn add_i32(a: I32, b: I32) I32 = "jetc436_add_i32";
     fn add_f32(a: F32, b: F32) F32 = "jetc436_add_f32";
@@ -1851,7 +1862,7 @@ int32_t repr_packet_payload_offset(void){return offsetof(Packet,payload);}"#).un
 enum Status { Ok = 0; Lost = 7 }
 #Layout(c, tag: U8)
 enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
-#Extern module c.reprc2 {
+#Import module c.reprc2 {
  fn repr_status(s: Status) I32 = "repr_status"
  fn repr_packet(p: Packet) I32 = "repr_packet"
  fn repr_packet_size() I32 = "repr_packet_size"
@@ -1940,7 +1951,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     )
     .unwrap();
     let main = root.join("main.jet");
-    fs::write(&main,"use c.cb as c\nfn increment(x: I32) I32 -[]> { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) I32 -[]>) I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) -> x + x, 10)) }\n").unwrap();
+    fs::write(&main,"use c.cb as c\nfn increment(x: I32) I32 -[]> { return x + 1 }\n#Import module c.cb { fn call_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) I32 -[]>) I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) -> x + x, 10)) }\n").unwrap();
     let src = fs::read_to_string(&main).unwrap();
     let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
         panic!(
@@ -2007,7 +2018,7 @@ fn cffi_raw_status_out_pointer_reads_only_on_success() {
 use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
-#Extern module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
+#Import module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
 fn load(id: U64) Record !String -> {
     slot := Record{id: 0, flags: 0}
     status := I32{ 1 }
@@ -2095,7 +2106,7 @@ fn cffi_sysv64_abi_executes_native_symbol() {
         .unwrap()
         .success());
     declare_local_c_dep(&root, "abi");
-    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n";
+    let src="use c.abi as c\n#Import module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n";
     let main = root.join("main.jet");
     fs::write(&main, src).unwrap();
     let out = jet::compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(|d| {
@@ -2160,7 +2171,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         ("null_s", "returned a null pointer", false),
         ("bad", "not valid UTF-8", false),
     ] {
-        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n");
+        let src=format!("use c.strret as c\n#Import module c.strret {{ fn get() String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n");
         let main = root.join(format!("{name}.jet"));
         fs::write(&main, &src).unwrap();
         let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
@@ -2243,7 +2254,7 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
         &main,
         r#"use c.jetc436 as c436
 
-#Extern module c.jetc436 {
+#Import module c.jetc436 {
     fn takes_str(s: String) Int = "jetc436_strlen";
 }
 
@@ -2349,7 +2360,7 @@ fn cffi_string_param_emits_cstring_conversion() {
 
 #[test]
 fn cffi_empty_overlay_is_bindgen_only() {
-    // D-CFFI2-SYN-2: an empty `#Extern module` adds nothing; the full bindgen
+    // D-CFFI2-SYN-2: an empty `#Import module` adds nothing; the full bindgen
     // surface stays visible.
     let root = std::env::temp_dir().join(format!("jet_cffi_empty_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -2366,7 +2377,7 @@ fn cffi_empty_overlay_is_bindgen_only() {
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#Extern module c.jetc { }
+#Import module c.jetc { }
 fn run() { print(jc.ping()); }
 "#,
     )
@@ -2403,7 +2414,7 @@ fn cffi_overlay_overrides_bindgen() {
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#Extern module c.jetc { fn add(a: Int, b: Int) Int = "real_add"; }
+#Import module c.jetc { fn add(a: Int, b: Int) Int = "real_add"; }
 fn run() { print(jc.add(1, 2)); }
 "#,
     )
@@ -2542,7 +2553,7 @@ fn cobol_cache_without_descriptor_rejects_abi_unknown() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("payroll.jet"),
-        "#Extern module c.jet_cobol_payroll {\n    fn apply_minor(value: Int) Int = \"jet_cobol_payroll_apply_minor\"\n}\n",
+        "#Import module c.jet_cobol_payroll {\n    fn apply_minor(value: Int) Int = \"jet_cobol_payroll_apply_minor\"\n}\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -2964,7 +2975,7 @@ fn anonymous_union_is_rejected_before_c_ffi_codegen() {
     let main = root.join("main.jet");
     let src = r#"
 use c.union_boundary as c
-#Extern module c.union_boundary {
+#Import module c.union_boundary {
     fn consume(value: Int | String) Int = "consume"
 }
 fn run() { print(0) }
@@ -3117,6 +3128,11 @@ fn concurrent_processes_share_one_bridge_build_per_key() {
         let dir = root.join(format!("w{worker}"));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("main.jet"), source).unwrap();
+        fs::write(
+            dir.join("package.jet"),
+            "name: \"ffi_concurrent\"\nversion: \"0.1.0\"\nauthority: .{\n    holds: { allow: [FFI] },\n}\n",
+        )
+        .unwrap();
         children.push(
             Command::new(env!("CARGO_BIN_EXE_jet"))
                 .args(["run", "--profile=debug", "main.jet"])

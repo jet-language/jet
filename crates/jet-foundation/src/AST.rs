@@ -4,11 +4,11 @@
 #[path = "AST/types.rs"]
 mod types;
 pub use types::{
-    canonicalize_tuple_fields, canonicalize_union, int_range, int_spelling, numeric_type_from_name,
-    union_enum_name, union_member_tag, AccessConvention, CallablePolicy, CallablePolicyChain,
-    CompositeTypePairError, Dimension, Exactness, FunctionCallMetadata, FunctionObligations,
-    InternalTag, KnowledgeEntry, KnowledgeFact, KnowledgeVector, Measure, MeasureRule, TagMarker,
-    Type, TypeIdentity,
+    canonicalize_tuple_fields, canonicalize_union, int_range, int_spelling, is_unit_callable_return,
+    numeric_type_from_name, union_enum_name, union_member_tag, AccessConvention, CallablePolicy,
+    CallablePolicyChain, CompositeTypePairError, Dimension, Exactness, FunctionCallMetadata,
+    FunctionObligations, InternalTag, KnowledgeEntry, KnowledgeFact, KnowledgeVector, Measure,
+    MeasureRule, TagMarker, Type, TypeIdentity,
 };
 
 #[path = "AST/program_imports.rs"]

@@ -402,8 +402,8 @@ fn render_jet(lib: &str, s: &Surface) -> String {
     }
     o.push_str("}\nuse c.");
     o.push_str(&abi);
-    o.push_str(" as abi\n\npub struct Handle { value: Int }\npub enum DotNetError { Exception InvalidHandle ResourceLimit }\n\n");
-    o.push_str("fn error(code: Int) DotNetError -> { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }\n\n");
+    o.push_str(" as abi\n\npub struct Handle { value: Int }\n#Error\npub enum DotNetError { Exception InvalidHandle ResourceLimit }\n\n");
+    o.push_str("fn error(code: Int) DotNetError !Never -[]> { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }\n\n");
     o.push_str("pub fn new(");
     jet_params(&mut o, &s.ctor);
     o.push_str(") Handle !DotNetError -[FFI.DotNet]> {\n    value :: abi.new(");

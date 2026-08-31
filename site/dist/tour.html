@@ -31,8 +31,8 @@
 <section class="wrap page">
   <div class="page-header">
     <p class="eyebrow">// the tour</p>
-    <h1>The whole language, in programs that run.</h1>
-    <p>Every sample below is a complete program or a slice of one, and almost all of them are copied verbatim from the compiler's example corpus, where each file is compiled and its output compared against a golden file on every test run. This page cannot quietly rot: when the language changes, these samples break the build until someone fixes them.</p>
+    <h1>A tour in runnable programs.</h1>
+    <p>The examples shown here point at repository corpus files; the golden harness covers the linked examples. This page is a teaching surface, not a release guarantee.</p>
   </div>
   <ul class="toc">
     <li><a href="#hello">Hello</a></li>
@@ -50,7 +50,7 @@
 <article class="wrap article">
   <section>
     <h2 id="hello">Hello, and the whole toolchain</h2>
-    <p>A file is a complete program. No manifest, no project folder, no build file. fn run is where running starts.</p>
+    <p>This example runs from one file; no project setup is shown. fn run is where running starts.</p>
     <div class="code"><div class="code-head"><span>examples/features/basics/hello.jet</span></div><div class="code-body"><pre><code><span class="c">// Your first program. `fn run` is where running starts.</span>
 <span class="k">fn</span> <span class="f">run</span>() {
     <span class="f">print</span>(<span class="s">"hello, world"</span>)
@@ -146,7 +146,7 @@
 
   <section>
     <h2 id="loops">Loops produce values<span class="sec-file">examples/features/basics/loop_values.jet</span></h2>
-    <p>loop … in walks a collection. As an expression it collects results; add a guard to filter; break ends the prefix. One loop form, everywhere.</p>
+    <p>This example uses the collection loop form to produce values, filter with a guard, and stop at a prefix.</p>
     <div class="code"><div class="code-head"><span>examples/features/basics/loop_values.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
     values <span class="g">::</span> [<span class="t">Int</span>]{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}
     doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
@@ -164,8 +164,8 @@
   </section>
 
   <section>
-    <h2 id="concurrency">Concurrency that cannot leak<span class="sec-file">examples/features/concurrency/tasks_join_all.jet</span></h2>
-    <p>task spawns work and hands back a duty: every handle must be joined, raced, gathered, or detached on purpose. Forgetting one is a compile error.</p>
+    <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">examples/features/concurrency/tasks_join_all.jet</span></h2>
+    <p>This example shows explicit task joins, collection, racing, and detachment. Each operation is visible at its use site.</p>
     <div class="code"><div class="code-head"><span>examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
     <span class="c">// Join discharges the duty and yields the value.</span>
     joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
@@ -207,9 +207,9 @@
   </section>
 
   <section>
-    <h2 id="web">The same language, in a browser</h2>
-    <p>jet build --target web compiles a program to WebAssembly with a small JS bridge. The web backend is early and covers a checked subset. The marketing page's live counter is built exactly this way.</p>
-    <div class="term"><span class="ps">$</span> <span class="cmd">jet build --target web counter.jet</span> <span class="dim"># emits app.wasm, app.js, and a host page</span></div>
+    <h2 id="web">Web target, under active checks</h2>
+    <p>The site presents a web-widget example. Browser/UI parity remains an open checked subset; the command below is the intended target entry point.</p>
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet build --target web counter.jet</span> <span class="dim"># try the web target</span></div>
   </section>
 
   <p>The corpus these samples come from lives in examples/features in the repository, next to the golden outputs that keep them honest.</p>

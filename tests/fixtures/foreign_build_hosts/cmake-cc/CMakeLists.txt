@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.20)
+project(jet_cc_cmake_fixture LANGUAGES C CXX)
+
+add_executable(cc-driver main.c)
+add_executable(cxx-driver main.cpp)
+foreach(target IN ITEMS cc-driver cxx-driver)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_compile_options(${target} PRIVATE "@${CMAKE_CURRENT_SOURCE_DIR}/flags.rsp")
+endforeach()
+set_property(TARGET cc-driver PROPERTY C_STANDARD 11)
+set_property(TARGET cxx-driver PROPERTY CXX_STANDARD 17)

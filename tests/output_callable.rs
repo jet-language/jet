@@ -128,7 +128,7 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
 
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("jet_runtime_boundary(|| __jet_start())"));
+    assert!(rust.contains("if let Err(__jet___entry_error) = __jet_start()"));
     assert!(matches!(
         jet::Interpreter::run_checked(&bundle, false),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -170,7 +170,8 @@ fn resident_jit_hot_swap_session() {
         .hot_swap("start", &v2, false)
         .expect("resident hot swap");
     assert!(
-        matches!(swapped, RunOutcome::Ran { ref stderr, exit_code: 1, .. } if stderr == "selected boom\n")
+        matches!(&swapped, RunOutcome::Ran { stderr, exit_code: 1, .. } if stderr == "Error: selected boom\n"),
+        "{swapped:?}"
     );
 }
 
@@ -213,6 +214,158 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
         jet::Interpreter::run_checked(&bundle, false),
         RunOutcome::Ran { exit_code: 0, .. }
     ));
+}
+
+#[test]
+fn qualified_entry_follows_nested_quoted_import_graph() {
+    let dir = common::unique_tmp("jet_output_callable_nested");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("src/command.jet"),
+        "pub fn run() { print(\"nested\") }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/cli.jet"),
+        "pub use \"command\" as command;\npub fn run() { print(\"reexport\") }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/app.jet"),
+        "pub use \"cli\" as cli;\npub use cli.[run as cli_run];\n",
+    )
+    .unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "use \"src/app\" as app\nnested :: Output.Executable{ name: \"nested\", entry: app.cli.command.run }\nreexported :: Output.Service{ name: \"reexported\", entry: app.cli_run }\ndefaults: { run: nested };\n",
+    )
+    .unwrap();
+
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let outputs = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Const(value) => value.resolved_output.as_ref(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let nested = outputs
+        .iter()
+        .find(|output| output.address == "nested")
+        .copied()
+        .expect("nested Output entry resolves");
+    let reexported = outputs
+        .iter()
+        .find(|output| output.address == "reexported")
+        .copied()
+        .expect("re-exported Output entry resolves");
+    assert_eq!(nested.source_name, "run");
+    assert_eq!(nested.semantic_name, "run");
+    assert!(
+        nested.source_path.ends_with("src/command.jet"),
+        "{}",
+        nested.source_path
+    );
+    assert_eq!(reexported.source_name, "run");
+    assert!(reexported.source_path.ends_with("src/cli.jet"));
+
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(rust.contains("__jet_command::__jet_run()"), "{rust}");
+    assert!(matches!(
+        jet::Interpreter::run_checked(&bundle, false),
+        RunOutcome::Ran {
+            ref stdout,
+            exit_code: 0,
+            ..
+        } if stdout == "nested\n"
+    ));
+}
+
+#[test]
+fn manifest_output_root_alias_is_live_for_direct_check() {
+    let dir = common::unique_tmp("jet_manifest_output_check");
+    std::fs::create_dir_all(dir.join("src/cli")).unwrap();
+    std::fs::write(
+        dir.join("package.jet"),
+        "name: \"manifest_output_check\"\nversion: \"0.1.0\"\noutputs: .{ dogfood: .Executable{ entry: app.run } }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("run.jet"),
+        "use \"src/cli/main\" as app\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/cli/main.jet"), "pub fn run() {}\n").unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "run.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("jet check should execute");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("L0103"), "{stderr}");
+}
+
+#[test]
+fn nested_output_links_report_e1321_before_codegen() {
+    fn codes(tag: &str, app: &str, cli: &str, entry: &str) -> Vec<String> {
+        let dir = common::unique_tmp(tag);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("main.jet"),
+            format!(
+                "use \"app\" as app\nout :: Output.Executable{{ name: \"out\", entry: {entry} }}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("app.jet"), app).unwrap();
+        std::fs::write(dir.join("cli.jet"), cli).unwrap();
+
+        let mut bundle = jet::Loader::load_entry(dir.join("main.jet").to_str().unwrap()).unwrap();
+        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect()
+    }
+
+    let missing = codes(
+        "jet_output_nested_missing",
+        "pub use \"cli\" as cli;\n",
+        "pub fn run() {}\n",
+        "app.cli.missing",
+    );
+    assert!(
+        missing.iter().any(|code| code == "E1321"),
+        "{missing:?}"
+    );
+
+    let private = codes(
+        "jet_output_nested_private",
+        "use \"cli\" as cli;\n",
+        "pub fn run() {}\n",
+        "app.cli.run",
+    );
+    assert!(
+        private.iter().any(|code| code == "E1321"),
+        "{private:?}"
+    );
+
+    let escaped = codes(
+        "jet_output_nested_escape",
+        "pub use \"cli\" as cli;\n",
+        "fn run() {}\n",
+        "app.cli.run",
+    );
+    assert!(
+        escaped.iter().any(|code| code == "E1321"),
+        "{escaped:?}"
+    );
 }
 
 #[test]
@@ -354,11 +507,11 @@ fn checked_default_selects_one_of_multiple_executables() {
     assert_eq!(selected.address, "two");
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
     assert!(
-        rust.contains("jet_runtime_boundary(|| __jet_second())"),
+        rust.contains("if let Err(__jet___entry_error) = __jet_second()"),
         "{rust}"
     );
     assert!(
-        !rust.contains("jet_runtime_boundary(|| __jet_first())"),
+        !rust.contains("if let Err(__jet___entry_error) = __jet_first()"),
         "{rust}"
     );
 }
@@ -549,6 +702,11 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "42\n",
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stderr).contains("imported boom"));
 }

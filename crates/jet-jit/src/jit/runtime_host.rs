@@ -221,13 +221,15 @@ pub(crate) fn catch_jit_panic<R>(
         }
         Err(payload) => {
             resident_teardown();
-            let detail = if let Some(s) = payload.downcast_ref::<String>() {
-                s.clone()
-            } else if let Some(s) = payload.downcast_ref::<&str>() {
-                (*s).to_string()
-            } else {
-                take_silenced_jit_panic().unwrap_or_else(|| "unknown panic payload".into())
-            };
+            let detail = take_silenced_jit_panic().unwrap_or_else(|| {
+                if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else {
+                    "unknown panic payload".into()
+                }
+            });
             Err(format!(
                 "jit {context} panicked before returning an unsupported reason: {detail}"
             ))
@@ -341,6 +343,10 @@ pub(crate) struct JitRuntime {
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
     /// them leaves warm `jet run` hits with empty panic/require text (I9).
     pub(crate) compile_strings: Vec<(usize, String)>,
+    /// Source labels for JIT task spawn sites. This is resident metadata, not
+    /// a process-global registry: generated code passes the existing site
+    /// number and the host resolves the label on the active runtime.
+    pub(crate) task_labels: Vec<Option<String>>,
     /// Compile-time zip row schemas referenced by resident Cranelift code. The
     /// host receives only handles at run time; this table supplies the checked
     /// column representation and remains stable across heap resets.
@@ -553,7 +559,62 @@ impl JitRuntime {
     /// caller supplies no source facts for an engine failure, so the report
     /// keeps the generic E3001 location shape.
     pub(crate) fn set_trap(&mut self, msg: &str) {
-        self.set_runtime_stop("E3001", 0, msg);
+        if let Some(reason) = jet_codegen::scheduler::jet_scheduler_host_fault_reason(msg) {
+            self.set_host_fault(reason);
+        } else {
+            self.set_runtime_stop("E3001", 0, msg);
+        }
+    }
+
+    /// A foreign bridge panic is a program-side runtime stop. Render it with
+    /// the active Jet frame instead of the generic host E3001 fallback.
+    pub(crate) fn set_ffi_runtime_stop(&mut self, msg: &str) {
+        let line = self.current_line.max(1);
+        if Concurrency::in_scheduler_task() {
+            let source_line = self
+                .source_text
+                .lines()
+                .nth((line as usize).saturating_sub(1))
+                .filter(|source| !source.is_empty())
+                .unwrap_or(self.current_source_line.as_str());
+            self.set_child_runtime_stop(
+                "E3014",
+                &self.source_file,
+                line,
+                &self.current_function,
+                source_line,
+                msg,
+            );
+            return;
+        }
+        self.set_runtime_stop_with_source_line("E3014", line, None, msg);
+    }
+
+    /// Carry a rendered child failure through the scheduler result without
+    /// mutating the resident process outcome. The task shares this runtime
+    /// with its parent, so writing `stderr` or `exit_code` here would make a
+    /// handled child failure stop an unrelated parent operation.
+    fn set_child_runtime_stop(
+        &self,
+        code: &'static str,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        source_line: &str,
+        message: &str,
+    ) {
+        if Concurrency::local_rich_panic_pending() || Concurrency::task_trap_pending() {
+            return;
+        }
+        let report = contract_kernel::jet_runtime_stop_report(
+            code, file, line, fn_name, source_line, 1, 1, message, "",
+        );
+        // The child result owns this failure. Keep the full shared-Prelude
+        // report available to stream/task adapters, but leave resident output
+        // and exit status untouched.
+        Concurrency::set_rich_panic_reason(message.to_string());
+        Concurrency::set_rich_panic_report(report.rendered);
+        Concurrency::set_local_rich_panic();
     }
 
     /// A Rust helper panic is an engine fault, not a user runtime stop. Keep
@@ -562,6 +623,10 @@ impl JitRuntime {
     pub(crate) fn set_host_fault(&mut self, msg: &str) {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
+        }
+        let msg = jet_codegen::scheduler::jet_scheduler_host_fault_reason(msg).unwrap_or(msg);
+        if Concurrency::in_scheduler_task() {
+            Concurrency::set_task_trap(msg);
         }
         self.host_fault = true;
         self.host_fault_payload_captured = true;
@@ -588,12 +653,15 @@ impl JitRuntime {
         line: u32,
         message: &str,
     ) {
+        if Concurrency::in_scheduler_task() {
+            self.set_child_runtime_stop(code, file, line, "", "", message);
+            return;
+        }
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
-        let report = contract_kernel::jet_runtime_stop_report(
-            code, file, line, "", "", 1, 1, message, "",
-        );
+        let report =
+            contract_kernel::jet_runtime_stop_report(code, file, line, "", "", 1, 1, message, "");
         let _ = jet_codegen::development_receipt::jet_production_failure_receipt_write(
             code, file, line, "",
         );
@@ -613,6 +681,26 @@ impl JitRuntime {
         source_override: Option<&str>,
         message: &str,
     ) {
+        if Concurrency::in_scheduler_task() {
+            let source_line = source_override
+                .filter(|source| !source.is_empty())
+                .or_else(|| {
+                    self.source_text
+                        .lines()
+                        .nth((line as usize).saturating_sub(1))
+                        .filter(|source| !source.is_empty())
+                })
+                .unwrap_or(self.current_source_line.as_str());
+            self.set_child_runtime_stop(
+                code,
+                &self.source_file,
+                line,
+                &self.current_function,
+                source_line,
+                message,
+            );
+            return;
+        }
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
@@ -652,6 +740,23 @@ impl JitRuntime {
     }
 
     pub(crate) fn set_rendered_runtime_stop(&mut self, rendered: String, exit_code: i32) {
+        if Concurrency::in_scheduler_task() {
+            if Concurrency::local_rich_panic_pending() || Concurrency::task_trap_pending() {
+                return;
+            }
+            let reason = rendered
+                .lines()
+                .next()
+                .and_then(|line| line.split_once("]: ").map(|(_, message)| message))
+                .unwrap_or_else(|| rendered.lines().next().unwrap_or("runtime failure"));
+            // A report already rendered by the shared Prelude is the child
+            // result. Preserve it for stream/task adapters, but never copy it
+            // into the resident process stderr or exit status.
+            Concurrency::set_rich_panic_reason(reason.to_string());
+            Concurrency::set_rich_panic_report(rendered);
+            Concurrency::set_local_rich_panic();
+            return;
+        }
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
@@ -697,12 +802,7 @@ impl JitRuntime {
         self.current_source_line = src_line.to_string();
         if jet_codegen::runtime_stack::jet_runtime_stack_enter() {
             let message = jet_foundation::Outcome::jet_stack_overflow_message(fn_name);
-            let report = contract_kernel::jet_runtime_stop_report(
-                "E3012", file, line, fn_name, src_line, 1, 1, &message, "",
-            );
-            self.stderr.push_str(&report.rendered);
-            self.exit_code = Some(report.exit_code);
-            self.store_trap(&message);
+            self.set_runtime_stop_with_source_line("E3012", line, Some(src_line), &message);
         }
     }
 
@@ -1372,6 +1472,28 @@ fn jet_jit_str_to_lower(id: i64) -> i64 {
     })
 }
 
+fn jet_jit_str_to_ascii_upper(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt
+            .heap
+            .get_string(id)
+            .map(Text::text_rt::ascii_upper)
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
+fn jet_jit_str_to_ascii_lower(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt
+            .heap
+            .get_string(id)
+            .map(Text::text_rt::ascii_lower)
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
 fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
@@ -1554,13 +1676,7 @@ fn jet_jit_str_before_view(id: i64, sep_id: i64) -> i64 {
     })
 }
 
-fn jet_jit_str_slice_value(
-    id: i64,
-    start: i64,
-    end: i64,
-    exclusive: bool,
-    line: u32,
-) -> i64 {
+fn jet_jit_str_slice_value(id: i64, start: i64, end: i64, exclusive: bool, line: u32) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
         match string_slice_kernel::jet_string_slice_value(&text, start, end, exclusive) {
@@ -1578,13 +1694,7 @@ fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
     jet_jit_str_slice_value(id, start, end, false, 0)
 }
 
-fn jet_jit_str_slice_range(
-    id: i64,
-    start: i64,
-    end: i64,
-    exclusive: i8,
-    line: i32,
-) -> i64 {
+fn jet_jit_str_slice_range(id: i64, start: i64, end: i64, exclusive: i8, line: i32) -> i64 {
     jet_jit_str_slice_value(id, start, end, exclusive != 0, line.max(0) as u32)
 }
 
@@ -1844,10 +1954,7 @@ fn jet_jit_numeric_checked_int(value: i64, kind: i64, line: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_try_from(value, kind) {
         Some(value) => value as u64 as i64,
         None => {
-            rt.set_arithmetic_stop(
-                line.max(0) as u32,
-                "Value doesn't fit in destination type",
-            );
+            rt.set_arithmetic_stop(line.max(0) as u32, "Value doesn't fit in destination type");
             0
         }
     })
@@ -2383,13 +2490,12 @@ mod service_adapter {
                 }
                 "send_durable" if index < 2 => Some(ArgKind::Slot),
                 "send_durable" if index < 4 => Some(ArgKind::String),
-                "delivery_wait"
-                | "delivery_status"
-                | "delivery_retry"
-                | "delivery_cancel"
-                | "delivery_receipt"
-                | "delivery_events"
-                    if index == 0 => Some(ArgKind::Slot),
+                "delivery_wait" | "delivery_status" | "delivery_retry" | "delivery_cancel"
+                | "delivery_receipt" | "delivery_events"
+                    if index == 0 =>
+                {
+                    Some(ArgKind::Slot)
+                }
                 "set_state_snapshot" | "set_state_event_log" if index == 0 => Some(ArgKind::Slot),
                 "set_state_snapshot" | "set_state_event_log" if index == 1 => Some(ArgKind::Slot),
                 "set_state_snapshot" | "set_state_event_log" if index == 2 => Some(ArgKind::String),
@@ -3102,8 +3208,34 @@ fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
     duration_kernel::jet_duration_kernel_difference(a, b)
 }
 
+fn jet_jit_duration_abs(value: i64) -> i64 {
+    duration_kernel::jet_duration_kernel_abs(value)
+}
+
+fn jet_jit_duration_negated(value: i64) -> i64 {
+    duration_kernel::jet_duration_kernel_negated(value)
+}
+
+fn jet_jit_duration_sign(value: i64) -> i64 {
+    duration_kernel::jet_duration_kernel_sign(value)
+}
+
+fn jet_jit_duration_total_in(value: i64, unit: i64) -> f64 {
+    let unit = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(unit).unwrap_or_default());
+    duration_kernel::jet_duration_kernel_total_in(value, &unit)
+}
+
+fn jet_jit_duration_round(value: i64, unit: i64, increment: i64, mode: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let unit = rt.heap.clone_string(unit).unwrap_or_default();
+        let mode = rt.heap.clone_string(mode).unwrap_or_default();
+        duration_kernel::jet_duration_kernel_round(value, &unit, increment, &mode).unwrap_or(value)
+    })
+}
+
 fn jet_jit_duration_scale(value: i64, factor: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_scale(value, factor) {
+    Concurrency::with_runtime_mut(|rt| {
+        match duration_kernel::jet_duration_kernel_scale(value, factor) {
         Some(value) => value,
         None => {
             rt.set_arithmetic_stop(
@@ -3112,11 +3244,13 @@ fn jet_jit_duration_scale(value: i64, factor: i64) -> i64 {
             );
             0
         }
+        }
     })
 }
 
 fn jet_jit_duration_divide(value: i64, factor: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_divide(value, factor) {
+    Concurrency::with_runtime_mut(|rt| {
+        match duration_kernel::jet_duration_kernel_divide(value, factor) {
         Some(value) => value,
         None => {
             rt.set_arithmetic_stop(
@@ -3124,6 +3258,7 @@ fn jet_jit_duration_divide(value: i64, factor: i64) -> i64 {
                 duration_kernel::jet_duration_kernel_scale_error_reason(),
             );
             0
+        }
         }
     })
 }
@@ -3534,6 +3669,86 @@ fn jet_jit_perf_reset_fidelity() {
     set_perf_fidelity_bits(JIT_PERF_DEFAULT_FIDELITY_BITS);
 }
 
+pub(crate) fn declare_host_fns_for_module<M: Module>(
+    module: &mut M,
+) -> Result<HostFns, String> {
+    let coll = Collections::declare_collections_host_fns(module)?;
+    let compute = Compute::declare_compute_host_fns(module)?;
+    let memory = Memory::declare_memory_host_fns(module)?;
+    let cell = LocalCell::declare_host_fns(module)?;
+    let conc = Concurrency::declare_concurrency_host_fns(module)?;
+    let core = CoreHost::declare_core_host_fns(module)?;
+    let encoding = Encoding::declare_encoding_host_fns(module)?;
+    let stream = crate::enc_stream::declare_stream_host_fns(module)?;
+    let fmt = Fmt::declare_fmt_host_fns(module)?;
+    let compress = Compress::declare_compress_host_fns(module)?;
+    let archive = Archive::declare_archive_host_fns(module)?;
+    let process = Process::declare_process_host_fns(module)?;
+    let num = Numeric::declare_numeric_host_fns(module)?;
+    let solver = Solver::declare_solver_host_fns(module)?;
+    let random = Random::declare_random_host_fns(module)?;
+    let text = crate::Text::declare_text_host_fns(module)?;
+    let sketch = crate::Sketch::declare_sketch_host_fns(module)?;
+    let args = crate::Args::declare_args_host_fns(module)?;
+    let db = crate::DB::declare_db_host_fns(module)?;
+    let crypto = Crypto::declare_crypto_host_fns(module)?;
+    let net = Net::declare_net_host_fns(module)?;
+    let net_http = crate::net_http_rt::declare_net_http_host_fns(module)?;
+    let game = crate::Game::declare_game_host_fns(module)?;
+    let raylib = crate::Raylib::declare_raylib_host_fns(module)?;
+    let layout = crate::Layout::declare_layout_host_fns(module)?;
+    let reactive = crate::Reactive::declare_reactive_host_fns(module)?;
+    let ui = crate::Ui::declare_ui_host_fns(module)?;
+    let web = crate::Web::declare_web_host_fns(module)?;
+    let parse = crate::Parse::declare(module)?;
+    let data = crate::Data::declare(module)?;
+    let time = crate::Time::declare_time_host_fns(module)?;
+    let io = crate::IO::declare_io_host_fns(module)?;
+    let watcher = crate::Watcher::declare_watcher_host_fns(module)?;
+    let math = crate::Math::declare_math_host_fns(module)?;
+    let math_extra = crate::MathExtra::declare_math_extra_host_fns(module)?;
+    let ffi = crate::Ffi::declare_ffi_host_fns(module)?;
+    declare_host_fns(
+        module,
+        coll,
+        compute,
+        memory,
+        cell,
+        conc,
+        core,
+        encoding,
+        stream,
+        fmt,
+        compress,
+        archive,
+        process,
+        num,
+        solver,
+        random,
+        text,
+        sketch,
+        args,
+        db,
+        crypto,
+        net,
+        net_http,
+        game,
+        raylib,
+        layout,
+        reactive,
+        ui,
+        web,
+        parse,
+        data,
+        time,
+        io,
+        watcher,
+        math,
+        math_extra,
+        ffi,
+    )
+}
+
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let mut builder =
         JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
@@ -3576,81 +3791,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::MathExtra::register_math_extra_symbols(&mut builder);
     crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
-    let coll = Collections::declare_collections_host_fns(&mut module)?;
-    let compute = Compute::declare_compute_host_fns(&mut module)?;
-    let memory = Memory::declare_memory_host_fns(&mut module)?;
-    let cell = LocalCell::declare_host_fns(&mut module)?;
-    let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
-    let core = CoreHost::declare_core_host_fns(&mut module)?;
-    let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
-    let stream = crate::enc_stream::declare_stream_host_fns(&mut module)?;
-    let fmt = Fmt::declare_fmt_host_fns(&mut module)?;
-    let compress = Compress::declare_compress_host_fns(&mut module)?;
-    let archive = Archive::declare_archive_host_fns(&mut module)?;
-    let process = Process::declare_process_host_fns(&mut module)?;
-    let num = Numeric::declare_numeric_host_fns(&mut module)?;
-    let solver = Solver::declare_solver_host_fns(&mut module)?;
-    let random = Random::declare_random_host_fns(&mut module)?;
-    let text = crate::Text::declare_text_host_fns(&mut module)?;
-    let sketch = crate::Sketch::declare_sketch_host_fns(&mut module)?;
-    let args = crate::Args::declare_args_host_fns(&mut module)?;
-    let db = crate::DB::declare_db_host_fns(&mut module)?;
-    let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
-    let net = Net::declare_net_host_fns(&mut module)?;
-    let net_http = crate::net_http_rt::declare_net_http_host_fns(&mut module)?;
-    let game = crate::Game::declare_game_host_fns(&mut module)?;
-    let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
-    let layout = crate::Layout::declare_layout_host_fns(&mut module)?;
-    let reactive = crate::Reactive::declare_reactive_host_fns(&mut module)?;
-    let ui = crate::Ui::declare_ui_host_fns(&mut module)?;
-    let web = crate::Web::declare_web_host_fns(&mut module)?;
-    let parse = crate::Parse::declare(&mut module)?;
-    let data = crate::Data::declare(&mut module)?;
-    let time = crate::Time::declare_time_host_fns(&mut module)?;
-    let io = crate::IO::declare_io_host_fns(&mut module)?;
-    let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
-    let math = crate::Math::declare_math_host_fns(&mut module)?;
-    let math_extra = crate::MathExtra::declare_math_extra_host_fns(&mut module)?;
-    let ffi = crate::Ffi::declare_ffi_host_fns(&mut module)?;
-    let host = declare_host_fns(
-        &mut module,
-        coll,
-        compute,
-        memory,
-        cell,
-        conc,
-        core,
-        encoding,
-        stream,
-        fmt,
-        compress,
-        archive,
-        process,
-        num,
-        solver,
-        random,
-        text,
-        sketch,
-        args,
-        db,
-        crypto,
-        net,
-        net_http,
-        game,
-        raylib,
-        layout,
-        reactive,
-        ui,
-        web,
-        parse,
-        data,
-        time,
-        io,
-        watcher,
-        math,
-        math_extra,
-        ffi,
-    )?;
+    let host = declare_host_fns_for_module(&mut module)?;
     Ok((module, host))
 }
 
@@ -4181,6 +4322,15 @@ host_fns! {
         sig_duration_int.params.push(AbiParam::new(types::I64));
         sig_duration_int.params.push(AbiParam::new(types::I64));
         sig_duration_int.returns.push(AbiParam::new(types::I64));
+        let mut sig_duration_total_in = Signature::new(cc);
+        sig_duration_total_in.params.push(AbiParam::new(types::I64));
+        sig_duration_total_in.params.push(AbiParam::new(types::I64));
+        sig_duration_total_in.returns.push(AbiParam::new(types::F64));
+        let mut sig_duration_round = Signature::new(cc);
+        sig_duration_round
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_duration_round.returns.push(AbiParam::new(types::I64));
         let mut sig_noarg_f64 = Signature::new(cc);
         sig_noarg_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_perf_override = Signature::new(cc);
@@ -4291,6 +4441,8 @@ host_fns! {
     str_trim: "jet_jit_str_trim" => jet_jit_str_trim: sig_str_unary_i64;
     str_to_upper: "jet_jit_str_to_upper" => jet_jit_str_to_upper: sig_str_unary_i64;
     str_to_lower: "jet_jit_str_to_lower" => jet_jit_str_to_lower: sig_str_unary_i64;
+    str_to_ascii_upper: "jet_jit_str_to_ascii_upper" => jet_jit_str_to_ascii_upper: sig_str_unary_i64;
+    str_to_ascii_lower: "jet_jit_str_to_ascii_lower" => jet_jit_str_to_ascii_lower: sig_str_unary_i64;
     str_replace: "jet_jit_str_replace" => jet_jit_str_replace: sig_str_replace;
     str_lines: "jet_jit_str_lines" => jet_jit_str_lines: sig_str_unary_i64;
     str_split: "jet_jit_str_split" => jet_jit_str_split: sig_str_binary_i64;
@@ -4394,6 +4546,11 @@ host_fns! {
     duration_add: "jet_jit_duration_add" => jet_jit_duration_add: sig_duration_int;
     duration_sub: "jet_jit_duration_sub" => jet_jit_duration_sub: sig_duration_int;
     duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
+    duration_abs: "jet_jit_duration_abs" => jet_jit_duration_abs: sig_result_query_i64;
+    duration_negated: "jet_jit_duration_negated" => jet_jit_duration_negated: sig_result_query_i64;
+    duration_sign: "jet_jit_duration_sign" => jet_jit_duration_sign: sig_result_query_i64;
+    duration_total_in: "jet_jit_duration_total_in" => jet_jit_duration_total_in: sig_duration_total_in;
+    duration_round: "jet_jit_duration_round" => jet_jit_duration_round: sig_duration_round;
     duration_scale: "jet_jit_duration_scale" => jet_jit_duration_scale: sig_duration_int;
     duration_divide: "jet_jit_duration_divide" => jet_jit_duration_divide: sig_duration_int;
     duration_show: "jet_jit_duration_show" => jet_jit_duration_show: sig_str_unary_i64;
@@ -4486,7 +4643,7 @@ mod zip_value_kind_tests {
 
 #[cfg(test)]
 mod host_fns_tests {
-    use super::new_jit_module;
+    use super::{new_jit_module, Concurrency, JitRuntime};
     use crate::host_fns_audit;
     use crate::resident::fresh_runtime;
 
@@ -4578,5 +4735,76 @@ mod host_fns_tests {
         assert!(!runtime.stderr.contains("E3010"));
         assert!(!runtime.stderr.contains("E3011"));
         assert!(!runtime.stderr.contains("E3012"));
+    }
+
+    #[test]
+    fn scheduler_host_fault_marker_is_not_user_visible() {
+        let mut runtime = fresh_runtime();
+        runtime.set_host_fault("__jet_host_fault__: helper fault");
+
+        assert_eq!(runtime.exit_code, Some(101));
+        assert_eq!(runtime.trapped.as_deref(), Some("helper fault"));
+    }
+
+    #[test]
+    fn child_runtime_stop_stays_out_of_process_stop_state() {
+        std::thread::spawn(|| {
+            let mut runtime = fresh_runtime();
+            runtime.source_file = "child.jet".to_string();
+            runtime.source_text = "divide()".to_string();
+            runtime.current_function = "run".to_string();
+            runtime.current_line = 1;
+            let runtime_ptr = &mut runtime as *mut JitRuntime;
+            Concurrency::set_active_runtime(Some(runtime_ptr));
+            let outcome = jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_runtime_stop("E3010", 1, "division by zero");
+                });
+            });
+            Concurrency::set_active_runtime(None);
+            Concurrency::clear_http_shared_runtime();
+
+            assert!(matches!(
+                outcome,
+                jet_codegen::scheduler::JetSchedulerWait::Ready(())
+            ));
+            assert!(runtime.stderr.is_empty());
+            assert_eq!(runtime.exit_code, None);
+            assert_eq!(runtime.trapped, None);
+            assert!(!runtime.host_fault);
+        })
+        .join()
+        .expect("child failure probe");
+    }
+
+    #[test]
+    fn child_ffi_failure_stays_out_of_process_stop_state() {
+        std::thread::spawn(|| {
+            let mut runtime = fresh_runtime();
+            runtime.source_file = "ffi.jet".to_string();
+            runtime.source_text = "foreign_call()".to_string();
+            runtime.current_function = "run".to_string();
+            runtime.current_line = 1;
+            let runtime_ptr = &mut runtime as *mut JitRuntime;
+            Concurrency::set_active_runtime(Some(runtime_ptr));
+            let outcome = jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_ffi_runtime_stop("panic: a foreign function panicked");
+                });
+            });
+            Concurrency::set_active_runtime(None);
+            Concurrency::clear_http_shared_runtime();
+
+            assert!(matches!(
+                outcome,
+                jet_codegen::scheduler::JetSchedulerWait::Ready(())
+            ));
+            assert!(runtime.stderr.is_empty());
+            assert_eq!(runtime.exit_code, None);
+            assert_eq!(runtime.trapped, None);
+            assert!(!runtime.host_fault);
+        })
+        .join()
+        .expect("child failure probe");
     }
 }

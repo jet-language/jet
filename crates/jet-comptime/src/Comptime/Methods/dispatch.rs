@@ -299,7 +299,8 @@ pub(crate) fn check_literal_embed_path(
     path: &str,
     span: Span,
 ) -> Result<String, Diagnostic> {
-    let p = std::path::Path::new(path);
+    let path = normalize_rel(path);
+    let p = std::path::Path::new(&path);
     if p.is_absolute() {
         return Err(embed_path_err(builtin, "absolute", span));
     }
@@ -308,7 +309,7 @@ pub(crate) fn check_literal_embed_path(
     {
         return Err(embed_path_err(builtin, "escape", span));
     }
-    Ok(path.to_string())
+    Ok(path)
 }
 
 pub(crate) fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
@@ -350,10 +351,24 @@ pub(crate) fn find_glob(
     let pattern = normalize_rel(glob);
     let segments = split_rel(&pattern);
     let root_rel = static_glob_prefix(&segments);
+    let walk_error = |error: std::io::Error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`{}` can't walk `{glob}`", crate::Syntax::BUILTIN_FIND),
+            error.to_string(),
+            "check that every directory matched by the glob can be read".to_string(),
+            Some(span),
+        )
+    };
+    let base_root = checked_embed_path(base_dir, ".").map_err(&walk_error)?;
     let root = if root_rel.is_empty() {
-        base_dir.to_path_buf()
+        base_root.clone()
     } else {
-        base_dir.join(root_rel.join("/"))
+        match checked_embed_path(&base_root, &root_rel.join("/")) {
+            Ok(root) => root,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(walk_error(error)),
+        }
     };
     let has_recursive = segments.iter().any(|segment| segment == "**");
     let max_depth = if has_recursive {
@@ -372,23 +387,16 @@ pub(crate) fn find_glob(
     if !root.exists() {
         return Ok(out);
     }
+    let logical_root = root_rel.join("/");
     walk_find(
-        base_dir,
         &root,
+        Path::new(&logical_root),
         &segments,
         root_rel.len(),
         max_depth,
         &mut out,
     )
-    .map_err(|e| {
-        Diagnostic::error(
-            "E0955",
-            format!("`{}` can't walk `{glob}`", crate::Syntax::BUILTIN_FIND),
-            e.to_string(),
-            "check that every directory matched by the glob can be read".to_string(),
-            Some(span),
-        )
-    })?;
+    .map_err(walk_error)?;
     Ok(out)
 }
 
@@ -420,7 +428,11 @@ pub fn eval_build_time_io(
             Some(span),
         )
     })?;
-    let bytes = std::fs::read(full).map_err(|error| {
+    let bytes = crate::SHA256::read_file_nofollow(
+        &full,
+        crate::SHA256::MAX_TREE_FILE_BYTES,
+    )
+    .map_err(|error| {
         Diagnostic::error(
             "E0955",
             format!("`{builtin}` can't open `{rel}`"),
@@ -469,10 +481,32 @@ pub fn eval_locked_find(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let builtin = crate::Syntax::BUILTIN_FIND;
-    let mut matches = find_glob(base_dir, glob, span)?;
+    let base_root = checked_embed_path(base_dir, ".").map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`{builtin}` can't walk `{glob}`"),
+            error.to_string(),
+            "check that every directory matched by the glob can be read".to_string(),
+            Some(span),
+        )
+    })?;
+    let mut matches = find_glob(&base_root, glob, span)?;
     matches.sort();
     for rel in &matches {
-        let bytes = std::fs::read(base_dir.join(rel)).map_err(|error| {
+        let full = checked_embed_path(&base_root, rel).map_err(|error| {
+            Diagnostic::error(
+                "E0955",
+                format!("`{builtin}` can't open `{rel}`"),
+                format!("{error} (matched while expanding `{glob}`)"),
+                "check the glob and remove unreadable files from its match set".to_string(),
+                Some(span),
+            )
+        })?;
+        let bytes = crate::SHA256::read_file_nofollow(
+            &full,
+            crate::SHA256::MAX_TREE_FILE_BYTES,
+        )
+        .map_err(|error| {
             Diagnostic::error(
                 "E0955",
                 format!("`{builtin}` can't open `{rel}`"),
@@ -527,7 +561,11 @@ pub fn eval_build_embed(
             Some(span),
         )
     })?;
-    let bytes = std::fs::read(full).map_err(|error| {
+    let bytes = crate::SHA256::read_file_nofollow(
+        &full,
+        crate::SHA256::MAX_TREE_FILE_BYTES,
+    )
+    .map_err(|error| {
         Diagnostic::error(
             "E0955",
             format!("`b.embed` cannot open `{rel}`"),
@@ -593,8 +631,8 @@ fn segment_has_glob(segment: &str) -> bool {
 }
 
 fn walk_find(
-    base_dir: &Path,
     dir: &Path,
+    logical_dir: &Path,
     pattern: &[String],
     depth: usize,
     max_depth: usize,
@@ -605,14 +643,21 @@ fn walk_find(
     for entry in entries {
         let ty = entry.file_type()?;
         let path = entry.path();
+        let logical_path = logical_dir.join(entry.file_name());
         if ty.is_dir() {
             let dir_depth = depth + 1;
             if dir_depth < max_depth {
-                walk_find(base_dir, &path, pattern, dir_depth, max_depth, out)?;
+                walk_find(
+                    &path,
+                    &logical_path,
+                    pattern,
+                    dir_depth,
+                    max_depth,
+                    out,
+                )?;
             }
         } else if ty.is_file() {
-            let rel = path.strip_prefix(base_dir).unwrap_or(&path);
-            let rel = normalize_rel(&rel.to_string_lossy());
+            let rel = normalize_rel(&logical_path.to_string_lossy());
             if glob_segments_match(pattern, &split_rel(&rel)) {
                 out.push(rel);
             }
@@ -1588,7 +1633,7 @@ impl<'a> Interp<'a> {
                 ));
             }
         };
-        match std::fs::read(&full) {
+        match crate::SHA256::read_file_nofollow(&full, crate::SHA256::MAX_TREE_FILE_BYTES) {
             Ok(bytes) => {
                 // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
                 let hash = crate::SHA256::sha256_hex(&bytes);
@@ -1708,5 +1753,71 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_rejects_symlinked_root_before_traversal() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-comptime-find-symlink-root-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-comptime-find-symlink-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "must not be read").unwrap();
+        symlink(&outside, root.join("link")).unwrap();
+
+        let result = eval_locked_find(
+            &root,
+            "link/**",
+            None,
+            Span::new(0, 1),
+        );
+        assert!(result.is_err(), "find must reject a symlinked traversal root");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_rejects_glob_reads_through_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-comptime-find-glob-symlink-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-comptime-find-glob-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "must not be read").unwrap();
+        symlink(&outside, root.join("link")).unwrap();
+
+        let mut inputs = Vec::new();
+        let result = eval_locked_find(
+            &root,
+            r"link\**\*.txt",
+            Some(&mut inputs),
+            Span::new(0, 1),
+        );
+        assert!(result.is_err(), "find must refuse the hostile matched read");
+        assert!(inputs.is_empty(), "refused find must record no outside input");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

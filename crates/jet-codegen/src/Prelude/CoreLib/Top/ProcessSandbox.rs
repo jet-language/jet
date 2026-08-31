@@ -28,6 +28,24 @@ pub struct Status {
     pub reason: String,
 }
 
+/// One immutable host directory exposed to a child process. The native
+/// adapters validate the source and project it read-only at the declared
+/// destination; no adapter adds an implicit host search path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadOnlyMount {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+}
+
+impl ReadOnlyMount {
+    pub fn new(source: impl Into<PathBuf>, destination: impl Into<PathBuf>) -> Self {
+        ReadOnlyMount {
+            source: source.into(),
+            destination: destination.into(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     Unsupported(String),
@@ -97,8 +115,17 @@ pub fn status() -> Status {
             };
         };
         let policy = policy(false, false);
-        let mut command =
-            linux_sandbox_command(&bwrap, None, None, &BTreeMap::new(), false, false, false);
+        let mut command = linux_sandbox_command(
+            &bwrap,
+            None,
+            None,
+            &BTreeMap::new(),
+            false,
+            false,
+            false,
+            &[],
+            None,
+        );
         command.args([probe.as_os_str(), std::ffi::OsStr::new("-c")]);
         command.arg("exit 0");
         return match command.status() {
@@ -221,6 +248,37 @@ pub fn spawn<F>(
 where
     F: FnOnce(&mut Command) -> Result<(), Error>,
 {
+    spawn_with_read_only_mounts(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        source_readable,
+        source_writable,
+        &[],
+        argv0,
+        configure,
+    )
+}
+
+pub fn spawn_with_read_only_mounts<F>(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    source_readable: bool,
+    source_writable: bool,
+    mounts: &[ReadOnlyMount],
+    argv0: Option<&std::ffi::OsStr>,
+    configure: F,
+) -> Result<Child, Error>
+where
+    F: FnOnce(&mut Command) -> Result<(), Error>,
+{
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
@@ -243,15 +301,18 @@ where
         }
         let source_dir = real_directory(source_dir)?;
         let output_dir = output_dir.map(real_directory).transpose()?;
+        let mounts = validate_read_only_mounts(mounts)?;
+        let command_executable = mounted_executable_path(&executable, &mounts);
         #[cfg(target_os = "macos")]
         {
             let profile = build_profile(
-                &executable,
+                &command_executable,
                 &source_dir,
                 output_dir.as_deref(),
                 share_network,
                 source_readable,
                 source_writable,
+                &mounts,
             )?;
             let mut command = Command::new(MACOS_SANDBOX_EXEC);
             command
@@ -260,7 +321,7 @@ where
                 // it, creating a launch race.
                 .arg("-p")
                 .arg(&profile)
-                .arg(&executable)
+                .arg(&command_executable)
                 .args(args)
                 .env_clear()
                 .current_dir(&source_dir);
@@ -290,11 +351,10 @@ where
                 share_network,
                 source_readable,
                 source_writable,
+                &mounts,
+                argv0,
             );
-            if let Some(argv0) = argv0 {
-                command.arg("--argv0").arg(argv0);
-            }
-            command.arg(&executable).args(args);
+            command.arg(&command_executable).args(args);
             configure(&mut command)?;
             return command
                 .spawn()
@@ -313,6 +373,7 @@ where
             share_network,
             source_readable,
             source_writable,
+            mounts,
             argv0,
             configure,
         );
@@ -351,8 +412,30 @@ pub fn output_with_timeout(
     share_network: bool,
     timeout: Option<Duration>,
 ) -> Result<Output, Error> {
+    output_with_read_only_mounts(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        &[],
+        timeout,
+    )
+}
+
+pub fn output_with_read_only_mounts(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    mounts: &[ReadOnlyMount],
+    timeout: Option<Duration>,
+) -> Result<Output, Error> {
     let argv0 = executable.file_name().map(std::ffi::OsStr::to_owned);
-    let child = spawn(
+    let child = spawn_with_read_only_mounts(
         executable,
         args,
         source_dir,
@@ -361,6 +444,7 @@ pub fn output_with_timeout(
         share_network,
         true,
         output_dir.is_none(),
+        mounts,
         argv0.as_deref(),
         |command| {
             command
@@ -485,6 +569,64 @@ fn real_directory(path: &Path) -> Result<PathBuf, Error> {
     Ok(canonical)
 }
 
+fn validate_read_only_mounts(mounts: &[ReadOnlyMount]) -> Result<Vec<ReadOnlyMount>, Error> {
+    mounts
+        .iter()
+        .map(|mount| {
+            let metadata = fs::symlink_metadata(&mount.source).map_err(|error| {
+                Error::Unsupported(format!(
+                    "sandbox mount source `{}` is unavailable: {error}",
+                    mount.source.display()
+                ))
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(Error::Unsupported(format!(
+                    "sandbox mount source `{}` is not a real directory",
+                    mount.source.display()
+                )));
+            }
+            let source = real_directory(&mount.source)?;
+            let destination = &mount.destination;
+            if !destination.is_absolute()
+                || destination == Path::new("/")
+                || destination.components().any(|component| {
+                    matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
+                })
+            {
+                return Err(Error::Unsupported(format!(
+                    "sandbox mount destination `{}` is not an absolute, normalized directory",
+                    destination.display()
+                )));
+            }
+            Ok(ReadOnlyMount::new(source, destination.clone()))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn mounted_executable_path(executable: &Path, mounts: &[ReadOnlyMount]) -> PathBuf {
+    mounts
+        .iter()
+        .filter_map(|mount| {
+            executable
+                .strip_prefix(&mount.source)
+                .ok()
+                .map(|relative| (relative.components().count(), mount, relative))
+        })
+        .max_by_key(|(depth, _, _)| *depth)
+        .map_or_else(
+            || executable.to_path_buf(),
+            |(_, mount, relative)| mount.destination.join(relative),
+        )
+}
+
+#[cfg(target_os = "macos")]
+fn mounted_executable_path(executable: &Path, _mounts: &[ReadOnlyMount]) -> PathBuf {
+    // Seatbelt restricts the real host path; it does not create the virtual
+    // mount namespace that Bubblewrap gives Linux actions.
+    executable.to_path_buf()
+}
+
 fn find_program_path(program: &str) -> Option<PathBuf> {
     let direct = Path::new(program);
     if direct.components().count() > 1 && direct.is_file() {
@@ -510,6 +652,8 @@ fn linux_sandbox_command(
     share_network: bool,
     source_readable: bool,
     source_writable: bool,
+    mounts: &[ReadOnlyMount],
+    argv0: Option<&std::ffi::OsStr>,
 ) -> Command {
     let mut command = Command::new(bwrap);
     command
@@ -587,12 +731,32 @@ fn linux_sandbox_command(
                 .arg("/work");
         }
     }
+    for mount in mounts {
+        let mut destination = PathBuf::from("/");
+        for component in mount.destination.components() {
+            if let std::path::Component::Normal(part) = component {
+                destination.push(part);
+                command.arg("--dir").arg(&destination);
+            }
+        }
+        command
+            .arg("--ro-bind")
+            .arg(&mount.source)
+            .arg(&mount.destination);
+    }
     if share_network {
         command.arg("--share-net");
     }
     for (key, value) in env {
         command.arg("--setenv").arg(key).arg(value);
     }
+    if let Some(argv0) = argv0 {
+        command.arg("--argv0").arg(argv0);
+    }
+    // Bubblewrap accepts options until `--`; keep the user-selected
+    // executable and argv in the command position even if their text starts
+    // with a dash.
+    command.arg("--");
     command
 }
 
@@ -639,6 +803,7 @@ fn build_profile(
     share_network: bool,
     source_readable: bool,
     source_writable: bool,
+    mounts: &[ReadOnlyMount],
 ) -> Result<String, Error> {
     let executable = sbpl_path(executable)?;
     let source_dir = sbpl_path(source_dir)?;
@@ -646,7 +811,14 @@ fn build_profile(
     let mut profile = String::from(
         "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-fork)\n(allow process-exec\n",
     );
-    profile.push_str(&format!("  (literal \"{executable}\")\n)\n"));
+    profile.push_str(&format!("  (literal \"{executable}\")\n"));
+    for mount in mounts {
+        profile.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            sbpl_path(&mount.source)?
+        ));
+    }
+    profile.push_str(")\n");
     profile.push_str("(allow file-read*\n");
     if source_readable {
         profile.push_str(&format!("  (subpath \"{source_dir}\")\n"));
@@ -660,7 +832,20 @@ fn build_profile(
     profile.push_str("  (subpath \"/usr/bin\")\n");
     profile.push_str("  (subpath \"/bin\")\n");
     profile.push_str("  (subpath \"/sbin\")\n");
-    profile.push_str("  (subpath \"/nix/store\"))\n");
+    profile.push_str("  (subpath \"/nix/store\")\n");
+    for mount in mounts {
+        profile.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            sbpl_path(&mount.source)?
+        ));
+        if mount.destination != mount.source {
+            profile.push_str(&format!(
+                "  (subpath \"{}\")\n",
+                sbpl_path(&mount.destination)?
+            ));
+        }
+    }
+    profile.push(')');
     if let Some(output_dir) = output_dir.as_deref() {
         profile.push_str(&format!("(allow file-write* (subpath \"{output_dir}\"))\n"));
     } else if source_writable {

@@ -3,10 +3,19 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{
+    Diagnostic, FixApplicability, FixSafety, Span, TextEdit,
+};
 use crate::Sema::Diagnostics::{is_core_error_family_type, is_default_error};
 use crate::Syntax;
 use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
+
+#[derive(Debug, Clone)]
+struct FailureCallProvenance {
+    callee: String,
+    definition: String,
+    contract: String,
+}
 
 impl<'a> Checker<'a> {
     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
@@ -130,6 +139,309 @@ impl<'a> Checker<'a> {
         ));
         None
     }
+    fn resolve_failure_function_in_module(
+        &self,
+        mut module_idx: usize,
+        mut name: String,
+    ) -> Option<(usize, String, crate::AST::FuncSig)> {
+        let modules = self.modules?;
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if !visited.insert((module_idx, name.clone())) {
+                return None;
+            }
+            let module = modules.get(module_idx)?;
+            if let Some((real_name, real_module)) = module.reexports.get(&name) {
+                name = real_name.clone();
+                module_idx = *real_module;
+                continue;
+            }
+            let semantic_name = name
+                .split_once('.')
+                .and_then(|(inline_module, item)| {
+                    module
+                        .code_modules
+                        .get(inline_module)
+                        .map(|canonical| jet_foundation::Names::member_name(canonical, item))
+                })
+                .unwrap_or_else(|| name.clone());
+            let signature = module.funcs.get(&semantic_name)?.clone();
+            return Some((module_idx, semantic_name, signature));
+        }
+    }
+
+    fn resolve_failure_function(
+        &self,
+        name: &str,
+    ) -> Option<(usize, String, crate::AST::FuncSig)> {
+        if let Some(signature) = self.funcs.get(name) {
+            return Some((self.module_idx, name.to_string(), signature.clone()));
+        }
+        if let Some(mangled) = self
+            .inline_module
+            .as_ref()
+            .and_then(|module| self.inline_unqualified.get(&(module.clone(), name.to_string())))
+        {
+            if let Some(signature) = self.funcs.get(mangled) {
+                return Some((self.module_idx, mangled.clone(), signature.clone()));
+            }
+        }
+        if let Some(mangled) = self.unqualified.get(name) {
+            if let Some(signature) = self.funcs.get(mangled) {
+                return Some((self.module_idx, mangled.clone(), signature.clone()));
+            }
+        }
+        if let Some((function, module_idx)) = self
+            .inline_module
+            .as_ref()
+            .and_then(|module| self.inline_unqualified_file.get(&(module.clone(), name.to_string())))
+        {
+            if let Some(target) = self.resolve_failure_function_in_module(*module_idx, function.clone())
+            {
+                return Some(target);
+            }
+        }
+        if let Some((function, module_idx)) = self.unqualified_file.get(name) {
+            if let Some(target) = self.resolve_failure_function_in_module(*module_idx, function.clone())
+            {
+                return Some(target);
+            }
+        }
+        if let Some((_, module_idx, function)) = self.resolve_import_call_path(name) {
+            if let Some(target) = self.resolve_failure_function_in_module(module_idx, function) {
+                return Some(target);
+            }
+        }
+        let (alias, item) = name.split_once('.')?;
+        if let Some(canonical) = self.code_modules.get(alias) {
+            let mangled = jet_foundation::Names::member_name(canonical, item);
+            if let Some(signature) = self.funcs.get(&mangled) {
+                return Some((self.module_idx, mangled, signature.clone()));
+            }
+        }
+        if let Some((_, mangled)) = self
+            .inline_reexport_inline
+            .get(&(alias.to_string(), item.to_string()))
+        {
+            if let Some(signature) = self.funcs.get(mangled) {
+                return Some((self.module_idx, mangled.clone(), signature.clone()));
+            }
+        }
+        if let Some((function, module_idx)) = self
+            .inline_reexport_file
+            .get(&(alias.to_string(), item.to_string()))
+        {
+            return self.resolve_failure_function_in_module(*module_idx, function.clone());
+        }
+        None
+    }
+
+    fn definition_location(&self, module_idx: usize, span: Span) -> Option<String> {
+        let module = self.modules.and_then(|modules| modules.get(module_idx))?;
+        if module.module_path.is_empty() || module.source.is_empty() {
+            return None;
+        }
+        let (line, col) = crate::Diagnostics::span_line_col(&module.source, span.start);
+        Some(format!("{}:{line}:{col}", module.module_path))
+    }
+
+    fn definition_span_text(&self, owner: usize, name: &str) -> String {
+        let Some(declaration) = self.name_ledger.declaration(owner, name) else {
+            return "Core or generated callable (no user source location)".to_string();
+        };
+        self.definition_location(declaration.module, declaration.span)
+            .unwrap_or_else(|| "Core or generated callable (no user source location)".to_string())
+    }
+
+    fn definition_fallback_text(&self) -> String {
+        "Core or generated callable (no user source location)".to_string()
+    }
+
+    fn failure_call_provenance(&self, inner: &Expr) -> FailureCallProvenance {
+        match inner {
+            Expr::Call(call) => {
+                let (definition, contract) = self
+                    .resolve_failure_function(&call.name)
+                    .map(|(owner, name, signature)| {
+                        (
+                            self.definition_span_text(owner, &name),
+                            signature.failure_contract().source(),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            self.definition_span_text(self.module_idx, &call.name),
+                            call.resolved_ret
+                                .as_ref()
+                                .map(|return_type| {
+                                    crate::AST::FailureContract::from_return_type(Some(return_type))
+                                        .source()
+                                })
+                                .unwrap_or_else(|| "inferred failure contract".to_string()),
+                        )
+                    });
+                FailureCallProvenance {
+                    callee: call.name.clone(),
+                    definition,
+                    contract,
+                }
+            }
+            Expr::MethodCall {
+                method,
+                recv_type,
+                ..
+            } => {
+                let mut contract = "inferred failure contract".to_string();
+                let mut definition = self.definition_fallback_text();
+                if let Some(type_name) = recv_type.as_deref() {
+                    if let Some((owner, signature)) = self.resolve_method_sig(type_name, method) {
+                        contract = signature.failure_contract().source();
+                        let (_, leaf) = self.struct_type_name_parts(type_name);
+                        if let Some(declaration) = self
+                            .name_ledger
+                            .declaration(owner, &format!("{leaf}.{method}"))
+                        {
+                            definition = self
+                                .definition_location(declaration.module, declaration.span)
+                                .unwrap_or_else(|| self.definition_fallback_text());
+                        }
+                    }
+                }
+                FailureCallProvenance {
+                    callee: format!("{method}()"),
+                    definition,
+                    contract,
+                }
+            }
+            _ => FailureCallProvenance {
+                callee: "this fallible expression".to_string(),
+                definition: self.definition_fallback_text(),
+                contract: "inferred failure contract".to_string(),
+            },
+        }
+    }
+
+    /// Build the caller-side repair from the source declaration when the
+    /// declaration is available. Keeping the authored success spelling avoids
+    /// putting diagnostic glosses such as `(a whole number)` into a source
+    /// edit, and also covers the implicit `Err` route (`fn f() Int`).
+    fn failure_domain_caller_edit(&self, source_name: &str) -> Option<TextEdit> {
+        if let Some(span) = self.current_return_type_span {
+            let authored = self.source.get(span.start..span.end);
+            let success = authored
+                .and_then(|text| text.split_once(Syntax::TYPE_FALLIBLE_SEP))
+                .map_or_else(
+                    || {
+                        self.declared_return_type
+                            .as_ref()
+                            .and_then(|return_type| return_type.unwrap_result())
+                            .map(|(ok, _)| ok.name())
+                            .unwrap_or_default()
+                    },
+                    |(success, _)| success.trim().to_string(),
+                );
+            let new_text = if success.is_empty() {
+                format!("{}{}", Syntax::TYPE_FALLIBLE_SEP, source_name)
+            } else {
+                format!("{} {}{}", success, Syntax::TYPE_FALLIBLE_SEP, source_name)
+            };
+            return Some(TextEdit { span, new_text });
+        }
+
+        // No written return type means a unit callable with the implicit
+        // default route. Insert the explicit domain at its body boundary.
+        let body = self
+            .source
+            .get(self.current_function_span.start..self.current_function_span.end)?;
+        let body_offset = body
+            .find('{')
+            .or_else(|| body.find(Syntax::OP_UNIFIED_ARROW))?;
+        let insertion = self.current_function_span.start + body_offset;
+        Some(TextEdit {
+            span: Span::new(insertion, insertion),
+            new_text: format!("{}{} ", Syntax::TYPE_FALLIBLE_SEP, source_name),
+        })
+    }
+
+    /// Build the declaration-site template for the second repair. The body
+    /// needs the user's source-to-target mapping, so this remains a reviewable
+    /// suggestion rather than an automatic edit.
+    fn failure_domain_conversion_edit(
+        &self,
+        source_name: &str,
+        target_name: &str,
+    ) -> Option<TextEdit> {
+        if source_name.is_empty()
+            || target_name.is_empty()
+            || source_name
+                .chars()
+                .chain(target_name.chars())
+                .any(|character| character.is_whitespace() || matches!(character, '|'))
+        {
+            return None;
+        }
+        let separator = if self.source.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
+        Some(TextEdit {
+            span: Span::new(self.source.len(), self.source.len()),
+            new_text: format!(
+                "{separator}impl {source_name} -> {target_name} {{\n    // map each {source_name} case into {target_name}\n}}\n"
+            ),
+        })
+    }
+
+    fn report_failure_domain_mismatch(
+        &mut self,
+        span: Span,
+        inner: &Expr,
+        source: &Type,
+        target: &Type,
+    ) {
+        let provenance = self.failure_call_provenance(inner);
+        let callee = provenance.callee;
+        let definition = provenance.definition;
+        let contract = provenance.contract;
+        let caller = self
+            .declared_return_type
+            .as_ref()
+            .map(|return_type| {
+                crate::AST::FailureContract::from_return_type(Some(return_type)).source()
+            })
+            .unwrap_or_else(|| "no declared failure contract".to_string());
+        let source_name = source.name();
+        let target_name = target.name();
+        let mut diagnostic = Diagnostic::from_row(
+            "E2404",
+            &[
+                ("Source", &source_name),
+                ("Target", &target_name),
+                ("callee", &callee),
+                ("definition", &definition),
+                ("contract", &contract),
+                ("caller", &caller),
+            ],
+            Some(span),
+        )
+        .with_detail(format!(
+            "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {definition}\neffective contract: {contract}\ncaller contract: {caller}"
+        ));
+        if let Some(edit) = self.failure_domain_caller_edit(&source_name) {
+            diagnostic = diagnostic.with_edit_grade(
+                edit,
+                FixApplicability::Suggested,
+                FixSafety::NeedsReview,
+            );
+        }
+        if target_name != Syntax::TYPE_NEVER {
+            if let Some(edit) = self.failure_domain_conversion_edit(&source_name, &target_name) {
+                diagnostic = diagnostic.with_alternative_edit(edit);
+            }
+        }
+        self.diags.push(diagnostic);
+    }
 
     pub(crate) fn infer_try(
         &mut self,
@@ -149,6 +461,7 @@ impl<'a> Checker<'a> {
         note: &mut Option<Box<Expr>>,
         checked_inner_type: Option<Type>,
     ) -> Option<Type> {
+        let implicit_propagation = checked_inner_type.as_ref().is_some_and(Type::is_fallible);
         if let Some(note) = note.as_mut() {
             let saved = self.expected_type.clone();
             self.expected_type = Some(Type::String);
@@ -198,16 +511,12 @@ impl<'a> Checker<'a> {
                         if matches!(ret_err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
                             && !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) =>
                     {
-                        self.diags.push(Diagnostic::error(
-                            "E2404",
-                            format!(
-                                "`?` can't propagate `{}` into a `!Never` contract",
-                                err.name()
-                            ),
-                            "`!Never` records that every reachable path is free of structured failure".to_string(),
-                            "remove the fallible path, handle it locally with `??`, or declare its error domain".to_string(),
-                            Some(span),
-                        ));
+                        self.report_failure_domain_mismatch(
+                            span,
+                            inner.as_ref(),
+                            err.as_ref(),
+                            ret_err.as_ref(),
+                        );
                         None
                     }
                     // E2-M7: error types match — propagate and unwrap the Ok value.
@@ -245,8 +554,14 @@ impl<'a> Checker<'a> {
 
                         // D-ERR-CONV: check if a declared `impl Source -> Target` conversion exists.
                         if self.trait_reg.has_error_conv(&err_type_name, &ret_err_name) {
+                            let source = (*err).clone();
+                            let target = (**ret_err).clone();
                             let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
-                            *convert = TryConvert::Typed(fn_name);
+                            *convert = TryConvert::Typed {
+                                fn_name,
+                                source,
+                                target,
+                            };
                             self.task_body_propagates = true;
                             return Some((*ok).clone());
                         }
@@ -255,67 +570,108 @@ impl<'a> Checker<'a> {
                             let err_name = err.name();
                             // D-FAIL-CONV2=A: demand-driven family conversion onto Err.
                             if !self.no_prelude && is_core_error_family_type(&err_name) {
+                                let source = (*err).clone();
+                                let target = Type::Named(Syntax::TYPE_ERR.to_string());
                                 let fn_name = error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
-                                *convert = TryConvert::Typed(fn_name);
+                                *convert = TryConvert::Typed {
+                                    fn_name,
+                                    source,
+                                    target,
+                                };
                                 self.task_body_propagates = true;
                                 return Some((*ok).clone());
                             }
+                            let (what, why, fix) = if implicit_propagation {
+                                (
+                                    format!(
+                                        "this implicit fallible call can't convert `{}` into `{}` — no declared conversion exists",
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                    format!(
+                                        "ordinary fallible calls propagate automatically; `{}` can reach `{}` only through `impl {} -> {}`",
+                                        err_name,
+                                        Syntax::TYPE_ERR,
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                    format!(
+                                        "handle this call locally with `??`, add `impl {} -> {} {{ … }}`, or change the return type",
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                )
+                            } else {
+                                (
+                                    format!(
+                                        "`?` can't convert `{}` into `{}` — no declared conversion exists",
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                    format!(
+                                        "`?` uses the declared conversion rail; `{}` can reach `{}` only through `impl {} -> {}`",
+                                        err_name,
+                                        Syntax::TYPE_ERR,
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                    format!(
+                                        "add `impl {} -> {} {{ … }}` before this function, or change the return type",
+                                        err_name,
+                                        Syntax::TYPE_ERR
+                                    ),
+                                )
+                            };
                             self.diags.push(Diagnostic::error(
                                 "E2402",
-                                format!(
-                                    "`?` can't convert `{}` into `{}` — no declared conversion exists",
-                                    err_name,
-                                    Syntax::TYPE_ERR
-                                ),
-                                format!(
-                                    "`?` uses the declared conversion rail; `{}` can reach `{}` only through `impl {} -> {}`",
-                                    err_name,
-                                    Syntax::TYPE_ERR,
-                                    err_name,
-                                    Syntax::TYPE_ERR
-                                ),
-                                format!(
-                                    "add `impl {} -> {} {{ … }}` before this function, or change the return type",
-                                    err_name,
-                                    Syntax::TYPE_ERR
-                                ),
+                                what,
+                                why,
+                                fix,
                                 Some(span),
                             ));
                             return None;
                         }
                         // E2404: no declared conversion between these two typed error types.
-                        self.diags.push(Diagnostic::error(
-                            "E2404",
-                            format!(
-                                "`?` can't turn a `{}` into a `{}` here",
-                                err_type_name, ret_err_name
-                            ),
-                            format!(
-                                "`?` only changes an error's type when you've declared how; \
-                                 there's no declared way to turn `{}` into `{}`",
-                                err_type_name, ret_err_name
-                            ),
-                            format!(
-                                "add `impl {} -> {} {{ … }}` before this function",
-                                err_type_name, ret_err_name
-                            ),
-                            Some(span),
-                        ));
+                        self.report_failure_domain_mismatch(
+                            span,
+                            inner.as_ref(),
+                            err.as_ref(),
+                            ret_err.as_ref(),
+                        );
                         None
                     }
                     _ => {
+                        let (what, why, fix) = if implicit_propagation {
+                            (
+                                "this fallible call only works inside a function that returns a fallible result"
+                                    .to_string(),
+                                "ordinary fallible calls propagate their failure automatically to the caller"
+                                    .to_string(),
+                                format!(
+                                    "declare `{}` in the return type before `->`, or handle the result with `{}`",
+                                    err.name(),
+                                    Syntax::OP_FALLBACK
+                                ),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "`{}` only works inside a function that returns a fallible result",
+                                    Syntax::OP_TRY_SUFFIX
+                                ),
+                                "propagation early-returns the failure to the caller".to_string(),
+                                format!(
+                                    "declare the failure in the return type — `{}` before `->` — or handle the result with `{}`",
+                                    err.name(),
+                                    Syntax::OP_FALLBACK
+                                ),
+                            )
+                        };
                         self.diags.push(Diagnostic::error(
                             "E0403",
-                            format!(
-                                "`{}` only works inside a function that returns a fallible result",
-                                Syntax::OP_TRY_SUFFIX
-                            ),
-                            "propagation early-returns the failure to the caller".to_string(),
-                            format!(
-                                "declare the failure in the return type — `{}` before `->` — or handle the result with `{}`",
-                                err.name(),
-                                Syntax::OP_FALLBACK
-                            ),
+                            what,
+                            why,
+                            fix,
                             Some(span),
                         ));
                         None
@@ -585,8 +941,14 @@ impl<'a> Checker<'a> {
     fn return_route_type(&self) -> Option<Type> {
         let ret = self.ret.clone()?;
         match &ret {
-            Type::Result { ok, .. } if self.is_unit_type(ok) => None,
-            ty if self.is_unit_type(ty) => None,
+            Type::Result { ok, .. }
+                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                    || self.is_unit_type(ok) =>
+            {
+                None
+            }
+            ty if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                || self.is_unit_type(ty) => None,
             _ => Some(ret),
         }
     }

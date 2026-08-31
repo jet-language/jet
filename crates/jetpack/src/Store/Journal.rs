@@ -1,9 +1,9 @@
-use super::*;
 use super::Closure::{
     recover_closure_journal_unlocked, validate_universe_isolation, CanonicalActionRecord,
     ClosureGraph, ClosureObject, ClosureRecord, RECEIPTS_DIR,
 };
 use super::Receipt::render_receipt;
+use super::*;
 
 const JOURNAL_DIR: &str = "journal";
 const COMPACT_AFTER: usize = 64;
@@ -132,10 +132,7 @@ pub(super) fn lifecycle_inputs_unlocked(
         canonical.extend_from_slice(&bytes);
     }
     let inputs = (
-        graph
-            .objects
-            .into_keys()
-            .collect::<BTreeSet<String>>(),
+        graph.objects.into_keys().collect::<BTreeSet<String>>(),
         format!("sha256-{}", SHA256::sha256_hex(&canonical)),
     );
     // Recovery above may have rewritten WAL state; stamp the result so the

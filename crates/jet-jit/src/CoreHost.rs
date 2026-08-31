@@ -65,6 +65,18 @@ mod os_rt {
         }
 
         #[derive(Clone, Debug, PartialEq)]
+        pub(crate) struct Stat {
+            pub(crate) size: i64,
+            pub(crate) modified_ms: i64,
+            pub(crate) created_ms: i64,
+            pub(crate) readonly: bool,
+            pub(crate) is_file: bool,
+            pub(crate) is_dir: bool,
+            pub(crate) is_symlink: bool,
+            pub(crate) kind: String,
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
         pub(crate) enum IOError {
             InvalidInput(IOContext),
             NotFound(IOContext),
@@ -89,7 +101,6 @@ mod os_rt {
                     cause: Some(cause.to_string()),
                 })
             }
-
         }
 
         pub(crate) fn io_error_at(
@@ -129,6 +140,7 @@ mod os_rt {
     mod prelude_impl {
         use super::{jet_std, jet_std_env_get, jet_std_process_exit};
 
+        include!("../../jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs");
     }
 
@@ -226,7 +238,7 @@ mod os_rt {
 // FSRuntimeOps.rs is the one policy-bearing filesystem fragment. The
 // resident host supplies only these raw kernels and its result marshaller.
 mod fs_prelude {
-    use super::fs_ops_kernel::{jet_fs_glob, jet_fs_rename};
+    use super::fs_ops_kernel::{jet_fs_canonicalize, jet_fs_glob, jet_fs_rename};
     use super::os_rt::jet_std;
     use crate::fault_injection::jet_fault_should_fail;
 
@@ -1170,6 +1182,12 @@ fn jet_jit_path_normalize(rec: i64) -> i64 {
     path_record(path_kernel::jet_std_path_normalize(&s))
 }
 
+fn jet_jit_path_is_within(path: i64, base: i64) -> i8 {
+    let path = path_string_from_record(path);
+    let base = path_string_from_record(base);
+    path_kernel::jet_std_path_is_within(&path, &base) as i8
+}
+
 fn jet_jit_path_to_string(rec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path_string_from_record(rec)))
 }
@@ -1234,44 +1252,6 @@ fn jet_jit_fs_list_dir(path: i64) -> i64 {
         });
         rt.results.len() as i64
     })
-}
-
-fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
-    t.duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_millis() as i64)
-}
-
-fn walk_entries(root: &std::path::Path) -> Result<Vec<(String, String, bool, i64)>, String> {
-    let mut out = Vec::new();
-    fn walk_dir(
-        root: &std::path::Path,
-        dir: &std::path::Path,
-        depth: i64,
-        out: &mut Vec<(String, String, bool, i64)>,
-    ) -> Result<(), String> {
-        let mut entries = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
-            entries.push(entry.map_err(|e| e.to_string())?);
-        }
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            let p = entry.path();
-            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            let relative = p
-                .strip_prefix(root)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .to_string();
-            out.push((p.to_string_lossy().to_string(), relative, is_dir, depth));
-            if is_dir {
-                walk_dir(root, &p, depth + 1, out)?;
-            }
-        }
-        Ok(())
-    }
-    walk_dir(root, root, 0, &mut out)?;
-    Ok(out)
 }
 
 fn path_record(path: String) -> i64 {
@@ -1491,48 +1471,28 @@ fn jet_jit_fs_remove_all(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_stat(path: i64) -> i64 {
-    let p = clone_string(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    let meta = match std::fs::symlink_metadata(&p) {
-        Ok(m) => m,
-        Err(e) => return result_err_msg(&format!("stat {p}: {e}")),
-    };
-    let ft = meta.file_type();
-    let kind = if ft.is_symlink() {
-        "symlink"
-    } else if ft.is_dir() {
-        "dir"
-    } else if ft.is_file() {
-        "file"
-    } else {
-        "other"
-    };
-    let rec = Concurrency::with_runtime_mut(|rt| {
-        let rec = rt.heap.alloc_record(8);
-        let _ = rt.heap.record_set_int(rec, 0, meta.len() as i64);
-        let _ = rt.heap.record_set_int(
-            rec,
-            1,
-            meta.modified().ok().and_then(system_time_ms).unwrap_or(0),
-        );
-        let _ = rt.heap.record_set_int(
-            rec,
-            2,
-            meta.created().ok().and_then(system_time_ms).unwrap_or(0),
-        );
-        let _ = rt
-            .heap
-            .record_set_bool(rec, 3, meta.permissions().readonly());
-        let _ = rt.heap.record_set_bool(rec, 4, ft.is_file());
-        let _ = rt.heap.record_set_bool(rec, 5, ft.is_dir());
-        let _ = rt.heap.record_set_bool(rec, 6, ft.is_symlink());
-        let kid = rt.heap.alloc_string(kind.to_string());
-        let _ = rt.heap.record_set_string(rec, 7, kid);
-        rec
-    });
-    result_ok(rec as u64)
+    let path = clone_string(path);
+    os_rt::marshal_result(fs_prelude::jet_fs_stat(&path), |stat| {
+        Concurrency::with_runtime_mut(|rt| {
+            let record = rt.heap.alloc_record(9);
+            let kind = rt.heap.alloc_string(stat.kind);
+            let _ = rt.heap.record_set_int(record, 0, stat.size);
+            let _ = rt.heap.record_set_int(record, 1, stat.modified_ms);
+            let _ = rt.heap.record_set_int(record, 2, stat.created_ms);
+            let _ = rt.heap.record_set_bool(record, 3, stat.readonly);
+            let _ = rt.heap.record_set_bool(record, 4, stat.is_file);
+            let _ = rt.heap.record_set_bool(record, 5, stat.is_dir);
+            let _ = rt.heap.record_set_bool(record, 6, stat.is_symlink);
+            let _ = rt.heap.record_set_string(record, 7, kind);
+            let _ = rt.heap.record_set_int(record, 8, stat.mode);
+            record as u64
+        })
+    })
+}
+
+fn jet_jit_fs_set_mode(path: i64, mode: i64) -> i64 {
+    let path = clone_string(path);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_set_mode(&path, mode), |_| 0)
 }
 
 fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
@@ -1583,17 +1543,7 @@ fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
 
 fn jet_jit_fs_fsync(path: i64) -> i64 {
     let p = clone_string(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::OpenOptions::new()
-        .read(true)
-        .open(&p)
-        .and_then(|f| f.sync_all())
-    {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("fsync {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_fsync(&p), |_| 0)
 }
 
 fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
@@ -1629,14 +1579,30 @@ fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
 }
 
 fn jet_jit_fs_walk(path: i64) -> i64 {
+    jet_jit_fs_walk_parallel(path)
+}
+
+fn jet_jit_fs_rename(from: i64, to: i64) -> i64 {
+    let from = clone_string(from);
+    let to = clone_string(to);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_rename(&from, &to), |_| 0)
+}
+
+fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
-    let entries = match walk_entries(std::path::Path::new(&p)) {
-        Ok(e) => e,
-        Err(e) => return result_err_msg(&format!("walk {p}: {e}")),
+    let mut entries = match fs_walk_kernel::jet_fs_walk_parallel(
+        &p,
+        &p,
+        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+        |_, error| error.to_string(),
+    ) {
+        Ok(entries) => entries,
+        Err(error) => return result_err_msg(&format!("walk {p}: {error}")),
     };
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
     let list = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for (path, relative, is_dir, depth) in entries {
@@ -1654,18 +1620,12 @@ fn jet_jit_fs_walk(path: i64) -> i64 {
     result_ok(list as u64)
 }
 
-fn jet_jit_fs_rename(from: i64, to: i64) -> i64 {
-    let from = clone_string(from);
-    let to = clone_string(to);
-    os_rt::marshal_result(fs_prelude::jet_std_fs_rename(&from, &to), |_| 0)
-}
-
-fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
+fn jet_jit_fs_walk_files(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
-    let mut entries = match fs_walk_kernel::jet_fs_walk_parallel(
+    let mut entries = match fs_walk_kernel::jet_fs_walk_files_parallel(
         &p,
         &p,
         |path, relative, is_dir, depth| (path, relative, is_dir, depth),
@@ -1709,23 +1669,7 @@ fn jet_jit_fs_glob(pattern: i64) -> i64 {
 fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
     let src = clone_string(from);
     let dst = clone_string(to);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
-    }
-    #[cfg(unix)]
-    let res = std::os::unix::fs::symlink(&src, &dst);
-    #[cfg(windows)]
-    let res = {
-        let meta = std::fs::metadata(&src);
-        match meta {
-            Ok(m) if m.is_dir() => std::os::windows::fs::symlink_dir(&src, &dst),
-            _ => std::os::windows::fs::symlink_file(&src, &dst),
-        }
-    };
-    match res {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("symlink {dst}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_symlink(&src, &dst), |_| 0)
 }
 
 fn jet_jit_fs_read_link(path: i64) -> i64 {
@@ -1758,34 +1702,16 @@ fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
 
 fn jet_jit_fs_canonicalize(path: i64) -> i64 {
     let p = clone_string(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    match std::fs::canonicalize(&p) {
-        Ok(abs) => {
-            let sid = Concurrency::with_runtime_mut(|rt| {
-                rt.heap.alloc_string(abs.to_string_lossy().to_string())
-            });
-            result_ok(sid as u64)
-        }
-        Err(e) => result_err_msg(&format!("canonicalize {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_canonicalize(&p), |value| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value)) as u64
+    })
 }
 
 fn jet_jit_fs_absolute(path: i64) -> i64 {
-    let p = clone_string(path);
-    let path = std::path::Path::new(&p);
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(path),
-            Err(e) => return result_err_msg(&format!("absolute {p}: {e}")),
-        }
-    };
-    let sid =
-        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(abs.to_string_lossy().to_string()));
-    result_ok(sid as u64)
+    let path = clone_string(path);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_absolute(&path), |value| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value)) as u64
+    })
 }
 
 fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
@@ -2222,6 +2148,10 @@ host_fns! {
         sig_i64_i64_i8.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i8.params.push(AbiParam::new(types::I8));
         sig_i64_i64_i8.returns.push(AbiParam::new(types::I64));
+        let mut sig_path_is_within = Signature::new(cc);
+        sig_path_is_within.params.push(AbiParam::new(types::I64));
+        sig_path_is_within.params.push(AbiParam::new(types::I64));
+        sig_path_is_within.returns.push(AbiParam::new(types::I8));
 
 
     }
@@ -2305,18 +2235,19 @@ host_fns! {
     fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
-    fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
+    fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
+    fs_set_mode: "jet_jit_fs_set_mode" => jet_jit_fs_set_mode: sig_i64_i64_i64;
     fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;
     fs_list_dir: "jet_jit_fs_list_dir" => jet_jit_fs_list_dir: sig_unary_i64;
     fs_remove_all: "jet_jit_fs_remove_all" => jet_jit_fs_remove_all: sig_unary_i64;
     fs_remove: "jet_jit_fs_remove" => jet_jit_fs_remove: sig_unary_i64;
-    fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
     fs_read_at: "jet_jit_fs_read_at" => jet_jit_fs_read_at: sig_i64_i64_i64_i64;
     fs_write_at: "jet_jit_fs_write_at" => jet_jit_fs_write_at: sig_i64_i64_i64_i64;
     fs_fsync: "jet_jit_fs_fsync" => jet_jit_fs_fsync: sig_unary_i64;
     fs_write_atomic: "jet_jit_fs_write_atomic" => jet_jit_fs_write_atomic: sig_i64_i64_i64;
     fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_unary_i64;
     fs_walk_parallel: "jet_jit_fs_walk_parallel" => jet_jit_fs_walk_parallel: sig_unary_i64;
+    fs_walk_files: "jet_jit_fs_walk_files" => jet_jit_fs_walk_files: sig_unary_i64;
     fs_rename: "jet_jit_fs_rename" => jet_jit_fs_rename: sig_i64_i64_i64;
     fs_glob: "jet_jit_fs_glob" => jet_jit_fs_glob: sig_unary_i64;
     fs_symlink: "jet_jit_fs_symlink" => jet_jit_fs_symlink: sig_i64_i64_i64;
@@ -2348,6 +2279,7 @@ host_fns! {
     path_extension: "jet_jit_path_extension" => jet_jit_path_extension: sig_unary_i64;
     path_stem: "jet_jit_path_stem" => jet_jit_path_stem: sig_unary_i64;
     path_normalize: "jet_jit_path_normalize" => jet_jit_path_normalize: sig_unary_i64;
+    path_is_within: "jet_jit_path_is_within" => jet_jit_path_is_within: sig_path_is_within;
     path_to_string: "jet_jit_path_to_string" => jet_jit_path_to_string: sig_unary_i64;
     path_walk: "jet_jit_path_walk" => jet_jit_path_walk: sig_unary_i64;
     math_sin: "jet_jit_math_sin" => jet_jit_math_sin: sig_f64_f64;

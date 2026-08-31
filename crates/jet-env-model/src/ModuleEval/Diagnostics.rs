@@ -45,17 +45,6 @@ pub(super) fn bad_import_directive(span: Span) -> Diagnostic {
     )
 }
 
-/// E0970: `imports: find("<dir>")` points at a directory that doesn't exist.
-pub(super) fn find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0970",
-        format!("`find` can't read the directory `{}`", dir.display()),
-        "`imports: find(\"<dir>\")` walks that directory for `.jet` modules (U4); it must exist relative to this file".to_string(),
-        "Create the directory, or fix the path so it points at your modules folder".to_string(),
-        Some(span),
-    )
-}
-
 /// E0971: a discovered module imports — forbidden by the liftability law (U4):
 /// modules contribute to the merged whole, they don't import each other.
 pub(super) fn discovered_module_imports(file: &Path) -> Diagnostic {

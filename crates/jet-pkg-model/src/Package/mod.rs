@@ -16,8 +16,8 @@ mod Discovery;
 mod Edit;
 
 pub use Blocks::{
-    build_entry_source, dep_display, parse_policy_document, AuthorityHolds, BuildOptimize,
-    BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry, PackageKind,
+    build_entry_source, dep_display, dep_display_redacted, parse_policy_document, AuthorityHolds,
+    BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry, PackageKind,
     ProvenanceRequirement, ProviderAuthority, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
@@ -76,6 +76,16 @@ pub struct OutputFact {
     /// Canvas and other structured consumers must use this value so arrays,
     /// objects, booleans, and numbers are not flattened into strings.
     pub payload: OutputPayload,
+}
+
+/// One checked package runtime entry: source file plus callable selected by
+/// the package output. A qualified manifest entry contributes only its leaf
+/// function because the alias belongs to the resolver's source graph, not the
+/// resolved target file.
+#[derive(Debug, Clone)]
+pub struct CheckedPackageEntry {
+    pub file: CheckedFile,
+    pub callable: String,
 }
 
 impl OutputFact {
@@ -225,10 +235,11 @@ pub struct PackageFacts {
     pub origin: String,
 }
 
-/// D-POLICY-WORD1=A: the package's non-memory governance namespace —
-/// package-scope only (never a Config contribution), same as the ratified
-/// D-MARK-SCOPE1 package rung. Memory denials live in `authority.holds.deny` and are
-/// carried separately through `PackageGuarantees`.
+/// D-POLICY-WORD1=A / D-TEAMPOLICY1=A: the package's non-memory governance
+/// namespace — package-scope only (never a Config contribution), same as the
+/// ratified D-MARK-SCOPE1 package rung. Memory denials live in
+/// `authority.holds.deny` and are carried separately through
+/// `PackageGuarantees`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackagePolicy {
     /// D-AUTHORITY-MEM1: source policy keeps only non-memory settings. Memory
@@ -237,6 +248,18 @@ pub struct PackagePolicy {
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).
     pub lints_deny: Option<Vec<String>>,
+    /// D-TEAMPOLICY1=A: closed effect ceilings keyed by project-relative
+    /// module path. An empty set is an explicit pure (`-[]>`) ceiling.
+    pub effects: BTreeMap<String, BTreeSet<String>>,
+    /// D-TEAMPOLICY1=A: `None` means no unsafe rule; `Some(empty)` is the
+    /// explicit `.Deny` rule, while non-empty values are `.Paths([...])`.
+    pub unsafe_paths: Option<Vec<String>>,
+    /// D-TEAMPOLICY1=A: `None` means no expert-surface rule; `Some(false)`
+    /// is `.Deny` and `Some(true)` is `.Allow`.
+    pub expert: Option<bool>,
+    /// D-TEAMPOLICY1=A: `None` means no dependency wall; `Some(list)` is the
+    /// `.List([...])` allow-list, with an empty list denying every dependency.
+    pub deps: Option<Vec<String>>,
     /// D-MEM-GUARANTEE1=A: package-only dependencies whose foreign pointers
     /// are contained by a tracked-handle fence.
     pub contain: BTreeSet<String>,
@@ -523,7 +546,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};policy_exceptions={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_lints_deny={:?};policy_effects={:?};policy_unsafe_paths={:?};policy_expert={:?};policy_deps={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};policy_exceptions={:?};",
             self.name,
             self.version,
             self.jet,
@@ -542,6 +565,11 @@ impl PackageFacts {
             self.effects_enabled,
             self.effects_allow,
             self.effects_deny,
+            self.policy.lints_deny,
+            self.policy.effects,
+            self.policy.unsafe_paths,
+            self.policy.expert,
+            self.policy.deps,
             self.policy.contain,
             self.policy.harden,
             self.policy.licenses,
@@ -753,9 +781,9 @@ impl PackageFacts {
         self.provenance.get(field).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    /// Ensure every explicitly contained name belongs to this package's
-    /// declared dependency graph. `harden` needs no name check: it covers the
-    /// complete graph by definition.
+    /// Ensure explicitly contained names belong to this package's declared
+    /// dependency graph. `policy.deps` is an allow-list for the resolved graph,
+    /// so names absent from `deps:` are not malformed by themselves.
     pub fn validate_guarantees(&self) -> Result<(), PackageParseError> {
         if let Some(name) = self
             .policy
@@ -769,6 +797,7 @@ impl PackageFacts {
                 ),
             });
         }
+
         Ok(())
     }
 
@@ -872,7 +901,7 @@ impl PackageFacts {
         let resolver =
             AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.resolve_run_entry_checked(&resolver)
-            .map(|file| file.map(|file| file.path))
+            .map(|entry| entry.map(|entry| entry.file.path))
     }
 
     /// Resolve the runnable Package entry from one already-open authority
@@ -881,7 +910,7 @@ impl PackageFacts {
     pub fn resolve_run_entry_checked(
         &self,
         resolver: &AuthorityResolver,
-    ) -> Result<Option<CheckedFile>, String> {
+    ) -> Result<Option<CheckedPackageEntry>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
         if migrate_retired_entry(resolver.root(), &self.origin, &self.name)? {
@@ -894,7 +923,13 @@ impl PackageFacts {
                 resolver
                     .revalidate_file(&file)
                     .map_err(|error| format!("{}: {error}", self.origin))?;
-                return Ok(Some(file));
+                return Ok(Some(CheckedPackageEntry {
+                    file,
+                    callable: crate::Syntax::DEFAULT_ENTRY_FILE
+                        .strip_suffix(".jet")
+                        .unwrap_or(crate::Syntax::DEFAULT_ENTRY_FILE)
+                        .to_string(),
+                }));
             }
             Err(error) if error.is_missing() => {}
             Err(error) => return Err(format!("{}: {error}", self.origin)),
@@ -1075,14 +1110,14 @@ impl PackageFacts {
         output: &OutputFact,
     ) -> Result<Option<std::path::PathBuf>, AuthorityError> {
         self.entry_file_checked(resolver, output)
-            .map(|file| file.map(|file| file.path))
+            .map(|entry| entry.map(|entry| entry.file.path))
     }
 
     fn entry_file_checked(
         &self,
         resolver: &AuthorityResolver,
         output: &OutputFact,
-    ) -> Result<Option<CheckedFile>, AuthorityError> {
+    ) -> Result<Option<CheckedPackageEntry>, AuthorityError> {
         let Some(entry) = output.entry.as_deref() else {
             return Ok(None);
         };
@@ -1097,7 +1132,10 @@ impl PackageFacts {
             match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
                 Ok(file) => {
                     resolver.revalidate_file(&file)?;
-                    return Ok(Some(file));
+                    return Ok(Some(CheckedPackageEntry {
+                        file,
+                        callable: canonical_run_name.to_string(),
+                    }));
                 }
                 // `run` is the canonical entry selector. A missing canonical
                 // file is a closed negative result; never reinterpret it as
@@ -1109,13 +1147,16 @@ impl PackageFacts {
         if parts.len() == 1 {
             let matches =
                 self.discover_function_entries_checked(resolver, parts[0], false, false)?;
-            return Ok((matches.len() == 1).then(|| matches.into_iter().next().unwrap().0));
+            return Ok((matches.len() == 1).then(|| {
+                let (file, _) = matches.into_iter().next().unwrap();
+                CheckedPackageEntry {
+                    file,
+                    callable: parts[0].to_string(),
+                }
+            }));
         }
         let files = self.source_files_checked(resolver)?;
-        let result = {
-            let Some(sources) = parse_sources(&files) else {
-                return Ok(None);
-            };
+        let result = parse_sources(&files).and_then(|sources| {
             let targets = reachable_import_module_targets(resolver.root(), parts[0], &sources);
             let matches = if targets.len() == 1 {
                 sources
@@ -1131,12 +1172,17 @@ impl PackageFacts {
                 Vec::new()
             };
             (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
-        };
+        });
         for file in &files {
             resolver.revalidate_file(file)?;
         }
         resolver.revalidate_root()?;
-        Ok(result.and_then(|path| files.into_iter().find(|file| file.path == path)))
+        Ok(result
+            .and_then(|path| files.into_iter().find(|file| file.path == path))
+            .map(|file| CheckedPackageEntry {
+                file,
+                callable: parts[1].to_string(),
+            }))
     }
 
     #[cfg(test)]
@@ -1269,8 +1315,7 @@ impl PackageFacts {
                     name == crate::Syntax::PACKAGE_FILE
                         || name == crate::Syntax::PAYLOAD_FILE
                         || (name == crate::Syntax::LEGACY_ENTRY_FILE
-                            && (file.relative
-                                == Path::new(crate::Syntax::LEGACY_ENTRY_FILE)
+                            && (file.relative == Path::new(crate::Syntax::LEGACY_ENTRY_FILE)
                                 || file.relative
                                     == Path::new("src").join(crate::Syntax::LEGACY_ENTRY_FILE)))
                 });
@@ -2098,11 +2143,15 @@ fn parse_common(
             "policy" => {
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
-                let (licenses, source_maps, exceptions) =
+                let (licenses, source_maps, exceptions, effects, unsafe_paths, expert, deps) =
                     Blocks::parse_package_policy_surface(body)?;
                 facts.policy = PackagePolicy {
                     declarations: Blocks::parse_policy(body, true)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
+                    effects,
+                    unsafe_paths,
+                    expert,
+                    deps,
                     contain,
                     harden,
                     licenses,
@@ -3505,13 +3554,33 @@ fn imported_source_paths(
     source: &ParsedSource,
     sources: &[ParsedSource],
 ) -> Vec<std::path::PathBuf> {
-    source
-        .program
-        .imports
-        .iter()
-        .filter(|import| !matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. }))
-        .flat_map(|import| resolved_import_targets(root, source, &import.kind, sources))
-        .collect()
+    let mut pending = vec![source.path.clone()];
+    let mut visited = BTreeSet::new();
+    let mut imported = BTreeSet::new();
+
+    while let Some(path) = pending.pop() {
+        if !visited.insert(normalize_discovery_path(&path)) {
+            continue;
+        }
+
+        let Some(source) = sources.iter().find(|candidate| candidate.path == path) else {
+            continue;
+        };
+
+        for import in
+            source.program.imports.iter().filter(|import| {
+                !matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. })
+            })
+        {
+            for target in resolved_import_targets(root, source, &import.kind, sources) {
+                if imported.insert(normalize_discovery_path(&target)) {
+                    pending.push(target);
+                }
+            }
+        }
+    }
+
+    imported.into_iter().collect()
 }
 
 fn normalize_discovery_path(path: &std::path::Path) -> std::path::PathBuf {
@@ -3705,7 +3774,11 @@ fn real_build_entry_lines(source: &str, candidates: &[usize]) -> Option<Vec<usiz
 }
 
 fn source_line_at(source: &str, offset: usize) -> usize {
-    source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1
+    source[..offset]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 /// Whether a top-level manifest entry is the package's `fn build` decl
@@ -4120,6 +4193,10 @@ outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
             facts.entry_path(&dir, output).unwrap(),
             Some(dir.join("src/cli/main.jet"))
         );
+        let resolver = AuthorityResolver::open(&dir).unwrap();
+        let checked = facts.resolve_run_entry_checked(&resolver).unwrap().unwrap();
+        assert_eq!(checked.file.path, dir.join("src/cli/main.jet"));
+        assert_eq!(checked.callable, "cli_run");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -4128,16 +4205,9 @@ outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
         let dir = temp_dir("output-entry-import-graph");
         std::fs::create_dir_all(dir.join("src/cli")).unwrap();
         std::fs::write(dir.join("entry.jet"), "use \"runner\" as runner\n").unwrap();
-        std::fs::write(
-            dir.join("runner.jet"),
-            "use \"src/cli/main\" as app\n",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("src/cli/main.jet"),
-            "pub fn cli_run() {}\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
+        std::fs::write(dir.join("bridge.jet"), "use \"src/cli/main\" as app\n").unwrap();
+        std::fs::write(dir.join("src/cli/main.jet"), "pub fn cli_run() {}\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
 outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,

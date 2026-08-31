@@ -141,12 +141,12 @@ impl<'a> Checker<'a> {
         } else {
             exp_ret.map(|ret| (**ret).clone())
         };
-        // Collection callbacks advertise an open return row (`Fn(...)->None`)
-        // so sema can infer the mapped value. Keep that row local while the
-        // body is checked: a fallible callee makes the callback return its own
-        // Result carrier, rather than propagating into the enclosing function.
+        // An unannotated callback borrows the expected function's success row
+        // while its body is checked. If a nested call can fail, retain that
+        // failure carrier on the callback; the caller then decides whether its
+        // operation can project the carrier (for example collection map/filter)
+        // or must reject the widened callback type.
         let infer_failure_carrier = expected_callable
-            && exp_ret.is_none()
             && lam.result_type.is_none()
             && lam.error_type.is_none();
 
@@ -431,21 +431,21 @@ impl<'a> Checker<'a> {
                         "a stored lambda"
                     };
                     self.diags.push(Diagnostic::error(
-                            "E0120",
-                            format!(
-                                "`{}` was not moved here, so it cannot be captured by {}",
-                                name, destination
-                            ),
-                            "this function can access the parameter, but it does not own the value; capture requires the move marker `^`"
-                                .to_string(),
-                            format!(
-                                "make the parameter owned with the move marker `^`: `{}: {}{}`",
-                                name,
-                                Syntax::SIGIL_MOVE,
-                                cap_ty.name()
-                            ),
-                            Some(lam.span),
-                        ));
+                        "E0120",
+                        format!(
+                            "`{}` was not moved here, so it cannot be captured by {}",
+                            name, destination
+                        ),
+                        "this function can access the parameter, but it does not own the value; capture requires the move marker `^`"
+                            .to_string(),
+                        format!(
+                            "make the parameter owned with the move marker `^`: `{}: {}{}`",
+                            name,
+                            Syntax::SIGIL_MOVE,
+                            cap_ty.name()
+                        ),
+                        Some(lam.span),
+                    ));
                     continue;
                 }
                 if self.is_view(name) {
@@ -768,7 +768,23 @@ impl<'a> Checker<'a> {
                     // The body may never run (a spawned task, a callback), so
                     // a `return` inside it is a conditional return of the
                     // enclosing function, not an unconditional one (card #2006).
+                    // An open value callback is checked once as a statement
+                    // block for declarations/flow, then its tail is inferred
+                    // as the callback value below. Drop only that first-pass
+                    // E0402; ignored fallible calls earlier in the block remain
+                    // errors.
+                    let tail_span = stmts.iter().rev().find_map(|stmt| match stmt {
+                        Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr.span()),
+                        _ => None,
+                    });
+                    let diagnostics_start = self.diags.len();
                     self.check_conditional_block(stmts, false);
+                    if infer_failure_carrier {
+                        let checked = self.diags.split_off(diagnostics_start);
+                        self.diags.extend(checked.into_iter().filter(|diagnostic| {
+                            !(diagnostic.code == "E0402" && diagnostic.span == tail_span)
+                        }));
+                    }
                     let mut last_ret = None;
                     for s in stmts.iter_mut().rev() {
                         match s {
@@ -839,6 +855,7 @@ impl<'a> Checker<'a> {
         // the body, but that implementation detail must not turn
         // `Fn() -> None` into the incompatible `Fn() -> Unit` signature.
         if infer_failure_carrier
+            && exp_ret.is_none()
             && body_ret
                 .as_ref()
                 .is_some_and(|ty| is_unit_type(ty))
@@ -865,6 +882,7 @@ impl<'a> Checker<'a> {
             .collect();
         // D-CONC-SPAWN1: record this body's own propagation fact, then
         // restore the enclosing body's.
+        let inferred_failure_carrier = self.failure_carrier.clone();
         lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
         self.task_body_propagates = saved_task_body_propagates;
         self.in_lambda_body = saved_in_lambda_body;
@@ -889,24 +907,30 @@ impl<'a> Checker<'a> {
                             info.param_conv,
                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
                         ) {
-                            self.diags.push(Diagnostic::error(
-                                    "E0120",
-                                    format!(
-                                        "`{}` was not moved here, so the lambda cannot take it with the move marker `^`",
-                                        name
-                                    ),
-                                    "this function has read access only and does not own the value; the move marker `^` is required"
-                                        .to_string(),
-                                    format!(
-                                        "take ownership in this function with the move marker `^`: `{}: {}{}`",
-                                        name,
-                                        Syntax::SIGIL_MOVE,
-                                        info.ty.name()
-                                    ),
-                                    Some(*span),
-                                ));
+                            let source_ty = info.ty.clone();
+                            let diagnostic = Diagnostic::error(
+                                "E0120",
+                                format!(
+                                    "`{}` was not moved here, so the lambda cannot take it with the move marker `^`",
+                                    name
+                                ),
+                                "this function has read access only and does not own the value; the move marker `^` is required"
+                                    .to_string(),
+                                format!(
+                                    "take ownership in this function with the move marker `^`: `{}: {}{}`",
+                                    name,
+                                    Syntax::SIGIL_MOVE,
+                                    source_ty.name()
+                                ),
+                                Some(*span),
+                            );
+                            self.diags.push(self.with_ownership_copy_edit(
+                                diagnostic,
+                                *span,
+                                Some(&source_ty),
+                            ));
                         } else {
-                            self.mark_moved(name.clone(), *span);
+                            self.mark_moved_by(name.clone(), *span, "escaping lambda");
                         }
                     }
                 }
@@ -933,7 +957,46 @@ impl<'a> Checker<'a> {
             && self.fx_edges == *before_edges
             && self.fx_maximal == *before_maximal;
 
-        let ret_ty = if let Some(er) = &effective_ret {
+        let inferred_fallible_ret = if infer_failure_carrier {
+            inferred_failure_carrier.as_ref().map(|carrier| {
+                let body = body_ret.clone().unwrap_or_else(|| {
+                    Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                });
+                let ok = match body {
+                    Type::Result { ok, .. } => *ok,
+                    other => other,
+                };
+                match carrier {
+                    Type::Result { err, .. } => Type::Result {
+                        ok: Box::new(ok),
+                        err: err.clone(),
+                    },
+                    _ => body_ret.clone().unwrap_or_else(|| {
+                        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                    }),
+                }
+            })
+        } else {
+            None
+        };
+        let ret_ty = if let Some(inferred) = &inferred_fallible_ret {
+            if let (Some(expected), Some(actual)) = (&effective_ret, &body_ret) {
+                if !lambda_body_matches_return(expected, actual) {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!(
+                            "this lambda should return {}, not {}",
+                            expected.show(),
+                            actual.show()
+                        ),
+                        "the lambda's return type must match what's expected here".to_string(),
+                        type_fix_hint(expected, actual),
+                        Some(lam.span),
+                    ));
+                }
+            }
+            Some(inferred.clone())
+        } else if let Some(er) = &effective_ret {
             if let Some(br) = &body_ret {
                 if !lambda_body_matches_return(er, br) {
                     self.diags.push(Diagnostic::error(
@@ -948,6 +1011,15 @@ impl<'a> Checker<'a> {
             Some(er.clone())
         } else {
             body_ret
+        };
+        lam.meta.fallible_carrier = if lam.meta.fallible_propagation {
+            inferred_fallible_ret.or_else(|| {
+                ret_ty.as_ref().and_then(|ty| {
+                    matches!(ty, Type::Result { .. } | Type::Option(_)).then(|| ty.clone())
+                })
+            })
+        } else {
+            None
         };
         if ret_ty
             .as_ref()

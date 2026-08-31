@@ -1,8 +1,8 @@
 Error [E0140]: `db` still owes `consume`
-  --> tests/ui/single_use_dropped.jet:15:5
+  --> tests/ui/single_use_dropped.jet:10:12
     |
- 15 |     db :: acquire("db")
-    |     ^^
- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(db) }` to discard it deliberately
+ 10 | fn run() { db :: acquire("db") }
+    |            ^^
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(db) }` to discard it deliberately
 More: jet-lang.dev/e/E0140

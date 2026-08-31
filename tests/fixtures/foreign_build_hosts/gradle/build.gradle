@@ -1,0 +1,7 @@
+apply from: file("../../../../tools/foreign-build-hosts/gradle/jet-library.gradle")
+jetLibrary { toolsDir = file("../../../../tools/foreign-build-hosts"); entry = "library.jet"; output = "core"; library = "loadable"; loadable = true; inputs = ["package.jet", ".jet/lock", "library.jet", "extra.jet"] }
+tasks.register("host", Exec) {
+    dependsOn "jetLibrary"
+    inputs.file "host.c"; inputs.files jetLibrary.staticLibrary(), jetLibrary.header(), jetLibrary.stamp(); outputs.file "${buildDir}/host"
+    doFirst { commandLine([(System.getenv("CC") ?: "cc"), "-std=c11", "-I${jetLibrary.artifactDirectory()}", "host.c", jetLibrary.staticLibrary()] + jetLibrary.runtimeLinkOptions() + ["-o", "${buildDir}/host"]) }
+}

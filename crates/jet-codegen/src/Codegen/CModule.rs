@@ -42,6 +42,14 @@ pub(crate) fn qualify_named_rust_type(cx: &Cx, ty: &Type) -> String {
     }
 }
 
+fn is_raw_pointer_type(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, args } => name == Syntax::TYPE_PTR && args.len() == 1,
+        Type::Tagged { inner, .. } => is_raw_pointer_type(inner),
+        _ => false,
+    }
+}
+
 pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String) {
     if cm.functions.is_empty() {
         return;
@@ -80,20 +88,62 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
     out.push('\n');
 
     for ef in &cm.functions {
+        let report_line = crate::Diagnostics::span_line_col(&cx.src, ef.span.start).0;
+        let report_src = cx
+            .src
+            .lines()
+            .nth(report_line.saturating_sub(1))
+            .unwrap_or_default();
+        let report_file = escape_rust_str(&cx.file);
+        let report_fn = escape_rust_str(&ef.name);
+        let report_src = escape_rust_str(report_src);
+        let ffi_stop = |message: &str| {
+            format!(
+                "{root}jet_runtime_stop_with_context(\"E3014\", {file}, {line}, {fn_name}, {src}, {message})",
+                root = cx.root_prefix,
+                file = report_file,
+                line = report_line,
+                fn_name = report_fn,
+                src = report_src,
+                message = escape_rust_str(message),
+            )
+        };
         let mut sig_params = Vec::new();
         let mut conv_lines = Vec::new();
         let mut call_args = Vec::new();
         let mut post_lines = Vec::new();
+        let mut boundary_lines = Vec::new();
         for (i, p) in ef.params.iter().enumerate() {
             sig_params.push(format!(
                 "a{i}: {}",
                 c_wrapper_param_type(p.convention, &p.ty, cx, p.ty_span)
             ));
+            let raw_pointer = is_raw_pointer_type(&p.ty);
+            if p.convention == AccessConvention::Write {
+                let check = if raw_pointer {
+                    "jet_sentry_foreign_ptr_ref"
+                } else {
+                    "jet_sentry_foreign_ref"
+                };
+                boundary_lines.push(format!(
+                    "    let _ = {root}jet_mem::{check}(a{i});",
+                    root = cx.root_prefix,
+                ));
+            }
+            if raw_pointer && p.convention != AccessConvention::Write {
+                call_args.push(format!(
+                    "{root}jet_mem::jet_sentry_foreign_ptr(a{i})",
+                    root = cx.root_prefix,
+                ));
+                continue;
+            }
             match (p.convention, &p.ty) {
                 (AccessConvention::Write, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let mut c{i} = {root}jet_std::jet_int_to_i64(*a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
+                        "    let mut c{i} = {root}jet_std::jet_int_to_i64(*a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", {file}, {line}, {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
+                        file = report_file,
+                        line = report_line,
                     ));
                     call_args.push(format!("&mut c{i}"));
                     post_lines.push(format!(
@@ -105,29 +155,37 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                     conv_lines.push(format!("    let mut c{i} = *a{i} as u32;"));
                     call_args.push(format!("&mut c{i}"));
                     post_lines.push(format!(
-                        "    *a{i} = char::from_u32(c{i}).unwrap_or_else(|| jet_panic(file!(), line!(), \"a C function writing through a Char capability returned an invalid Unicode scalar\"));"
+                        "    *a{i} = char::from_u32(c{i}).unwrap_or_else(|| {stop});",
+                        stop = ffi_stop(
+                            "a C function writing through a Char capability returned an invalid Unicode scalar",
+                        ),
                     ));
                 }
                 (AccessConvention::Write, Type::String) => {
                     conv_lines.push(format!(
-                        "    let mut c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| jet_panic(file!(), line!(), \"{NUL_PANIC}\"));"
+                        "    let mut c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| {stop});",
+                        stop = ffi_stop(NUL_PANIC),
                     ));
                     call_args.push(format!("c{i}.as_mut_ptr()"));
                     post_lines.push(format!(
-                        "    *a{i} = unsafe {{ std::ffi::CStr::from_ptr(c{i}.as_ptr()) }}.to_str().unwrap_or_else(|_| jet_panic(file!(), line!(), \"{UTF8_WRITE_PANIC}\")).to_owned();"
+                        "    *a{i} = unsafe {{ std::ffi::CStr::from_ptr(c{i}.as_ptr()) }}.to_str().unwrap_or_else(|_| {stop}).to_owned();",
+                        stop = ffi_stop(UTF8_WRITE_PANIC),
                     ));
                 }
                 (AccessConvention::Write, _) => call_args.push(format!("a{i} as *mut _")),
                 (AccessConvention::Move, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
+                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", {file}, {line}, {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
+                        file = report_file,
+                        line = report_line,
                     ));
                     call_args.push(format!("c{i}"));
                 }
                 (AccessConvention::Move, Type::String) => {
                     conv_lines.push(format!(
-                        "    let c{i} = std::ffi::CString::new(a{i}).unwrap_or_else(|_| jet_panic(file!(), line!(), \"{NUL_PANIC}\"));"
+                        "    let c{i} = std::ffi::CString::new(a{i}).unwrap_or_else(|_| {stop});",
+                        stop = ffi_stop(NUL_PANIC),
                     ));
                     call_args.push(format!("c{i}.as_ptr()"));
                 }
@@ -135,14 +193,17 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                 (AccessConvention::Move, _) => call_args.push(format!("a{i}")),
                 (AccessConvention::Read, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
+                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", {file}, {line}, {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
+                        file = report_file,
+                        line = report_line,
                     ));
                     call_args.push(format!("c{i}"));
                 }
                 (AccessConvention::Read, Type::String) => {
                     conv_lines.push(format!(
-                        "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| jet_panic(file!(), line!(), \"{NUL_PANIC}\"));"
+                        "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| {stop});",
+                        stop = ffi_stop(NUL_PANIC),
                     ));
                     call_args.push(format!("c{i}.as_ptr()"));
                 }
@@ -177,12 +238,17 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         let call_body = match &ef.return_type {
             None => format!("    unsafe {{ {}; }}", call),
             Some(Type::String) => format!(
-                "    let p = unsafe {{ {} }};\n    if p.is_null() {{ jet_panic(file!(), line!(), \"{NULL_RETURN_PANIC}\"); }}\n    let bytes = unsafe {{ std::ffi::CStr::from_ptr(p) }};\n    let result = bytes.to_str().unwrap_or_else(|_| jet_panic(file!(), line!(), \"{UTF8_RETURN_PANIC}\")).to_owned();",
-                call
+                "    let p = unsafe {{ {} }};\n    if p.is_null() {{ {null_stop} }}\n    let bytes = unsafe {{ std::ffi::CStr::from_ptr(p) }};\n    let result = bytes.to_str().unwrap_or_else(|_| {utf8_stop}).to_owned();",
+                call,
+                null_stop = ffi_stop(NULL_RETURN_PANIC),
+                utf8_stop = ffi_stop(UTF8_RETURN_PANIC),
             ),
             Some(Type::Char) => format!(
-                "    let v = unsafe {{ {} }};\n    let result = char::from_u32(v).unwrap_or_else(|| jet_panic(file!(), line!(), \"a C function declared to return Char returned an invalid Unicode scalar\"));",
-                call
+                "    let v = unsafe {{ {} }};\n    let result = char::from_u32(v).unwrap_or_else(|| {stop});",
+                call,
+                stop = ffi_stop(
+                    "a C function declared to return Char returned an invalid Unicode scalar",
+                ),
             ),
             Some(Type::Int) => format!(
                 "    let result = {}jet_std::jet_int_from_i64(unsafe {{ {} }});",
@@ -204,6 +270,11 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             body
         } else {
             format!("{}\n{}", conv_lines.join("\n"), body)
+        };
+        let body = if boundary_lines.is_empty() {
+            body
+        } else {
+            format!("{}\n{}", boundary_lines.join("\n"), body)
         };
         out.push_str(&format!(
             "pub fn {}({}){} {{\n{}\n}}\n\n",

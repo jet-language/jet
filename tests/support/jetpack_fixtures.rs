@@ -30,12 +30,17 @@ pub fn jetos() -> Command {
 }
 
 /// Keep no-project commands outside the repository without creating a cwd
-/// whose deletion could strand a surviving child or descendant.
+/// whose deletion could strand a surviving child or descendant. Redirect all
+/// process temporary files to the shared disk-backed test scratch root.
 pub fn neutral_command(binary: &Path) -> Command {
     let mut command = Command::new(binary);
-    let temp = std::env::temp_dir();
+    let temp = crate::common::test_scratch_root("jetpack-command-tmp");
     let root = temp.ancestors().last().expect("temp path has no root");
-    command.current_dir(root);
+    command
+        .current_dir(root)
+        .env("TMPDIR", &temp)
+        .env("TMP", &temp)
+        .env("TEMP", &temp);
     command
 }
 

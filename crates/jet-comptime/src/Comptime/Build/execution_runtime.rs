@@ -11,7 +11,7 @@ use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
 use super::handles::{ActionHandle, ActionId, ProbeId, ToolchainHandle};
 use super::plan_graph::{BuildExecutionReport, BuildPlan};
-use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
+use super::provenance_toolchains::{ProbeKind, ReproducibilityClass, ToolchainResolution};
 use super::targets::BuildPath;
 use super::validation::resolve_under;
 use super::{RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
@@ -264,16 +264,39 @@ fn run_native_sandboxed_with_timeout(
     share_network: bool,
     timeout: Option<Duration>,
 ) -> Result<NativeSandboxOutput, NativeSandboxError> {
+    run_native_sandboxed_with_timeout_and_mounts(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        &[],
+        timeout,
+    )
+}
+
+fn run_native_sandboxed_with_timeout_and_mounts(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    mounts: &[jet_process_sandbox::ReadOnlyMount],
+    timeout: Option<Duration>,
+) -> Result<NativeSandboxOutput, NativeSandboxError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         let output_is_separate = output_dir.is_some();
-        let output = jet_process_sandbox::output_with_timeout(
+        let output = jet_process_sandbox::output_with_read_only_mounts(
             executable,
             args,
             source_dir,
             output_dir,
             env,
             share_network,
+            mounts,
             timeout,
         )
         .map_err(|error| match error {
@@ -295,7 +318,7 @@ fn run_native_sandboxed_with_timeout(
 
     #[cfg(target_os = "windows")]
     {
-        return jet_process_sandbox::windows_output(
+        return jet_process_sandbox::windows_output_with_read_only_mounts(
             executable,
             args,
             source_dir,
@@ -304,6 +327,7 @@ fn run_native_sandboxed_with_timeout(
             share_network,
             true,
             output_dir.is_none(),
+            mounts,
             timeout.map(|limit| limit.as_millis().min(i64::MAX as u128) as i64),
             Some(64 * 1024 * 1024),
         )
@@ -867,13 +891,31 @@ fn execute_one_action(
         })
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let output = match run_native_sandboxed_with_timeout(
+    let runtime_args = runtime_toolchain_arguments(plan, action.toolchain, &action.argv[1..]);
+    let runtime_env = runtime_toolchain_environment(plan, action.toolchain, &env);
+    let mounts = plan
+        .toolchain(action.toolchain)
+        .map(|toolchain| {
+            toolchain
+                .mounts
+                .iter()
+                .map(|mount| {
+                    jet_process_sandbox::ReadOnlyMount::new(
+                        PathBuf::from(&mount.source),
+                        PathBuf::from(&mount.destination),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let output = match run_native_sandboxed_with_timeout_and_mounts(
         &executable,
-        &action.argv[1..],
+        &runtime_args,
         &sandbox,
         None,
-        &env,
+        &runtime_env,
         grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net),
+        &mounts,
         Some(jet_process_sandbox::DEFAULT_ACTION_TIMEOUT),
     )
     {
@@ -1887,15 +1929,18 @@ fn resolve_program_path(
 ) -> Option<PathBuf> {
     let toolchain = plan.toolchain(toolchain_handle)?;
     if let Some(declared) = toolchain.tools.get(program) {
-        return canonical_executable_path(declared);
+        return canonical_tool_path(toolchain, declared);
     }
     let basename = Path::new(program)
         .file_name()
         .and_then(|name| name.to_str());
     if let Some(basename) = basename {
         if let Some(declared) = toolchain.tools.get(basename) {
-            return canonical_executable_path(declared);
+            return canonical_tool_path(toolchain, declared);
         }
+    }
+    if matches!(toolchain.resolution, ToolchainResolution::DeclaredOnly) {
+        return None;
     }
     if Path::new(program).components().count() > 1 {
         if let Some(path) = canonical_executable_path(program) {
@@ -1946,6 +1991,134 @@ fn canonical_executable_path(program: &str) -> Option<PathBuf> {
     path.is_file()
         .then(|| fs::canonicalize(path).ok())
         .flatten()
+}
+
+fn canonical_tool_path(
+    toolchain: &super::provenance_toolchains::BuildToolchain,
+    declared: &str,
+) -> Option<PathBuf> {
+    let declared_path = Path::new(declared);
+    for mount in &toolchain.mounts {
+        let destination = Path::new(&mount.destination);
+        if let Ok(relative) = declared_path.strip_prefix(destination) {
+            if relative
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+            {
+                return None;
+            }
+            let source = PathBuf::from(&mount.source).join(relative);
+            return canonical_executable_path(&source.to_string_lossy());
+        }
+    }
+    canonical_executable_path(declared)
+}
+
+/// Linux gives the action a mount namespace, so declared virtual toolchain
+/// paths stay virtual in argv and the environment. macOS and Windows enforce
+/// the same read-only policy with ACL/sandbox rules but do not project a
+/// second filesystem namespace; translate only the declared mount paths at
+/// that adapter boundary. The action key still contains the canonical virtual
+/// spelling and therefore remains machine-independent.
+fn runtime_toolchain_arguments(
+    plan: &BuildPlan,
+    toolchain: ToolchainHandle,
+    args: &[String],
+) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (plan, toolchain);
+        return args.to_vec();
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let Some(toolchain) = plan.toolchain(toolchain) else {
+            return args.to_vec();
+        };
+        args.iter()
+            .map(|argument| runtime_toolchain_argument(toolchain, argument))
+            .collect()
+    }
+}
+
+fn runtime_toolchain_environment(
+    plan: &BuildPlan,
+    toolchain: ToolchainHandle,
+    env: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (plan, toolchain);
+        return env.clone();
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let Some(toolchain) = plan.toolchain(toolchain) else {
+            return env.clone();
+        };
+        env.iter()
+            .map(|(key, value)| (key.clone(), runtime_toolchain_argument(toolchain, value)))
+            .collect()
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn runtime_toolchain_argument(
+    toolchain: &super::provenance_toolchains::BuildToolchain,
+    argument: &str,
+) -> String {
+    if let Some(path) = runtime_mount_path(toolchain, argument) {
+        return path;
+    }
+    for prefix in [
+        "--sysroot=",
+        "-isysroot=",
+        "-I",
+        "-L",
+        "-include",
+        "-isystem",
+        "-iquote",
+        "-idirafter",
+        "-imacros",
+    ] {
+        let Some(value) = argument.strip_prefix(prefix) else {
+            continue;
+        };
+        if let Some(path) = runtime_mount_path(toolchain, value) {
+            return format!("{prefix}{path}");
+        }
+    }
+    argument.to_string()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn runtime_mount_path(
+    toolchain: &super::provenance_toolchains::BuildToolchain,
+    value: &str,
+) -> Option<String> {
+    for mount in &toolchain.mounts {
+        let destination = mount
+            .destination
+            .trim_end_matches(|character| character == '/' || character == '\\');
+        if value == destination {
+            return Some(mount.source.clone());
+        }
+        let Some(relative) = value
+            .strip_prefix(destination)
+            .and_then(|suffix| {
+                suffix
+                    .strip_prefix('/')
+                    .or_else(|| suffix.strip_prefix('\\'))
+            })
+        else {
+            continue;
+        };
+        let path = Path::new(&mount.source).join(relative);
+        return Some(path.to_string_lossy().into_owned());
+    }
+    None
 }
 
 fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> ContentDigest {
@@ -2683,6 +2856,65 @@ mod tests {
             assert!(
                 elapsed < Duration::from_secs(5),
                 "timeout took too long: {elapsed:?}"
+            );
+        }
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_sandbox_output_limit_stops_a_flooding_build_action() {
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("sh"))
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+            )
+            .map(|directory| directory.join("bash"))
+            .find(|candidate| candidate.is_file())
+        })
+        .expect("a shell is required for the output-limit regression");
+        let root = std::env::temp_dir().join(format!(
+            "jet-build-action-output-{}-{}",
+            std::process::id(),
+            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let started = Instant::now();
+        let result = run_native_sandboxed_with_timeout(
+            &shell,
+            &["-c".to_string(), "printf '%70000000s' x".to_string()],
+            &root,
+            None,
+            &BTreeMap::new(),
+            false,
+            Some(Duration::from_secs(5)),
+        );
+        let elapsed = started.elapsed();
+        let status = native_sandbox_status();
+        if !status.available {
+            assert!(
+                matches!(result, Err(NativeSandboxError::Unsupported(_))),
+                "unsupported backend must refuse the flooding action: {result:?}"
+            );
+        } else {
+            match result {
+                Err(NativeSandboxError::Io(detail)) => {
+                    assert!(
+                        detail.contains("output exceeded"),
+                        "output-limit regression returned the wrong error: {detail}"
+                    );
+                }
+                other => panic!("flooding action was not stopped: {other:?}"),
+            }
+            assert!(
+                elapsed < Duration::from_secs(5),
+                "output limit took too long: {elapsed:?}"
             );
         }
 

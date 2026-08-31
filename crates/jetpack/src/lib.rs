@@ -30,6 +30,7 @@ pub use jet_pkg_model::{
     JavaBind, JetLib, LintPolicy, Lock, Manifest, Package, PascalBind, Platform, PowerShellBind,
     RefSpec, ScriptDeps, TclBind, Variant, CFFI, FFI, JSON,
 };
+pub use jet_pkg_model::MCP;
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
 // now live in jet-pkg-model (L1). WorkspaceFile eval lives in jet-env-model
 // (L2). jetpack re-exports under the historical module paths via the thin

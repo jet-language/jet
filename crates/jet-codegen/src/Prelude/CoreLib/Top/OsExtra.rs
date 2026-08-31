@@ -4,9 +4,6 @@
 pub(crate) fn jet_std_os_name() -> String {
     std::env::consts::OS.to_string()
 }
-pub(crate) fn jet_std_os_family() -> String {
-    std::env::consts::FAMILY.to_string()
-}
 pub(crate) fn jet_std_os_arch() -> String {
     std::env::consts::ARCH.to_string()
 }

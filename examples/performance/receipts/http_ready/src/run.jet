@@ -30,7 +30,7 @@ fn run() !(NetError | RangeError | TaskFailure) {
     if args.len() > 1 && (args.get(1) ?? "") == "serve" {
         port :: env.get("JETPACK_SERVICE_PORT") ?? "18080"
         listener :: net.tcp_listen("127.0.0.1:{port}")
-        budget :: Duration.milliseconds(10000)
+        budget :: 10000ms
         print("ready")
         loop {
             stream :: listener.accept(deadline: budget)
@@ -42,7 +42,7 @@ fn run() !(NetError | RangeError | TaskFailure) {
     listener :: net.tcp_listen("127.0.0.1:0")
     address :: listener.local_addr()
     print("ready")
-    budget :: Duration.milliseconds(1000)
+    budget :: 1000ms
     server :: task {
         stream :: listener.accept(deadline: budget)
         _request :: stream.read_text(8192, deadline: budget)

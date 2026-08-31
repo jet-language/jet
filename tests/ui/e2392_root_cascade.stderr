@@ -1,0 +1,17 @@
+Error [E2404]: `?` can't turn the `SourceErr` from `load_row` into `TargetErr` here
+  --> tests/ui/e2392_root_cascade.jet:28:5
+    |
+ 28 |     load_row()
+    |     ^^^^^^^^
+ Why: `load_row` is defined at `e2392_root_cascade.jet:23:4` with effective failure contract `explicit !SourceErr`; the caller's `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
+ Fix: declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `load_row` locally with `??`
+More: jet-lang.dev/e/E2404
+
+Error [E2404]: `?` can't turn the `OtherSourceErr` from `load_other` into `OtherTargetErr` here
+  --> tests/ui/e2392_root_cascade.jet:37:5
+    |
+ 37 |     load_other()
+    |     ^^^^^^^^^^
+ Why: `load_other` is defined at `e2392_root_cascade.jet:25:4` with effective failure contract `explicit !OtherSourceErr`; the caller's `explicit !OtherTargetErr` contract has no route from `OtherSourceErr` to `OtherTargetErr`
+ Fix: declare the caller with `OtherSourceErr` as its failure domain, or add `impl OtherSourceErr -> OtherTargetErr { … }`; otherwise handle `load_other` locally with `??`
+More: jet-lang.dev/e/E2404

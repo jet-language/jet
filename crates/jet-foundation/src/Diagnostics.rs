@@ -145,6 +145,13 @@ impl CryptoMisuseReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuredDiagnostic {
+    /// Source-derived alternatives that share the diagnostic row's edit
+    /// applicability and safety grade. The primary edit remains in
+    /// `Diagnostic::edit`; this channel keeps the report model compatible
+    /// with diagnostics that teach more than one repair.
+    SuggestedEdits {
+        edits: Vec<TextEdit>,
+    },
     CryptoMisuse {
         reason: CryptoMisuseReason,
         operation: &'static str,
@@ -307,8 +314,80 @@ impl Diagnostic {
         }
     }
 
-    /// Attach a source-derived edit authored by the checker at the diagnostic
-    /// raise site. Human fix prose is presentation only.
+    /// Attach a source-derived edit with an explicit safety grade. The typed
+    /// row still owns the edit channel; the raise site owns whether its proof
+    /// is strong enough for automatic application.
+    pub fn with_edit_grade(
+        mut self,
+        edit: TextEdit,
+        applicability: FixApplicability,
+        safety: FixSafety,
+    ) -> Self {
+        let row = crate::Registry::diagnostic(&self.code)
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
+        assert!(
+            matches!(
+                row.structured_fix,
+                Some(
+                    crate::Registry::StructuredFix::SourceEdit
+                        | crate::Registry::StructuredFix::SuggestedSourceEdit
+                )
+            ),
+            "diagnostic `{}` has no row-owned source edit",
+            self.code
+        );
+        assert!(
+            applicability != FixApplicability::Safe || safety.auto_apply(),
+            "safe diagnostic edit `{}` must have an auto-applicable safety grade",
+            self.code
+        );
+        self.applicability = Some(applicability);
+        self.safety = Some(safety);
+        self.edit = Some(edit);
+        self
+    }
+
+    /// Attach one additional source repair to this diagnostic. All attached
+    /// repairs use the primary edit's row-owned applicability and safety.
+    pub fn with_alternative_edit(mut self, edit: TextEdit) -> Self {
+        assert!(
+            self.edit.is_some() && self.applicability.is_some() && self.safety.is_some(),
+            "diagnostic `{}` needs a graded primary edit before an alternative",
+            self.code
+        );
+        match self.structured.take() {
+            None => {
+                self.structured = Some(StructuredDiagnostic::SuggestedEdits { edits: vec![edit] });
+            }
+            Some(StructuredDiagnostic::SuggestedEdits { mut edits }) => {
+                edits.push(edit);
+                self.structured = Some(StructuredDiagnostic::SuggestedEdits { edits });
+            }
+            Some(other) => {
+                self.structured = Some(other);
+                crate::ice!(
+                    self.span,
+                    "diagnostic `{}` cannot carry source edit alternatives with another structured payload",
+                    self.code
+                );
+            }
+        }
+        self
+    }
+
+    /// Return the primary repair followed by any source-derived alternatives.
+    pub fn all_edits(&self) -> Vec<TextEdit> {
+        let mut edits = self.edit.clone().into_iter().collect::<Vec<_>>();
+        if let Some(StructuredDiagnostic::SuggestedEdits { edits: alternatives }) =
+            &self.structured
+        {
+            edits.extend(alternatives.iter().cloned());
+        }
+        edits
+    }
+
+    /// Attach a source-derived edit whose grade is projected from the typed
+    /// row.
     pub fn with_edit(mut self, edit: TextEdit) -> Self {
         let row = crate::Registry::diagnostic(&self.code)
             .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
@@ -327,6 +406,18 @@ impl Diagnostic {
         self.safety = row_safety(row, Some(&edit));
         self.edit = Some(edit);
         self
+    }
+    /// Attach a reviewable source edit without claiming that applying it is
+    /// behavior-preserving.
+    pub fn with_suggested_edit(self, span: Span, new_text: impl Into<String>) -> Self {
+        self.with_edit_grade(
+            TextEdit {
+                span: Span::new(span.start, span.start),
+                new_text: new_text.into(),
+            },
+            FixApplicability::Suggested,
+            FixSafety::NeedsReview,
+        )
     }
 
     /// Build a compile-time error emitted by a programmable build rule.
@@ -591,9 +682,13 @@ impl Diagnostic {
 
     fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
         let theme = Theme::new(color);
-        let what = crate::Outcome::jet_sentence_case_line(&self.what);
-        let why = crate::Outcome::jet_sentence_case_line(&self.why);
-        let fix = crate::Outcome::jet_sentence_case_line(&self.fix);
+        // Diagnostic fields remain raw for JSON/LSP consumers. Only the
+        // terminal projection escapes them, so an URL, revision, provider
+        // stderr, or source line cannot emit terminal controls or forge rows.
+        let file = escape_terminal_text(file);
+        let what = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.what));
+        let why = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.why));
+        let fix = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.fix));
         let mut out = String::new();
         let label = match self.severity {
             Severity::Error => theme.error("Error"),
@@ -614,22 +709,26 @@ impl Diagnostic {
             let (line, col) = line_col(src, span.start);
             let loc = format!("--> {}:{}:{}", file, line, col);
             let loc = if hyperlinks {
-                osc8(&file_url(file, line, col), &loc)
+                osc8(&file_url(&file, line, col), &loc)
             } else {
                 loc
             };
             out.push_str(&format!("  {}\n", theme.dim(&loc)));
-            let line_text = src.lines().nth(line - 1).unwrap_or("");
+            let raw_line_text = src.lines().nth(line - 1).unwrap_or("");
+            let line_text = escape_terminal_text(raw_line_text);
             out.push_str("    |\n");
             out.push_str(&format!("{:>3} | {}\n", line, line_text));
 
             // Width-aware underline: pad by the display width of everything
             // before the span, then draw carets as wide as the spanned text.
-            let prefix: String = line_text.chars().take(col - 1).collect();
+            let raw_prefix: String = raw_line_text.chars().take(col - 1).collect();
+            let prefix = escape_terminal_text(&raw_prefix);
             let pad_width = display_width(&prefix);
             let snippet = src.get(span.start..span.end.min(src.len())).unwrap_or("");
-            let snippet_first_line: String = snippet.chars().take_while(|&c| c != '\n').collect();
-            let avail = display_width(line_text).saturating_sub(pad_width);
+            let raw_snippet_first_line: String =
+                snippet.chars().take_while(|&c| c != '\n').collect();
+            let snippet_first_line = escape_terminal_text(&raw_snippet_first_line);
+            let avail = display_width(&line_text).saturating_sub(pad_width);
             let mut caret_len = display_width(&snippet_first_line).max(1);
             if avail > 0 {
                 caret_len = caret_len.min(avail);
@@ -657,9 +756,12 @@ impl Diagnostic {
         out.push_str(&format!(" {} {}\n", theme.bold("Why:"), why));
         out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), fix));
         if let Some(detail) = &self.detail {
-            out.push_str(detail);
-            if !detail.ends_with('\n') {
-                out.push('\n');
+            if !has_structured_detail_key(detail) {
+                let detail = escape_terminal_text(detail);
+                out.push_str(&detail);
+                if !detail.ends_with('\n') {
+                    out.push('\n');
+                }
             }
         }
         out.push_str(&crate::Outcome::jet_diagnostic_more_line(&self.code));
@@ -721,23 +823,20 @@ impl Diagnostic {
             }
             None => {}
         }
-        match &self.edit {
-            Some(e) => {
-                let safety = self.safety.unwrap_or_else(|| {
-                    crate::ice!(
-                        self.span,
-                        "diagnostic `{}` has an edit without a safety grade",
-                        self.code
-                    )
-                });
-                report.fix_edits.push(ReportEdit::new(
-                    file.clone(),
-                    ReportSpan::new(e.span.start, e.span.end),
-                    e.new_text.clone(),
-                    safety,
-                ));
-            }
-            None => {}
+        for e in self.all_edits() {
+            let safety = self.safety.unwrap_or_else(|| {
+                crate::ice!(
+                    self.span,
+                    "diagnostic `{}` has an edit without a safety grade",
+                    self.code
+                )
+            });
+            report.fix_edits.push(ReportEdit::new(
+                file.clone(),
+                ReportSpan::new(e.span.start, e.span.end),
+                e.new_text.clone(),
+                safety,
+            ));
         }
         report.cause = self.cause.iter().map(|cause| cause.code.clone()).collect();
         report.clears = clears;
@@ -765,6 +864,26 @@ impl Diagnostic {
         }
         report.json()
     }
+}
+/// Put root diagnostics before reports that name them as causes. The stable
+/// pass preserves source order among independent reports and breaks cycles by
+/// leaving the remaining cycle in its original order.
+pub fn order_diagnostics_root_first(diagnostics: &mut Vec<Diagnostic>) {
+    let mut pending = std::mem::take(diagnostics);
+    let mut ordered = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let next = pending.iter().position(|diagnostic| {
+            !diagnostic.cause.iter().any(|cause| {
+                pending.iter().any(|candidate| cause.matches(candidate))
+            })
+        });
+        let Some(index) = next else {
+            ordered.extend(pending.drain(..));
+            break;
+        };
+        ordered.push(pending.remove(index));
+    }
+    *diagnostics = ordered;
 }
 
 fn row_edit(row: &crate::Registry::DiagnosticRow, span: Option<Span>) -> Option<TextEdit> {
@@ -805,6 +924,46 @@ fn row_applicability(
 fn row_safety(row: &crate::Registry::DiagnosticRow, edit: Option<&TextEdit>) -> Option<FixSafety> {
     edit.and_then(|_| row.structured_fix)
         .and_then(|_| row.fix_safety)
+}
+
+/// Escape untrusted text before it is projected to a terminal.
+///
+/// This is deliberately a display-only transformation. Diagnostic fields,
+/// source bytes, URLs, revisions, and provider output keep their original
+/// structured values; only C0/C1 controls, line separators, and terminal
+/// line breaks become visible escape sequences in the human renderer.
+pub fn escape_terminal_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control()
+                || matches!(character, '\u{2028}' | '\u{2029}') =>
+            {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{{{:04x}}}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn has_structured_detail_key(detail: &str) -> bool {
+    let Some(first_line) = detail.lines().next() else {
+        return false;
+    };
+    let Some((kind, value)) = first_line.split_once(':') else {
+        return false;
+    };
+    !kind.is_empty()
+        && kind
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+        && !value.is_empty()
+        && !value.chars().next().is_some_and(char::is_whitespace)
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
@@ -1349,6 +1508,28 @@ mod renderer_tests {
     }
 
     #[test]
+    fn terminal_projection_escapes_hostile_text_without_mutating_structure() {
+        let detail = "provider: \x1b[31mBAD\nforged";
+        let diagnostic = Diagnostic::error(
+            "E0001",
+            "The \x1b]8;;evil\x07 headline".into(),
+            "The why\nforged".into(),
+            "The fix\rforged".into(),
+            Some(Span::new(0, 1)),
+        )
+        .with_detail(detail.to_string());
+
+        let rendered = diagnostic.render("bad\x1b]8;;evil", "x\x1b[31m\n");
+        assert!(!rendered.contains('\x1b'), "raw ANSI reached the terminal: {rendered:?}");
+        assert!(rendered.contains("\\u{001b}"), "ESC was not made visible: {rendered:?}");
+        assert!(rendered.contains("\\nforged"), "newline was not escaped: {rendered:?}");
+        assert!(rendered.contains("\\rforged"), "carriage return was not escaped: {rendered:?}");
+        assert!(!rendered.contains("BAD\nforged"), "stderr forged a terminal row: {rendered:?}");
+        assert_eq!(diagnostic.detail.as_deref(), Some(detail));
+        assert!(diagnostic.why.contains('\n'), "structured diagnostic text was mutated");
+    }
+
+    #[test]
     fn runtime_text_obeys_case_law_and_more_line() {
         assert_eq!(
             crate::Outcome::jet_sentence_case_line("The compiler saw `TypeName`"),
@@ -1484,6 +1665,53 @@ mod crypto_diagnostic_contract_tests {
     }
 
     #[test]
+    fn report_order_puts_roots_before_their_dependents() {
+        let root = Diagnostic::error(
+            "E0109",
+            "root".into(),
+            "test".into(),
+            "fix root".into(),
+            Some(Span::new(0, 1)),
+        );
+        let middle = Diagnostic::error(
+            "E0108",
+            "middle".into(),
+            "test".into(),
+            "fix middle".into(),
+            Some(Span::new(2, 3)),
+        )
+        .caused_by(&root);
+        let leaf = Diagnostic::error(
+            "E0107",
+            "leaf".into(),
+            "test".into(),
+            "fix leaf".into(),
+            Some(Span::new(4, 5)),
+        )
+        .caused_by(&middle);
+        let sibling = Diagnostic::error(
+            "E0001",
+            "sibling".into(),
+            "test".into(),
+            "fix sibling".into(),
+            Some(Span::new(6, 7)),
+        );
+        let mut diagnostics = vec![leaf, sibling, middle, root];
+
+        order_diagnostics_root_first(&mut diagnostics);
+
+        let position = |code: &str| {
+            diagnostics
+                .iter()
+                .position(|diagnostic| diagnostic.code == code)
+                .expect("ordered report must retain every diagnostic")
+        };
+        assert!(position("E0001") < position("E0108"));
+        assert!(position("E0109") < position("E0108"));
+        assert!(position("E0108") < position("E0107"));
+    }
+
+    #[test]
     fn report_json_preserves_a_multi_link_cause_chain() {
         let root = Diagnostic::error(
             "E0109",
@@ -1596,6 +1824,38 @@ mod crypto_diagnostic_contract_tests {
             new_text: "copy".to_string(),
         });
         assert_eq!(suggested.applicability, Some(FixApplicability::Suggested));
+    }
+
+    #[test]
+    fn alternative_edits_share_the_report_grade() {
+        let diagnostic = Diagnostic::from_row(
+            "E2404",
+            &[
+                ("Source", "SourceErr"),
+                ("Target", "TargetErr"),
+                ("callee", "helper"),
+                ("definition", "source bytes 0..6"),
+                ("contract", "explicit !SourceErr"),
+                ("caller", "explicit !TargetErr"),
+            ],
+            Some(Span::new(10, 16)),
+        )
+        .with_edit_grade(
+            TextEdit {
+                span: Span::new(20, 39),
+                new_text: "Int !SourceErr".to_string(),
+            },
+            FixApplicability::Suggested,
+            FixSafety::NeedsReview,
+        )
+        .with_alternative_edit(TextEdit {
+            span: Span::new(100, 100),
+            new_text: "impl SourceErr -> TargetErr { … }".to_string(),
+        });
+        assert_eq!(diagnostic.all_edits().len(), 2);
+        let json = diagnostic.to_json(&ReportPath::from_process("main.jet"), "x");
+        assert_eq!(json.matches("\"safety\":\"needs-review\"").count(), 2);
+        assert!(json.contains("impl SourceErr -> TargetErr"), "{json}");
     }
 
     #[test]

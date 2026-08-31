@@ -26,6 +26,22 @@ pub struct ScalarBridgeFunction {
     pub result: ForeignScalar,
 }
 
+/// One exact file input in a bridge identity. The role is part of the record,
+/// so a declaration, runtime, header, or generated worker cannot be mistaken
+/// for another file merely because both happen to have the same bytes.
+pub type BridgeSource<'a> = (&'a str, &'a Path);
+
+/// A local native archive candidate used by a binding or link record.
+/// `bytes == None` is deliberate evidence that the candidate was absent or
+/// unreadable when the identity was made; it is not a permission to fall back
+/// to a different host tool or guessed library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveInput {
+    pub library: String,
+    pub path: PathBuf,
+    pub bytes: Option<Vec<u8>>,
+}
+
 /// A deterministic content-addressed identity record.
 #[derive(Debug, Default)]
 pub struct IdentityBuilder {
@@ -86,6 +102,29 @@ pub fn scalar_bridge_identity(
     worker: &Path,
     functions: &[ScalarBridgeFunction],
 ) -> Result<String, String> {
+    scalar_bridge_identity_with_sources(
+        descriptor,
+        lib,
+        abi,
+        runtime,
+        &[("source", source)],
+        worker,
+        functions,
+    )
+}
+
+/// Build a scalar bridge identity from all exact foreign source files involved
+/// in the bridge. `sources` must include the primary `source` passed to the C
+/// bridge renderer; adapters may add declaration files or other local inputs.
+pub fn scalar_bridge_identity_with_sources(
+    descriptor: BinderDescriptor,
+    lib: &str,
+    abi: &str,
+    runtime: &str,
+    sources: &[BridgeSource<'_>],
+    worker: &Path,
+    functions: &[ScalarBridgeFunction],
+) -> Result<String, String> {
     validate_scalar_bridge(abi, descriptor, functions)?;
     let expected_abi = format!("{}{lib}", descriptor.language.bridge_prefix());
     if abi != expected_abi {
@@ -97,7 +136,7 @@ pub fn scalar_bridge_identity(
         abi,
         runtime,
         &descriptor.stamp(),
-        source,
+        sources,
         worker,
         functions,
     )
@@ -109,16 +148,10 @@ fn scalar_bridge_identity_with_descriptor(
     abi: &str,
     runtime: &str,
     descriptor: &str,
-    source: &Path,
+    sources: &[BridgeSource<'_>],
     worker: &Path,
     functions: &[ScalarBridgeFunction],
 ) -> Result<String, String> {
-    let source_bytes = fs::read(source).map_err(|error| {
-        format!(
-            "could not read {} for bridge identity: {error}",
-            source.display()
-        )
-    })?;
     let worker_bytes = fs::read(worker).map_err(|error| {
         format!(
             "could not read {} for bridge identity: {error}",
@@ -135,8 +168,21 @@ fn scalar_bridge_identity_with_descriptor(
     identity.field("cc", tool_identity("cc").as_bytes());
     identity.field("ar", tool_identity("ar").as_bytes());
     identity.field("descriptor", descriptor.as_bytes());
-    identity.field("source_path", source.as_os_str().as_encoded_bytes());
-    identity.field("source_bytes", &source_bytes);
+    for (role, source) in sources {
+        if role.is_empty() {
+            return Err("foreign bridge source roles cannot be empty".into());
+        }
+        let path_field = format!("{role}_path");
+        identity.field(&path_field, source.as_os_str().as_encoded_bytes());
+        let source_bytes = fs::read(source).map_err(|error| {
+            format!(
+                "could not read {} for bridge identity: {error}",
+                source.display()
+            )
+        })?;
+        let bytes_field = format!("{role}_bytes");
+        identity.field(&bytes_field, &source_bytes);
+    }
     identity.field("worker_path", worker.as_os_str().as_encoded_bytes());
     identity.field("worker_bytes", &worker_bytes);
     for function in functions {
@@ -156,13 +202,7 @@ pub fn write_provenance(
     fields: &[(&str, &str)],
     artifacts: &[(String, String)],
 ) -> Result<(), String> {
-    let mut text = format!("schema={PROVENANCE_SCHEMA}\nidentity={identity}\n");
-    for (name, value) in fields {
-        append_line(&mut text, name, value)?;
-    }
-    for (relative, digest) in artifacts {
-        append_line(&mut text, &format!("artifact.{relative}"), digest)?;
-    }
+    let text = render_provenance(identity, fields, artifacts)?;
     let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
     fs::write(&temporary, text.as_bytes())
         .map_err(|error| format!("could not stage {}: {error}", path.display()))?;
@@ -171,6 +211,24 @@ pub fn write_provenance(
         return Err(format!("could not publish {}: {error}", path.display()));
     }
     Ok(())
+}
+
+/// Render the common queryable provenance format without publishing a file.
+/// Binders use this when their result object carries the record to a CLI
+/// writer; `write_provenance` uses the same formatter for on-disk records.
+pub fn render_provenance(
+    identity: &str,
+    fields: &[(&str, &str)],
+    artifacts: &[(String, String)],
+) -> Result<String, String> {
+    let mut text = format!("schema={PROVENANCE_SCHEMA}\nidentity={identity}\n");
+    for (name, value) in fields {
+        append_line(&mut text, name, value)?;
+    }
+    for (relative, digest) in artifacts {
+        append_line(&mut text, &format!("artifact.{relative}"), digest)?;
+    }
+    Ok(text)
 }
 
 /// Read and validate a bridge provenance sidecar.
@@ -278,10 +336,43 @@ pub fn compile_scalar_sidecar_with_identity(
     descriptor: BinderDescriptor,
     functions: &[ScalarBridgeFunction],
 ) -> Result<PathBuf, String> {
+    compile_scalar_sidecar_with_identity_and_sources(
+        cache,
+        identity,
+        abi,
+        runtime,
+        worker,
+        source,
+        descriptor,
+        &[("source", source)],
+        functions,
+    )
+}
+
+/// Compile or reuse a scalar sidecar while checking an identity containing
+/// additional exact source files (for example a JS declaration plus runtime).
+pub fn compile_scalar_sidecar_with_identity_and_sources(
+    cache: &Path,
+    identity: &str,
+    abi: &str,
+    runtime: &str,
+    worker: &Path,
+    source: &Path,
+    descriptor: BinderDescriptor,
+    sources: &[BridgeSource<'_>],
+    functions: &[ScalarBridgeFunction],
+) -> Result<PathBuf, String> {
     validate_scalar_bridge(abi, descriptor, functions)?;
     let lib = scalar_bridge_library(abi, descriptor)?;
-    let expected_identity =
-        scalar_bridge_identity(descriptor, lib, abi, runtime, source, worker, functions)?;
+    let expected_identity = scalar_bridge_identity_with_sources(
+        descriptor,
+        lib,
+        abi,
+        runtime,
+        sources,
+        worker,
+        functions,
+    )?;
     if expected_identity != identity {
         return Err("foreign bridge identity does not match its descriptor inputs".into());
     }
@@ -379,12 +470,13 @@ pub fn write_scalar_provenance(
     worker: &Path,
     archive: &Path,
 ) -> Result<PathBuf, String> {
-    write_scalar_provenance_with_functions(
+    write_scalar_provenance_with_sources(
         cache,
         lib,
         descriptor,
         runtime,
         source,
+        &[("source", source)],
         worker,
         archive,
         &[],
@@ -404,6 +496,36 @@ pub fn write_scalar_provenance_with_functions(
     archive: &Path,
     functions: &[ScalarBridgeFunction],
 ) -> Result<PathBuf, String> {
+    write_scalar_provenance_with_sources(
+        cache,
+        lib,
+        descriptor_row,
+        runtime,
+        source,
+        &[("source", source)],
+        worker,
+        archive,
+        functions,
+    )
+}
+
+/// Publish scalar provenance from the exact source roles used by the bridge.
+/// The common record carries a digest and path for every role, while the
+/// identity itself carries the complete bytes.
+pub fn write_scalar_provenance_with_sources(
+    cache: &Path,
+    lib: &str,
+    descriptor_row: BinderDescriptor,
+    runtime: &str,
+    source: &Path,
+    sources: &[BridgeSource<'_>],
+    worker: &Path,
+    archive: &Path,
+    functions: &[ScalarBridgeFunction],
+) -> Result<PathBuf, String> {
+    if !sources.iter().any(|(_, path)| *path == source) {
+        return Err("foreign bridge provenance sources omit the primary source".into());
+    }
     let contract = descriptor_row.contract;
     let descriptor = descriptor_row.stamp();
     let calling = format!("{:?}", contract.calling_convention);
@@ -417,61 +539,66 @@ pub fn write_scalar_provenance_with_functions(
     let provider = format!("{:?}", descriptor_row.provider);
     let language = descriptor_row.language;
     let abi = format!("jet_{}_{}", language.root(), lib);
-    let identity = scalar_bridge_identity(
+    let identity = scalar_bridge_identity_with_sources(
         descriptor_row,
         lib,
         &abi,
         runtime,
-        source,
+        sources,
         worker,
         functions,
     )?;
     let runtime_toolchain = tool_identity(runtime);
     let cc = tool_identity("cc");
     let ar = tool_identity("ar");
-    let source_text = source.to_string_lossy().into_owned();
-    let worker_text = worker.to_string_lossy().into_owned();
     let worker_digest = sha_file(worker)?;
     let archive_digest = sha_file(archive)?;
     let provenance = cache.join(format!("{lib}.provenance"));
-    let fields = [
-        ("language", language.root().to_string()),
-        ("abi", abi),
-        ("runtime", runtime.to_string()),
-        ("transport", "supervised-scalar-sidecar".to_string()),
-        ("descriptor", descriptor),
-        ("calling", calling),
-        ("layout", layout),
-        ("ownership", ownership),
-        ("errors", errors),
-        ("callbacks", callbacks),
-        ("async", async_completion),
-        ("tasks", task_boundary),
-        ("safety", safety),
-        ("provider", provider),
-        ("runtime-toolchain", runtime_toolchain),
-        ("cc", cc),
-        ("ar", ar),
+    let mut fields = vec![
+        ("language".to_string(), language.root().to_string()),
+        ("abi".to_string(), abi),
+        ("runtime".to_string(), runtime.to_string()),
         (
-            "source-sha256",
-            crate::SHA256::sha256_hex(
-                &fs::read(source)
-                    .map_err(|error| format!("could not read {}: {error}", source.display()))?,
-            ),
+            "transport".to_string(),
+            "supervised-scalar-sidecar".to_string(),
         ),
-        (
-            "worker-sha256",
-            crate::SHA256::sha256_hex(
-                &fs::read(worker)
-                    .map_err(|error| format!("could not read {}: {error}", worker.display()))?,
-            ),
-        ),
-        ("source", source_text),
-        ("worker", worker_text),
+        ("descriptor".to_string(), descriptor),
+        ("calling".to_string(), calling),
+        ("layout".to_string(), layout),
+        ("ownership".to_string(), ownership),
+        ("errors".to_string(), errors),
+        ("callbacks".to_string(), callbacks),
+        ("async".to_string(), async_completion),
+        ("tasks".to_string(), task_boundary),
+        ("safety".to_string(), safety),
+        ("provider".to_string(), provider),
+        ("runtime-toolchain".to_string(), runtime_toolchain),
+        ("cc".to_string(), cc),
+        ("ar".to_string(), ar),
     ];
+    for (role, path) in sources {
+        fields.push((role.to_string(), path.to_string_lossy().into_owned()));
+        fields.push((
+            format!("{role}-sha256"),
+            sha_file(path)?,
+        ));
+    }
+    fields.push(("worker".to_string(), worker.to_string_lossy().into_owned()));
+    fields.push(("worker-sha256".to_string(), worker_digest.clone()));
+    for function in functions {
+        fields.push(("function".to_string(), function.name.clone()));
+        fields.push((
+            "function-params".to_string(),
+            format!("{:?}", function.params),
+        ));
+        fields.push((
+            "function-result".to_string(),
+            format!("{:?}", function.result),
+        ));
+    }
     let field_refs: Vec<(&str, &str)> = fields
         .iter()
-        .map(|(name, value)| (*name, value.as_str()))
+        .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
     let artifacts = [
         (
@@ -798,13 +925,91 @@ fn c_escape(value: &str) -> String {
     out
 }
 
-fn tool_identity(tool: &str) -> String {
-    let Some(path) = std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).find_map(|directory| {
-            let candidate = directory.join(tool);
-            candidate.is_file().then_some(candidate)
+const LOCAL_ARCHIVE_SUFFIXES: &[&str] = &[".a", ".so", ".dylib", ".dll", ".lib"];
+
+/// Resolve each named native library to the first exact local archive found in
+/// the declared search paths. Missing candidates remain records, so adding or
+/// replacing a local archive changes the identity instead of silently reusing
+/// a stale bridge.
+pub fn local_archive_inputs(
+    library_dirs: &[PathBuf],
+    libraries: &[String],
+) -> Vec<ArchiveInput> {
+    if library_dirs.is_empty() {
+        return Vec::new();
+    }
+    libraries
+        .iter()
+        .map(|library| {
+            let mut path = None;
+            'directories: for directory in library_dirs {
+                for suffix in LOCAL_ARCHIVE_SUFFIXES {
+                    let candidate = directory.join(format!("lib{library}{suffix}"));
+                    if candidate.is_file() {
+                        path = Some(candidate);
+                        break 'directories;
+                    }
+                }
+            }
+            let path = path.unwrap_or_else(|| {
+                library_dirs
+                    .first()
+                    .map(|directory| directory.join(format!("lib{library}.a")))
+                    .unwrap_or_else(|| PathBuf::from(format!("lib{library}.a")))
+            });
+            let path = path.canonicalize().unwrap_or(path);
+            let bytes = fs::read(&path).ok();
+            ArchiveInput {
+                library: library.clone(),
+                path,
+                bytes,
+            }
         })
-    }) else {
+        .collect()
+}
+
+/// Add local archive path/byte records to a binding identity.
+pub fn add_local_archive_inputs(
+    identity: &mut IdentityBuilder,
+    library_dirs: &[PathBuf],
+    libraries: &[String],
+) {
+    let inputs = local_archive_inputs(library_dirs, libraries);
+    add_archive_inputs(identity, &inputs);
+}
+
+/// Add already-resolved archive records to an identity. Callers that have a
+/// provider-specific notion of which libraries are local can use this without
+/// manufacturing missing candidates for system or provisioned dependencies.
+pub fn add_archive_inputs(identity: &mut IdentityBuilder, inputs: &[ArchiveInput]) {
+    for input in inputs {
+        identity.field("linked_library", input.library.as_bytes());
+        identity.field("linked_archive_path", input.path.as_os_str().as_encoded_bytes());
+        match &input.bytes {
+            Some(bytes) => identity.field("linked_archive_bytes", bytes),
+            None => identity.field("linked_archive_missing", b"true"),
+        }
+    }
+}
+
+/// Resolve one pinned host tool without relying on the shell's executable
+/// suffix rules. Windows toolchains commonly expose `cc.exe`/`ar.exe`, while
+/// POSIX toolchains expose the unsuffixed names.
+pub fn tool_path(tool: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).find_map(|directory| {
+        let candidate = directory.join(tool);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        cfg!(windows)
+            .then(|| directory.join(format!("{tool}.exe")))
+            .filter(|candidate| candidate.is_file())
+    })
+}
+
+pub fn tool_identity(tool: &str) -> String {
+    let Some(path) = tool_path(tool) else {
         return "missing".to_string();
     };
     let path = path.canonicalize().unwrap_or(path);
@@ -830,7 +1035,7 @@ fn tool_identity(tool: &str) -> String {
     format!("{};version={version}", path.display())
 }
 
-fn sha_file(path: &Path) -> Result<String, String> {
+pub fn sha_file(path: &Path) -> Result<String, String> {
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
     Ok(crate::SHA256::sha256_hex(&bytes))

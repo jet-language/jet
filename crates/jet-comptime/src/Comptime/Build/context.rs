@@ -82,6 +82,8 @@ impl BuildContext {
                 linker: None,
                 sysroot: None,
                 tools: std::collections::BTreeMap::new(),
+                resolution: super::provenance_toolchains::ToolchainResolution::Ambient,
+                mounts: Vec::new(),
                 provenance: BuildProvenance::inferred_host(),
             }],
             signing_identities: Vec::new(),
@@ -136,6 +138,8 @@ impl BuildContext {
             linker: spec.linker,
             sysroot: spec.sysroot,
             tools: spec.tools,
+            resolution: spec.resolution,
+            mounts: spec.mounts,
             provenance: spec.provenance,
         });
         Ok(ToolchainHandle {

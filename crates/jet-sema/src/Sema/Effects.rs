@@ -229,6 +229,81 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
     jet_foundation::Authority::covers(bound, e)
 }
 
+/// D-TEAMPOLICY1=A: enforce the package's normalized module effect ceilings
+/// against the same solved rows used by ordinary effect checking. A path rule
+/// covers the named module path and every descendant source path.
+pub fn package_effect_policy_diagnostics(
+    bundle: &crate::AST::ProgramBundle,
+    solved: &HashMap<String, EffectSet>,
+    ceilings: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<Diagnostic> {
+    if ceilings.is_empty() {
+        return Vec::new();
+    }
+    let mut diagnostics = Vec::new();
+    for module in &bundle.modules {
+        let Some(path) = package_policy_source_path(bundle, module) else {
+            // The root package policy is scoped to root-package source. A
+            // dependency's manifest owns its own policy, even when its module
+            // is present in this flattened bundle.
+            continue;
+        };
+        let Some((_, ceiling)) = ceilings
+            .iter()
+            .filter(|(rule, _)| package_policy_path_covers(rule, &path))
+            .max_by_key(|(rule, _)| rule.len())
+        else {
+            continue;
+        };
+        let prefix = format!("{}::", module.alias);
+        let mut inferred = EffectSet::new();
+        for (key, effects) in solved {
+            if key.starts_with(&prefix) {
+                inferred.extend(effects.iter().cloned());
+            }
+        }
+        for effect in inferred {
+            if ceiling.iter().any(|bound| effect_covers(bound, &effect)) {
+                continue;
+            }
+            diagnostics.push(Diagnostic::from_row(
+                "E2960",
+                &[
+                    ("rule", "policy.effects"),
+                    ("subject", &effect),
+                    ("path", &path),
+                ],
+                None,
+            ));
+        }
+    }
+    diagnostics
+}
+
+/// Return a normalized project-relative source path for a root-package module.
+/// `None` marks a dependency module, so package path policy cannot leak across
+/// package boundaries.
+pub fn package_policy_source_path(
+    bundle: &crate::AST::ProgramBundle,
+    module: &crate::AST::LoadedModule,
+) -> Option<String> {
+    let relative = module.path.strip_prefix(&bundle.project_root).ok()?;
+    let path = relative.to_string_lossy().replace('\\', "/");
+    let path = path.strip_prefix("./").unwrap_or(&path);
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+pub fn package_policy_path_covers(rule: &str, path: &str) -> bool {
+    rule == "."
+        || rule == path
+        || path
+            .strip_suffix(".jet")
+            .is_some_and(|without_extension| without_extension == rule)
+        || path
+            .strip_prefix(rule)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 /// The subset of `inferred` NOT covered by any entry of `bound_set` — the
 /// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
 /// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
@@ -2315,6 +2390,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
+        | Expr::Unit(..)
         | Expr::Char(..)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)

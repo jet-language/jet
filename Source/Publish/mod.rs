@@ -25,6 +25,7 @@ pub use crate::Sema::Schema::{
 mod Schema;
 pub use Schema::write_schema_snapshots_for_entry;
 mod Diff;
+pub mod ForeignPackage;
 pub mod Index;
 mod NamePolicy;
 pub mod Policy;

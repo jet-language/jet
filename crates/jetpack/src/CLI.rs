@@ -12,6 +12,7 @@ pub mod ProfileDispatch;
 mod add_remove_push_image;
 mod bridge_os_studio;
 mod browser;
+mod cc;
 mod dashboard;
 #[allow(dead_code)]
 mod format;

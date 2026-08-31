@@ -923,9 +923,7 @@ mod tests {
         // Sealed verification manifests track per-file (inode, size, mtime)
         // tuples, so an in-place payload rewrite is drift even when the root
         // stat identity is unchanged: the use path re-hashes and rejects.
-        let root_stamp = super::super::Ingest::object_stamp(
-            &fs::symlink_metadata(&out).unwrap(),
-        );
+        let root_stamp = super::super::Ingest::object_stamp(&fs::symlink_metadata(&out).unwrap());
         let payload = out.join("payload");
         let mut permissions = fs::metadata(&payload).unwrap().permissions();
         permissions.set_readonly(false);
@@ -1331,12 +1329,7 @@ mod tests {
         // The sealed stat manifest trusts unchanged (inode, size, mtime)
         // tuples without reading bytes; the full audit path still fails on
         // the unreadable payload.
-        assert!(full_verified_output_hash(
-            &object,
-            &roots.hangar_dir(),
-            false,
-        )
-        .is_err());
+        assert!(full_verified_output_hash(&object, &roots.hangar_dir(), false,).is_err());
         let mut mismatch = test_expectation(&object);
         mismatch.identity.source_fingerprint = "wrong-source".into();
 
@@ -2262,14 +2255,8 @@ mod tests {
                 let desired = [
                     ("HOME", Some(parent.join("home").into_os_string())),
                     ("USERPROFILE", Some(parent.join("home").into_os_string())),
-                    (
-                        "LOCALAPPDATA",
-                        Some(parent.join("local").into_os_string()),
-                    ),
-                    (
-                        "XDG_DATA_HOME",
-                        Some(parent.join("data").into_os_string()),
-                    ),
+                    ("LOCALAPPDATA", Some(parent.join("local").into_os_string())),
+                    ("XDG_DATA_HOME", Some(parent.join("data").into_os_string())),
                     (
                         "XDG_STATE_HOME",
                         Some(parent.join("state").into_os_string()),
@@ -2320,8 +2307,7 @@ mod tests {
 
         impl Guard {
             pub fn new(tag: &str) -> Guard {
-                static NEXT: std::sync::atomic::AtomicU64 =
-                    std::sync::atomic::AtomicU64::new(0);
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
                 let nanos = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()

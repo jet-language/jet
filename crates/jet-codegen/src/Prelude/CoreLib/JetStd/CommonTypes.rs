@@ -385,9 +385,21 @@
         // Drop without finish leaves the last value unterminated on the wire.
         pub(crate) pending_lf: bool,
     }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CSVRow {
+        pub fields: Vec<String>,
+        pub line: i64,
+    }
     pub struct CSVReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,
+        pub(crate) delimiter: char,
+        pub(crate) header: bool,
+        pub(crate) skip_blank: bool,
+        pub(crate) parser: super::jet_csv_kernel::CsvParser,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
+        pub(crate) utf8: [u8; 4],
+        pub(crate) utf8_len: usize,
         pub(crate) total: i64,
         pub(crate) offset: i64,
         pub(crate) line: i64,
@@ -578,6 +590,7 @@
         pub is_dir: bool,
         pub is_symlink: bool,
         pub kind: String,
+        pub mode: i64,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -1121,6 +1134,32 @@
             }
             acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0);
             Ok(acc)
+        }
+
+        pub fn from_radix(text: &str, radix: u32) -> Result<Self, String> {
+            if !(2..=36).contains(&radix) {
+                return Err(format!("integer radix must be between 2 and 36, got {radix}"));
+            }
+            let text = text.trim();
+            let (negative, digits) = if let Some(rest) = text.strip_prefix('-') {
+                (true, rest)
+            } else if let Some(rest) = text.strip_prefix('+') {
+                (false, rest)
+            } else {
+                (false, text)
+            };
+            if digits.is_empty() {
+                return Err("integer radix text is empty".to_string());
+            }
+            let mut value = Self::from_int(0);
+            for digit in digits.chars() {
+                let digit = digit
+                    .to_digit(radix)
+                    .ok_or_else(|| format!("invalid base-{radix} integer `{text}`"))?;
+                value = value.mul_small(radix).add_small(digit);
+            }
+            value.negative = negative && !value.is_zero();
+            Ok(value)
         }
 
         fn normalize(mut self) -> Self {
@@ -1713,6 +1752,29 @@
             }
         }
 
+        pub fn to_radix(&self, radix: u32) -> Result<String, String> {
+            if !(2..=36).contains(&radix) {
+                return Err(format!("integer radix must be between 2 and 36, got {radix}"));
+            }
+            let mut value = self.abs();
+            let mut digits = Vec::new();
+            while !value.is_zero() {
+                let (next, digit) = value.div_rem_small(radix);
+                digits.push(
+                    char::from_digit(digit, radix)
+                        .expect("div_rem_small remainder is below the radix"),
+                );
+                value = next;
+            }
+            if digits.is_empty() {
+                digits.push('0');
+            } else {
+                digits.reverse();
+            }
+            let body = digits.into_iter().collect::<String>();
+            Ok(if self.negative { format!("-{body}") } else { body })
+        }
+
         pub fn to_string_rep(&self) -> String {
             if self.limbs.len() == 1 && self.limbs[0] == 0 {
                 return "0".to_string();
@@ -1740,10 +1802,11 @@
     // D-INTBIG1: default `Int` is one packed word at the language boundary.
     // Values in the signed 63-bit payload stay unboxed. Other values point at
     // this std-only arena and continue through the same limb implementation.
-    // The representation is deliberately private to the generated Prelude:
-    // user code and every execution tier still see only `Int`.
-    const JET_INT_SMALL_MIN: i64 = -(1i64 << 62);
-    const JET_INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
+    // The representation is runtime-internal: these bounds are public only so
+    // the exported hot macros can expand in a split user crate. User code and
+    // every execution tier still see only `Int`.
+    pub const JET_INT_SMALL_MIN: i64 = -(1i64 << 62);
+    pub const JET_INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
     const JET_INT_BIG_TAG: i64 = i64::MIN + 1;
     static JET_INT_BIG_VALUES: std::sync::OnceLock<std::sync::Mutex<Vec<JetBigInt>>> =
         std::sync::OnceLock::new();
@@ -1814,6 +1877,18 @@
             .map_err(|_| format!("cannot parse `{value}` as an integer"))
     }
 
+    pub fn jet_int_to_radix(value: i64, radix: i64) -> Result<String, String> {
+        let radix = u32::try_from(radix)
+            .map_err(|_| format!("integer radix must be between 2 and 36, got {radix}"))?;
+        jet_int_value(value).to_radix(radix)
+    }
+
+    pub fn jet_int_from_radix(text: &str, radix: i64) -> Result<i64, String> {
+        let radix = u32::try_from(radix)
+            .map_err(|_| format!("integer radix must be between 2 and 36, got {radix}"))?;
+        JetBigInt::from_radix(text, radix).map(jet_int_pack)
+    }
+
     pub fn jet_int_to_i64(value: i64) -> Option<i64> {
         if !jet_int_is_tagged(value) {
             Some(value)
@@ -1876,24 +1951,228 @@
         jet_int_value(value).bit_count(width, method).unwrap_or(0)
     }
 
-    #[inline(always)]
-    pub fn jet_int_compare(left: i64, right: i64) -> i64 {
-        // Every valid immediate carrier is in the signed payload half-word;
-        // the lower-bound test is the hot tag check. Values below it remain
-        // on the bigint rail, including the reserved sentinel.
-        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
-            return match left.cmp(&right) {
+    // Keep the small-value branch in the shared Prelude, but expose it as a
+    // macro so AOT can place the branch and machine operation in a hot loop.
+    // The slow functions remain the sole promotion/overflow implementation;
+    // the macro only selects that shared rail after the same representation
+    // checks as the resident helpers below.
+    #[macro_export]
+    macro_rules! jet_int_compare_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if __jet_left >= $crate::jet_std::JET_INT_SMALL_MIN
+                && __jet_right >= $crate::jet_std::JET_INT_SMALL_MIN
+            {
+                match __jet_left.cmp(&__jet_right) {
+                    std::cmp::Ordering::Less => -1,
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Greater => 1,
+                }
+            } else {
+                $crate::jet_std::jet_int_compare_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_compare_hot;
+
+    #[macro_export]
+    macro_rules! jet_int_add_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if __jet_left >= $crate::jet_std::JET_INT_SMALL_MIN
+                && __jet_right >= $crate::jet_std::JET_INT_SMALL_MIN
+            {
+                let (__jet_value, __jet_overflowed) = __jet_left.overflowing_add(__jet_right);
+                if !__jet_overflowed
+                    && ($crate::jet_std::JET_INT_SMALL_MIN
+                        ..=$crate::jet_std::JET_INT_SMALL_MAX)
+                        .contains(&__jet_value)
+                {
+                    __jet_value
+                } else {
+                    $crate::jet_std::jet_int_add_slow(__jet_left, __jet_right)
+                }
+            } else {
+                $crate::jet_std::jet_int_add_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_add_hot;
+
+    #[macro_export]
+    macro_rules! jet_int_sub_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if __jet_left >= $crate::jet_std::JET_INT_SMALL_MIN
+                && __jet_right >= $crate::jet_std::JET_INT_SMALL_MIN
+            {
+                let (__jet_value, __jet_overflowed) = __jet_left.overflowing_sub(__jet_right);
+                if !__jet_overflowed
+                    && ($crate::jet_std::JET_INT_SMALL_MIN
+                        ..=$crate::jet_std::JET_INT_SMALL_MAX)
+                        .contains(&__jet_value)
+                {
+                    __jet_value
+                } else {
+                    $crate::jet_std::jet_int_sub_slow(__jet_left, __jet_right)
+                }
+            } else {
+                $crate::jet_std::jet_int_sub_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_sub_hot;
+
+    #[macro_export]
+    macro_rules! jet_int_mul_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if __jet_left >= $crate::jet_std::JET_INT_SMALL_MIN
+                && __jet_right >= $crate::jet_std::JET_INT_SMALL_MIN
+            {
+                let (__jet_value, __jet_overflowed) = __jet_left.overflowing_mul(__jet_right);
+                if !__jet_overflowed
+                    && ($crate::jet_std::JET_INT_SMALL_MIN
+                        ..=$crate::jet_std::JET_INT_SMALL_MAX)
+                        .contains(&__jet_value)
+                {
+                    __jet_value
+                } else {
+                    $crate::jet_std::jet_int_mul_slow(__jet_left, __jet_right)
+                }
+            } else {
+                $crate::jet_std::jet_int_mul_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_mul_hot;
+
+    // These macros have no fallback by design. The TIR emitter may select them
+    // only after its interval/cost fact proves both operands and the result stay
+    // on the signed-63-bit rail. Every unproved operation remains on the hot
+    // macro above, which preserves bigint promotion and checked arithmetic.
+    #[macro_export]
+    macro_rules! jet_int_add_inline {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            __jet_left + __jet_right
+        }};
+    }
+    pub use crate::jet_int_add_inline;
+
+    #[macro_export]
+    macro_rules! jet_int_sub_inline {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            __jet_left - __jet_right
+        }};
+    }
+    pub use crate::jet_int_sub_inline;
+
+    #[macro_export]
+    macro_rules! jet_int_mul_inline {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            __jet_left * __jet_right
+        }};
+    }
+    pub use crate::jet_int_mul_inline;
+
+    #[macro_export]
+    macro_rules! jet_int_compare_inline {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            match __jet_left.cmp(&__jet_right) {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
                 std::cmp::Ordering::Greater => 1,
-            };
-        }
-        jet_int_compare_slow(left, right)
+            }
+        }};
+    }
+    pub use crate::jet_int_compare_inline;
+
+    #[macro_export]
+    macro_rules! jet_int_neg_inline {
+        ($value:expr) => {{
+            let __jet_value = $value;
+            -__jet_value
+        }};
+    }
+    pub use crate::jet_int_neg_inline;
+
+    // Bitwise operations cannot overflow a valid packed value. Keep their
+    // representation check in the shared Prelude so the cold bigint rail is
+    // still selected for every tagged or otherwise non-packed input.
+    #[macro_export]
+    macro_rules! jet_int_bit_and_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                .contains(&__jet_left)
+                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                    .contains(&__jet_right)
+            {
+                __jet_left & __jet_right
+            } else {
+                $crate::jet_std::jet_int_bit_and_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_bit_and_hot;
+
+    #[macro_export]
+    macro_rules! jet_int_bit_or_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                .contains(&__jet_left)
+                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                    .contains(&__jet_right)
+            {
+                __jet_left | __jet_right
+            } else {
+                $crate::jet_std::jet_int_bit_or_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_bit_or_hot;
+
+    #[macro_export]
+    macro_rules! jet_int_bit_xor_hot {
+        ($left:expr, $right:expr) => {{
+            let __jet_left = $left;
+            let __jet_right = $right;
+            if ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                .contains(&__jet_left)
+                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                    .contains(&__jet_right)
+            {
+                __jet_left ^ __jet_right
+            } else {
+                $crate::jet_std::jet_int_bit_xor_slow(__jet_left, __jet_right)
+            }
+        }};
+    }
+    pub use crate::jet_int_bit_xor_hot;
+
+    #[inline(always)]
+    pub fn jet_int_compare(left: i64, right: i64) -> i64 {
+        jet_int_compare_hot!(left, right)
     }
 
     #[cold]
     #[inline(never)]
-    fn jet_int_compare_slow(left: i64, right: i64) -> i64 {
+    pub fn jet_int_compare_slow(left: i64, right: i64) -> i64 {
         match jet_int_value(left).compare(&jet_int_value(right)) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
@@ -1905,64 +2184,67 @@
     /// helper so tight loops see two tag tests and one checked machine op.
     #[inline(always)]
     pub fn jet_int_add(left: i64, right: i64) -> i64 {
-        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
-            let (value, overflowed) = left.overflowing_add(right);
-            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                return value;
-            }
-        }
-        jet_int_add_slow(left, right)
+        jet_int_add_hot!(left, right)
     }
 
     #[cold]
     #[inline(never)]
-    fn jet_int_add_slow(left: i64, right: i64) -> i64 {
+    pub fn jet_int_add_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).add(&jet_int_value(right)))
     }
 
     #[inline(always)]
     pub fn jet_int_sub(left: i64, right: i64) -> i64 {
-        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
-            let (value, overflowed) = left.overflowing_sub(right);
-            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                return value;
-            }
-        }
-        jet_int_sub_slow(left, right)
+        jet_int_sub_hot!(left, right)
     }
 
     #[cold]
     #[inline(never)]
-    fn jet_int_sub_slow(left: i64, right: i64) -> i64 {
+    pub fn jet_int_sub_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).sub(&jet_int_value(right)))
     }
 
     #[inline(always)]
     pub fn jet_int_mul(left: i64, right: i64) -> i64 {
-        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
-            let (value, overflowed) = left.overflowing_mul(right);
-            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                return value;
-            }
-        }
-        jet_int_mul_slow(left, right)
+        jet_int_mul_hot!(left, right)
     }
 
     #[cold]
     #[inline(never)]
-    fn jet_int_mul_slow(left: i64, right: i64) -> i64 {
+    pub fn jet_int_mul_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).mul(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_bit_and(left: i64, right: i64) -> i64 {
+        jet_int_bit_and_hot!(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn jet_int_bit_and_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).bit_and(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_bit_or(left: i64, right: i64) -> i64 {
+        jet_int_bit_or_hot!(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn jet_int_bit_or_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).bit_or(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_bit_xor(left: i64, right: i64) -> i64 {
+        jet_int_bit_xor_hot!(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn jet_int_bit_xor_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).bit_xor(&jet_int_value(right)))
     }
 

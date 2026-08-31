@@ -124,13 +124,20 @@ fn outputs_block_drives_jet_build_aot() {
 }
 
 #[test]
-fn nested_outputs_entry_follows_src_cli_import_on_both_run_tiers() {
+fn nested_outputs_entry_invokes_leaf_on_every_run_tier() {
     let dir = nested_example_dir();
     assert!(!dir.join("runner.jet").is_file());
     assert!(dir.join("src/cli/main.jet").is_file());
+    assert!(!fs::read_to_string(dir.join("src/cli/main.jet"))
+        .unwrap()
+        .contains("fn run"));
 
     let mut outputs = Vec::new();
-    for args in [vec!["run"], vec!["run", "--release"]] {
+    for args in [
+        vec!["run"],
+        vec!["run", "--interpret"],
+        vec!["run", "--release"],
+    ] {
         let out = Command::new(jet_bin())
             .args(&args)
             .current_dir(&dir)
@@ -154,6 +161,184 @@ fn nested_outputs_entry_follows_src_cli_import_on_both_run_tiers() {
         )
         .unwrap()
     );
+
+    if common::have_rustc() {
+        let build = Command::new(jet_bin())
+            .arg("build")
+            .current_dir(&dir)
+            .output()
+            .expect("nested output build should execute");
+        assert!(
+            build.status.success(),
+            "nested output build failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let binary = dir.join("build/main");
+        let run = Command::new(&binary)
+            .output()
+            .expect("nested output binary should run");
+        assert!(
+            run.status.success(),
+            "nested output binary failed:\n{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(run.stdout, outputs[0]);
+    }
+}
+
+#[test]
+fn package_output_selects_non_run_callable_for_run_dev_and_effects() {
+    let scratch = common::Scratch::new("package-output-callable");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"selected_callable\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [IO] } }\noutputs: .{ app: .Executable{ entry: launch } }\n",
+    )
+    .unwrap();
+    fs::write(
+        scratch.join("entry.jet"),
+        "fn run() { print(\"wrong callable\") }\npub fn launch() {}\n",
+    )
+    .unwrap();
+
+    for args in [
+        vec!["run"],
+        vec!["run", "--interpret"],
+        vec!["dev", "--watch=off"],
+    ] {
+        let output = Command::new(jet_bin())
+            .args(&args)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("selected package callable should execute");
+        assert!(
+            output.status.success(),
+            "selected callable {:?} failed:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            b"",
+            "package execution fell back to run for {:?}: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    let build = Command::new(jet_bin())
+        .arg("build")
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("selected package callable should build");
+    assert!(
+        build.status.success(),
+        "selected callable build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let summary = String::from_utf8_lossy(&build.stderr);
+    assert!(
+        summary.contains("required effects: none"),
+        "effect summary used the parked run callable:\n{summary}"
+    );
+}
+
+#[test]
+fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
+    let scratch = common::Scratch::new("nested-entry-wrapper");
+    let entry = scratch.join("entry.jet");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"nested_entry_wrapper\"\nversion: \"0.1.0\"\noutputs: .{ app: .Executable{ entry: app.leaf } }\n",
+    )
+    .unwrap();
+    fs::write(&entry, "use \"runner\" as runner\n").unwrap();
+    fs::write(scratch.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
+    fs::write(scratch.join("bridge.jet"), "use \"leaf\" as app\n").unwrap();
+    fs::write(scratch.join("leaf.jet"), "pub fn leaf() {}\n").unwrap();
+
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("chain should load");
+    jet::Driver::swap_entry_point(&mut bundle, "leaf");
+    let wrapper = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Func(function) if function.name == "run" => function.body.first(),
+            _ => None,
+        })
+        .expect("entry swap should inject a run wrapper");
+    let call_name = match wrapper {
+        jet::AST::Stmt::Expr(jet::AST::Expr::Call(call)) => &call.name,
+        other => panic!("expected wrapper call, got {other:?}"),
+    };
+    assert_eq!(call_name, "runner.bridge.app.leaf");
+
+    jet::Driver::compile_bundle_path_with_entry(entry.to_str().unwrap(), "leaf")
+        .expect("qualified nested entry wrapper should compile");
+}
+
+#[test]
+fn package_default_output_alias_invokes_nested_leaf_from_path_and_cwd() {
+    let package = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dogfood/jetpack");
+    let fixture_root = package.join("tests/fixtures/phase1");
+    let scratch = common::Scratch::new("package-output-default");
+    let home = scratch.join("home");
+    let store = home.join(".cache/jet-dogfood/jetpack-store");
+    fs::create_dir_all(&home).unwrap();
+
+    for mode in [
+        vec!["run"],
+        vec!["run", "--interpret"],
+        vec!["run", "--release"],
+    ] {
+        for (label, cwd, target) in [
+            (
+                "path",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+                Some(package.clone()),
+            ),
+            ("cwd", package.clone(), None),
+        ] {
+            let mut args = mode
+                .iter()
+                .map(|arg| (*arg).to_string())
+                .collect::<Vec<_>>();
+            if let Some(target) = target {
+                args.push(target.to_string_lossy().into_owned());
+            }
+            args.extend([
+                "--".to_string(),
+                "plan".to_string(),
+                "--json".to_string(),
+                "--offline".to_string(),
+            ]);
+            let output = Command::new(jet_bin())
+                .args(&args)
+                .current_dir(cwd)
+                .env("HOME", &home)
+                .env("JETPACK_DOGFOOD_ROOT", &store)
+                .env("JETPACK_PROJECT_ROOT", &fixture_root)
+                .env("JETPACK_OFFLINE", "1")
+                .env("NO_COLOR", "1")
+                .output()
+                .expect("dogfood package output should execute");
+            assert!(
+                output.status.success(),
+                "{label} {mode:?} failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                stdout.contains("\"name\":\"dogfood\""),
+                "{label} {mode:?} did not execute dogfood output:\n{stdout}"
+            );
+            assert!(
+                stdout.contains("\"selected_profiles\":[\"dogfood\"]"),
+                "{label} {mode:?} returned unexpected plan:\n{stdout}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -186,18 +371,17 @@ fn nested_output_failures_keep_the_package_diagnostic() {
             .current_dir(&dir)
             .output()
             .expect("nested output rejection should execute");
-        assert!(!out.status.success(), "nested output unexpectedly succeeded");
+        assert!(
+            !out.status.success(),
+            "nested output unexpectedly succeeded"
+        );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains("Error [E2105]"), "missing E2105:\n{stderr}");
 
         let _ = fs::remove_dir_all(&dir);
     }
 
-    run_case(
-        "missing",
-        "use \"src/cli/missing\" as app\n",
-        &[],
-    );
+    run_case("missing", "use \"src/cli/missing\" as app\n", &[]);
     run_case(
         "ambiguous",
         "use \"src/cli/main\" as app\n",
@@ -206,11 +390,7 @@ fn nested_output_failures_keep_the_package_diagnostic() {
             ("src/cli/main/module.jet", "pub fn cli_run() {}\n"),
         ],
     );
-    run_case(
-        "escaping",
-        "use \"../../outside/main\" as app\n",
-        &[],
-    );
+    run_case("escaping", "use \"../../outside/main\" as app\n", &[]);
 }
 
 /// The negative half of the proof: copy the fixture but drop `outputs:` from
@@ -258,6 +438,128 @@ fn entry_resolution_requires_the_outputs_block() {
     );
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #2352: a nested file named `main.jet` is an ordinary import target.
+/// Only a root-level `main.jet` is the retired convention entry.
+#[test]
+fn manifest_output_resolves_nested_main_file_across_run_and_build() {
+    let scratch = common::Scratch::new("package-output-nested-main");
+    fs::create_dir_all(scratch.join("src/cli")).expect("create nested source directory");
+    fs::write(
+        scratch.join("package.jet"),
+        concat!(
+            "name: \"nested_main_output\"\n",
+            "version: \"0.1.0\"\n",
+            "outputs: .{ app: .Executable{ entry: cli.cli_run } }\n",
+            "defaults: .{ run: app }\n",
+            "authority: .{ holds: { allow: [IO] } }\n",
+        ),
+    )
+    .expect("write package manifest");
+    fs::write(scratch.join("entry.jet"), "use \"src/cli/main\" as cli\n")
+        .expect("write package import root");
+    fs::write(
+        scratch.join("src/cli/main.jet"),
+        "pub fn cli_run() {\n    print(\"nested-main\")\n}\n",
+    )
+    .expect("write nested package entry");
+
+    let run = Command::new(jet_bin())
+        .arg("run")
+        .current_dir(&scratch.path)
+        .output()
+        .expect("manifest-selected nested output should run");
+    assert!(
+        run.status.success(),
+        "jet run failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(run.stdout, b"nested-main\n");
+
+    if !common::have_rustc() {
+        return;
+    }
+    let build = Command::new(jet_bin())
+        .arg("build")
+        .current_dir(&scratch.path)
+        .output()
+        .expect("manifest-selected nested output should build");
+    assert!(
+        build.status.success(),
+        "jet build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = scratch.join("build/main");
+    assert!(binary.is_file(), "jet build did not produce build/main");
+    let built = Command::new(binary)
+        .output()
+        .expect("manifest-selected nested binary should run");
+    assert!(
+        built.status.success(),
+        "built binary failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert_eq!(built.stdout, b"nested-main\n");
+}
+
+/// Card #2352: unsafe or non-unique nested selectors fail at the Package
+/// boundary instead of reaching sema or rustc with a guessed entry.
+#[test]
+fn manifest_output_rejects_missing_ambiguous_and_escaping_nested_entries() {
+    for (tag, imports, sources) in [
+        (
+            "missing",
+            "use \"src/missing\" as cli\n",
+            Vec::<(&str, &str)>::new(),
+        ),
+        (
+            "ambiguous",
+            "use \"src/one\" as cli\nuse \"src/two\" as cli\n",
+            vec![
+                ("src/one.jet", "pub fn cli_run() {}\n"),
+                ("src/two.jet", "pub fn cli_run() {}\n"),
+            ],
+        ),
+        (
+            "escaping",
+            "use \"../outside\" as cli\n",
+            Vec::<(&str, &str)>::new(),
+        ),
+    ] {
+        let scratch = common::Scratch::new(&format!("package-output-nested-{tag}"));
+        fs::create_dir_all(scratch.join("src")).expect("create nested source directory");
+        fs::write(
+            scratch.join("package.jet"),
+            concat!(
+                "name: \"invalid_nested_output\"\n",
+                "version: \"0.1.0\"\n",
+                "outputs: .{ app: .Executable{ entry: cli.cli_run } }\n",
+                "defaults: .{ run: app }\n",
+            ),
+        )
+        .expect("write package manifest");
+        fs::write(scratch.join("entry.jet"), imports).expect("write package import root");
+        for (path, source) in sources {
+            fs::write(scratch.join(path), source).expect("write candidate entry source");
+        }
+
+        let out = Command::new(jet_bin())
+            .arg("run")
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("invalid nested manifest output should be rejected");
+        assert!(
+            !out.status.success(),
+            "{tag} nested output unexpectedly ran"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("Error [E2105]:") && stderr.contains("no unique source entry"),
+            "{tag} nested output lost the registered package diagnostic:\n{stderr}"
+        );
+    }
 }
 
 fn typed_settings_dir() -> PathBuf {
@@ -538,4 +840,12 @@ fn build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers() {
         first, inspected,
         "graph inspection must name the same cycle chain as an executing build"
     );
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_package_templates() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("package")
+        .expect("package corpus semantic policy");
 }

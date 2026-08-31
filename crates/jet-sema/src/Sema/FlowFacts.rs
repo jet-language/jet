@@ -17,6 +17,7 @@
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |
 //! | [`Uninit`] | a `Type.{ uninit }` place not yet written (D-UNINIT1) | `CheckerCore` |
 //! | [`View`] | open borrow windows over a place (D-MEM1 S9) | `CheckerOwnership` |
+//! | [`PathString`] | normalized typed-Path string provenance | `CheckerCore` |
 //! | `Typestate` | the state a value is in (D-STATE1) | `Sema::State` |
 //! | `Taint` | the fact tags a value carries (D-TAG-SURFACE1) | `Sema::Taint` |
 //!
@@ -513,11 +514,25 @@ impl Plane for Narrow {
     }
 }
 
+/// The source that consumed a place. Keeping the consuming callee beside the
+/// span lets ownership diagnostics explain both ends of a later reuse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MoveOrigin {
+    pub(crate) span: super::Span,
+    pub(crate) consumer: Option<String>,
+}
+
+impl MoveOrigin {
+    pub(crate) fn new(span: super::Span, consumer: Option<String>) -> Self {
+        Self { span, consumer }
+    }
+}
+
 /// The use that gave a place away, keyed by place name (`order`, `order.line`).
 pub(crate) enum Moved {}
 
 impl Plane for Moved {
-    type Fact = super::Span;
+    type Fact = MoveOrigin;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
         keep_left(left, right)
@@ -585,6 +600,27 @@ impl Plane for View {
     const KEEPS_PRE_MERGE: bool = true;
 }
 
+/// D-PATH-CONTAINMENT1=A: one immutable String binding came from a normalized
+/// typed Path. Keeping the source identity lets the containment lint replace
+/// the whole string idiom without treating arbitrary strings as Paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PathStringFact {
+    pub(crate) source: String,
+}
+
+pub(crate) enum PathString {}
+
+impl Plane for PathString {
+    type Fact = PathStringFact;
+
+    fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
+        match (left, right) {
+            (Some(left), Some(right)) if left == right => Some(left.clone()),
+            _ => None,
+        }
+    }
+}
+
 /// Every per-binding fact the checker holds, in one store.
 #[derive(Debug, Clone)]
 pub(crate) struct FlowFacts {
@@ -602,6 +638,7 @@ pub(crate) struct FlowFacts {
     pub(crate) moved: Facts<Moved>,
     pub(crate) uninit: Facts<Uninit>,
     pub(crate) views: Facts<View>,
+    pub(crate) path_strings: Facts<PathString>,
     pub(crate) states: Facts<super::State::Typestate>,
 }
 
@@ -618,6 +655,7 @@ impl Default for FlowFacts {
             moved: Facts::default(),
             uninit: Facts::default(),
             views: Facts::default(),
+            path_strings: Facts::default(),
             states: Facts::default(),
         }
     }
@@ -637,6 +675,7 @@ impl FlowFacts {
         self.frozen.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
+        self.path_strings.leave_depth(depth);
         self.states.leave_depth(depth);
         self.depth = depth.saturating_sub(1);
     }
@@ -713,6 +752,11 @@ impl FlowFacts {
                 &Self::plane(&paths, |facts| &facts.views),
                 &mut view_sink,
             ),
+            path_strings: Facts::merge_paths(
+                &before.path_strings,
+                &Self::plane(&paths, |facts| &facts.path_strings),
+                &mut Vec::new(),
+            ),
             states: Facts::merge_paths(
                 &before.states,
                 &Self::plane(&paths, |facts| &facts.states),
@@ -751,6 +795,11 @@ impl FlowFacts {
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),
             uninit: Facts::after_loop(&before.uninit, &after_body.uninit, &mut Vec::new()),
             views: Facts::after_loop(&before.views, &after_body.views, &mut Vec::new()),
+            path_strings: Facts::after_loop(
+                &before.path_strings,
+                &after_body.path_strings,
+                &mut Vec::new(),
+            ),
             states: Facts::after_loop(&before.states, &after_body.states, state_diverged),
         }
     }

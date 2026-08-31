@@ -1,35 +1,17 @@
-Error [E0102]: `Vec2` has no method `compare`
-  --> tests/ui/operator_nested_compound.jet:6:8
-    |
-  6 | struct Inner {
-    |        ^^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Vec2` or `impl Vec2`
-More: jet-lang.dev/e/E0102
-
-Error [E0102]: `Inner` has no method `compare`
-  --> tests/ui/operator_nested_compound.jet:10:8
-    |
- 10 | struct Outer {
-    |        ^^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Inner` or `impl Inner`
-More: jet-lang.dev/e/E0102
-
-Error [E0362]: compound assignment can't target a nested operator field
+Error [E0362]: Compound assignment can't target a nested operator field
   --> tests/ui/operator_nested_compound.jet:28:17
     |
  28 |     outer.inner.value += Vec2{x: 3, y: 4}
     |                 ^^^^^
- Why: the current operator-place lowering supports one named owner and one field
- Fix: bind the inner value, update it, then assign the whole inner value back
+ Why: The current operator-place lowering supports one named owner and one field
+ Fix: Bind the inner value, update it, then assign the whole inner value back
 More: jet-lang.dev/e/E0362
 
-Error [E0362]: compound assignment can't target a nested operator field
+Error [E0362]: Compound assignment can't target a nested operator field
   --> tests/ui/operator_nested_compound.jet:31:76
     |
  31 | fn update_generic<T: Add>(outer: &GenericOuter<T>, delta: T) { outer.inner.value += delta }
     |                                                                            ^^^^^
- Why: the current operator-place lowering supports one named owner and one field
- Fix: bind the inner value, update it, then assign the whole inner value back
+ Why: The current operator-place lowering supports one named owner and one field
+ Fix: Bind the inner value, update it, then assign the whole inner value back
 More: jet-lang.dev/e/E0362

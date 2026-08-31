@@ -25,7 +25,8 @@ const DEFAULT_TOWER_PATH = (function () {
   return join(ROOT, "plugins/tower/.tower/tower.json");
 })();
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
-const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "crates/jet-cli/src/CLI.rs"];
+const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "crates/jet-cli/src/CLI.rs", "site/generate.jet"];
+const PUBLIC_CLAIM_SURFACES = ["README.md", "site/generate.jet"];
 
 /** Live board cards plus archived history (D-TWR-ARCHIVE1) for owner lookup. */
 function loadBoardCards(towerPath) {
@@ -76,7 +77,7 @@ function registryClaims() {
   return claims;
 }
 
-function declarationClaims(overrides) {
+function declarationClaims(overrides, declarationsByFile = new Map()) {
   const found = [];
   for (const path of PUBLIC_DECLARATION_FILES) {
     const text = fileText(path, overrides);
@@ -91,16 +92,83 @@ function declarationClaims(overrides) {
     const blockEnd = text.lastIndexOf("\n", endAt);
     if (blockStart < 0 || blockEnd < blockStart) throw new Error(`public claim declaration block has no line body in ${path}`);
     const block = text.slice(blockStart + 1, blockEnd + 1);
+    const declared = [];
     for (const line of block.split(/\r?\n/)) {
       if (!line.trim()) continue;
       const match = line.match(/FEATURE_CLAIM:\s*(claim\.[a-z0-9-]+)\s*\|\s*([^<\n]+?)(?:\s*-->|\s*$)/);
       if (!match || !match[2].trim().endsWith(".")) {
         throw new Error(`unmarked broad claim declaration in ${path}: ${line.trim()}`);
       }
+      if (declared.includes(match[1])) throw new Error(`duplicate public claim declaration in ${path}: ${match[1]}`);
       found.push(match[1]);
+      declared.push(match[1]);
     }
+    declarationsByFile.set(path, declared);
   }
   return found;
+}
+
+function validatePublicSurface(manifest, claims, declarationsByFile, overrides, fail) {
+  const rows = manifest.publicSurface;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    fail("manifest", "publicSurface must contain one row per declared README/site claim");
+    return;
+  }
+  const rowsBySurface = new Map();
+  const seen = new Set();
+  for (const row of rows) {
+    const surface = row?.surface;
+    const claimId = row?.claimId;
+    const laneId = row?.laneId;
+    const anchor = row?.anchor;
+    const key = `${surface}\u0000${claimId}`;
+    if (!PUBLIC_CLAIM_SURFACES.includes(surface)) {
+      fail("manifest", `public claim row names unsupported surface ${surface}`);
+      continue;
+    }
+    if (seen.has(key)) {
+      fail(claimId, `duplicate public claim row for ${surface}`);
+      continue;
+    }
+    seen.add(key);
+    const claim = claims.get(claimId);
+    if (!claim) {
+      fail(claimId, `public claim row names unknown claim ${claimId}`);
+      continue;
+    }
+    if (typeof anchor !== "string" || anchor.length < 8) {
+      fail(claimId, `public claim row for ${surface} lacks a decisive source anchor`);
+    } else {
+      try {
+        if (!fileText(surface, overrides).includes(anchor)) {
+          fail(claimId, `public claim anchor missing in ${surface}: ${anchor}`);
+        }
+      } catch (error) {
+        fail(claimId, error.message);
+      }
+    }
+    if (!/^[a-z0-9-]+$/.test(laneId ?? "")) {
+      fail(claimId, `public claim row has invalid evidence lane ${laneId}`);
+      continue;
+    }
+    const lane = (claim.acceptanceLanes ?? []).find((candidate) => candidate.id === laneId);
+    if (!lane) {
+      fail(claimId, `public claim row points to missing evidence lane ${laneId}`);
+      continue;
+    }
+    if (!Array.isArray(lane.artifacts) || lane.artifacts.length === 0) {
+      fail(claimId, `public claim evidence lane ${laneId} has no artifacts`);
+    }
+    if (!rowsBySurface.has(surface)) rowsBySurface.set(surface, []);
+    rowsBySurface.get(surface).push(claimId);
+  }
+  for (const surface of PUBLIC_CLAIM_SURFACES) {
+    const declared = [...new Set(declarationsByFile.get(surface) ?? [])];
+    const mapped = [...new Set(rowsBySurface.get(surface) ?? [])];
+    if (!sameSet(declared, mapped)) {
+      fail("manifest", `public claim rows drifted for ${surface}; declarations=${declared.sort().join(",")} rows=${mapped.sort().join(",")}`);
+    }
+  }
 }
 
 function cliCommands() {
@@ -261,10 +329,12 @@ function validateManifest(manifest, board, options = {}) {
   if (!sameSet([...claims.keys()], docsClaims)) {
     errors.push(`manifest: docs registry drift; manifest=${[...claims.keys()].sort().join(",")} docs=${docsClaims.sort().join(",")}`);
   }
-  const declaredClaims = declarationClaims(options.fileOverrides);
+  const declarationsByFile = new Map();
+  const declaredClaims = declarationClaims(options.fileOverrides, declarationsByFile);
   if (!sameSet([...claims.keys()], [...new Set(declaredClaims)])) {
     errors.push(`manifest: designated public declarations have unowned or missing claim IDs; declarations=${[...new Set(declaredClaims)].sort().join(",")}`);
   }
+  validatePublicSurface(manifest, claims, declarationsByFile, options.fileOverrides, fail);
 
   for (const [surface, owner] of Object.entries(manifest.cliOwnership ?? {})) {
     if (!claims.has(owner)) errors.push(`cli ${surface}: unknown owner claim ${owner}`);

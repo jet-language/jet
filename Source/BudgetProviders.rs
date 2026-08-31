@@ -643,8 +643,36 @@ fn measure_artifact_runtime(
     })
 }
 
+#[derive(Clone, Copy)]
+struct ProcessUsage {
+    status: i32,
+    process_cpu_ns: u128,
+    peak_rss_bytes: u64,
+}
+
 #[cfg(target_os = "linux")]
-fn wait4_artifact(pid: u32, nonblocking: bool) -> Result<Option<u64>, ProviderFailure> {
+fn process_timeval_ns(
+    seconds: std::os::raw::c_long,
+    micros: std::os::raw::c_long,
+    name: &str,
+) -> Result<u128, ProviderFailure> {
+    let seconds = u128::try_from(seconds)
+        .map_err(|_| ProviderFailure::malformed(format!("{name} seconds are negative")))?;
+    let micros = u128::try_from(micros)
+        .map_err(|_| ProviderFailure::malformed(format!("{name} microseconds are negative")))?;
+    if micros >= 1_000_000 {
+        return Err(ProviderFailure::malformed(format!(
+            "{name} microseconds are outside 0..1_000_000"
+        )));
+    }
+    seconds
+        .checked_mul(1_000_000_000)
+        .and_then(|value| value.checked_add(micros * 1_000))
+        .ok_or_else(|| ProviderFailure::malformed(format!("{name} overflowed nanoseconds")))
+}
+
+#[cfg(target_os = "linux")]
+fn wait4_process(pid: u32, nonblocking: bool) -> Result<Option<ProcessUsage>, ProviderFailure> {
     use std::os::raw::{c_int, c_long};
 
     extern "C" {
@@ -661,16 +689,39 @@ fn wait4_artifact(pid: u32, nonblocking: bool) -> Result<Option<u64>, ProviderFa
         return Err(ProviderFailure::operation(
             FailureClass::Execution,
             format!(
-                "cannot collect artifact resource usage: {}",
+                "cannot collect child resource usage: {}",
                 std::io::Error::last_os_error()
             ),
         ));
     }
+    let user_ns = process_timeval_ns(usage[0], usage[1], "child ru_utime")?;
+    let system_ns = process_timeval_ns(usage[2], usage[3], "child ru_stime")?;
+    let process_cpu_ns = user_ns
+        .checked_add(system_ns)
+        .ok_or_else(|| ProviderFailure::malformed("child process CPU time overflowed"))?;
     let kib = u64::try_from(usage[4])
-        .map_err(|_| ProviderFailure::malformed("artifact ru_maxrss is negative"))?;
-    Ok(Some(kib.checked_mul(1024).ok_or_else(|| {
-        ProviderFailure::malformed("artifact ru_maxrss overflowed bytes")
-    })?))
+        .map_err(|_| ProviderFailure::malformed("child ru_maxrss is negative"))?;
+    let peak_rss_bytes = kib.checked_mul(1024).ok_or_else(|| {
+        ProviderFailure::malformed("child ru_maxrss overflowed bytes")
+    })?;
+    Ok(Some(ProcessUsage {
+        status,
+        process_cpu_ns,
+        peak_rss_bytes,
+    }))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wait4_process(_pid: u32, _nonblocking: bool) -> Result<Option<ProcessUsage>, ProviderFailure> {
+    Err(ProviderFailure::operation(
+        FailureClass::Unavailable,
+        "process CPU child accounting requires Linux wait4 resource usage",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn wait4_artifact(pid: u32, nonblocking: bool) -> Result<Option<u64>, ProviderFailure> {
+    Ok(wait4_process(pid, nonblocking)?.map(|usage| usage.peak_rss_bytes))
 }
 
 #[cfg(target_os = "linux")]
@@ -727,6 +778,7 @@ fn read_vm_hwm(pid: u32) -> Result<Option<u64>, ProviderFailure> {
 
 const COMPILE_WARMUPS: u128 = 1;
 const COMPILE_SAMPLES: usize = 20;
+const COMPILE_CLOCK: &str = "process_cpu";
 const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
 
 // D-VERDICT-666-1 / D-BUILD-DEFAULT1: the probe follows the same production
@@ -885,7 +937,7 @@ pub fn compiler_probe_version(
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
     let backend = CompileBackend::for_profile(profile);
     Ok(format!(
-        "jet-compile-latency-v2;mode={mode};target={target};profile={profile};backend={};linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
+        "jet-compile-latency-v3;clock={COMPILE_CLOCK};mode={mode};target={target};profile={profile};backend={};linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
         backend.label(),
         backend.linker(),
         descriptor.source_tree_sha256, descriptor.patch_sha256
@@ -1282,7 +1334,7 @@ fn compile_latency_samples(
             (child, read_compile_phases(scratch, backend)?)
         };
         peak_rss_bytes = peak_rss_bytes.max(child.peak_rss_bytes);
-        let elapsed_ns = child.elapsed_ns;
+        let elapsed_ns = child.process_cpu_ns;
         sample_values.push(
             Rational::parse(&elapsed_ns.to_string(), "1").map_err(ProviderFailure::malformed)?,
         );
@@ -1293,6 +1345,7 @@ fn compile_latency_samples(
                     CanonicalJson::String(backend.label().into()),
                 ),
                 ("cache_state".into(), CanonicalJson::String(mode.into())),
+                ("clock".into(), CanonicalJson::String(COMPILE_CLOCK.into())),
                 (
                     "compiler_digest".into(),
                     CanonicalJson::String(compiler_digest.clone()),
@@ -1352,6 +1405,7 @@ fn compile_latency_samples(
             CanonicalJson::String(backend.label().into()),
         ),
         ("cache_state".into(), CanonicalJson::String(mode.into())),
+        ("clock".into(), CanonicalJson::String(COMPILE_CLOCK.into())),
         (
             "compiler_digest".into(),
             CanonicalJson::String(compiler_digest),
@@ -1871,7 +1925,7 @@ fn patch_header_path(header: &str) -> Result<String, String> {
 
 #[derive(Clone, Copy)]
 struct ChildMetrics {
-    elapsed_ns: u128,
+    process_cpu_ns: u128,
     peak_rss_bytes: u64,
 }
 
@@ -1961,15 +2015,15 @@ fn run_compile_child(
             format!("cannot start compile workload child: {error}"),
         )
     })?;
-    let started = Instant::now();
     let mut peak_rss_bytes = 0;
     let deadline = Instant::now() + NATIVE_BUILD_DEADLINE;
     loop {
         if let Some(value) = child_peak_rss(child.id())? {
             peak_rss_bytes = peak_rss_bytes.max(value);
         }
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
+        match wait4_process(child.id(), true) {
+            Ok(Some(usage)) if usage.status == 0 => {
+                peak_rss_bytes = peak_rss_bytes.max(usage.peak_rss_bytes);
                 let required = match backend {
                     CompileBackend::JitCranelift => vec!["jet-timing.json"],
                     CompileBackend::AotRustc => {
@@ -1992,14 +2046,17 @@ fn run_compile_child(
                     ));
                 }
                 return Ok(ChildMetrics {
-                    elapsed_ns: started.elapsed().as_nanos(),
+                    process_cpu_ns: usage.process_cpu_ns,
                     peak_rss_bytes,
                 });
             }
-            Ok(Some(status)) => {
+            Ok(Some(usage)) => {
                 return Err(ProviderFailure::operation(
                     FailureClass::Execution,
-                    format!("compile workload child exited with {status}"),
+                    format!(
+                        "compile workload child exited with status {}",
+                        usage.status
+                    ),
                 ))
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
@@ -2012,10 +2069,7 @@ fn run_compile_child(
             }
             Err(error) => {
                 terminate_group(&mut child);
-                return Err(ProviderFailure::operation(
-                    FailureClass::Execution,
-                    format!("cannot supervise compile workload child: {error}"),
-                ));
+                return Err(error);
             }
         }
     }
@@ -3097,6 +3151,17 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
     static PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_cpu_time_conversion_is_exact_and_rejects_invalid_timevals() {
+        assert_eq!(
+            process_timeval_ns(2, 345_678, "test").unwrap(),
+            2_345_678_000
+        );
+        assert!(process_timeval_ns(-1, 0, "test").is_err());
+        assert!(process_timeval_ns(0, 1_000_000, "test").is_err());
+    }
 
     fn request() -> ProviderRequest {
         ProviderRequest {

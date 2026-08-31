@@ -19,10 +19,114 @@ fn package_policy_cannot_authorize_unsafe() {
         "test",
     )
     .unwrap_err();
+    let detail = error.to_string();
     assert!(matches!(
         error,
-        jet::Package::PackageParseError::BadMemoryPolicy { .. }
+        jet::Package::PackageParseError::BadPackagePolicy { .. }
     ));
+    assert!(detail.contains("policy.unsafe") && detail.contains(".Deny"));
+}
+
+#[test]
+fn package_team_policy_parser_normalizes_typed_controls() {
+    let package = jet::Package::PackageFacts::parse(
+        "name: \"policy\"\nversion: \"0.1.0\"\n\
+         deps: .{ zlib: c@system }\n\
+         policy: .{ effects: .{ \"./src\": -[IO, IO]> }, \
+         unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, \
+        deps: .List([\"zlib\", \"zlib\"]), lints: .{ deny: [float_money] })\n",
+        "test",
+    )
+    .unwrap();
+    let ceiling = package.policy.effects.get("src").unwrap();
+    assert_eq!(ceiling.len(), 1);
+    assert!(ceiling.contains("IO"));
+    assert_eq!(package.policy.unsafe_paths, Some(vec!["src".to_string()]));
+    assert_eq!(package.policy.expert, Some(false));
+    assert_eq!(package.policy.deps, Some(vec!["zlib".to_string()]));
+    assert_eq!(
+        package.policy.lints_deny,
+        Some(vec!["float_money".to_string()])
+    );
+}
+
+#[test]
+fn package_dependency_policy_checks_source_less_dependencies_once_in_order() {
+    let root = common::unique_tmp("policy_dependency_facts");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"policy\"\nversion: \"0.1.0\"\n\
+         deps: .{ a_denied: c@system, m_allowed: c@system, z_denied: js@\"widget#version=1@npm\" }\n\
+         policy: .{ deps: .List([\"m_allowed\"]) }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let dependency_names = bundle
+        .package_guarantees
+        .dependency_names
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dependency_names,
+        vec![
+            "a_denied".to_string(),
+            "m_allowed".to_string(),
+            "z_denied".to_string()
+        ]
+    );
+
+    let (diagnostics, _, _) = jet::Driver::check_file_with_effect_facts(
+        entry.to_str().unwrap(),
+        None,
+        false,
+    );
+    let policy_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E2960")
+        .collect::<Vec<_>>();
+    assert_eq!(policy_diagnostics.len(), 2, "{diagnostics:#?}");
+    assert!(policy_diagnostics[0].what.contains("a_denied"));
+    assert!(policy_diagnostics[1].what.contains("z_denied"));
+    assert!(policy_diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.what.contains("package.jet")));
+    assert!(!policy_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.what.contains("m_allowed")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn package_policy_declarations_inherit_to_imported_modules() {
+    let root = common::unique_tmp("policy_inherited_package");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"policy\"\nversion: \"0.1.0\"\n\
+         policy: .{ explicit_units: true }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.jet"), "use child\nfn run() {}\n").unwrap();
+    std::fs::write(root.join("child.jet"), "fn helper() {}\n").unwrap();
+
+    let entry = root.join("main.jet");
+    let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let child = bundle
+        .modules
+        .iter()
+        .find(|module| module.path.file_name().and_then(|name| name.to_str()) == Some("child.jet"))
+        .expect("imported child module");
+    assert!(child.policy_declarations.iter().any(|declaration| {
+        declaration.key == jet::Policy::PolicyKey::ExplicitUnits
+            && declaration.scope == jet::Policy::PolicyScope::Package
+            && declaration.source.ends_with("package.jet")
+    }));
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

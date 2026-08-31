@@ -103,8 +103,7 @@ fn target_arg(args: &[String], cwd: &Path) -> Result<String, String> {
         if matches!(
             arg.as_str(),
             jet::CLI::MACHINE_OUTPUT_FLAG | "--quiet" | "--no-color"
-        )
-            || arg.starts_with("--color=")
+        ) || arg.starts_with("--color=")
         {
             continue;
         }

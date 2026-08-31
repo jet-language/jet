@@ -2,12 +2,14 @@
 //! Canvas lens, Jupyter adapter, and bounded headless protocol.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::exit;
+use std::process::{exit, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
 use jet::REPL::Notebook::{self, ClientKind, Kernel};
@@ -15,6 +17,9 @@ use jet::REPL::Notebook::{self, ClientKind, Kernel};
 const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 64;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const BOOTSTRAP_ROUTE: &str = "/__jet_notebook_bootstrap";
+const BOOTSTRAP_TTL: Duration = Duration::from_secs(30);
 
 /// Dispatch `jet notebook [PATH] [--protocol] [--bind ADDR] [--token TOKEN]`.
 pub(crate) fn run_notebook(raw: &[String]) {
@@ -68,7 +73,8 @@ pub(crate) fn run_notebook(raw: &[String]) {
             }
         },
     };
-    match serve_loopback(kernel, addr, &token, path.as_deref()) {
+    let auto_open = io::stdin().is_terminal() && is_loopback(addr);
+    match serve_loopback(kernel, addr, &token, path.as_deref(), auto_open) {
         Ok(code) => exit(code),
         Err(error) => {
             crate::cli_error!("E2105", "notebook server failed: {error}");
@@ -154,10 +160,22 @@ fn serve_loopback(
     addr: &str,
     token: &str,
     path: Option<&Path>,
+    auto_open: bool,
 ) -> Result<i32, String> {
     let listener = TcpListener::bind(addr).map_err(|error| error.to_string())?;
     let bound = listener.local_addr().map_err(|error| error.to_string())?;
-    eprintln!("jet notebook listening on http://{bound}/#token={token}");
+    let bootstrap = if auto_open {
+        let nonce = mint_token()?;
+        let state = Arc::new(Mutex::new(Some(BootstrapGrant {
+            nonce: nonce.clone(),
+            expires_at: Instant::now() + BOOTSTRAP_TTL,
+        })));
+        open_notebook_browser(&bootstrap_url(bound, &nonce));
+        Some(state)
+    } else {
+        None
+    };
+    eprintln!("{}", listener_notice(bound));
     if let Some(path) = path {
         eprintln!("document: {}", path.display());
     } else {
@@ -181,10 +199,11 @@ fn serve_loopback(
         let shared = Arc::clone(&shared);
         let active_for_thread = Arc::clone(&active);
         let token = token.to_string();
+        let bootstrap = bootstrap.clone();
         let result = std::thread::Builder::new().spawn(move || {
             let stream = stream;
             let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
-            let _ = handle_connection(stream, &shared, &token);
+            let _ = handle_connection(stream, &shared, &token, bootstrap.as_deref());
             active_for_thread.fetch_sub(1, Ordering::AcqRel);
         });
         if result.is_err() {
@@ -192,6 +211,71 @@ fn serve_loopback(
         }
     }
     Ok(ExitCodes::OK)
+}
+
+struct BootstrapGrant {
+    nonce: String,
+    expires_at: Instant,
+}
+
+fn listener_notice(bound: SocketAddr) -> String {
+    format!("jet notebook listening on http://{bound}/ (authentication token withheld)")
+}
+
+fn bootstrap_url(bound: SocketAddr, nonce: &str) -> String {
+    format!(
+        "http://{bound}{BOOTSTRAP_ROUTE}?nonce={}",
+        fragment_component(nonce)
+    )
+}
+
+fn redirect_location(token: &str) -> String {
+    format!("/#token={}", fragment_component(token))
+}
+
+fn fragment_component(value: &str) -> String {
+    value.bytes().fold(String::new(), |mut encoded, byte| {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+        encoded
+    })
+}
+
+fn browser_launch_spec(explicit: Option<OsString>, url: &str) -> (OsString, Vec<OsString>) {
+    if let Some(browser) = explicit {
+        return (browser, vec![url.into()]);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        ("open".into(), vec![url.into()])
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Pass the URL directly to Explorer. `cmd /C start` would make URL
+        // metacharacters part of a command string.
+        ("explorer.exe".into(), vec![url.into()])
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        ("xdg-open".into(), vec![url.into()])
+    }
+}
+
+fn open_notebook_browser(url: &str) {
+    let explicit = std::env::var_os("JET_CANVAS_BROWSER")
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("BROWSER").filter(|value| !value.is_empty()));
+    let (program, args) = browser_launch_spec(explicit, url);
+    let mut command = Command::new(program);
+    command.args(args);
+    if let Err(error) = command.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        eprintln!(
+            "jet notebook browser handoff failed: {error}; set JET_CANVAS_BROWSER or BROWSER"
+        );
+    }
 }
 
 struct Request {
@@ -205,14 +289,30 @@ fn handle_connection(
     mut stream: TcpStream,
     kernel: &Arc<Mutex<Kernel>>,
     token: &str,
+    bootstrap: Option<&Mutex<Option<BootstrapGrant>>>,
 ) -> Result<(), String> {
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .set_read_timeout(Some(REQUEST_TIMEOUT))
         .map_err(|error| error.to_string())?;
     let request = read_request(&mut stream)?;
     let (route, query) = split_target(&request.target);
+    if request.method == "GET" && route == BOOTSTRAP_ROUTE {
+        let valid = bootstrap.is_some_and(|state| {
+            form_value(query, "nonce").is_some_and(|nonce| consume_bootstrap(state, &nonce))
+        });
+        return if valid {
+            write_redirect(&mut stream, token)
+        } else {
+            write_response(
+                &mut stream,
+                "401 Unauthorized",
+                "application/json; charset=utf-8",
+                &json_error("invalid or expired notebook bootstrap"),
+            )
+        };
+    }
     let public = request.method == "GET" && (route == "/" || route == "/index.html");
-    if !public && !authorized(&request, query, token) {
+    if !public && !authorized(&request, token) {
         return write_response(
             &mut stream,
             "401 Unauthorized",
@@ -460,9 +560,20 @@ fn merge_path(kernel: &mut Kernel, path: &Path) -> Result<String, String> {
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
+    read_request_until(stream, Instant::now() + REQUEST_TIMEOUT)
+}
+
+fn read_request_until(stream: &mut TcpStream, deadline: Instant) -> Result<Request, String> {
     let mut bytes = Vec::new();
     let header_end = loop {
         let mut chunk = [0u8; 4096];
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("request deadline exceeded".into());
+        }
+        stream
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| error.to_string())?;
         let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
         if count == 0 {
             return Err("request ended before headers".into());
@@ -499,6 +610,13 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     }
     while bytes.len() < header_end + length {
         let mut chunk = [0u8; 4096];
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("request deadline exceeded".into());
+        }
+        stream
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| error.to_string())?;
         let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
         if count == 0 {
             return Err("request ended before body".into());
@@ -519,12 +637,44 @@ fn split_target(target: &str) -> (&str, &str) {
     target.split_once('?').unwrap_or((target, ""))
 }
 
-fn authorized(request: &Request, query: &str, token: &str) -> bool {
+fn authorized(request: &Request, token: &str) -> bool {
+    let expected = format!("Bearer {token}");
     request
         .headers
         .get("authorization")
-        .is_some_and(|value| value == &format!("Bearer {token}"))
-        || form_value(query, "token").is_some_and(|value| value == token)
+        .is_some_and(|value| constant_time_eq(value.as_bytes(), expected.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= usize::from(
+            left.get(index).copied().unwrap_or_default()
+                ^ right.get(index).copied().unwrap_or_default(),
+        );
+    }
+    difference == 0
+}
+
+fn consume_bootstrap(state: &Mutex<Option<BootstrapGrant>>, nonce: &str) -> bool {
+    consume_bootstrap_at(state, nonce, Instant::now())
+}
+
+fn consume_bootstrap_at(state: &Mutex<Option<BootstrapGrant>>, nonce: &str, now: Instant) -> bool {
+    let Ok(mut grant) = state.lock() else {
+        return false;
+    };
+    if grant.as_ref().is_some_and(|grant| now >= grant.expires_at) {
+        *grant = None;
+        return false;
+    }
+    let matches = grant
+        .as_ref()
+        .is_some_and(|grant| constant_time_eq(grant.nonce.as_bytes(), nonce.as_bytes()));
+    if matches {
+        *grant = None;
+    }
+    matches
 }
 
 fn form_value(body: &str, key: &str) -> Option<String> {
@@ -570,6 +720,16 @@ fn write_response(
         .map_err(|error| error.to_string())
 }
 
+fn write_redirect(stream: &mut TcpStream, token: &str) -> Result<(), String> {
+    let location = redirect_location(token);
+    let response = format!(
+        "HTTP/1.1 303 See Other\r\nLocation: {location}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
 fn json_error(message: &str) -> String {
     format!("{{\"ok\":false,\"error\":{}}}", json_str(message))
 }
@@ -589,4 +749,141 @@ fn json_str(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listener_notice_withholds_the_bearer_token() {
+        let notice = listener_notice("127.0.0.1:43127".parse().unwrap());
+        assert_eq!(
+            notice,
+            "jet notebook listening on http://127.0.0.1:43127/ (authentication token withheld)"
+        );
+        assert!(!notice.contains("#token="));
+    }
+
+    #[test]
+    fn redirect_location_keeps_authentication_in_the_fragment() {
+        let bound = "127.0.0.1:43127".parse().unwrap();
+        assert_eq!(
+            format!("http://{bound}{}", redirect_location("a&b")),
+            "http://127.0.0.1:43127/#token=a%26b"
+        );
+        assert_eq!(redirect_location("a&b"), "/#token=a%26b");
+        assert!(!listener_notice(bound).contains("a&b"));
+    }
+
+    #[test]
+    fn browser_process_receives_bootstrap_nonce_without_bearer() {
+        let bound = "127.0.0.1:43127".parse().unwrap();
+        let bearer = "browser-bearer";
+        let url = bootstrap_url(bound, "0123456789abcdef0123456789abcdef");
+        let (_, args) = browser_launch_spec(Some("fake-browser".into()), &url);
+        assert_eq!(args, vec![OsString::from(url.clone())]);
+        assert!(!url.contains("#token="));
+        assert!(!url.contains(bearer));
+        assert!(args
+            .iter()
+            .all(|argument| !argument.to_string_lossy().contains(bearer)));
+    }
+
+    #[test]
+    fn bootstrap_nonce_is_single_use_and_not_a_bearer() {
+        let now = Instant::now();
+        let nonce = "0123456789abcdef0123456789abcdef";
+        let state = Mutex::new(Some(BootstrapGrant {
+            nonce: nonce.into(),
+            expires_at: now + BOOTSTRAP_TTL,
+        }));
+        assert!(!consume_bootstrap_at(&state, "wrong-nonce", now));
+        assert!(consume_bootstrap_at(&state, nonce, now));
+        assert!(!consume_bootstrap_at(&state, nonce, now));
+
+        let request = Request {
+            method: "POST".into(),
+            target: "/api/state".into(),
+            headers: HashMap::from([(String::from("authorization"), format!("Bearer {nonce}"))]),
+            body: String::new(),
+        };
+        assert!(!authorized(&request, "actual-bearer"));
+    }
+
+    #[test]
+    fn bootstrap_nonce_expires_and_is_removed() {
+        let now = Instant::now();
+        let state = Mutex::new(Some(BootstrapGrant {
+            nonce: "expired-nonce".into(),
+            expires_at: now,
+        }));
+        assert!(!consume_bootstrap_at(&state, "expired-nonce", now));
+        assert!(state.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn minted_bootstrap_nonce_is_fresh_and_hex_encoded() {
+        let first = mint_token().unwrap();
+        let second = mint_token().unwrap();
+        assert_eq!(first.len(), 32);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, "0".repeat(32));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn notebook_auth_ignores_query_tokens_and_compares_the_bearer_header() {
+        let request = Request {
+            method: "POST".into(),
+            target: "/api/state?token=attacker-query".into(),
+            headers: HashMap::from([(
+                String::from("authorization"),
+                String::from("Bearer local-secret"),
+            )]),
+            body: String::new(),
+        };
+        assert!(authorized(&request, "local-secret"));
+
+        let query_only = Request {
+            headers: HashMap::new(),
+            ..request
+        };
+        assert!(!authorized(&query_only, "local-secret"));
+
+        let wrong = Request {
+            headers: HashMap::from([(
+                String::from("authorization"),
+                String::from("Bearer local-secrex"),
+            )]),
+            ..query_only
+        };
+        assert!(!authorized(&wrong, "local-secret"));
+    }
+
+    #[test]
+    fn partial_notebook_request_cannot_extend_the_absolute_deadline() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        let writer = std::thread::spawn(move || {
+            let mut client = client;
+            for _ in 0..200 {
+                if std::io::Write::write_all(&mut client, b"G").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+
+        let started = Instant::now();
+        let result = read_request_until(&mut server, started + Duration::from_millis(80));
+        assert!(result.is_err(), "incomplete request unexpectedly succeeded");
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "incomplete request outlived its absolute deadline"
+        );
+        drop(server);
+        writer.join().unwrap();
+    }
 }

@@ -64,7 +64,9 @@ impl<'a> Checker<'a> {
             ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") => {
                 Some(Type::Named(name.to_string()))
             }
-            ("core.encoding.csv", "CSVReader" | "CSVWriter") => Some(Type::Named(name.to_string())),
+            ("core.encoding.csv", "CSVReader" | "CSVWriter" | "CSVRow") => {
+                Some(Type::Named(name.to_string()))
+            }
             ("core.encoding.xml", "XMLReader" | "XMLWriter") => Some(Type::Named(name.to_string())),
             ("core.encoding.cbor", "CBORReader" | "CBORWriter") => {
                 Some(Type::Named(name.to_string()))

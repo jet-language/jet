@@ -284,9 +284,22 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
             }
         })
         .flatten();
-    if let Some(plan) =
+    if let Some(mut plan) =
         cli_plan_from_schema(schema, &module.items, cli_items, type_identity.as_deref())
     {
+        if let Some(output) = module.items.iter().find_map(|item| match item {
+            Item::Const(value) => value
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected && output.params.len() == 1),
+            _ => None,
+        }) {
+            plan.user_run = output.lowered_name.clone();
+            plan.run_returns_value = !matches!(
+                output.failure_contract().effective_type(),
+                Type::Named(name) if name == jet_foundation::Syntax::INTERNAL_UNIT_TYPE
+            );
+        }
         install_cli_plan(plan);
     }
 }

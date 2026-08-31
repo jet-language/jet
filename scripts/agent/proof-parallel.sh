@@ -42,8 +42,14 @@ if [ "${#suites[@]}" -eq 0 ] && [ "${#crates[@]}" -eq 0 ]; then
   exit 2
 fi
 
-# ── scratch on disk, never in RAM ────────────────────────────────────────────
-scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-test-scratch}"
+# ── scratch on disk, never in RAM, never shared with lanes ───────────────────
+# Implementation lanes export TMPDIR=$HOME/.cache/jet-test-scratch and write
+# hostile fixtures there (symlinks, special files, unreadable dirs). A proof run
+# that shares that directory walks another lane's fixture and fails an unrelated
+# suite: one lane's `card1377/tower-docs-*/docs/race` symlink turned all eight
+# `ice_regressions` bucket tests red with E1334 while the same tests pass 17/17
+# under an isolated root. Proof therefore gets its own scratch by default.
+scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-proof-scratch}"
 mkdir -p "$scratch"
 case "$(df -P "$scratch" | awk 'NR==2 {print $1}')" in
   tmpfs|none)

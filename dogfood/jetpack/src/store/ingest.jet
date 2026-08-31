@@ -75,14 +75,6 @@ fn fail_after_stage(stage_output: String, error: IngestError) IngestResult !Inge
     return Err(error)
 }
 
-fn same_strings(left: [String], right: [String]) Bool !IngestError -> {
-    if left.len() != right.len() -> return Ok(false)
-    loop (index, value) in left {
-        if value != right[index] -> return Ok(false)
-    }
-    return Ok(true)
-}
-
 fn same_stat(left: Stat, right: Stat) Bool !IngestError -> {
     return Ok(left.is_file == right.is_file && left.is_dir == right.is_dir && left.is_symlink == right.is_symlink && left.size == right.size && left.mode == right.mode)
 }
@@ -127,9 +119,9 @@ fn validate_relative_link(link_relative: String, target: String) Bool !IngestErr
 }
 
 fn validate_destination(path: String, store_root: String, label: String) Bool !IngestError -> {
-    candidate :: Path.from(path).normalize().to_string()
-    base :: Path.from(store_root).normalize().to_string()
-    if candidate != base && !candidate.starts_with("{base}/") {
+    candidate :: Path.from(~path).normalize()
+    base :: Path.from(~store_root).normalize()
+    if !candidate.is_within(~base) {
         return Err(IngestError{message: "{label} leaves the store root"})
     }
     return Ok(true)
@@ -172,7 +164,7 @@ fn copy_node(source: String, destination: String, source_root: String, relative:
             copy_node(~child_source, ~child_destination, ~source_root, ~child_relative, ~store_root) ?? return Err(IngestError{message: "source path {child_relative} cannot be copied"})
         }
         names_after :: directory_names(~source)
-        if !same_strings(~names_before, ~names_after) {
+        if names_before != names_after {
             return Err(IngestError{message: "source directory {relative} changed while copying"})
         }
         return Ok(true)
@@ -316,21 +308,32 @@ fn projection_entries(root: String, relative: String, out: &[String]) Bool !Inge
     return Err(IngestError{message: "tree path {relative} has an unsupported file kind"})
 }
 
-fn json_string(value: String) String !IngestError -> {
-    return json.to_string(DataTree.Text(~value))
-}
-
 fn metadata_json(request: IngestRequest, output_hash: String, payload_root: String) String !IngestError -> {
-    name :: json_string(~request.name)
-    version :: json_string(~request.version)
-    reference :: json_string(~request.reference)
-    out :: json_string(~payload_root)
-    empty :: json_string("")
-    hash :: json_string(~output_hash)
-    platform :: json_string("native")
-    provenance :: json_string("jetpack-ingest")
-    named_outputs :: "{{\"out\":{hash}}}"
-    return Ok("{{\n  \"name\": {name},\n  \"version\": {version},\n  \"ref\": {reference},\n  \"out\": {out},\n  \"bin\": {empty},\n  \"rlib\": {empty},\n  \"output_hash\": {hash},\n  \"platform\": {platform},\n  \"signature\": {empty},\n  \"provenance\": {provenance},\n  \"source_fingerprint\": {empty},\n  \"recipe_fingerprint\": {empty},\n  \"policy_fingerprint\": {empty},\n  \"identity_platform\": {platform},\n  \"references\": [],\n  \"named_outputs\": {named_outputs},\n  \"platform_artifact_kind\": {empty},\n  \"producer_record\": {empty},\n  \"receipt\": {empty},\n  \"realized_at\": 0,\n  \"last_used_at\": \"0\"\n}}")
+    empty := DataTree.Text("")
+    platform := DataTree.Text("native")
+    return Ok(json.to_string(DataTree.Object([
+        "name": DataTree.Text(~request.name),
+        "version": DataTree.Text(~request.version),
+        "ref": DataTree.Text(~request.reference),
+        "out": DataTree.Text(~payload_root),
+        "bin": empty,
+        "rlib": empty,
+        "output_hash": DataTree.Text(~output_hash),
+        "platform": platform,
+        "signature": empty,
+        "provenance": DataTree.Text("jetpack-ingest"),
+        "source_fingerprint": empty,
+        "recipe_fingerprint": empty,
+        "policy_fingerprint": empty,
+        "identity_platform": platform,
+        "references": DataTree.Array([DataTree]{}),
+        "named_outputs": DataTree.Object(["out": DataTree.Text(~output_hash)]),
+        "platform_artifact_kind": empty,
+        "producer_record": empty,
+        "receipt": empty,
+        "realized_at": DataTree.Int(0),
+        "last_used_at": DataTree.Text("0")
+    ])))
 }
 
 fn safe_entry_id(name: String, version: String, reference: String, payload_root: String) String !IngestError -> {

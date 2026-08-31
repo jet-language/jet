@@ -53,11 +53,22 @@ pub fn bind(
     let functions = parse(declarations)?;
     let descriptor = *binder_descriptor(ForeignLanguage::JS)
         .ok_or_else(|| BindError::Source("JS binder descriptor is not registered".into()))?;
-    let _declaration_path = declaration_path.canonicalize().map_err(|error| {
+    let declaration_path = declaration_path.canonicalize().map_err(|error| {
         BindError::Io(format!(
             "could not resolve TypeScript declarations: {error}"
         ))
     })?;
+    let on_disk_declarations = std::fs::read_to_string(&declaration_path).map_err(|error| {
+        BindError::Io(format!(
+            "could not read TypeScript declarations from {}: {error}",
+            declaration_path.display()
+        ))
+    })?;
+    if on_disk_declarations != declarations {
+        return Err(BindError::Source(
+            "TypeScript declaration text does not match the declared source file".into(),
+        ));
+    }
     let runtime_path = runtime_path
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve JavaScript runtime: {error}")))?;
@@ -79,17 +90,21 @@ pub fn bind(
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve JavaScript worker: {error}")))?;
     let abi = format!("jet_js_{lib}");
-    let identity = ForeignBridge::scalar_bridge_identity(
+    let sources = [
+        ("runtime", runtime_path.as_path()),
+        ("declaration", declaration_path.as_path()),
+    ];
+    let identity = ForeignBridge::scalar_bridge_identity_with_sources(
         descriptor,
         lib,
         &abi,
         "node",
-        &runtime_path,
+        &sources,
         &worker,
         &functions,
     )
     .map_err(BindError::Source)?;
-    let archive = ForeignBridge::compile_scalar_sidecar_with_identity(
+    let archive = ForeignBridge::compile_scalar_sidecar_with_identity_and_sources(
         cache,
         &identity,
         &abi,
@@ -97,15 +112,17 @@ pub fn bind(
         &worker,
         &runtime_path,
         descriptor,
+        &sources,
         &functions,
     )
     .map_err(BindError::Source)?;
-    let provenance_path = ForeignBridge::write_scalar_provenance_with_functions(
+    let provenance_path = ForeignBridge::write_scalar_provenance_with_sources(
         cache,
         lib,
         descriptor,
         "node",
         &runtime_path,
+        &sources,
         &worker,
         &archive,
         &functions,

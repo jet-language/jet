@@ -16,6 +16,7 @@ mod duration_semantics {
 }
 
 mod time_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
@@ -787,9 +788,17 @@ mod tests {
 }
 
 pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+    cmp_ref(&a, &b, span)
+}
+
+fn cmp_ref(
+    a: &CtValue,
+    b: &CtValue,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
     if matches!(
-        (&a, &b),
+        (a, b),
         (
             Struct {
                 type_name: left_name,
@@ -802,24 +811,33 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
         ) if left_name == crate::Syntax::TYPE_FRACTION
             && right_name == crate::Syntax::TYPE_FRACTION
     ) {
-        let left = crate::Numeric::CtFraction::from_value(&a)
+        let left = crate::Numeric::CtFraction::from_value(a)
             .map_err(|error| unsupported(&error, span))?;
-        let right = crate::Numeric::CtFraction::from_value(&b)
+        let right = crate::Numeric::CtFraction::from_value(b)
             .map_err(|error| unsupported(&error, span))?;
         return Ok(left.cmp(&right));
     }
     match (a, b) {
-        (Int(a), Int(b)) => Ok(a.cmp(&b)),
+        (Int(a), Int(b)) => Ok(a.cmp(b)),
         (Float(a), Float(b)) => a
-            .partial_cmp(b)
+            .partial_cmp(*b)
             .ok_or_else(|| unsupported("comparing NaN", span)),
-        (Bool(a), Bool(b)) => Ok(a.cmp(&b)),
-        (Char(a), Char(b)) => Ok(a.cmp(&b)),
-        (Str(a), Str(b)) => Ok(a.cmp(&b)),
-        (left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
-            Ok(exact_big(&left)
+        (Bool(a), Bool(b)) => Ok(a.cmp(b)),
+        (Char(a), Char(b)) => Ok(a.cmp(b)),
+        (Str(a), Str(b)) => Ok(a.cmp(b)),
+        (List(left), List(right)) => {
+            for (left, right) in left.iter().zip(right) {
+                let ordering = cmp_ref(left, right, span)?;
+                if ordering != std::cmp::Ordering::Equal {
+                    return Ok(ordering);
+                }
+            }
+            Ok(left.len().cmp(&right.len()))
+        }
+        (left, right) if exact_big(left).is_some() && exact_big(right).is_some() => {
+            Ok(exact_big(left)
                 .expect("whole-number comparison")
-                .compare(&exact_big(&right).expect("whole-number comparison")))
+                .compare(&exact_big(right).expect("whole-number comparison")))
         }
         _ => Err(unsupported("comparing these values", span)),
     }
@@ -982,6 +1000,26 @@ pub fn apply_static_type_method(
                     s
                 )))),
             }))
+        }
+        ("Int", "from_radix") => {
+            let [CtValue::Str(text), radix] = args.as_slice() else {
+                return Some(Err(unsupported(
+                    "Int.from_radix expects text and an integer radix",
+                    span,
+                )));
+            };
+            let Some(radix) = exact_big(radix).and_then(|value| value.try_i64()) else {
+                return Some(Err(unsupported("integer radix must fit in Int", span)));
+            };
+            let Ok(radix) = u32::try_from(radix) else {
+                let message = format!("integer radix must be between 2 and 36, got {radix}");
+                return Some(Err(unsupported(&message, span)));
+            };
+            Some(
+                crate::Numeric::CtBigInt::from_radix(text, radix)
+                    .map(exact_int_value)
+                    .map_err(|message| unsupported(&message, span)),
+            )
         }
         ("Float", "parse") => {
             let s = match args.into_iter().next() {
@@ -1455,6 +1493,23 @@ pub fn apply_method(
         return result;
     }
     match (recv, method) {
+        (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "to_radix") => {
+            let [radix] = args.as_slice() else {
+                return Err(unsupported("Int.to_radix expects one radix", span));
+            };
+            let Some(radix) = exact_big(radix).and_then(|value| value.try_i64()) else {
+                return Err(unsupported("integer radix must fit in Int", span));
+            };
+            let Ok(radix) = u32::try_from(radix) else {
+                let message = format!("integer radix must be between 2 and 36, got {radix}");
+                return Err(unsupported(&message, span));
+            };
+            exact_big(value)
+                .expect("whole-number radix receiver")
+                .to_radix(radix)
+                .map(CtValue::Str)
+                .map_err(|message| unsupported(&message, span))
+        }
         // Universal
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
         // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
@@ -1491,6 +1546,32 @@ pub fn apply_method(
                     )
                 },
             )
+        }
+        // D-DATATREE-ERGO1=A: dynamic tree methods marshal through the shared
+        // Prelude implementation. The type guard keeps ordinary user enums
+        // from acquiring DataTree-only operations in the interpreter.
+        (
+            v @ CtValue::Enum { type_name, .. },
+            "to_text",
+        ) if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+            Ok(match super::SyncLite::datatree_to_text(v) {
+                Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                None => CtValue::absent(Type::String),
+            })
+        }
+        (
+            v @ CtValue::Enum { type_name, .. },
+            "equal_unordered",
+        ) if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+            let Some(other) = args.into_iter().next() else {
+                return Err(unsupported(
+                    "`.equal_unordered` requires one DataTree argument",
+                    span,
+                ));
+            };
+            Ok(CtValue::Bool(super::SyncLite::datatree_equal_unordered(
+                v, &other,
+            )))
         }
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
         // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
@@ -2498,7 +2579,22 @@ pub fn apply_method(
         (CtValue::Struct { type_name, fields }, method)
             if matches!(
                 type_name.as_str(),
-                "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap"
+                "CompilerLexed"
+                    | "CompilerSyntaxTree"
+                    | "CompilerChecked"
+                    | "CompilerSourceMap"
+                    | "CompilerPackageError"
+                    | "CompilerDependency"
+                    | "CompilerPackageTarget"
+                    | "CompilerPackageOutput"
+                    | "CompilerBuildProfile"
+                    | "CompilerManifest"
+                    | "CompilerPackage"
+                    | "CompilerLockedPackage"
+                    | "CompilerLock"
+                    | "CompilerKeyValue"
+                    | "CompilerProfile"
+                    | "CompilerProfileSet"
             ) =>
         {
             Ok(fields

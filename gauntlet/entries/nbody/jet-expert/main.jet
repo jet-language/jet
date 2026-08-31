@@ -1,6 +1,10 @@
 use core.math as math
-use core.process as process
 use core.text.fmt as fmt
+
+#CLI
+struct Args {
+    steps: Int
+}
 
 // D-SIMD3=B: keep the body coordinates together so native AOT can
 // auto-vectorize the fixed-width lane operations. The fourth lane is zero.
@@ -40,8 +44,8 @@ fn energy(
     return total
 }
 
-fn run() {
-    steps :: Int.parse(process.argv().get(1) ?? "50000") ?? 50000
+fn run(args: Args) {
+    steps :: args.steps
     pi :: Float{3.141592653589793}
     solar_mass :: Float{4.0} * pi * pi
     year :: Float{365.24}
@@ -105,64 +109,77 @@ fn run() {
     remaining := steps
     loop remaining > 0 {
         d01 :: p0 - p1
-        ds01 :: (d01 * d01).sum()
-        mag01 :: dt / (ds01 * math.sqrt(ds01))
-        v0 -= d01 * F64x4.splat(m1 * mag01)
-        v1 += d01 * F64x4.splat(m0 * mag01)
-
         d02 :: p0 - p2
-        ds02 :: (d02 * d02).sum()
-        mag02 :: dt / (ds02 * math.sqrt(ds02))
-        v0 -= d02 * F64x4.splat(m2 * mag02)
-        v2 += d02 * F64x4.splat(m0 * mag02)
-
         d03 :: p0 - p3
-        ds03 :: (d03 * d03).sum()
-        mag03 :: dt / (ds03 * math.sqrt(ds03))
-        v0 -= d03 * F64x4.splat(m3 * mag03)
-        v3 += d03 * F64x4.splat(m0 * mag03)
-
         d04 :: p0 - p4
-        ds04 :: (d04 * d04).sum()
-        mag04 :: dt / (ds04 * math.sqrt(ds04))
-        v0 -= d04 * F64x4.splat(m4 * mag04)
-        v4 += d04 * F64x4.splat(m0 * mag04)
-
         d12 :: p1 - p2
-        ds12 :: (d12 * d12).sum()
-        mag12 :: dt / (ds12 * math.sqrt(ds12))
-        v1 -= d12 * F64x4.splat(m2 * mag12)
-        v2 += d12 * F64x4.splat(m1 * mag12)
-
         d13 :: p1 - p3
-        ds13 :: (d13 * d13).sum()
-        mag13 :: dt / (ds13 * math.sqrt(ds13))
-        v1 -= d13 * F64x4.splat(m3 * mag13)
-        v3 += d13 * F64x4.splat(m1 * mag13)
-
         d14 :: p1 - p4
-        ds14 :: (d14 * d14).sum()
-        mag14 :: dt / (ds14 * math.sqrt(ds14))
-        v1 -= d14 * F64x4.splat(m4 * mag14)
-        v4 += d14 * F64x4.splat(m1 * mag14)
-
         d23 :: p2 - p3
-        ds23 :: (d23 * d23).sum()
-        mag23 :: dt / (ds23 * math.sqrt(ds23))
-        v2 -= d23 * F64x4.splat(m3 * mag23)
-        v3 += d23 * F64x4.splat(m2 * mag23)
-
         d24 :: p2 - p4
-        ds24 :: (d24 * d24).sum()
-        mag24 :: dt / (ds24 * math.sqrt(ds24))
-        v2 -= d24 * F64x4.splat(m4 * mag24)
-        v4 += d24 * F64x4.splat(m2 * mag24)
-
         d34 :: p3 - p4
-        ds34 :: (d34 * d34).sum()
-        mag34 :: dt / (ds34 * math.sqrt(ds34))
-        v3 -= d34 * F64x4.splat(m4 * mag34)
-        v4 += d34 * F64x4.splat(m3 * mag34)
+
+        dx0 :: F64x4(d01[0], d02[0], d03[0], d04[0])
+        dy0 :: F64x4(d01[1], d02[1], d03[1], d04[1])
+        dz0 :: F64x4(d01[2], d02[2], d03[2], d04[2])
+        squared0 :: dx0 * dx0 + dy0 * dy0 + dz0 * dz0
+
+        dx1 :: F64x4(d12[0], d13[0], d14[0], d23[0])
+        dy1 :: F64x4(d12[1], d13[1], d14[1], d23[1])
+        dz1 :: F64x4(d12[2], d13[2], d14[2], d23[2])
+        squared1 :: dx1 * dx1 + dy1 * dy1 + dz1 * dz1
+
+        dx2 :: F64x4(d24[0], d34[0], 0.0, 0.0)
+        dy2 :: F64x4(d24[1], d34[1], 0.0, 0.0)
+        dz2 :: F64x4(d24[2], d34[2], 0.0, 0.0)
+        squared2 :: dx2 * dx2 + dy2 * dy2 + dz2 * dz2
+
+        roots0 :: F64x4(
+            math.sqrt(squared0[0]),
+            math.sqrt(squared0[1]),
+            math.sqrt(squared0[2]),
+            math.sqrt(squared0[3])
+        )
+        force0 :: dt_vec / (squared0 * roots0)
+
+        roots1 :: F64x4(
+            math.sqrt(squared1[0]),
+            math.sqrt(squared1[1]),
+            math.sqrt(squared1[2]),
+            math.sqrt(squared1[3])
+        )
+        force1 :: dt_vec / (squared1 * roots1)
+
+        roots2 :: F64x4(
+            math.sqrt(squared2[0]),
+            math.sqrt(squared2[1]),
+            math.sqrt(squared2[2]),
+            math.sqrt(squared2[3])
+        )
+        force2 :: dt_vec / (squared2 * roots2)
+
+        v0 -= d01 * F64x4.splat(m1 * force0[0])
+        v1 += d01 * F64x4.splat(m0 * force0[0])
+        v0 -= d02 * F64x4.splat(m2 * force0[1])
+        v2 += d02 * F64x4.splat(m0 * force0[1])
+        v0 -= d03 * F64x4.splat(m3 * force0[2])
+        v3 += d03 * F64x4.splat(m0 * force0[2])
+        v0 -= d04 * F64x4.splat(m4 * force0[3])
+        v4 += d04 * F64x4.splat(m0 * force0[3])
+
+        v1 -= d12 * F64x4.splat(m2 * force1[0])
+        v2 += d12 * F64x4.splat(m1 * force1[0])
+        v1 -= d13 * F64x4.splat(m3 * force1[1])
+        v3 += d13 * F64x4.splat(m1 * force1[1])
+        v1 -= d14 * F64x4.splat(m4 * force1[2])
+        v4 += d14 * F64x4.splat(m1 * force1[2])
+        v2 -= d23 * F64x4.splat(m3 * force1[3])
+        v3 += d23 * F64x4.splat(m2 * force1[3])
+
+        v2 -= d24 * F64x4.splat(m4 * force2[0])
+        v4 += d24 * F64x4.splat(m2 * force2[0])
+        v3 -= d34 * F64x4.splat(m4 * force2[1])
+        v4 += d34 * F64x4.splat(m3 * force2[1])
 
         p0 += dt_vec * v0
         p1 += dt_vec * v1

@@ -86,6 +86,28 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
             Some(span),
         );
     }
+    if module == "core.crypto" {
+        if let Some(algorithm) = name.strip_suffix("_bytes") {
+            let digest = match algorithm {
+                "sha256" | "blake3" => "Digest256",
+                "sha512" => "Digest512",
+                _ => "",
+            };
+            if !digest.is_empty() {
+                return Diagnostic::error(
+                    "E1004",
+                    format!("`crypto.{name}` was retired"),
+                    format!(
+                        "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit"
+                    ),
+                    format!(
+                        "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes"
+                    ),
+                    Some(span),
+                );
+            }
+        }
+    }
     let items = core_module_items(module);
     // #2002: the module DOES expose `name`. Claiming it has no such item, and
     // then "suggesting" that same name back, is two false statements produced by
@@ -218,9 +240,9 @@ pub(crate) fn e2411(ty: &Type, encode: bool, span: Span) -> Diagnostic {
     };
     Diagnostic::error(
         "E2411",
-        format!("{ty} can't be {verb}"),
-        format!("only types that opt in (and their fields) have a wire form; {ty} does not"),
-        format!("add {marker} to {ty}, or remove it from the encoded value"),
+        format!("`{ty}` can't be {verb}"),
+        format!("only types that opt in (and their fields) have a wire form; `{ty}` does not"),
+        format!("add {marker} to `{ty}`, or remove it from the encoded value"),
         Some(span),
     )
 }
@@ -470,9 +492,81 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     }
 }
 
+fn invalid_union_decode_shapes(items: &[crate::AST::Item], ty: &Type) -> bool {
+    if let Type::Union(members) = ty {
+        let mut seen = Vec::new();
+        for member in members {
+            let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+                return true;
+            };
+            for shape in shapes {
+                if seen.contains(&shape) {
+                    return true;
+                }
+                seen.push(shape);
+            }
+        }
+    }
+    match ty {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => invalid_union_decode_shapes(items, inner),
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
+            invalid_union_decode_shapes(items, key) || invalid_union_decode_shapes(items, value)
+        }
+        Type::Apply { args, .. } | Type::Union(args) => args
+            .iter()
+            .any(|arg| invalid_union_decode_shapes(items, arg)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| invalid_union_decode_shapes(items, field)),
+        Type::Fn { params, ret, .. } => {
+            params
+                .iter()
+                .any(|param| invalid_union_decode_shapes(items, param))
+                || ret
+                    .as_deref()
+                    .is_some_and(|ret| invalid_union_decode_shapes(items, ret))
+        }
+        _ => false,
+    }
+}
+
+fn invalid_generated_union_decode_shapes(
+    items: &[crate::AST::Item],
+    definition: &crate::AST::EnumDef,
+) -> bool {
+    if !definition.name.starts_with("__JetUnion_") {
+        return false;
+    }
+    let mut seen = Vec::new();
+    for variant in &definition.variants {
+        let crate::AST::VariantPayload::Single(member, _) = &variant.payload else {
+            continue;
+        };
+        let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+            return true;
+        };
+        for shape in shapes {
+            if seen.contains(&shape) {
+                return true;
+            }
+            seen.push(shape);
+        }
+    }
+    false
+}
+
 /// Generated serde bodies are implementation detail. When the declaration pass
-/// already reports E2411 for a field, checking that synthetic body would only
-/// repeat the same problem as E0905 at a generated-code span.
+/// already reports an invalid field, default, or union wire shape, checking
+/// that synthetic body would only repeat the same problem at a generated-code
+/// span.
 pub(crate) fn invalid_serde_derive_impls(
     items: &[crate::AST::Item],
     reg: &TraitRegistry,
@@ -500,7 +594,13 @@ pub(crate) fn invalid_serde_derive_impls(
                     invalid.insert((s.name.clone(), crate::Generics::ENCODE.to_string()));
                 }
                 if s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-                    && fields.iter().any(|f| !is_decodable_ty(&f.ty, reg))
+                    && (fields.iter().any(|f| {
+                        !is_decodable_ty(&f.ty, reg)
+                            || invalid_union_decode_shapes(items, &f.ty)
+                    }) || s
+                        .fields
+                        .iter()
+                        .any(|f| f.default.is_some() && f.default_ct.is_none()))
                 {
                     invalid.insert((s.name.clone(), crate::Generics::DECODE.to_string()));
                 }
@@ -523,7 +623,10 @@ pub(crate) fn invalid_serde_derive_impls(
                     invalid.insert((e.name.clone(), crate::Generics::ENCODE.to_string()));
                 }
                 if e.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-                    && payloads.iter().any(|t| !is_decodable_ty(t, reg))
+                    && (payloads.iter().any(|t| {
+                        !is_decodable_ty(t, reg)
+                            || invalid_union_decode_shapes(items, t)
+                    }) || invalid_generated_union_decode_shapes(items, e))
                 {
                     invalid.insert((e.name.clone(), crate::Generics::DECODE.to_string()));
                 }
@@ -774,11 +877,11 @@ pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic 
     let why = if !signed && bits == 8 {
         "binary APIs use one byte per value".to_string()
     } else {
-        format!("{article} {spelling} is a fixed-width number — values outside its range can't fit")
+        format!("{article} `{spelling}` is a fixed-width number — values outside its range can't fit")
     };
     Diagnostic::error(
         "E1003",
-        format!("{article} {spelling} holds {lo}..{hi}"),
+        format!("{article} `{spelling}` holds {lo}..{hi}"),
         why,
         format!("use a number from {lo} through {hi}"),
         Some(span),

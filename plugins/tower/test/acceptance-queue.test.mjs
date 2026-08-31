@@ -190,8 +190,10 @@ const PORT = 17959;
 const server = serve(store, PORT, false);
 after(() => server.close());
 const url = (p) => `http://localhost:${PORT}${p}`;
-const post = async (route, body) => {
-  const r = await fetch(url('/api/' + route), { method: 'POST', body: JSON.stringify(body) });
+const post = async (route, body, headers = {}) => {
+  const requestHeaders = { 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers };
+  if (body?.by === 'owner' && !requestHeaders.cookie) requestHeaders.cookie = await ownerSession();
+  const r = await fetch(url('/api/' + route), { method: 'POST', headers: requestHeaders, body: JSON.stringify(body) });
   return { status: r.status, json: await r.json() };
 };
 const fullCard = async (ref) => (await (await fetch(url(`/api/card?id=${encodeURIComponent(ref)}`))).json()).card;
@@ -206,7 +208,7 @@ const ownerSession = async () => {
 const ownerResolve = async (cookie, decisionId, outcome, comment) => {
   const issued = await fetch(url('/api/acceptance/challenge'), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify' },
+    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' },
     body: JSON.stringify({ decisionId, outcome }),
   });
   const issuedBody = await issued.json();
@@ -214,7 +216,7 @@ const ownerResolve = async (cookie, decisionId, outcome, comment) => {
   const challenge = issuedBody.result;
   const resolved = await fetch(url('/api/acceptance/resolve'), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify' },
+    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' },
     body: JSON.stringify({ challenge: challenge.challenge, decisionId, outcome, comment }),
   });
   return { status: resolved.status, json: await resolved.json(), challenge: challenge.challenge };
@@ -244,14 +246,19 @@ test('forged #515/#516 path: generic clearance rejects caller-supplied owner and
     { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'owner' },
     { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'agent', quote: 'owner said accept' },
   ]) {
-    const r = await post('clearance', payload);
+    const headers = payload.by === 'owner' ? { cookie: 'tower=forged' } : {};
+    const r = await post('clearance', payload, headers);
     assert.equal(r.status, 403);
     assert.equal(r.json.error, 'E_ACCEPTANCE_OWNER_UI');
   }
   const state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards.find(c => c.num === 1).phase, 'verify');
   assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').status, 'open');
-  assert.equal(state.events.filter(e => e.action === 'acceptance.reject' && e.ref === 'D-ACCEPT-1').length, 2);
+  assert.deepEqual(
+    state.events.filter(e => e.action === 'acceptance.reject' && e.ref === 'D-ACCEPT-1').map(e => e.by),
+    ['agent', 'unknown'],
+    'caller-supplied owner attribution must not enter the rejection audit log',
+  );
 });
 
 test('generic clearance batch rejects acceptance atomically and audits it', async () => {
@@ -321,25 +328,24 @@ test('owner provenance fails closed for missing session, replay, and wrong decis
   await post('card/criteria-add', { id: '#4', text: 'does the thing', by: 'planner' });
   await post('card/criteria-meet', { id: '#4', n: 1, evidence: 'built', by: 'builder' });
   await post('card/update', { id: '#4', phase: 'done', by: 'builder' });
-  let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
   assert.equal(r.status, 403);
   const cookie = await ownerSession();
-  // Owner order 2026-07-12: remote (forwarded) devices act as owner too —
-  // a sessioned, marked request from a non-loopback address succeeds.
-  r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.1' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
-  assert.equal(r.status, 200);
+  // A forwarded remote address cannot reuse a loopback-only, no-token session.
+  r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.1', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  assert.equal(r.status, 401);
   const issue = async () => {
-    const issued = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+    const issued = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
     return (await issued.json()).result.challenge;
   };
   let challenge = await issue();
-  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-4', outcome: 'accept' }) });
+  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-4', outcome: 'accept' }) });
   assert.equal(r.status, 403);
   challenge = await issue();
-  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-3', outcome: 'bounce' }) });
+  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-3', outcome: 'bounce' }) });
   assert.equal(r.status, 403);
   const ok = await ownerResolve(cookie, 'D-ACCEPT-3', 'accept');
-  const replay = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge: ok.challenge, decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  const replay = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ challenge: ok.challenge, decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
   assert.equal(replay.status, 403);
 });
 
@@ -351,14 +357,14 @@ test('double-click: two independently-challenged accept attempts on the same bal
   const cookie = await ownerSession();
   const issue = async () => {
     const issued = await fetch(url('/api/acceptance/challenge'), {
-      method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' },
+      method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' },
       body: JSON.stringify({ decisionId: 'D-ACCEPT-4', outcome: 'accept' }),
     });
     return (await issued.json()).result.challenge;
   };
   const [chA, chB] = await Promise.all([issue(), issue()]);
   const resolve = (challenge) => fetch(url('/api/acceptance/resolve'), {
-    method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' },
+    method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' },
     body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-4', outcome: 'accept' }),
   });
   const [rA, rB] = await Promise.all([resolve(chA), resolve(chB)]);
@@ -372,11 +378,7 @@ test('double-click: two independently-challenged accept attempts on the same bal
   assert.equal((await fullCard('#4')).phase, 'done', 'card closes exactly once');
 });
 
-// Owner order 2026-07-12: no loopback/token restriction on owner
-// verification — any device that reaches the board acts as the owner
-// (single-owner LAN/tailnet tool). Session + UI-marker + challenge
-// provenance still apply; only the transport gate is gone.
-test('remote device: accepted without any auth.token — restriction removed by owner order', async () => {
+test('remote device: no auth.token means owner verification stays loopback-only', async () => {
   const rdir = mkdtempSync(join(tmpdir(), 'tower-avq-remote-'));
   writeJSON(join(rdir, 'tower.json'), empty('Remote'));
   writeJSON(configFile(rdir), { project: 'Remote' });
@@ -385,33 +387,28 @@ test('remote device: accepted without any auth.token — restriction removed by 
   const rserver = serve(rstore, rport, false);
   const rurl = (p) => `http://localhost:${rport}${p}`;
   try {
-    await fetch(rurl('/api/card/add'), { method: 'POST', body: JSON.stringify({ title: 'Remote card', needsAcceptance: true, by: 'owner' }) });
-    await fetch(rurl('/api/card/criteria-add'), { method: 'POST', body: JSON.stringify({ id: '#1', text: 'does the thing', by: 'planner' }) });
-    await fetch(rurl('/api/card/criteria-meet'), { method: 'POST', body: JSON.stringify({ id: '#1', n: 1, evidence: 'built', by: 'builder' }) });
-    await fetch(rurl('/api/card/update'), { method: 'POST', body: JSON.stringify({ id: '#1', phase: 'done', by: 'builder' }) });
+    const localHeaders = { 'content-type': 'application/json', 'x-tower-client': 'cli' };
+    const noTokenRemoteHeaders = { 'x-forwarded-for': '203.0.113.9' };
+    await fetch(rurl('/api/card/add'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ title: 'Remote card', needsAcceptance: true }) });
+    await fetch(rurl('/api/card/criteria-add'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', text: 'does the thing', by: 'planner' }) });
+    await fetch(rurl('/api/card/criteria-meet'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', n: 1, evidence: 'built', by: 'builder' }) });
+    await fetch(rurl('/api/card/update'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', phase: 'done', by: 'builder' }) });
 
-    // simulated remote device (forwarded marker), no token anywhere: GET /
-    // mints an owner session, challenge + resolve round-trip closes the card.
-    const remoteHeaders = { 'x-forwarded-for': '203.0.113.9' };
+    // Simulated remote device (forwarded marker), no token anywhere: GET /
+    // does not mint an owner session, and acceptance stays open.
+    const remoteHeaders = noTokenRemoteHeaders;
     const page = await fetch(rurl('/'), { headers: remoteHeaders });
     const remoteCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
-    assert.ok(remoteCookie, 'a remote GET / mints an owner session with no token configured');
+    assert.equal(remoteCookie, undefined, 'a remote GET / cannot mint an owner session without auth.token');
     const challengeRes = await fetch(rurl('/api/acceptance/challenge'), {
       method: 'POST',
       headers: { ...remoteHeaders, cookie: remoteCookie, 'x-tower-owner-action': 'verify' },
       body: JSON.stringify({ decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
     });
-    assert.equal(challengeRes.status, 200, JSON.stringify(await challengeRes.clone().json()));
-    const challenge = (await challengeRes.json()).result.challenge;
-    const resolved = await fetch(rurl('/api/acceptance/resolve'), {
-      method: 'POST',
-      headers: { ...remoteHeaders, cookie: remoteCookie, 'x-tower-owner-action': 'verify' },
-      body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
-    });
-    assert.equal(resolved.status, 200);
+    assert.equal(challengeRes.status, 401, JSON.stringify(await challengeRes.clone().json()));
     const state = await (await fetch(rurl('/api/state'))).json();
-    const closed = await (await fetch(rurl('/api/card?id=%231'))).json();
-    assert.equal(closed.card.phase, 'done', 'remote no-token accept round-trips to a closed card');
+    assert.equal(state.cards[0].phase, 'verify', 'remote no-token request cannot close the card');
+    assert.equal(state.decisions[0].status, 'open', 'remote no-token request cannot ratify the ballot');
   } finally {
     rserver.close();
   }

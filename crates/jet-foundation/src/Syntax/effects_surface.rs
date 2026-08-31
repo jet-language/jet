@@ -256,6 +256,7 @@ pub enum InterpolationSelectorKind {
     Debug,
     Pretty,
     Fixed,
+    Grouped,
     Hex,
     Pad,
     PadLeft,
@@ -299,6 +300,11 @@ pub const INTERPOLATION_SELECTORS: &[InterpolationSelector] = &[
     InterpolationSelector {
         name: "Fixed",
         kind: InterpolationSelectorKind::Fixed,
+        arguments: InterpolationSelectorArguments::Precision,
+    },
+    InterpolationSelector {
+        name: "Grouped",
+        kind: InterpolationSelectorKind::Grouped,
         arguments: InterpolationSelectorArguments::Precision,
     },
     InterpolationSelector {
@@ -378,7 +384,7 @@ mod interpolation_selector_tests {
                 .map(|selector| selector.name)
                 .collect::<Vec<_>>(),
             vec![
-                "Debug", "Pretty", "Fixed", "Hex", "Pad", "PadLeft", "Sci", "Percent",
+                "Debug", "Pretty", "Fixed", "Grouped", "Hex", "Pad", "PadLeft", "Sci", "Percent",
                 "Bin", "Oct", "Unit",
             ]
         );

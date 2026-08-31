@@ -1101,7 +1101,7 @@ fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutco
     assert_ne!(generated, renamed, "generated crate attribute changed");
     let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
     let mut command = Command::new("rustc");
-    common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
     let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
@@ -1585,17 +1585,20 @@ fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
     let invalid_utf8_path = dir.join("invalid-utf8.csv");
     let item_limit_path = dir.join("item-limit.csv");
     let total_limit_path = dir.join("total-limit.csv");
+    let options_path = dir.join("options.tsv");
     fs::write(&input_path, "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail").unwrap();
     fs::write(&malformed_path, "\"bad").unwrap();
     fs::write(&invalid_utf8_path, [b'a', b',', 0xff]).unwrap();
     fs::write(&item_limit_path, "\"abcd\"\r\n").unwrap();
     fs::write(&total_limit_path, "a,b\r\n").unwrap();
+    fs::write(&options_path, "name\tnote\r\n\r\nAda\t\"line1\r\nline2\"\r\n").unwrap();
     let input = input_path.to_string_lossy().replace('\\', "\\\\");
     let output = output_path.to_string_lossy().replace('\\', "\\\\");
     let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
     let invalid_utf8 = invalid_utf8_path.to_string_lossy().replace('\\', "\\\\");
     let item_limit = item_limit_path.to_string_lossy().replace('\\', "\\\\");
     let total_limit = total_limit_path.to_string_lossy().replace('\\', "\\\\");
+    let options = options_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
 use core.encoding as encoding
@@ -1626,12 +1629,12 @@ fn run() {{
     reader :: csv.reader(^input) ?? panic("reader")
     first :: reader.next() ?? panic("first")
     if first == {{
-        Val(row) -> {{ print(row[0]); print(row[1]); print(row[2]); print(row[3]) }}
+        Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1]); print(row.fields[2]); print(row.fields[3]) }}
         None -> {{ print("first-missing") }}
     }}
     second :: reader.next() ?? panic("second")
     if second == {{
-        Val(row) -> {{ print(row[0]); print(row[1] == ""); print(row[2]) }}
+        Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1] == ""); print(row.fields[2]) }}
         None -> {{ print("second-missing") }}
     }}
     eof :: reader.next() ?? panic("eof")
@@ -1639,14 +1642,25 @@ fn run() {{
     eof_again :: reader.next() ?? panic("eof again")
     if eof_again == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
 
+    options_input :: files.open("{options}") ?? panic("options open")
+    options_reader :: csv.reader(
+        ^options_input, delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("options reader")
+    options_first :: options_reader.next() ?? panic("options first")
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    if options_first == {{
+        Val(row) -> {{ print(row.line); print(row.fields[0]); print(row.fields[1].replace(crlf, "|")) }}
+        None -> {{ print("options-missing") }}
+    }}
+    options_eof :: options_reader.next() ?? panic("options eof")
+    if options_eof == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
+
     malformed_input :: files.open("{malformed}") ?? panic("malformed open")
     malformed_reader :: csv.reader(^malformed_input) ?? panic("malformed reader")
-    malformed_result :: malformed_reader.next()
-    if malformed_result == {{
+    if malformed_reader.next() == {{
         .Ok(_) -> {{ print("malformed-missed") }}
         .Err(malformed_first) -> {{
-            malformed_again :: malformed_reader.next()
-            if malformed_again == {{
+            if malformed_reader.next() == {{
                 .Ok(_) -> {{ print("malformed-terminal-missed") }}
                 .Err(malformed_second) -> {{ print(malformed_first.path); print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason) }}
             }}
@@ -1655,8 +1669,7 @@ fn run() {{
 
     invalid_utf8_input :: files.open("{invalid_utf8}") ?? panic("invalid utf8 open")
     invalid_utf8_reader :: csv.reader(^invalid_utf8_input) ?? panic("invalid utf8 reader")
-    invalid_utf8_result :: invalid_utf8_reader.next()
-    if invalid_utf8_result == {{
+    if invalid_utf8_reader.next() == {{
         .Ok(_) -> {{ print("invalid-utf8-missed") }}
         .Err(error) -> {{
             print(error.byte_offset)
@@ -1670,12 +1683,10 @@ fn run() {{
     item_limits.max_item_bytes = 3
     item_input :: files.open("{item_limit}") ?? panic("item open")
     item_reader :: csv.reader(^item_input, item_limits) ?? panic("item reader")
-    item_result :: item_reader.next()
-    if item_result == {{
+    if item_reader.next() == {{
         .Ok(_) -> {{ print("item-limit-missed") }}
         .Err(item_first) -> {{
-            item_again :: item_reader.next()
-            if item_again == {{
+            if item_reader.next() == {{
                 .Ok(_) -> {{ print("item-terminal-missed") }}
                 .Err(item_second) -> {{ print(item_first.path); print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason) }}
             }}
@@ -1686,12 +1697,10 @@ fn run() {{
     total_limits.max_total_bytes = Val(3)
     total_input :: files.open("{total_limit}") ?? panic("total open")
     total_reader :: csv.reader(^total_input, total_limits) ?? panic("total reader")
-    total_result :: total_reader.next()
-    if total_result == {{
+    if total_reader.next() == {{
         .Ok(_) -> {{ print("total-limit-missed") }}
         .Err(total_first) -> {{
-            total_again :: total_reader.next()
-            if total_again == {{
+            if total_reader.next() == {{
                 .Ok(_) -> {{ print("total-terminal-missed") }}
                 .Err(total_second) -> {{ print(total_first.byte_offset); print(total_first.path); print(total_first.reason == total_second.reason) }}
             }}
@@ -1720,7 +1729,7 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\na\nb,b\nc\"c\nline1\nline2\nlast\ntrue\ntail\ntrue\ntrue\n$[0][0]\ntrue\n3\n1\n4\n$[0][1]\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
+        "true\na\n1\nb,b\nc\"c\nline1\nline2\nlast\n3\ntrue\ntail\ntrue\ntrue\n3\nAda\nline1|line2\ntrue\n$[0][0]\ntrue\n3\n1\n4\n$[0][1]\n$[0][0]\ntrue\n$[0][0]\ntrue\n$[0][1]\ntrue\n"
     );
     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
     assert_eq!(stderr, "");
@@ -2733,7 +2742,7 @@ fn jet_enc_cbor_decode<T: __jet_Decode>(bytes: &Vec<u8>, options: jet_std::CBORO
     assert_ne!(generated, renamed, "generated crate attribute changed");
     let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
     let mut command = Command::new("rustc");
-    common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
     let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc rejected counted CBOR program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();

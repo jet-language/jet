@@ -119,6 +119,91 @@ test('repair dry-run validates and changes no bytes', () => {
   assert.equal(existsSync(join(dir, 'backups')), false);
 });
 
+test('repair cannot promote an open decision to ratified through its status leaf', () => {
+  const { dir } = fixture();
+  const live = JSON.parse(readFileSync(join(dir, 'tower.json'), 'utf8'));
+  live.decisions = [{ id: 'D-OPEN', cardId: 'c1', status: 'open', title: 'open decision' }];
+  writeFileSync(join(dir, 'tower.json'), JSON.stringify(live, null, 2) + '\n');
+  const payload = {
+    expectedRev: 7,
+    revPath: 'tower.json#/meta/rev',
+    counts: {
+      fields: 1,
+      substitutions: 1,
+      byCollection: { decisions: { fields: 1, substitutions: 1 } },
+      byStore: { 'tower.json': { fields: 1, substitutions: 1 } },
+    },
+    patches: [{
+      store: 'tower.json', collection: 'decisions', key: { id: 'D-OPEN' }, path: '/status',
+      current: 'open', replacement: 'ratified', substitutions: 1,
+    }],
+  };
+  const repair = {
+    schema: 'tower.repair-manifest/v1',
+    canonicalization: CANONICALIZATION,
+    payload,
+    sha256: canonicalPayloadHash(payload),
+  };
+  const before = bytes(dir);
+  for (const dryRun of [true, false]) {
+    assert.throws(
+      () => applyRepairManifest(dir, repair, { expectRev: 7, by: 'repairer', dryRun }),
+      (error) => error.code === 'E_MANIFEST' && /cannot ratify/u.test(error.message),
+    );
+    assert.deepEqual(bytes(dir), before);
+  }
+});
+
+test('repair cannot alter ratified decision outcomes or provenance', () => {
+  const { dir } = fixture();
+  const live = JSON.parse(readFileSync(join(dir, 'tower.json'), 'utf8'));
+  live.decisions = [{
+    id: 'D-RATIFIED',
+    status: 'ratified',
+    outcome: 'A',
+    provenance: { owner: 'owner' },
+  }];
+  writeFileSync(join(dir, 'tower.json'), JSON.stringify(live, null, 2) + '\n');
+  const before = bytes(dir);
+  for (const [path, current, replacement, substitutions] of [
+    ['/outcome', 'A', 'B', 1],
+    ['/provenance/owner', 'owner', 'agent', 5],
+  ]) {
+    const payload = {
+      expectedRev: 7,
+      revPath: 'tower.json#/meta/rev',
+      counts: {
+        fields: 1,
+        substitutions,
+        byCollection: { decisions: { fields: 1, substitutions } },
+        byStore: { 'tower.json': { fields: 1, substitutions } },
+      },
+      patches: [{
+        store: 'tower.json',
+        collection: 'decisions',
+        key: { id: 'D-RATIFIED' },
+        path,
+        current,
+        replacement,
+        substitutions,
+      }],
+    };
+    const repair = {
+      schema: 'tower.repair-manifest/v1',
+      canonicalization: CANONICALIZATION,
+      payload,
+      sha256: canonicalPayloadHash(payload),
+    };
+    for (const dryRun of [true, false]) {
+      assert.throws(
+        () => applyRepairManifest(dir, repair, { expectRev: 7, by: 'repairer', dryRun }),
+        (error) => error.code === 'E_MANIFEST');
+      assert.deepEqual(bytes(dir), before);
+    }
+  }
+});
+
+
 test('repair refuses expected-rev drift without any write', () => {
   const { dir, manifest: m } = fixture();
   const before = bytes(dir);

@@ -4,14 +4,13 @@
 //! summaries, examples, provenance, and completion names come exclusively
 //! from `jet_semindex::SemanticSymbolIndex`.
 
-use super::{unique_temp_name, Session};
+use super::{write_unique_temp_file, Session};
 
 pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolIndex {
     let mut index = jet_semindex::SemanticSymbolIndex::language();
     let src = format!("{}{}\n", session.import_src(), session.accumulated_src());
     if !src.trim().is_empty() {
-        let tmp_path = std::env::temp_dir().join(unique_temp_name("docs"));
-        if std::fs::write(&tmp_path, &src).is_ok() {
+        if let Ok(tmp_path) = write_unique_temp_file("docs", &src) {
             let path_str = tmp_path.to_string_lossy().to_string();
             let (_, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
                 &path_str,
@@ -235,5 +234,27 @@ mod tests {
         assert!(doc.contains("Decision: D-BLOCKPLANE1"), "got: {doc:?}");
         assert!(doc.contains("Example: #Live { input() }"), "got: {doc:?}");
         assert!(doc.contains("Source: Syntax.rs"), "got: {doc:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docs_temp_writer_rejects_existing_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-repl-docs-temp-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("outside.txt");
+        let link = root.join("docs.jet");
+        std::fs::write(&target, "must survive\n").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(super::super::write_temp_file_at(&link, "attacker\n").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "must survive\n");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

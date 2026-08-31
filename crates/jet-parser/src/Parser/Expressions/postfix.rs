@@ -201,12 +201,13 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     let qspan = self.bump().span;
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        let full = Span::new(expr.span().start, qspan.end);
+                        expr = Expr::Try(Box::new(expr), full, TryConvert::None, None);
+                        continue;
+                    }
                     if !matches!(self.peek().kind, TokKind::LParen) {
-                        return Err(Diagnostic::from_row(
-                            "E-ERR-PROPAGATE",
-                            &[],
-                            Some(qspan),
-                        ));
+                        return Err(Diagnostic::from_row("E-ERR-PROPAGATE", &[], Some(qspan)));
                     }
                     // D-FAILURE-FOUNDATION1=A: `?(text)` adds one lazy,
                     // source-linked context frame. The note remains an AST

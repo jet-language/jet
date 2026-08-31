@@ -4,7 +4,7 @@
   "cells": ["formats.binary-kernel"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig"],
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
   "spec": {
     "behavior": "Read a deterministic little-endian JGB1 binary record file, validate its header, sum values for records whose id is divisible by 7, and compute FNV-1a over all name bytes in file order.",
     "args": ["records.bin"],
@@ -16,6 +16,7 @@
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0599: no method named `try_into` found for slice `[u8]` in the current scope"], "notes": "Build requires `rustc --edition 2021 -O`; the checked-in source uses TryInto's 2021 prelude."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
     "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "zig": {"author": "luna-max", "turns": 2, "retries": 2, "diagnosticsHit": ["error: @bitCast must have a known result type", "main.zig:1:1: error: unable to load 'main.zig': FileNotFound"], "notes": "Rewrote the reader and stdout handling for Zig 0.16; manual little-endian decoding keeps the binary format explicit. One scratch build retry was needed after initially invoking Zig from the copied entry root without placing main.zig there."}
+    "zig": {"author": "luna-max", "turns": 2, "retries": 2, "diagnosticsHit": ["error: @bitCast must have a known result type", "main.zig:1:1: error: unable to load 'main.zig': FileNotFound"], "notes": "Rewrote the reader and stdout handling for Zig 0.16; manual little-endian decoding keeps the binary format explicit. One scratch build retry was needed after initially invoking Zig from the copied entry root without placing main.zig there."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node rail using Buffer decoding and BigInt FNV-1a; it reads the same JGB1 fixture and emits the canonical bytes."}
   }
 }

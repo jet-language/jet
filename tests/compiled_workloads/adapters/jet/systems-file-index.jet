@@ -1,0 +1,43 @@
+// #1414 systems workload: scan a frozen tree description without following
+// links or accepting an absolute/parent path.
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("read input")
+    files := 0
+    bytes := 0
+    rejects := 0
+    paths := ""
+    loop line in raw.lines() {
+        if line == "" -> next
+        fields :: line.split("|").to_list()
+        if fields.len() != 3 {
+            rejects += 1
+            next
+        }
+        kind :: fields[0]
+        path :: "{fields[1]}"
+        size :: Int.parse(fields[2]) ?? -1
+        if kind == "file" && path != "" && !path.starts_with("/") && !path.contains("..") && size >= 0 {
+            files += 1
+            bytes += size
+            paths = if paths == "" -> path else -> "{paths},{path}"
+        } else if kind == "dir" && path != "" && !path.starts_with("/") && !path.contains("..") {
+            // Directories are part of the index but do not contribute bytes.
+        } else if kind == "link" && path != "" && !path.starts_with("/") && !path.contains("..") {
+            // Links are listed but never followed.
+        } else {
+            rejects += 1
+        }
+    }
+    print("files={files}")
+    print("bytes={bytes}")
+    print("paths={paths}")
+    print("rejects={rejects}")
+}

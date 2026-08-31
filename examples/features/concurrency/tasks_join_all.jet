@@ -19,15 +19,11 @@ fn run() {
     results :: task.all {work(1), work(2), work(3)} ?? panic("task.all failed")
     print(results[0] + results[1] + results[2])
 
-    task.group race_group {
-        // `race` consumes both handles; the loser is cancelled.
-        print(task.race {slow_one(), work(3)} ?? panic("race failed"))
-    }
+    // `race` consumes both handles; the loser is cancelled.
+    print(task.race {slow_one(), work(3)} ?? panic("race failed"))
 
-    task.group any_group {
-        // `any` consumes both handles and takes the first success.
-        print(task.any {slow_one(), work(4)} ?? panic("any failed"))
-    }
+    // `any` consumes both handles and takes the first success.
+    print(task.any {slow_one(), work(4)} ?? panic("any failed"))
 
     // `detach` discharges the duty for fire-and-forget work.
     background :: task work(6)

@@ -64,10 +64,10 @@ fn bind_inferred_type(
     true
 }
 
-/// Seed ordinary generic inference with the concrete slots of a typed
-/// callable argument. `unify_types` already owns the ordinary structural
-/// cases; this wrapper adds the missing `Fn` recursion and provenance for a
-/// useful conflict fix.
+/// Seed generic inference with the concrete slots of a typed argument.
+/// `unify_types` remains the authority for the leaf cases; this wrapper
+/// mirrors its structural recursion and adds the missing `Fn` traversal plus
+/// provenance for a useful conflict diagnostic.
 fn seed_generic_type(
     expected: &Type,
     found: &Type,
@@ -108,6 +108,70 @@ fn seed_generic_type(
     }
 
     match (expected, found) {
+        (Type::List(expected), Type::List(found))
+        | (Type::Option(expected), Type::Option(found)) => seed_generic_type(
+            expected,
+            found,
+            source,
+            type_params,
+            subst,
+            origins,
+            conflict,
+        ),
+        (
+            Type::Result {
+                ok: expected_ok,
+                err: expected_err,
+            },
+            Type::Result {
+                ok: found_ok,
+                err: found_err,
+            },
+        ) => {
+            let ok = seed_generic_type(
+                expected_ok,
+                found_ok,
+                source,
+                type_params,
+                subst,
+                origins,
+                conflict,
+            );
+            let err = seed_generic_type(
+                expected_err,
+                found_err,
+                source,
+                type_params,
+                subst,
+                origins,
+                conflict,
+            );
+            ok && err
+        }
+        (
+            Type::Apply {
+                name: expected_name,
+                args: expected_args,
+            },
+            Type::Apply {
+                name: found_name,
+                args: found_args,
+            },
+        ) if expected_name == found_name && expected_args.len() == found_args.len() => {
+            let mut compatible = true;
+            for (expected, found) in expected_args.iter().zip(found_args) {
+                compatible &= seed_generic_type(
+                    expected,
+                    found,
+                    source,
+                    type_params,
+                    subst,
+                    origins,
+                    conflict,
+                );
+            }
+            compatible
+        }
         (
             Type::Fn {
                 params: expected_params,
@@ -120,31 +184,52 @@ fn seed_generic_type(
                 ..
             },
         ) => {
-            let params_ok = expected_params.len() == found_params.len()
-                && expected_params
-                    .iter()
-                    .zip(found_params)
-                    .all(|(expected, found)| {
+            // Callable labels/zones are checked by the final assignment pass;
+            // generic inference uses only the structural type slots. Keep
+            // walking after a parameter mismatch so a conflicting return
+            // still records its provenance.
+            let mut params_ok = expected_params.len() == found_params.len();
+            for (expected, found) in expected_params.iter().zip(found_params) {
+                params_ok &= seed_generic_type(
+                    expected,
+                    found,
+                    "the lambda parameter",
+                    type_params,
+                    subst,
+                    origins,
+                    conflict,
+                );
+            }
+            let ret_ok = match (expected_ret, found_ret) {
+                (Some(expected), Some(found)) => match expected.as_ref() {
+                    // Callable parameter signatures store an effective Result
+                    // carrier, while lambda values retain their raw success
+                    // return. Pair the carrier's success slot with that raw
+                    // return; two carrier values still use structural matching
+                    // so explicit error domains remain checked.
+                    Type::Result { ok: expected_ok, .. }
+                        if !matches!(found.as_ref(), Type::Result { .. }) =>
+                    {
                         seed_generic_type(
-                            expected,
-                            found,
-                            "the lambda parameter",
+                            expected_ok.as_ref(),
+                            found.as_ref(),
+                            "the lambda return",
                             type_params,
                             subst,
                             origins,
                             conflict,
                         )
-                    });
-            let ret_ok = match (expected_ret, found_ret) {
-                (Some(expected), Some(found)) => seed_generic_type(
-                    expected,
-                    found,
-                    "the lambda return",
-                    type_params,
-                    subst,
-                    origins,
-                    conflict,
-                ),
+                    }
+                    _ => seed_generic_type(
+                        expected.as_ref(),
+                        found.as_ref(),
+                        "the lambda return",
+                        type_params,
+                        subst,
+                        origins,
+                        conflict,
+                    ),
+                },
                 (None, None) => true,
                 _ => false,
             };
@@ -732,7 +817,11 @@ impl<'a> Checker<'a> {
                 }
                 if let Expr::Ident(name, span) = &arg.expr {
                     if !ty.is_scalar() {
-                        self.mark_moved(name.clone(), *span);
+                        self.mark_moved_by(
+                            name.clone(),
+                            *span,
+                            call.name.clone(),
+                        );
                     }
                 }
             }
@@ -970,7 +1059,10 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
-                    if !is_printable(&t, self.registry, self.trait_reg) && !self.is_unit_type(&t) {
+                    if !is_printable(&t, self.registry, self.trait_reg)
+                        && !self.is_unit_type(&t)
+                        && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)
+                    {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                             self.diags.push(Diagnostic::error(
                                     "E0112",
@@ -1153,7 +1245,11 @@ impl<'a> Checker<'a> {
                 // (E0140/E0141) and prevents any later reuse (E0121). Mark it
                 // consumed even on the E0143 path so the unaudited-drop error is
                 // not buried under a cascade E0140 "unconsumed" at scope end.
-                self.mark_moved(name.clone(), *span);
+                self.mark_moved_by(
+                    name.clone(),
+                    *span,
+                    call.name.clone(),
+                );
             }
             return Some(None);
         }
@@ -1195,6 +1291,18 @@ impl<'a> Checker<'a> {
                     call.args = args;
                     return Some(ret);
                 }
+            }
+            if let Some((alias, mod_idx, fn_name)) = self.resolve_import_call_path(&call.name) {
+                let result = self.infer_import_call(
+                    &alias,
+                    mod_idx,
+                    &fn_name,
+                    call.name_span,
+                    call.name_span,
+                    &call.type_args,
+                    &mut call.args,
+                );
+                return Some(result);
             }
             // D-NAME-WALK1=A: an inline body overlays its enclosing file's
             // unqualified maps with its own imports. The local scope wins;
@@ -1703,7 +1811,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!(
-                        "{} expects {} type argument{}, got {}",
+                        "`{}` expects {} type argument{}, got {}",
                         call.name,
                         fn_type_params.len(),
                         if fn_type_params.len() == 1 { "" } else { "s" },
@@ -1879,7 +1987,7 @@ impl<'a> Checker<'a> {
         } else if !call.type_args.is_empty() {
             self.diags.push(Diagnostic::error(
                 "E0119",
-                format!("{} is not generic", call.name),
+                format!("`{}` is not generic", call.name),
                 "only functions declared with type parameters accept call-site type arguments"
                     .to_string(),
                 format!("call {} without type arguments", call.name),
@@ -1945,6 +2053,9 @@ impl<'a> Checker<'a> {
             };
             let saved_exp = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
+            let callback_boundary = effective_params.get(i).is_some_and(|(_, ty)| {
+                crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
+            });
             if let Some((param_conv, param_ty)) = effective_params.get(i) {
                 if matches!(param_conv, AccessConvention::Move) {
                     // D-MEM-COPYSEM1: a move parameter is an owning slot.
@@ -1955,7 +2066,8 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(param_ty, Type::Fn { .. }) {
                     self.expected_type = Some(param_ty.clone());
-                    self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
+                    self.lambda_escapes =
+                        matches!(param_conv, AccessConvention::Move) || callback_boundary;
                 } else if matches!(
                     param_ty,
                     Type::Int
@@ -2066,9 +2178,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             self.memory_control_multiplier = memory_multiplier;
-            if effective_params.get(i).is_some_and(|(_, ty)| {
-                crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
-            }) {
+            if callback_boundary {
                 let safe = match &arg.expr {
                     Expr::Ident(callback, _) => {
                         self.funcs
@@ -2184,6 +2294,7 @@ impl<'a> Checker<'a> {
                 let exact_or_obligation_compatible =
                     if matches!(&param_ty, Type::Fn { .. }) && matches!(&arg_ty, Type::Fn { .. }) {
                         fn_types_compatible(&param_ty, &arg_ty)
+                            && Type::obligations_satisfy(&param_ty, &arg_ty)
                     } else {
                         arg_ty == param_ty && Type::obligations_satisfy(&param_ty, &arg_ty)
                     };
@@ -2289,7 +2400,11 @@ impl<'a> Checker<'a> {
                     // The value is given away for real.
                     if let Expr::Ident(name, span) = &arg.expr {
                         if !type_is_copy(param_ty) {
-                            self.mark_moved(name.clone(), *span);
+                            self.mark_moved_by(
+                                name.clone(),
+                                *span,
+                                call.name.clone(),
+                            );
                         }
                     }
                 }

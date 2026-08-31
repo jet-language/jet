@@ -1201,7 +1201,27 @@ fn effect_names(row: &[(String, Span)]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+fn is_unit_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+    )
+}
 
+/// True for the valueless callable return spellings before or after failure
+/// normalization (`fn()` and `fn() Unit`).
+pub fn is_unit_callable_return(ty: &Type) -> bool {
+    is_unit_type(ty)
+        || matches!(
+            ty,
+            Type::Result { ok, err }
+                if is_unit_type(ok)
+                    && matches!(
+                        err.as_ref(),
+                        Type::Named(name) if name == crate::Syntax::TYPE_ERR
+                    )
+        )
+}
 fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)]>) -> String {
     let contract = contract.unwrap_or(&[]);
     let mut parts = Vec::with_capacity(params.len() + 2);
@@ -1296,10 +1316,10 @@ impl Type {
                     hi: *hi,
                 },
                 Type::Tagged { marker, inner }
-                    if matches!(
-                        marker,
-                        TagMarker::Internal(InternalTag::CppCallbackAbi)
-                    ) => self_tagged_clone(marker, inner),
+                    if matches!(marker, TagMarker::Internal(InternalTag::CppCallbackAbi)) =>
+                {
+                    self_tagged_clone(marker, inner)
+                }
                 Type::Tagged { marker, inner } => Type::Tagged {
                     marker: marker.clone(),
                     inner: Box::new(normalize(inner)),
@@ -1725,7 +1745,9 @@ impl Type {
                         && match (required_ret, offered_ret) {
                             (None, None) => true,
                             (Some(required), Some(offered)) => nested(required, offered),
-                            _ => false,
+                            (None, Some(offered)) | (Some(offered), None) => {
+                                is_unit_callable_return(offered)
+                            }
                         }
                 }
                 (Type::List(_), Type::List(_))
@@ -2202,7 +2224,13 @@ impl Type {
         };
         if unit_success {
             error.map_or_else(
-                || format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, crate::Syntax::TYPE_ERR),
+                || {
+                    format!(
+                        "{}{}",
+                        crate::Syntax::TYPE_FALLIBLE_SEP,
+                        crate::Syntax::TYPE_ERR
+                    )
+                },
                 |error| format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, error),
             )
         } else if let Some(error) = error {
@@ -2240,8 +2268,10 @@ impl Type {
                 let ps = fn_param_names(params, param_contract.as_deref());
                 let mut signature = format!("fn({ps})");
                 if let Some(r) = ret {
-                    signature.push(' ');
-                    signature.push_str(&r.name());
+                    if !is_unit_callable_return(r) {
+                        signature.push(' ');
+                        signature.push_str(&r.name());
+                    }
                 }
                 if let Some(row) = effect_bound {
                     signature.push_str(" -[");
@@ -2339,8 +2369,10 @@ impl Type {
                 let ps = fn_param_names(params, param_contract.as_deref());
                 let mut signature = format!("fn({ps})");
                 if let Some(r) = ret {
-                    signature.push(' ');
-                    signature.push_str(&r.name());
+                    if !is_unit_callable_return(r) {
+                        signature.push(' ');
+                        signature.push_str(&r.name());
+                    }
                 }
                 if let Some(row) = effect_bound {
                     signature.push_str(" -[");

@@ -19,10 +19,40 @@ const server = serve(store, PORT, false);
 after(() => server.close());
 
 const url = (p) => `http://localhost:${PORT}${p}`;
-const post = async (p, b, raw = false) => {
-  const r = await fetch(url(p), { method: 'POST', body: raw ? b : JSON.stringify(b) });
+const AUTH_TOKEN = store.config.auth.token;
+const authHeaders = { authorization: `Bearer ${AUTH_TOKEN}` };
+const get = (p, options = {}) => fetch(url(p), {
+  ...options,
+  headers: { ...authHeaders, ...options.headers },
+});
+const post = async (p, b, raw = false, headers = {}) => {
+  const r = await fetch(url(p), {
+    method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers }, body: raw ? b : JSON.stringify(b),
+  });
   return { status: r.status, json: await r.json().catch(() => null) };
 };
+const ownerSession = async () => {
+  const unlock = await fetch(url(`/?key=${AUTH_TOKEN}`), { redirect: 'manual' });
+  const accessCookie = unlock.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(accessCookie, 'owner navigation must establish an access cookie');
+  const page = await fetch(url('/'), { headers: { accept: 'text/html', cookie: accessCookie } });
+  const ownerCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(ownerCookie, 'owner navigation must establish an in-memory session');
+  return `${accessCookie}; ${ownerCookie}`;
+};
+const ownerPost = async (p, b) => post(p, b, false, { cookie: await ownerSession() });
+
+test('configured token is required on loopback', async () => {
+  const read = await fetch(url('/api/state'));
+  assert.equal(read.status, 401);
+  const write = await fetch(url('/api/card/add'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
+    body: JSON.stringify({ title: 'unauthorized' }),
+  });
+  assert.equal(write.status, 401);
+  assert.equal((await get('/api/state')).status, 200);
+});
 
 test('provisioning: no vapid; auth stays opt-in (no auto token)', () => {
   assert.equal(store.config.push, null);
@@ -37,7 +67,7 @@ test('provisioning: no vapid; auth stays opt-in (no auto token)', () => {
 });
 
 test('push routes are gone', async () => {
-  const key = await fetch(url('/api/push/key'));
+  const key = await get('/api/push/key');
   assert.equal(key.status, 404);
   const sub = await post('/api/push/subscribe', { subscription: { endpoint: 'https://example.invalid/x', keys: {} } });
   assert.equal(sub.status, 404);
@@ -47,29 +77,29 @@ test('push routes are gone', async () => {
 
 test('undo: revert last write, conflict-guarded', async () => {
   await post('/api/card/add', { title: 'keep me' });
-  const before = await (await fetch(url('/api/state'))).json();
+  const before = await (await get('/api/state')).json();
   await post('/api/card/add', { title: 'oops' });
-  const mid = await (await fetch(url('/api/state'))).json();
+  const mid = await (await get('/api/state')).json();
   assert.equal(mid.cards.length, 2);
 
   // stale expectRev → refused
-  const bad = await post('/api/undo', { expectRev: before.meta.rev });
+  const bad = await ownerPost('/api/undo', { expectRev: before.meta.rev });
   assert.equal(bad.status, 409);
 
-  const ok = await post('/api/undo', { expectRev: mid.meta.rev });
+  const ok = await ownerPost('/api/undo', { expectRev: mid.meta.rev });
   assert.equal(ok.status, 200);
-  const after2 = await (await fetch(url('/api/state'))).json();
+  const after2 = await (await get('/api/state')).json();
   assert.equal(after2.cards.length, 1);
   assert.equal(after2.cards[0].title, 'keep me');
   assert.equal(after2.meta.rev, mid.meta.rev + 1);
 });
 
 test('retired routes are gone: files, agents, messages', async () => {
-  const r1 = await fetch(url('/api/agents'));
+  const r1 = await get('/api/agents');
   assert.equal(r1.status, 404);
   const r2 = await post('/api/message/send', { from: 'owner', to: 'a1', text: 'hi' });
   assert.equal(r2.status, 404);
-  const r3 = await fetch(url('/api/file?name=x.png'), { method: 'POST', body: Buffer.from([1]) });
+  const r3 = await get('/api/file?name=x.png', { method: 'POST', headers: { 'x-tower-client': 'cli' }, body: Buffer.from([1]) });
   assert.equal(r3.status, 404);
 });
 
@@ -77,20 +107,20 @@ test('clearance batch ratifies without agent notifications', async () => {
   const { json: cardR } = await post('/api/card/add', { title: 'ballot host' });
   const cid = cardR.result.id;
   for (const n of [1, 2, 3]) await post('/api/decision/add', { cardId: cid, id: 'D-W' + n, title: 'w' + n,
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] });
-  await post('/api/clearance', { decisionId: 'D-W1', outcome: 'A', by: 'owner' });
-  await post('/api/clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-W2', outcome: 'A' }, { decisionId: 'D-W3', outcome: 'A' }] });
+  await ownerPost('/api/clearance', { decisionId: 'D-W1', outcome: 'A', by: 'owner' });
+  await ownerPost('/api/clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-W2', outcome: 'A' }, { decisionId: 'D-W3', outcome: 'A' }] });
   const s = store.load();
   assert.equal(s.decisions.filter(d => d.status === 'ratified').length, 3);
   assert.equal(s.messages, undefined, 'no messages key survives');
 });
 
 test('SSE stream delivers state on mutation', async () => {
-  const res = await fetch(url('/api/stream'));
+  const res = await get('/api/stream');
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';

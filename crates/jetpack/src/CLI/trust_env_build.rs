@@ -29,11 +29,11 @@ use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 pub(super) struct EnvReadyStats {
     total: usize,
     cache_hits: usize,
-    realized: Vec<(String, String)>,
+    realized: Vec<Store::EnvironmentSelection>,
 }
 
 impl EnvReadyStats {
-    fn record(&mut self, entry: &Store::StoreEntry, state: Provider::SourceState, version: &str) {
+    fn record(&mut self, entry: &Store::StoreEntry, state: Provider::SourceState, _version: &str) {
         self.total += 1;
         // A local reuse and a verified binary-cache substitution both avoid
         // fresh work for the user entering the environment.
@@ -44,7 +44,21 @@ impl EnvReadyStats {
             self.cache_hits += 1;
         }
         self.realized
-            .push((entry.name.clone(), version.to_string()));
+            .push(Store::environment_entry_selection(entry));
+    }
+
+    fn canonicalize(&mut self, roots: &Store::Roots) {
+        let entries = Store::list_read_only(roots);
+        for selection in &mut self.realized {
+            if let Some(entry) = entries.iter().find(|entry| {
+                entry.reference == selection.0
+                    && entry.name == selection.1
+                    && entry.version == selection.2
+                    && entry.envelope.output_hash == selection.3
+            }) {
+                *selection = Store::environment_entry_selection(entry);
+            }
+        }
     }
 
     pub(super) fn cache_hit_percent(&self) -> usize {
@@ -56,11 +70,56 @@ impl EnvReadyStats {
     }
 
     pub(super) fn realized_set(&self) -> Vec<(String, String)> {
-        let mut realized = self.realized.clone();
+        let mut realized = self
+            .realized
+            .iter()
+            .map(|(_, name, version, output, _)| {
+                let version = if version.is_empty() {
+                    super::realize::version_from_out(name, output).unwrap_or_default()
+                } else {
+                    version.clone()
+                };
+                (name.clone(), version)
+            })
+            .collect::<Vec<_>>();
         realized.sort();
         realized.dedup();
         realized
     }
+
+    pub(super) fn realized_entries(&self) -> Vec<Store::EnvironmentSelection> {
+        let mut realized = self.realized.clone();
+        realized.sort();
+        realized
+    }
+}
+
+fn index_warm_realizations(
+    warm: Vec<Store::VerifiedRealization>,
+) -> std::collections::BTreeMap<String, Vec<Store::VerifiedRealization>> {
+    let mut indexed = std::collections::BTreeMap::new();
+    for realized in warm {
+        indexed
+            .entry(realized.original_reference().to_string())
+            .or_insert_with(Vec::new)
+            .push(realized);
+    }
+    indexed
+}
+
+fn take_warm_realization(
+    warm: &mut Option<std::collections::BTreeMap<String, Vec<Store::VerifiedRealization>>>,
+    reference: &str,
+) -> Option<Store::VerifiedRealization> {
+    let (realized, empty) = {
+        let realizations = warm.as_mut()?.get_mut(reference)?;
+        let realized = realizations.pop();
+        (realized, realizations.is_empty())
+    };
+    if empty {
+        warm.as_mut()?.remove(reference);
+    }
+    realized
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +128,6 @@ struct NativeDevTool {
     command: &'static str,
     relative_binary: &'static str,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeOutputPlatform {
     Any,
@@ -465,9 +523,22 @@ pub(super) fn compose_env_scoped_with_stats(
     scope: RealizeScope,
     confirm_download: bool,
 ) -> Result<(Env, EnvReadyStats), i32> {
-    let mut lock_diff = (scope == RealizeScope::Project)
+    compose_env_scoped_with_warm(theme, roots, flags, plan, scope, confirm_download, None)
+}
+
+pub(super) fn compose_env_scoped_with_warm(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &RunPlan,
+    scope: RealizeScope,
+    confirm_download: bool,
+    warm: Option<Vec<Store::VerifiedRealization>>,
+) -> Result<(Env, EnvReadyStats), i32> {
+    let warm_path = warm.is_some();
+    let mut lock_diff = (scope == RealizeScope::Project && !warm_path)
         .then(|| super::lock::LockDiffGuard::new(theme, &plan.project_root));
-    let download_plan = if confirm_download {
+    let download_plan = if confirm_download && !warm_path {
         Some(reject_unprompted_acquisition(
             theme, roots, flags, plan, scope,
         )?)
@@ -518,11 +589,12 @@ pub(super) fn compose_env_scoped_with_stats(
     let mut cache_leases = Vec::new();
     let mut ready_stats = EnvReadyStats::default();
     let name_w = name_column_width(&plan.refs);
+    let mut warm_realizations = warm.map(index_warm_realizations);
     // Multi-package realization gets one pinned aggregate on a TTY and one
     // settled row per package. Plain output keeps only those settled rows so
     // a large package set does not become a duplicate status/row ledger.
     let total_steps = plan.refs.len() + plan.adapters.len();
-    let live_mode = total_steps > 1;
+    let live_mode = total_steps > 1 && !warm_path;
     let live_tty = live_mode && theme.live_enabled();
     let mut live = theme.live_region();
     let mut completed_steps = 0usize;
@@ -544,29 +616,32 @@ pub(super) fn compose_env_scoped_with_stats(
         } else {
             RowStyle::Ready
         };
-        let live_arg = live_tty.then_some(&mut live);
-        let step_started = std::time::Instant::now();
-        let step_outcome = realize_ref_outcome(
-            theme,
-            roots,
-            flags,
-            &plan.table,
-            spec,
-            name_w,
-            style,
-            live_arg,
-            scope,
-        );
-        if phase_timing {
-            eprintln!(
-                "TIMING step {}: {:?}",
-                spec.package,
-                step_started.elapsed()
-            );
-        }
+        let step_outcome =
+            if let Some(realized) = take_warm_realization(&mut warm_realizations, &spec.raw) {
+                let (entry, state, lease) = realized.into_parts();
+                RefOutcome::Realized(entry, state, String::new(), lease)
+            } else {
+                let live_arg = live_tty.then_some(&mut live);
+                let step_started = std::time::Instant::now();
+                let step_outcome = realize_ref_outcome(
+                    theme,
+                    roots,
+                    flags,
+                    &plan.table,
+                    spec,
+                    name_w,
+                    style,
+                    live_arg,
+                    scope,
+                );
+                if phase_timing {
+                    eprintln!("TIMING step {}: {:?}", spec.package, step_started.elapsed());
+                }
+                step_outcome
+            };
         match step_outcome {
             RefOutcome::Realized(entry, state, line, lease) => {
-                if live_mode {
+                if live_mode && !line.is_empty() {
                     live.finish(&line);
                 }
                 completed_steps += 1;
@@ -636,7 +711,10 @@ pub(super) fn compose_env_scoped_with_stats(
                     failed = true;
                 }
                 if let Ok(producer) = Store::ProducerRecord::decode(&entry.producer_record) {
-                    nix_vars.extend(Provider::nix_runtime_environment(&producer));
+                    let runtime = Provider::nix_runtime_environment(&producer);
+                    if !runtime.is_empty() {
+                        nix_vars.extend(runtime);
+                    }
                 }
                 realized_outputs.push((
                     entry.name.clone(),
@@ -652,7 +730,7 @@ pub(super) fn compose_env_scoped_with_stats(
     }
     for (idx, adapter) in plan.adapters.iter().enumerate() {
         live.clear();
-        if total_steps > 1 {
+        if total_steps > 1 && !warm_path {
             theme.progress_chain(
                 "Adapt",
                 plan.refs.len() + idx + 1,
@@ -661,7 +739,11 @@ pub(super) fn compose_env_scoped_with_stats(
                 "adapter",
             );
         }
-        match realize_adapter(theme, roots, flags, adapter, &plan.table, true) {
+        let warm_reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+        let adapter_outcome = take_warm_realization(&mut warm_realizations, &warm_reference)
+            .map(|realized| realized.into_parts())
+            .or_else(|| realize_adapter(theme, roots, flags, adapter, &plan.table, true));
+        match adapter_outcome {
             Some((entry, state, lease)) => {
                 let version = if entry.version.is_empty() {
                     super::realize::version_from_out(&entry.name, &entry.out).unwrap_or_default()
@@ -833,6 +915,7 @@ pub(super) fn compose_env_scoped_with_stats(
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above remain the realization
     // report — callers may append a measured env-entry banner, but this shared
     // composer does not print a second package summary before shell handoff.
+    ready_stats.canonicalize(roots);
     Ok((
         Env {
             bin_dirs,
@@ -863,12 +946,7 @@ fn reject_unprompted_acquisition(
         .refs
         .iter()
         .filter(|spec| {
-            Provider::requires_acquisition(
-                spec,
-                &plan.table,
-                flags.offline,
-                &roots.hangar_dir(),
-            )
+            Provider::requires_acquisition(spec, &plan.table, flags.offline, &roots.hangar_dir())
         })
         .cloned()
         .collect::<Vec<_>>();

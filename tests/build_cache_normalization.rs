@@ -27,7 +27,8 @@ fn key_with(src: &str, profile_tag: &str, version: &str) -> String {
     std::fs::write(&file, src).unwrap();
     let bundle = jet::Loader::load_entry_with_overlay(file.to_str().unwrap(), None, false)
         .unwrap_or_else(|d| panic!("test program should parse:\n{src}\n{:?}", d));
-    let key = jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, version);
+    let key =
+        jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, version, &bundle.build_facts);
     std::fs::remove_dir_all(&dir).ok();
     key
 }

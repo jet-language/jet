@@ -295,6 +295,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
+        | Expr::Unit(..)
         | Expr::Char(..)
         | Expr::StrMatchLit(..)
         | Expr::BinMatchLit(..)

@@ -228,7 +228,7 @@ fn assert_matrix_cells() {
     assert_eq!(
         SOURCE.matches("print(~").count(),
         ROWS.len(),
-        "source must have exactly one print(v) cell per row"
+        "source must have one direct print cell per row"
     );
 }
 
@@ -486,4 +486,18 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
     // private func_ids table resolves the custom methods), and forced TIR eval.
     // It is the executable half of the four-seam contract and the golden gate.
     tir_support::assert_example_cli_tiers_agree("traits/impl_shape_matrix", EXPECTED);
+
+    // The ordinary three-mode helper proves output parity, but it does not
+    // prove that the default run stayed on the resident seam. Trace the same
+    // fixture once so the matrix cannot pass through tier 0 only.
+    let (code, stdout, stderr) =
+        tir_support::jit_run_traced("impl_shape_matrix_native", SOURCE);
+    assert_eq!(code, 0, "default `jet run` failed for impl_shape_matrix: {stderr}");
+    assert_eq!(stdout, EXPECTED);
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "impl_shape_matrix did not execute on the resident JIT: {stderr}"
+    );
 }

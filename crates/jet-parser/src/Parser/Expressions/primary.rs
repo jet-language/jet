@@ -689,9 +689,12 @@ impl<'a> Parser<'a> {
         Ok((type_name, retired_dot))
     }
 
-    /// D-CONC-SPAWN1=D: one `task` word owns single-task spawn and the
-    /// nested `all`/`race`/`any` combinators. Lower these forms into the
-    /// existing method-call seam; sema and TIR keep one task mechanism.
+    /// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: one `task` word owns
+    /// single-task spawn and the nested `all`/`race`/`any` combinators.
+    /// Named `task.all` branches become the existing anonymous tuple carrier;
+    /// every other combinator keeps its positional list form. Lower these
+    /// forms into the existing method-call seam; sema and TIR keep one task
+    /// mechanism.
     fn task_surface_expr(&mut self) -> Result<Expr, Diagnostic> {
         let task_span = self.bump().span;
         if matches!(self.peek().kind, TokKind::Dot) {
@@ -739,8 +742,27 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LBrace, "after the task selector")?;
             let open = self.toks[self.pos - 1].span;
             let mut branches = Vec::new();
+            let mut saw_named = false;
+            let mut saw_positional = false;
+            let mut mixed_span = None;
             if !matches!(self.peek().kind, TokKind::RBrace) {
                 loop {
+                    let (label, style_span) = if selector == "all"
+                        && matches!(self.peek().kind, TokKind::Ident(_))
+                        && matches!(self.peek2().kind, TokKind::Colon)
+                    {
+                        let (name, name_span) =
+                            self.expect_ident("for a named `task.all` branch")?;
+                        self.expect(TokKind::Colon, "after a named `task.all` branch")?;
+                        saw_named = true;
+                        (Some((name, name_span)), name_span)
+                    } else {
+                        saw_positional = true;
+                        (None, self.peek().span)
+                    };
+                    if saw_named && saw_positional && mixed_span.is_none() {
+                        mixed_span = Some(style_span);
+                    }
                     let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
                         let open = self.bump().span;
                         let body = self.block_stmts();
@@ -751,7 +773,7 @@ impl<'a> Parser<'a> {
                         let body_span = body.span();
                         (LambdaBody::Expr(Box::new(body)), body_span)
                     };
-                    branches.push((body, body_span));
+                    branches.push((label, body, body_span));
                     while matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
                     }
@@ -764,42 +786,64 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RBrace, "to close the task combinator")?;
             let close = self.toks[self.pos - 1].span;
             let list_span = Span::new(open.start, close.end);
-            let tasks = branches
-                .into_iter()
-                .map(|(body, body_span)| {
-                    let lambda = Lambda {
-                        take_names: Vec::new(),
-                        params: Vec::new(),
-                        result_type: None,
-                        error_type: None,
-                        effects: None,
-                        body,
+            if let Some(span) = mixed_span {
+                return Err(Diagnostic::from_row("E1117", &[], Some(span)));
+            }
+            let make_spawn = |body, body_span| {
+                let lambda = Lambda {
+                    take_names: Vec::new(),
+                    params: Vec::new(),
+                    result_type: None,
+                    error_type: None,
+                    effects: None,
+                    body,
+                    span: body_span,
+                    meta: LambdaMeta::default(),
+                };
+                Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(
+                        Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                        task_span,
+                    )),
+                    method: Syntax::INTERNAL_TASK_SPAWN_METHOD.to_string(),
+                    method_span: task_span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
+                    args: vec![CallArg {
+                        convention: AccessConvention::Read,
+                        expr: Expr::Lambda(lambda),
                         span: body_span,
-                        meta: LambdaMeta::default(),
-                    };
-                    Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(
-                            Syntax::INTERNAL_TASK_RECEIVER.to_string(),
-                            task_span,
-                        )),
-                        method: Syntax::INTERNAL_TASK_SPAWN_METHOD.to_string(),
-                        method_span: task_span,
-                        owner_type_args: Vec::new(),
-                        type_args: Vec::new(),
-                        args: vec![CallArg {
-                            convention: AccessConvention::Read,
-                            expr: Expr::Lambda(lambda),
-                            span: body_span,
-                            flags: crate::AST::CallArgFlags::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        recv_type: None,
-                        resolved_ret: None,
-                        checked_widen: false,
-                    }
-                })
-                .collect();
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    recv_type: None,
+                    resolved_ret: None,
+                    checked_widen: false,
+                }
+            };
+            let task_arg = if saw_named {
+                Expr::TupleLit(
+                    branches
+                        .into_iter()
+                        .map(|(label, body, body_span)| {
+                            let (name, _) =
+                                label.expect("validated all-named task.all branch");
+                            (name, make_spawn(body, body_span))
+                        })
+                        .collect(),
+                    list_span,
+                    None,
+                )
+            } else {
+                Expr::ListLit(
+                    branches
+                        .into_iter()
+                        .map(|(_, body, body_span)| make_spawn(body, body_span))
+                        .collect(),
+                    list_span,
+                )
+            };
             return Ok(Expr::MethodCall {
                 receiver: Box::new(Expr::Ident(
                     Syntax::INTERNAL_TASK_RECEIVER.to_string(),
@@ -816,7 +860,7 @@ impl<'a> Parser<'a> {
                 type_args: Vec::new(),
                 args: vec![CallArg {
                     convention: AccessConvention::Read,
-                    expr: Expr::ListLit(tasks, list_span),
+                    expr: task_arg,
                     span: list_span,
                     flags: crate::AST::CallArgFlags::default(),
                     label: None,
@@ -826,7 +870,7 @@ impl<'a> Parser<'a> {
                 resolved_ret: None,
                 checked_widen: false,
             });
-        }
+            }
 
         // D-CONC-FREEZE1=A: a task may consume one enclosing binding
         // explicitly with `task ^name { … }`. This is task-capture syntax,
@@ -1064,6 +1108,11 @@ impl<'a> Parser<'a> {
                                 }
                                 crate::Syntax::InterpolationSelectorKind::Fixed => {
                                     format = crate::AST::StrFormat::Fixed(
+                                        Self::parse_precision_selector(&mut sub, &selector_head)?,
+                                    );
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Grouped => {
+                                    format = crate::AST::StrFormat::Grouped(
                                         Self::parse_precision_selector(&mut sub, &selector_head)?,
                                     );
                                 }

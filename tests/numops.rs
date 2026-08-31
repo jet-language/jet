@@ -92,6 +92,19 @@ fn default_int_multiplication_is_exact() {
 }
 
 #[test]
+fn default_int_addition_promotes_without_wrapping() {
+    if !have_rustc() {
+        return;
+    }
+    // The packed rail must leave the hot path for this result and preserve
+    // exact Int semantics instead of wrapping the i64 carrier.
+    let src = "fn run() {\n    big :: 9223372036854775807\n    print(big + big)\n}\n";
+    let (code, stdout, stderr) = build_and_run("int_add_exact", src);
+    assert_eq!(code, 0, "exact Int addition should run: {stderr}");
+    assert_eq!(stdout.trim(), "18446744073709551614");
+}
+
+#[test]
 fn arithmetic_within_range_succeeds() {
     if !have_rustc() {
         return;

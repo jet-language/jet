@@ -1,0 +1,15 @@
+// D-FS-WALK-FILES1=A: file-only traversal keeps the walk policy and drops directories.
+use core.files as fs
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("walk-files-example")
+    nested :: Path.from(root).join("nested")
+    fs.create_dir_all(nested) ?? panic("mkdir")
+    fs.write(Path.from(root).join("root.txt"), "root") ?? panic("root")
+    fs.write(nested.join("child.txt"), "child") ?? panic("child")
+
+    entries :: fs.walk_files(root) ?? panic("walk")
+    print("file count: {entries.len()}")
+    loop entry in entries -> print(entry.relative)
+}

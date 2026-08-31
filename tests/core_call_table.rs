@@ -168,9 +168,7 @@ fn core_projection_is_complete_both_directions() {
     let ambient_rows: Vec<_> = jet::Syntax::CORE_CALLS
         .iter()
         .copied()
-        .filter(|row| {
-            row.interpreter_route == jet::Syntax::CoreCallInterpreterRoute::Ambient
-        })
+        .filter(|row| row.interpreter_route == jet::Syntax::CoreCallInterpreterRoute::Ambient)
         .collect();
     let ambient_mismatch = jet::Syntax::core_call_mismatch(
         &ambient_rows,
@@ -194,6 +192,8 @@ fn core_projection_is_complete_both_directions() {
     for (module, member) in [
         ("core.files", "rename"),
         ("core.files", "glob"),
+        ("core.files", "canonicalize"),
+        ("core.files", "stat"),
         ("core.time", "parse_rfc3339"),
         ("core.math", "from_bits"),
         ("core.crypto.uuid", "v4"),
@@ -233,11 +233,8 @@ fn core_projection_is_complete_both_directions() {
                 .any(|(module, member)| *module == row.module && *member == row.member)
         })
         .collect();
-    let stream_mismatch = jet::Syntax::core_call_mismatch(
-        &stream_rows,
-        "encoding stream",
-        &stream_key_refs,
-    );
+    let stream_mismatch =
+        jet::Syntax::core_call_mismatch(&stream_rows, "encoding stream", &stream_key_refs);
     assert!(
         stream_mismatch.is_empty(),
         "encoding stream/table mismatch:\n{}",
@@ -462,11 +459,9 @@ fn coverage_guard_rejects_interpreter_without_executable_route() {
                 jet_foundation::Syntax::CoreCallCoverage::KNOWN,
             ),
         )
-        .with_interpreter_route(
-            jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
+        .with_interpreter_route(jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
                 jet_foundation::Syntax::CoreCallPureRoute::None,
-            ),
-        ),
+        )),
     ];
     assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::None.is_executable());
     assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(

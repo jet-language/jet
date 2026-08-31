@@ -12,6 +12,7 @@ use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -158,18 +159,168 @@ fn registry_url_has_credentials(value: &str) -> bool {
     value[authority_start..authority_end].contains('@')
 }
 
-fn validate_registry_transport(registry: &RegistryConfig) -> Result<(), Diagnostic> {
+#[derive(Debug, Clone)]
+enum RegistryTransport {
+    Local,
+    Network {
+        scheme: String,
+        host: String,
+        port: u16,
+        explicit_port: bool,
+        address: IpAddr,
+    },
+}
+
+impl RegistryTransport {
+    fn remote(&self, url: &str) -> String {
+        let Self::Network {
+            scheme,
+            port,
+            explicit_port,
+            address,
+            ..
+        } = self
+        else {
+            return url.to_string();
+        };
+        if scheme != "git" {
+            return url.to_string();
+        }
+        let Some((url_scheme, rest)) = url.split_once("://") else {
+            return url.to_string();
+        };
+        let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let suffix = &rest[authority_end..];
+        let port = if *explicit_port {
+            format!(":{port}")
+        } else {
+            String::new()
+        };
+        format!("{url_scheme}://{}{}{}", registry_ip(*address), port, suffix)
+    }
+
+    fn command(&self) -> Command {
+        let mut command = jetpack::Provider::hardened_git_command();
+        let Self::Network {
+            scheme,
+            host,
+            port,
+            address,
+            ..
+        } = self
+        else {
+            return command;
+        };
+        if matches!(scheme.as_str(), "http" | "https") {
+            for value in [
+                "http.followRedirects=false".to_string(),
+                "http.proxy=".to_string(),
+                "http.sslVerify=true".to_string(),
+                format!(
+                    "http.curloptResolve={}:{}:{}",
+                    registry_host(host),
+                    port,
+                    registry_curl_address(*address)
+                ),
+            ] {
+                command.args(["-c", &value]);
+            }
+        } else if scheme == "ssh" {
+            command.env(
+                "GIT_SSH_COMMAND",
+                format!(
+                    "{} -oHostName={address}",
+                    jetpack::Provider::hardened_ssh_command()
+                ),
+            );
+        }
+        command
+    }
+}
+
+fn validate_registry_transport(registry: &RegistryConfig) -> Result<RegistryTransport, Diagnostic> {
     if registry_url_has_credentials(&registry.url) {
         return Err(e1235(
             &registry.url,
             "registry URLs must not contain embedded credentials or query/fragment parameters",
         ));
     }
-    Ok(())
+    if let Some(path) = registry.url.strip_prefix("file://") {
+        if path.is_empty() || !path.starts_with('/') || path.contains(['?', '#', '\\']) {
+            return Err(e1235(
+                &registry.url,
+                "file registry URLs must name an absolute local repository",
+            ));
+        }
+        return Ok(RegistryTransport::Local);
+    }
+    let (scheme, rest) = registry.url.split_once("://").ok_or_else(|| {
+        e1235(
+            &registry.url,
+            "registry URL must use file://, https://, http://, git://, or ssh://",
+        )
+    })?;
+    let scheme = scheme.to_ascii_lowercase();
+    if !matches!(scheme.as_str(), "git" | "http" | "https" | "ssh") {
+        return Err(e1235(
+            &registry.url,
+            "the registry transport scheme is not allowed",
+        ));
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
+        return Err(e1235(
+            &registry.url,
+            "registry URL must not contain embedded credentials",
+        ));
+    }
+    let (host, explicit_port) = registry_host_and_port(authority).map_err(|detail| {
+        e1235(
+            &registry.url,
+            &format!("invalid registry transport: {detail}"),
+        )
+    })?;
+    let port = explicit_port.unwrap_or(match scheme.as_str() {
+        "https" => 443,
+        "http" => 80,
+        "git" => 9418,
+        _ => 22,
+    });
+    let endpoint = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let addresses = endpoint
+        .to_socket_addrs()
+        .map_err(|error| {
+            e1235(
+                &registry.url,
+                &format!("could not resolve registry host: {error}"),
+            )
+        })?
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| !registry_public_ip(address.ip()))
+    {
+        return Err(e1235(
+            &registry.url,
+            "registry host resolves to a non-public address",
+        ));
+    }
+    Ok(RegistryTransport::Network {
+        scheme,
+        host,
+        port,
+        explicit_port: explicit_port.is_some(),
+        address: addresses[0].ip(),
+    })
 }
 
-fn git_command() -> Command {
-    let mut command = Command::new("git");
+fn git_command(transport: &RegistryTransport) -> Command {
+    let mut command = transport.command();
     // Git's configured credential helper is the host-owned provider. Keep its
     // request scoped to this repository path; the secret crosses only Git's
     // helper pipe and never becomes a Jet argument or environment value.
@@ -186,6 +337,97 @@ fn git_command() -> Command {
         }
     }
     command
+}
+
+fn registry_ip(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => address.to_string(),
+        IpAddr::V6(address) => format!("[{address}]"),
+    }
+}
+
+fn registry_curl_address(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => address.to_string(),
+        IpAddr::V6(address) => format!("[{address}]"),
+    }
+}
+
+fn registry_host(host: &str) -> String {
+    if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
+fn registry_host_and_port(authority: &str) -> Result<(String, Option<u16>), String> {
+    if let Some(host) = authority.strip_prefix('[') {
+        let (host, suffix) = host
+            .split_once(']')
+            .ok_or_else(|| "IPv6 host is not closed".to_string())?;
+        if host.is_empty() || (!suffix.is_empty() && !suffix.starts_with(':')) {
+            return Err("IPv6 host is malformed".to_string());
+        }
+        return Ok((
+            host.to_string(),
+            parse_registry_port(suffix.strip_prefix(':'))?,
+        ));
+    }
+    let (host, port) = authority
+        .rsplit_once(':')
+        .map(|(host, port)| (host, Some(port)))
+        .unwrap_or((authority, None));
+    if host.is_empty() || host.contains(':') || host.chars().any(char::is_whitespace) {
+        return Err("host is malformed".to_string());
+    }
+    Ok((host.to_string(), parse_registry_port(port)?))
+}
+
+fn parse_registry_port(port: Option<&str>) -> Result<Option<u16>, String> {
+    port.map(|port| {
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| "port is malformed".to_string())?;
+        (port != 0)
+            .then_some(port)
+            .ok_or_else(|| "port must not be zero".to_string())
+    })
+    .transpose()
+}
+
+fn registry_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 100 && (b & 0xc0) == 0x40
+                || a == 127
+                || a == 169 && b == 254
+                || a == 172 && (16..=31).contains(&b)
+                || a == 192 && b == 0 && c == 0
+                || a == 192 && b == 0 && c == 2
+                || a == 192 && b == 168
+                || a == 198 && (18..=19).contains(&b)
+                || a == 198 && b == 51 && c == 100
+                || a == 203 && b == 0 && c == 113
+                || a >= 224)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ipv4) = ip.to_ipv4_mapped() {
+                return registry_public_ip(IpAddr::V4(ipv4));
+            }
+            let [first, second, ..] = ip.segments();
+            (first & 0xe000) == 0x2000
+                && !ip.is_unspecified()
+                && !ip.is_loopback()
+                && !ip.is_multicast()
+                && (first & 0xfe00) != 0xfc00
+                && (first & 0xffc0) != 0xfe80
+                && !(first == 0x2001 && second == 0x0db8)
+        }
+    }
 }
 
 /// Host-pinned root key location for a registry. The registry name is hashed
@@ -246,7 +488,10 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
                 "registry root key is not a regular file",
             ));
         }
-        let existing = std::fs::read_to_string(&path)?;
+        let existing =
+            String::from_utf8(read_registry_file_nofollow(&path, 4096)?).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "registry root key is not UTF-8")
+            })?;
         if existing.trim() != public_key {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -285,7 +530,10 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
                 "registry root key is not a regular file",
             ));
         }
-        let existing = std::fs::read_to_string(&path)?;
+        let existing =
+            String::from_utf8(read_registry_file_nofollow(&path, 4096)?).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "registry root key is not UTF-8")
+            })?;
         if existing.trim() != public_key {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -303,10 +551,15 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
         unique_suffix(),
     ));
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&partial)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        if !add_registry_nofollow_flags(&mut options) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "no-follow registry key publication is unavailable on this platform",
+            ));
+        }
+        let mut file = options.open(&partial)?;
         use std::io::Write;
         file.write_all(public_key.as_bytes())?;
         file.write_all(b"\n")?;
@@ -317,6 +570,7 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
             std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600))?;
         }
         std::fs::rename(&partial, &path)?;
+        sync_registry_directory(parent)?;
         Ok::<_, io::Error>(())
     })();
     if result.is_err() {
@@ -393,7 +647,10 @@ pub fn read_registry_root_key(registry_name: &str) -> io::Result<String> {
             "registry root key is not a regular file",
         ));
     }
-    let key = std::fs::read_to_string(&path)?.trim().to_string();
+    let key = String::from_utf8(read_registry_file_nofollow(&path, 4096)?)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "registry root key is not UTF-8"))?
+        .trim()
+        .to_string();
     if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -475,10 +732,15 @@ fn acquire_registry_cache_lock(parent: &Path, name: &str) -> io::Result<Registry
     ))
 }
 
-fn clone_registry_to(registry: &RegistryConfig, path: &Path) -> Result<(), Diagnostic> {
+fn clone_registry_to(
+    registry: &RegistryConfig,
+    path: &Path,
+    transport: &RegistryTransport,
+) -> Result<(), Diagnostic> {
     let path_display = path.to_string_lossy().into_owned();
-    let output = git_command()
-        .args(["clone", &registry.url, &path_display])
+    let remote = transport.remote(&registry.url);
+    let output = git_command(transport)
+        .args(["clone", "--", &remote, &path_display])
         .output();
     match output {
         Ok(output) if output.status.success() => Ok(()),
@@ -569,6 +831,7 @@ fn install_registry_clone(
 fn validate_existing_index_clone(
     registry: &RegistryConfig,
     dir: &Path,
+    transport: &RegistryTransport,
 ) -> Result<bool, Diagnostic> {
     let existing = match std::fs::symlink_metadata(dir) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
@@ -599,7 +862,7 @@ fn validate_existing_index_clone(
             }
             Err(error) => return Err(e1235(&registry.url, &error.to_string())),
         }
-        let origin = git_command()
+        let origin = git_command(transport)
             .args(["remote", "get-url", "origin"])
             .current_dir(dir)
             .output()
@@ -621,8 +884,9 @@ fn ensure_index_clone_locked(
     registry: &RegistryConfig,
     dir: &Path,
     parent: &Path,
+    transport: &RegistryTransport,
 ) -> Result<PathBuf, Diagnostic> {
-    let existing = validate_existing_index_clone(registry, dir)?;
+    let existing = validate_existing_index_clone(registry, dir, transport)?;
 
     let partial = parent.join(format!(
         ".{}.partial-{}",
@@ -635,7 +899,7 @@ fn ensure_index_clone_locked(
             "registry cache has a colliding partial clone",
         ));
     }
-    clone_registry_to(registry, &partial)?;
+    clone_registry_to(registry, &partial, transport)?;
     install_registry_clone(registry, dir, parent, &partial, existing)
 }
 
@@ -643,7 +907,7 @@ fn ensure_index_clone_locked(
 /// Refreshing an existing cache uses the same staged replacement, so an
 /// interrupted or failed fetch leaves the previous verified clone untouched.
 pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
-    validate_registry_transport(registry)?;
+    let transport = validate_registry_transport(registry)?;
     let dir = index_repo_path(registry);
     if let Some(parent) = dir.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
@@ -655,16 +919,16 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
         .ok_or_else(|| e1235(&registry.url, "registry cache path has no parent"))?;
     let _lock = acquire_registry_cache_lock(parent, &registry.name)
         .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-    ensure_index_clone_locked(registry, &dir, parent)
+    ensure_index_clone_locked(registry, &dir, parent, &transport)
 }
 
 /// Return the already-installed registry clone without contacting its remote.
 /// Locked and offline consumers must validate the cache's real git origin
 /// before trusting its index, metadata, or artifacts.
 pub fn ensure_local_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
-    validate_registry_transport(registry)?;
+    let transport = validate_registry_transport(registry)?;
     let dir = index_repo_path(registry);
-    if !validate_existing_index_clone(registry, &dir)? {
+    if !validate_existing_index_clone(registry, &dir, &transport)? {
         return Err(e1235(
             &registry.url,
             "the local registry cache is unavailable; locked mode never downloads a new index",
@@ -679,6 +943,7 @@ pub fn ensure_local_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Di
 /// commit by accident.
 pub struct PublishCheckout {
     path: PathBuf,
+    cleanup_root: PathBuf,
     cleanup_attempted: Cell<bool>,
     owns_path: bool,
 }
@@ -691,7 +956,7 @@ impl PublishCheckout {
     /// Remove this checkout before an orderly return.
     pub fn cleanup(&self) -> io::Result<()> {
         self.cleanup_attempted.set(true);
-        cleanup_publish_checkout(&self.path, self.owns_path)
+        cleanup_publish_checkout(&self.cleanup_root, self.owns_path)
     }
 }
 
@@ -700,7 +965,7 @@ impl Drop for PublishCheckout {
         if self.cleanup_attempted.replace(true) {
             return;
         }
-        if let Err(error) = cleanup_publish_checkout(&self.path, self.owns_path) {
+        if let Err(error) = cleanup_publish_checkout(&self.cleanup_root, self.owns_path) {
             let diagnostic = checkout_cleanup_diagnostic(&self.path, &error);
             eprint!("{}", crate::Diagnostics::render_all("", "", &[diagnostic]));
         }
@@ -799,35 +1064,43 @@ fn clone_failure(
 
 /// Clone a clean publication checkout from the registry's current remote.
 pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishCheckout, Diagnostic> {
-    validate_registry_transport(registry)?;
-    let suffix = unique_suffix();
-    let path = std::env::temp_dir().join(format!("jet-registry-publish-{suffix}"));
-    if std::fs::symlink_metadata(&path).is_ok() {
-        return Err(e1235(
-            &registry.url,
-            "publication checkout path already exists",
-        ));
-    }
+    let transport = validate_registry_transport(registry)?;
+    let parent = std::env::temp_dir();
+    let checkout_root = jetpack::Provider::exclusive_temp_dir(&parent, "jet-registry-publish")
+        .map_err(|error| {
+            e1235(
+                &registry.url,
+                &format!("could not create publication checkout: {error}"),
+            )
+        })?;
+    let path = checkout_root.join("checkout");
     let path_display = path.to_string_lossy().into_owned();
-    let output = git_command()
-        .args(["clone", &registry.url, &path_display])
+    let remote = transport.remote(&registry.url);
+    let output = git_command(&transport)
+        .args(["clone", "--", &remote, &path_display])
         .output();
     let output = match output {
         Ok(output) => output,
         Err(error) => {
-            return Err(clone_failure(registry, &path, true, error.to_string()));
+            return Err(clone_failure(
+                registry,
+                &checkout_root,
+                true,
+                error.to_string(),
+            ));
         }
     };
     if !output.status.success() {
         return Err(clone_failure(
             registry,
-            &path,
+            &checkout_root,
             true,
             clone_output_detail(&output),
         ));
     }
     Ok(PublishCheckout {
         path,
+        cleanup_root: checkout_root,
         cleanup_attempted: Cell::new(false),
         owns_path: true,
     })
@@ -855,8 +1128,13 @@ fn push_index_inner(
     expected: Option<&IndexEntry>,
     recover_race: bool,
 ) -> Result<(), Diagnostic> {
-    validate_registry_transport(registry)?;
-    let run = |args: &[&str]| git_command().args(args).current_dir(repo).output();
+    let transport = validate_registry_transport(registry)?;
+    let run = |args: &[&str]| {
+        git_command(&transport)
+            .args(args)
+            .current_dir(repo)
+            .output()
+    };
     // A scratch clone may carry no user identity; set one so `commit` works.
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
     let _ = run(&["config", "user.name", "jet registry publish"]);
@@ -884,7 +1162,7 @@ fn push_index_inner(
         }
         stage_paths.push(referrers);
     }
-    let mut add = git_command();
+    let mut add = git_command(&transport);
     add.args(["add", "--"]);
     for path in &stage_paths {
         let relative = path
@@ -958,7 +1236,8 @@ fn push_index_inner(
         }
         let remote = format!("origin/{branch}");
         if let Some(entry) = expected {
-            if remote_contains_entry(repo, &remote, entry) && verify_remote_winner(registry, entry)?
+            if remote_contains_entry(repo, &remote, entry, &transport)
+                && verify_remote_winner(registry, entry)?
             {
                 return Ok(());
             }
@@ -991,7 +1270,7 @@ fn verify_remote_winner(
         if actual != *expected {
             return Ok(false);
         }
-        crate::Publish::verify_artifact(repo, &actual)
+        crate::Publish::snapshot_verified_artifact(repo, &actual)
             .map(|_| true)
             .map_err(|error| {
                 super::Advisory::e2607("concurrent registry winner", &error.to_string())
@@ -1074,7 +1353,12 @@ fn rebuild_publication_after_race(
     })
 }
 
-fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bool {
+fn remote_contains_entry(
+    repo: &Path,
+    remote: &str,
+    expected: &IndexEntry,
+    transport: &RegistryTransport,
+) -> bool {
     let path = match Index::index_entry_path(repo, &expected.name) {
         Ok(path) => path,
         Err(_) => return false,
@@ -1086,7 +1370,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         Err(_) => return false,
     };
     let spec = format!("{remote}:{relative}");
-    let output = match git_command()
+    let output = match git_command(transport)
         .args(["show", &spec])
         .current_dir(repo)
         .output()
@@ -1110,7 +1394,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         },
         Err(_) => return false,
     };
-    if !git_command()
+    if !git_command(transport)
         .args(["cat-file", "-e", &format!("{remote}:{artifact}")])
         .current_dir(repo)
         .output()
@@ -1134,7 +1418,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
                     .replace(std::path::MAIN_SEPARATOR, "/")
             })
             .is_some_and(|relative| {
-                git_command()
+                git_command(transport)
                     .args(["cat-file", "-e", &format!("{remote}:{relative}")])
                     .current_dir(repo)
                     .output()
@@ -1178,6 +1462,74 @@ pub fn artifact_path(repo: &Path, name: &str, version: &str) -> io::Result<PathB
     Ok(repo.join("artifacts").join(name).join(version))
 }
 
+/// A verified registry source snapshot. The registry checkout may be
+/// refreshed or replaced after this value is created; callers consume the
+/// held snapshot path instead of reopening the checkout artifact.
+pub struct ArtifactSnapshot {
+    path: PathBuf,
+    cleanup_root: PathBuf,
+    content_hash: String,
+}
+
+impl ArtifactSnapshot {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+}
+
+impl Drop for ArtifactSnapshot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.cleanup_root);
+    }
+}
+
+fn snapshot_registry_tree(scratch_parent: &Path, source: &Path) -> io::Result<ArtifactSnapshot> {
+    // Keep package snapshots on the registry checkout's disk. `/tmp` is a
+    // RAM-backed tmpfs on supported Jet hosts and is not an OOM-safe scratch
+    // location for a hostile artifact.
+    let cleanup_root =
+        jetpack::Provider::exclusive_temp_dir(scratch_parent, "jet-registry-artifact")?;
+    let path = cleanup_root.join("tree");
+    let result = (|| {
+        copy_artifact_tree(source, &path)?;
+        copy_publish_lock(source, &path)?;
+        let hash = registry_artifact_hash(&path)?;
+        Ok((path.clone(), hash))
+    })();
+    match result {
+        Ok((path, hash)) => Ok(ArtifactSnapshot {
+            path,
+            cleanup_root,
+            content_hash: hash,
+        }),
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&cleanup_root);
+            Err(error)
+        }
+    }
+}
+
+/// Verify an indexed artifact, then copy and re-hash it into an exclusive
+/// snapshot before any caller reads package or registry metadata.
+pub fn snapshot_verified_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<ArtifactSnapshot> {
+    let source = verify_artifact(repo, entry)?;
+    let snapshot = snapshot_registry_tree(repo, &source)?;
+    if !entry.content_hash.is_empty() && snapshot.content_hash() != entry.content_hash {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "registry source artifact for {} {} changed while being snapshotted",
+                entry.name, entry.version
+            ),
+        ));
+    }
+    Ok(snapshot)
+}
+
 /// Stage one package source tree into the registry clone and verify its source
 /// hash before the index is changed. Existing identical artifacts are reused;
 /// conflicting bytes fail closed.
@@ -1188,13 +1540,8 @@ pub fn publish_artifact(
     version: &str,
     expected_hash: &str,
 ) -> io::Result<PathBuf> {
-    let source_metadata = std::fs::symlink_metadata(source)?;
-    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "registry source artifact is not a directory",
-        ));
-    }
+    let source_snapshot = snapshot_registry_tree(repo, source)?;
+    let source = source_snapshot.path();
     validate_registry_metadata_file(source, name, version)?;
     let actual = registry_artifact_hash(source)?;
     if !expected_hash.is_empty() && actual != expected_hash {
@@ -1250,7 +1597,16 @@ pub fn publish_artifact(
             "registry artifact staging path already exists",
         ));
     }
+    let subject_root = repo.join("referrers").join(&actual);
+    let subject_root_existed = std::fs::symlink_metadata(&subject_root).is_ok();
+    let pending = subject_root.join(OCI_PENDING_SBOM);
+    let pending_existed = std::fs::symlink_metadata(&pending).is_ok();
+    let mut artifact_published = false;
     let result = (|| {
+        // Stage all content-derived evidence before the artifact becomes
+        // visible. An invalid lock or an oversized evidence payload therefore
+        // cannot leave an apparently published source tree behind.
+        stage_oci_sbom(repo, source, name, version, &actual)?;
         copy_artifact_tree(source, &staging)?;
         if registry_artifact_hash(&staging)? != actual {
             return Err(io::Error::new(
@@ -1258,16 +1614,25 @@ pub fn publish_artifact(
                 "staged registry artifact does not match its source hash",
             ));
         }
-        std::fs::rename(&staging, &destination)
+        std::fs::rename(&staging, &destination)?;
+        artifact_published = true;
+        finalize_oci_referrers_for_package(repo, name, version)
     })();
     match result {
-        Ok(()) => {
-            stage_oci_sbom(repo, source, name, version, &actual)?;
-            finalize_oci_referrers_for_package(repo, name, version)?;
-            Ok(destination)
-        }
+        Ok(()) => Ok(destination),
         Err(error) => match remove_staging_path(&staging) {
-            Ok(()) => Err(error),
+            Ok(()) => {
+                if !pending_existed {
+                    let _ = std::fs::remove_file(&pending);
+                }
+                if artifact_published && !subject_root_existed {
+                    let _ = remove_staging_path(&destination);
+                }
+                if !subject_root_existed {
+                    let _ = std::fs::remove_dir_all(&subject_root);
+                }
+                Err(error)
+            }
             Err(cleanup_error) => Err(io::Error::new(
                 error.kind(),
                 format!(
@@ -1965,11 +2330,28 @@ fn collect_registry_identity_files(
     for entry in entries {
         let path = entry.path();
         let name = entry.file_name();
-        let name = name.to_string_lossy();
+        let name = name.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "registry source contains a non-UTF-8 name `{}`",
+                    path.display()
+                ),
+            )
+        })?;
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() && !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "registry source contains an unsupported node `{}`",
+                    path.display()
+                ),
+            ));
+        }
         if name.starts_with('.') || name == "build" || name == "target" {
             continue;
         }
-        let metadata = std::fs::symlink_metadata(&path)?;
         if metadata.is_dir() {
             collect_registry_identity_files(&path, root, out)?;
             continue;
@@ -1995,7 +2377,16 @@ fn collect_registry_identity_files(
         let relative = path
             .strip_prefix(root)
             .unwrap_or(&path)
-            .to_string_lossy()
+            .to_str()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "registry source contains a non-UTF-8 path `{}`",
+                        path.display()
+                    ),
+                )
+            })?
             .replace('\\', "/");
         let is_registry_metadata = name == REGISTRY_PACKAGE_METADATA_FILE;
         // The artifact copy path preserves every visible regular file. Hash
@@ -2003,18 +2394,9 @@ fn collect_registry_identity_files(
         // asset) cannot be changed after publication without changing the
         // signed content identity.
         let content = if is_registry_metadata {
-            let mut content = Vec::new();
-            std::fs::File::open(&path)?
-                .take(MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1)
-                .read_to_end(&mut content)?;
-            if content.len() as u64 > MAX_REGISTRY_PACKAGE_METADATA_BYTES {
-                return Err(invalid_registry_metadata(
-                    "registry.json exceeds its size limit",
-                ));
-            }
-            content
+            read_registry_file_nofollow(&path, MAX_REGISTRY_PACKAGE_METADATA_BYTES)?
         } else {
-            std::fs::read(&path)?
+            read_registry_file_nofollow(&path, u64::MAX)?
         };
         out.push((relative, content));
     }
@@ -2472,21 +2854,44 @@ fn remove_staging_path(path: &Path) -> io::Result<()> {
 }
 
 fn copy_artifact_tree(source: &Path, destination: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(destination)?;
+    let source_metadata = std::fs::symlink_metadata(source)?;
+    if source_metadata.file_type().is_symlink()
+        || is_registry_reparse_point(&source_metadata)
+        || !source_metadata.is_dir()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "registry source root is not a real directory `{}`",
+                source.display()
+            ),
+        ));
+    }
+    ensure_registry_tree_directory(destination)?;
     let mut entries = std::fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|entry| entry.file_name());
+    let mut names = entries
+        .iter()
+        .map(|entry| entry.file_name())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
     for entry in entries {
         let name = entry.file_name();
-        let name = name.to_string_lossy();
-        // These are local state, never package source. tree_hash applies the
-        // same exclusion, so omitting them preserves the published identity.
-        if name.starts_with('.') || name == "build" || name == "target" {
-            continue;
-        }
+        let name = name.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "registry source contains a non-UTF-8 name `{}`",
+                    entry.path().display()
+                ),
+            )
+        })?;
         let from = entry.path();
-        let to = destination.join(entry.file_name());
         let metadata = std::fs::symlink_metadata(&from)?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() && !metadata.is_file() {
+        if metadata.file_type().is_symlink()
+            || is_registry_reparse_point(&metadata)
+            || !metadata.is_dir() && !metadata.is_file()
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
@@ -2495,13 +2900,278 @@ fn copy_artifact_tree(source: &Path, destination: &Path) -> io::Result<()> {
                 ),
             ));
         }
+        // These are local state, never package source. tree_hash applies the
+        // same exclusion, so omitting them preserves the published identity.
+        if name.starts_with('.') || name == "build" || name == "target" {
+            continue;
+        }
+        let to = destination.join(entry.file_name());
         if metadata.is_dir() {
+            ensure_registry_tree_directory(&to)?;
             copy_artifact_tree(&from, &to)?;
+            let after = std::fs::symlink_metadata(&from)?;
+            if !same_registry_identity(&metadata, &after) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "registry source directory changed while copying `{}`",
+                        from.display()
+                    ),
+                ));
+            }
         } else {
-            std::fs::copy(&from, &to)?;
+            copy_registry_file_nofollow(&from, &to, &metadata)?;
         }
     }
+    let mut after_names = std::fs::read_dir(source)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<io::Result<Vec<_>>>()?;
+    after_names.sort_unstable();
+    let after_metadata = std::fs::symlink_metadata(source)?;
+    if !same_registry_identity(&source_metadata, &after_metadata) || names != after_names {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "registry source changed while copying `{}`",
+                source.display()
+            ),
+        ));
+    }
     Ok(())
+}
+
+fn copy_publish_lock(source: &Path, destination: &Path) -> io::Result<()> {
+    let source_metadata = source.join(".jet");
+    let metadata = match std::fs::symlink_metadata(&source_metadata) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink()
+        || is_registry_reparse_point(&metadata)
+        || !metadata.is_dir()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "package .jet metadata directory must be a real directory",
+        ));
+    }
+    let source_lock = source_metadata.join("lock");
+    let lock_metadata = match std::fs::symlink_metadata(&source_lock) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if lock_metadata.file_type().is_symlink()
+        || is_registry_reparse_point(&lock_metadata)
+        || !lock_metadata.is_file()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "package lock must be a regular file",
+        ));
+    }
+    let destination_metadata = destination.join(".jet");
+    ensure_registry_tree_directory(&destination_metadata)?;
+    copy_registry_file_nofollow(
+        &source_lock,
+        &destination_metadata.join("lock"),
+        &lock_metadata,
+    )
+}
+
+fn ensure_registry_tree_directory(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.file_type().is_symlink() || is_registry_reparse_point(&metadata) =>
+        {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "registry tree directory must not be a symlink or reparse point",
+            ))
+        }
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "registry tree path is not a directory",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                ensure_registry_tree_directory(parent)?;
+            }
+            std::fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn copy_registry_file_nofollow(
+    source: &Path,
+    destination: &Path,
+    expected: &std::fs::Metadata,
+) -> io::Result<()> {
+    let mut source_options = std::fs::OpenOptions::new();
+    source_options.read(true);
+    add_registry_nofollow_flags(&mut source_options);
+    let mut source_file = source_options.open(source)?;
+    let opened = source_file.metadata()?;
+    if !opened.is_file()
+        || is_registry_reparse_point(&opened)
+        || !same_registry_identity(expected, &opened)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "registry source file changed before copy `{}`",
+                source.display()
+            ),
+        ));
+    }
+    let mut destination_options = std::fs::OpenOptions::new();
+    destination_options.write(true).create(true).truncate(true);
+    add_registry_nofollow_flags(&mut destination_options);
+    let mut destination_file = destination_options.open(destination)?;
+    std::io::copy(&mut source_file, &mut destination_file)?;
+    destination_file.sync_all()?;
+    let after = std::fs::symlink_metadata(source)?;
+    if !same_registry_identity(expected, &after) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "registry source file changed while copying `{}`",
+                source.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn read_registry_file_nofollow(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
+    let expected = std::fs::symlink_metadata(path)?;
+    if expected.file_type().is_symlink()
+        || is_registry_reparse_point(&expected)
+        || !expected.is_file()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "registry identity entry is not a regular file `{}`",
+                path.display()
+            ),
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    add_registry_nofollow_flags(&mut options);
+    let mut file = options.open(path)?;
+    let opened = file.metadata()?;
+    if !same_registry_identity(&expected, &opened) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "registry identity entry changed before read `{}`",
+                path.display()
+            ),
+        ));
+    }
+    let mut content = Vec::new();
+    file.by_ref()
+        .take(maximum.saturating_add(1))
+        .read_to_end(&mut content)?;
+    if content.len() as u64 > maximum {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry identity file exceeds its size limit",
+        ));
+    }
+    let after = std::fs::symlink_metadata(path)?;
+    if !same_registry_identity(&expected, &after) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "registry identity entry changed while reading `{}`",
+                path.display()
+            ),
+        ));
+    }
+    Ok(content)
+}
+
+fn add_registry_nofollow_flags(options: &mut std::fs::OpenOptions) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0o2000000;
+        const O_NOFOLLOW: i32 = 0o400000;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_CLOEXEC: i32 = 0x01000000;
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        return true;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    )))]
+    {
+        let _ = options;
+        false
+    }
+}
+
+fn sync_registry_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        return std::fs::File::open(path)?.sync_all();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn is_registry_reparse_point(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return metadata.file_attributes() & 0x0000_0400 != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
+fn same_registry_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type() && left.len() == right.len()
+    }
 }
 
 // ──────────────────────────────────────────────

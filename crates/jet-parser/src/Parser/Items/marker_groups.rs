@@ -1099,8 +1099,20 @@ impl<'a> Parser<'a> {
         {
             return self.ffi_fn_from_markers(markers);
         }
+        if markers.iter().any(Self::is_c_guest_import_marker) {
+            return self.guest_import_fn_from_markers(markers);
+        }
         let function = self.func()?;
         self.apply_function_markers(function, markers)
+    }
+
+    pub(super) fn is_c_guest_import_marker(marker: &Marker) -> bool {
+        !marker.negated
+            && marker.name == Syntax::MARKER_IMPORT
+            && matches!(
+                marker.args.as_slice(),
+                [crate::AST::Expr::Ident(argument, _)] if argument == Syntax::C_MODULE_ROOT
+            )
     }
 
     pub(in crate::Parser) fn apply_function_markers(

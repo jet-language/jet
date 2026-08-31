@@ -21,9 +21,7 @@ use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
-use crate::Codegen::TIR::lower::{
-    deferred_stmt, lower_return_value, LowerBody, LowerStmtPlan,
-};
+use crate::Codegen::TIR::lower::{deferred_stmt, lower_return_value, LowerBody, LowerStmtPlan};
 use crate::Codegen::TIR::lower_enum_match;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
@@ -81,7 +79,7 @@ pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
         "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
-        "CSVReader" => Some(Type::List(Box::new(Type::String))),
+        "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }
 }
@@ -293,7 +291,12 @@ fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
     }
 }
 
-pub(super) fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
+pub(super) fn lower_if_let_subject(
+    subject: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    cached: bool,
+) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
     // field, so an if-let may move it. Preserve an explicitly written `~field`
@@ -475,6 +478,46 @@ fn lower_if_cond_atom(
                 };
                 (name, place, Some(ty))
             })
+            .collect();
+        return (
+            TIfCond::WithPrelude {
+                prelude: vec![TStmt::Let {
+                    name: temp,
+                    kw: "let",
+                    let_ty: crate::Codegen::TIR::TLetTy::plain(subject_ty),
+                    init: subject_value,
+                    gc_promotion: None,
+                    gc_transferred: false,
+                }],
+                cond: Box::new(TIfCond::Plain(condition)),
+            },
+            bindings,
+            prefix,
+        );
+    }
+    // D-BINPAT1: value-form binary-pattern dispatch has the same single-
+    // evaluation rule as string-pattern dispatch. Keep the subject in a
+    // generated local so the scan and each hole projection see one value.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::BinMatch { .. },
+        ..
+    } = cond
+    {
+        let subject_value = lower_if_expr(subject, cx, env, cached);
+        let subject_ty = subject_value.ty.clone();
+        let temp = jet_format!("{jet_prefix}if_bin_{}", subject.span().start);
+        let local = TLocal::generated(&temp);
+        let local_expr = || TExpr {
+            ty: subject_ty.clone(),
+            kind: TExprKind::Local(local.clone()),
+        };
+        let condition = bin_match_pattern_cond_expr(pattern, local_expr(), cx);
+        let prefix = lower_bin_match_pattern_bindings(pattern, local_expr(), cx, env);
+        let (_, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+        let bindings = holes
+            .into_iter()
+            .map(|(name, ty)| (name.clone(), TLocal::user(&name), Some(ty)))
             .collect();
         return (
             TIfCond::WithPrelude {
@@ -773,8 +816,7 @@ fn lower_if_cond_atom(
                 let StructPatField::Bind { field, local, .. } = field else {
                     continue;
                 };
-                let fty =
-                    struct_pattern_field_type(cx, &subject_ty, field).unwrap_or(Type::Int);
+                let fty = struct_pattern_field_type(cx, &subject_ty, field).unwrap_or(Type::Int);
                 let place = if fty.is_allocator_view() {
                     TLocal::user(local).through_ref()
                 } else {
@@ -1633,7 +1675,11 @@ pub(crate) fn lower_mixed_switch<'a>(
                         cx,
                     )
                 } else if let Some(pattern) = bin_match_pat.as_ref() {
-                    bin_match_pattern_cond_expr(pattern, cx)
+                    bin_match_pattern_cond_expr(
+                        pattern,
+                        switch_subject_expr(subject_ty.clone()),
+                        cx,
+                    )
                 } else {
                     lower_branch_condition(&arm.cond, subject, &subject_ty, cx, branch)
                 };
@@ -1647,7 +1693,12 @@ pub(crate) fn lower_mixed_switch<'a>(
                         branch,
                     )
                 } else if let Some(pattern) = bin_match_pat.as_ref() {
-                    lower_bin_match_pattern_bindings(pattern, cx, branch)
+                    lower_bin_match_pattern_bindings(
+                        pattern,
+                        switch_subject_expr(subject_ty.clone()),
+                        cx,
+                        branch,
+                    )
                 } else {
                     Vec::new()
                 };

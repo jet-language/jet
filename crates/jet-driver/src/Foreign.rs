@@ -404,12 +404,23 @@ fn materialize_namespace(
             Err(_) => String::new(),
         };
         if !source.is_empty() {
-            if language == ForeignLanguage::Cobol && descriptor_stamp(&source).is_none() {
+            if matches!(language, ForeignLanguage::Cobol | ForeignLanguage::Com)
+                && descriptor_stamp(&source).is_none()
+            {
                 return Err(vec![Diagnostic::error(
                     "E3208",
-                    "generated `Cobol` binding has no ABI descriptor".to_string(),
-                    "the generated stub must record the checked COBOL C-ABI contract".to_string(),
-                    "regenerate the binding with `jet inspect bind cobol`".to_string(),
+                    format!(
+                        "generated `{}` binding has no ABI descriptor",
+                        language.root()
+                    ),
+                    format!(
+                        "the generated stub must record the checked {} ABI contract",
+                        language.root()
+                    ),
+                    format!(
+                        "regenerate the binding with `jet inspect bind {}`",
+                        language.root()
+                    ),
                     None,
                 )]);
             }

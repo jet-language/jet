@@ -4,8 +4,8 @@ use core.files as fs
 
 fn run() {
     abc :: [U8]{0x61, 0x62, 0x63}
-    print(crypto.sha512_bytes(abc))
-    print(crypto.blake3_bytes(abc))
+    print(crypto.sha512(abc).hex())
+    print(crypto.blake3(abc).hex())
     print(crypto.sha1(abc) == "a9993e364706816aba3e25717850c26c9cd0d89d")
     print(crypto.sha3_256(abc) == "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
     print(crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 1, 32).len() == 32)
@@ -40,19 +40,19 @@ fn run() {
     source_text :: "/tmp/jet_crypto_suite_source"
     sealed_text :: "/tmp/jet_crypto_suite_sealed"
     opened_text :: "/tmp/jet_crypto_suite_opened"
-    if fs.exists(source_text) -> fs.remove(source_text) ?? return Err("crypto fixture cleanup")
-    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? return Err("crypto fixture cleanup")
-    if fs.exists(opened_text) -> fs.remove(opened_text) ?? return Err("crypto fixture cleanup")
+    if fs.exists(source_text) -> fs.remove(source_text)
+    if fs.exists(sealed_text) -> fs.remove(sealed_text)
+    if fs.exists(opened_text) -> fs.remove(opened_text)
     source :: Path.from(source_text)
     sealed :: Path.from(sealed_text)
     opened :: Path.from(opened_text)
-    source.write_atomic(abc) ?? return Err("file source")
+    source.write_atomic(abc)
     file_recipient :: crypto.X25519SecretKey.new_random() ?? return Err("file recipient")
     crypto.file_seal([file_recipient.public_key()], source, sealed) ?? return Err("file seal")
     crypto.file_open(&file_recipient, sealed, opened) ?? return Err("file open")
-    opened_bytes :: fs.read(opened_text) ?? return Err("file read")
+    opened_bytes :: fs.read(opened_text)
     print(opened_bytes == "abc")
-    fs.remove(source_text) ?? return Err("crypto fixture cleanup")
-    fs.remove(sealed_text) ?? return Err("crypto fixture cleanup")
-    fs.remove(opened_text) ?? return Err("crypto fixture cleanup")
+    fs.remove(source_text)
+    fs.remove(sealed_text)
+    fs.remove(opened_text)
 }

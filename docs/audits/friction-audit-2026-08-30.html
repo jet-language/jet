@@ -1,0 +1,1076 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A traceable code-level companion to the Jet friction audit of 2026-08-30.">
+<title>Jet friction audit — 2026-08-30</title>
+<style>
+  :root {
+    --bg: #071019;
+    --surface-1: #0b1621;
+    --surface-2: #101d29;
+    --surface-3: #152534;
+    --border: #294050;
+    --border-soft: #1c3140;
+    --text: #f0f6f8;
+    --text-2: #c1ced4;
+    --muted: #93a5ae;
+    --amber: #f4b860;
+    --amber-soft: #332817;
+    --cyan: #6dd7e8;
+    --cyan-soft: #102c34;
+    --green: #70d69a;
+    --green-soft: #112c21;
+    --red: #ff8585;
+    --red-soft: #381d22;
+    --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --radius: 12px;
+    --measure: 72ch;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); scroll-padding-top: 5.25rem; }
+  body {
+    margin: 0;
+    background:
+      linear-gradient(90deg, rgba(109, 215, 232, 0.025) 1px, transparent 1px),
+      linear-gradient(rgba(109, 215, 232, 0.018) 1px, transparent 1px),
+      var(--bg);
+    background-size: 32px 32px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cyan); text-underline-offset: 0.2em; }
+  a:hover { color: var(--text); }
+  :focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 0.75rem;
+    left: 0.75rem;
+    transform: translateY(-180%);
+    padding: 0.65rem 0.9rem;
+    border: 1px solid var(--cyan);
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text);
+    font: 700 0.8rem var(--mono);
+  }
+  .skip-link:focus { transform: translateY(0); }
+
+  .topbar {
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    border-bottom: 1px solid var(--border-soft);
+    background: rgba(7, 16, 25, 0.96);
+  }
+  .nav {
+    display: flex;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0.7rem 1.5rem;
+    align-items: center;
+    gap: 1rem;
+  }
+  .nav-mark {
+    flex: none;
+    color: var(--amber);
+    font: 800 0.74rem/1 var(--mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .nav-links {
+    display: flex;
+    min-width: 0;
+    margin-left: auto;
+    gap: 0.15rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .nav a {
+    flex: none;
+    padding: 0.38rem 0.55rem;
+    border-radius: 5px;
+    color: var(--text-2);
+    font: 600 0.72rem var(--mono);
+    text-decoration: none;
+  }
+  .nav a:hover { background: var(--surface-2); color: var(--text); }
+
+  .page {
+    position: relative;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 6rem 3.2rem;
+  }
+  .page::before {
+    position: absolute;
+    top: 4.5rem;
+    bottom: 6rem;
+    left: 1.6rem;
+    width: 2px;
+    background: linear-gradient(var(--amber), rgba(244, 184, 96, 0.12));
+    content: "";
+  }
+  section { margin-top: 5rem; }
+  .hero { margin-top: 0; }
+  .eyebrow,
+  .trace-label,
+  .kicker {
+    color: var(--amber);
+    font: 700 0.72rem/1.3 var(--mono);
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+  .eyebrow { margin: 0 0 1rem; }
+  .eyebrow::before { content: "AUDIT / "; color: var(--muted); }
+  h1, h2, h3, p { margin-top: 0; }
+  h1 {
+    max-width: 17ch;
+    margin-bottom: 1rem;
+    font-size: clamp(2.4rem, 7vw, 5.5rem);
+    font-weight: 760;
+    letter-spacing: -0.055em;
+    line-height: 0.98;
+  }
+  h2 {
+    margin-bottom: 0.55rem;
+    font-size: clamp(1.65rem, 4vw, 2.55rem);
+    letter-spacing: -0.035em;
+    line-height: 1.1;
+  }
+  h3 { font-size: 1.08rem; line-height: 1.3; }
+  .lead {
+    max-width: var(--measure);
+    margin-bottom: 2rem;
+    color: var(--text-2);
+    font-size: clamp(1rem, 2vw, 1.2rem);
+  }
+  .thesis {
+    max-width: var(--measure);
+    margin: 2.25rem 0 0;
+    padding: 1.35rem 1.5rem;
+    border-left: 3px solid var(--amber);
+    background: linear-gradient(90deg, rgba(244, 184, 96, 0.09), transparent 80%);
+    color: var(--text);
+    font-size: 1.06rem;
+  }
+  .frequency-panel {
+    margin-top: 1.35rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+    overflow: hidden;
+  }
+  .frequency-title {
+    margin: 0;
+    padding: 1rem 1rem 0;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .frequency-table { font-size: 0.8rem; }
+  .frequency-table caption {
+    padding: 0.45rem 1rem 0.8rem;
+    color: var(--muted);
+    font: 0.7rem/1.4 var(--mono);
+  }
+  .frequency-table th,
+  .frequency-table td { padding: 0.62rem 1rem; }
+  .frequency-table th[scope="row"] {
+    width: 30%;
+    background: transparent;
+    color: var(--text);
+    font: 650 0.78rem var(--mono);
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+  }
+  .frequency-count {
+    width: 5.5rem;
+    color: var(--amber);
+    font: 750 0.78rem var(--mono);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .frequency-bar {
+    display: block;
+    width: 100%;
+    min-width: 9rem;
+    height: 0.72rem;
+  }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  .metric {
+    min-height: 132px;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+  }
+  .metric-value {
+    display: block;
+    color: var(--text);
+    font-size: clamp(2rem, 5vw, 3.3rem);
+    font-weight: 750;
+    letter-spacing: -0.055em;
+    line-height: 1;
+  }
+  .metric-label {
+    display: block;
+    margin-top: 0.75rem;
+    color: var(--muted);
+    font: 650 0.72rem/1.35 var(--mono);
+    text-transform: uppercase;
+  }
+  .prevention-metrics { margin-top: 0.75rem; }
+  .prevention-metrics .metric {
+    min-height: 112px;
+    background: var(--surface-2);
+  }
+  .prevention-metrics .metric-value { color: var(--amber); }
+  .scope-note { margin: 0.9rem 0 0; color: var(--muted); font-size: 0.88rem; }
+
+  .section-head { max-width: var(--measure); margin-bottom: 1.6rem; }
+  .section-head p { color: var(--text-2); }
+  .trace-label { display: inline-flex; gap: 0.5rem; align-items: center; margin-bottom: 0.65rem; }
+  .trace-label::before { width: 1.4rem; height: 1px; background: currentColor; content: ""; }
+  .cuts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+  }
+  .cut {
+    padding: 1.35rem;
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--amber);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+  }
+  .cut h3 { margin: 0.45rem 0 0.7rem; }
+  .cut p { margin-bottom: 1rem; color: var(--text-2); }
+  .observed,
+  .decision,
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.24rem 0.5rem;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    font: 750 0.64rem/1.1 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .observed { color: var(--cyan); background: var(--cyan-soft); }
+  .decision { color: var(--amber); background: var(--amber-soft); }
+  .bug { color: var(--red); background: var(--red-soft); }
+  .keep { color: var(--green); background: var(--green-soft); }
+  .stat-list { display: grid; gap: 0.48rem; margin: 0; }
+  .stat-row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr;
+    gap: 0.6rem;
+    align-items: center;
+    color: var(--text-2);
+    font-size: 0.82rem;
+  }
+  .stat-row strong { color: var(--text); font: 750 0.85rem var(--mono); }
+  .mini-bar { width: 100%; height: 6px; overflow: hidden; border-radius: 99px; background: var(--surface-3); }
+  .mini-bar span { display: block; height: 100%; border-radius: inherit; background: var(--amber); }
+  .cut-chart {
+    width: 100%;
+    height: 108px;
+    margin-top: 0.9rem;
+    overflow: visible;
+  }
+  .cut-chart text { fill: var(--muted); font: 9px var(--mono); }
+
+  .queue { display: grid; gap: 1rem; }
+  .ballot {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-1);
+  }
+  .ballot-head { padding: 1.4rem 1.5rem 1.2rem; border-bottom: 1px solid var(--border-soft); }
+  .ballot-id { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.85rem; }
+  .ballot h3 { margin-bottom: 0.4rem; font-size: clamp(1.18rem, 2.5vw, 1.5rem); }
+  .gist { max-width: var(--measure); margin: 0; color: var(--text-2); }
+  .evidence {
+    margin: 0;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-2);
+    background: rgba(109, 215, 232, 0.035);
+  }
+  .evidence q { font-family: var(--mono); font-size: 0.83rem; }
+  .evidence cite { display: block; margin-top: 0.45rem; color: var(--cyan); font: normal 0.72rem var(--mono); }
+  .comparison {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .code-pane { min-width: 0; }
+  .code-pane + .code-pane { border-left: 1px solid var(--border-soft); }
+  .code-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--muted);
+    font: 750 0.66rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .code-pane.after .code-label { color: var(--green); }
+  pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    background: #08131c;
+    color: #dcebf0;
+    font: 0.78rem/1.58 var(--mono);
+    tab-size: 4;
+  }
+  code { font-family: var(--mono); }
+  .code-string { color: #f6c978; }
+  .code-comment { color: #8faab4; }
+  .options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.7rem;
+    padding: 1rem;
+  }
+  .option {
+    padding: 1rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 9px;
+    background: var(--surface-2);
+  }
+  .option.ratified { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+  .option-top { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.55rem; }
+  .option-key { color: var(--text); font: 800 0.75rem var(--mono); }
+  .ratified-badge { color: var(--green); font: 750 0.63rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+  .option h4 { margin: 0 0 0.45rem; color: var(--text); font-size: 0.9rem; line-height: 1.35; }
+  .option p { margin: 0; color: var(--text-2); font-size: 0.79rem; line-height: 1.5; }
+
+  .prevention-callout {
+    margin-bottom: 1.8rem;
+    padding: 1.2rem 1.35rem;
+    border: 1px solid #326272;
+    border-left: 3px solid var(--cyan);
+    border-radius: var(--radius);
+    background: linear-gradient(100deg, var(--cyan-soft), var(--surface-1) 72%);
+  }
+  .prevention-callout p { max-width: 100ch; margin: 0; color: var(--text-2); }
+  .prevention-callout p + p { margin-top: 0.7rem; }
+  .prevention-block { margin-top: 2rem; }
+  .prevention-block > h3 { margin-bottom: 0.45rem; }
+  .prevention-block > p { max-width: var(--measure); color: var(--text-2); }
+  .ladder {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.7rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .ladder-rung {
+    position: relative;
+    min-height: 188px;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--cyan);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+  }
+  .ladder-rung:not(:last-child)::after {
+    position: absolute;
+    top: 1.75rem;
+    right: -0.72rem;
+    z-index: 1;
+    color: var(--amber);
+    content: "→";
+    font: 800 1.2rem/1 var(--mono);
+  }
+  .ladder-step {
+    display: block;
+    color: var(--amber);
+    font: 750 0.68rem/1.35 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .ladder-rung h4 { margin: 0.65rem 0 0.45rem; font-size: 0.95rem; line-height: 1.3; }
+  .ladder-rung p { margin: 0; color: var(--text-2); font-size: 0.8rem; line-height: 1.5; }
+  .prevention-table { min-width: 1120px; }
+  .lint-table { min-width: 780px; }
+  .prevention-table th[scope="row"],
+  .lint-table th[scope="row"] {
+    min-width: 13rem;
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    background: transparent;
+    color: var(--text);
+    font: 750 0.8rem/1.45 var(--mono);
+    letter-spacing: 0;
+    text-align: left;
+    text-transform: none;
+    white-space: normal;
+    vertical-align: top;
+  }
+  .prevention-table tr:last-child th[scope="row"],
+  .lint-table tr:last-child th[scope="row"] { border-bottom: 0; }
+  .guard-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+  }
+  .guard-card {
+    padding: 1.2rem;
+    border: 1px solid #326272;
+    border-top: 3px solid var(--cyan);
+    border-radius: var(--radius);
+    background: linear-gradient(140deg, var(--cyan-soft), var(--surface-1) 72%);
+  }
+  .guard-label {
+    color: var(--cyan);
+    font: 750 0.68rem/1.2 var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .guard-card h4 { margin: 0.65rem 0 0.5rem; font-size: 1.05rem; line-height: 1.3; }
+  .guard-card p { margin: 0; color: var(--text-2); }
+
+  .table-panel { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  caption { padding: 1rem 1.1rem; color: var(--muted); text-align: left; font: 0.72rem var(--mono); }
+  th {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    font: 750 0.67rem var(--mono);
+    letter-spacing: 0.07em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  td { padding: 0.9rem 1rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--text); font: 750 0.8rem var(--mono); white-space: nowrap; }
+  .file { color: var(--cyan); font: 0.75rem/1.5 var(--mono); }
+  .kept-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+  .kept-card {
+    padding: 1.15rem;
+    border: 1px solid #285d42;
+    border-radius: var(--radius);
+    background: linear-gradient(140deg, var(--green-soft), var(--surface-1) 72%);
+  }
+  .kept-card h3 { margin: 0.65rem 0 0.45rem; }
+  .kept-card p { margin: 0; color: var(--text-2); }
+  .win {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 1.2rem 1.3rem;
+    border: 1px solid #285d42;
+    border-radius: var(--radius);
+    background: var(--green-soft);
+    align-items: center;
+  }
+  .win strong { color: var(--green); font: 800 clamp(2rem, 6vw, 3.5rem)/1 var(--mono); }
+  .win p { margin: 0; color: var(--text-2); }
+  .method {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  .method-card { padding: 1.2rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+  .method-card h3 { margin-bottom: 0.5rem; }
+  .method-card p { margin: 0; color: var(--text-2); }
+  .method-card p + p { margin-top: 0.75rem; }
+  footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--border); color: var(--muted); font: 0.72rem/1.6 var(--mono); }
+
+  @media (max-width: 900px) {
+    .metrics, .cuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cuts .cut:last-child { grid-column: 1 / -1; }
+    .options { grid-template-columns: 1fr; }
+    .ladder { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ladder-rung:not(:last-child)::after { display: none; }
+  }
+  @media (max-width: 680px) {
+    .page { padding: 3.25rem 1rem 4rem 1.8rem; }
+    .page::before { top: 3.25rem; bottom: 4rem; left: 0.85rem; }
+    .nav { padding-inline: 0.8rem; }
+    .nav-mark { display: none; }
+    .nav-links { margin-left: 0; }
+    .metrics, .cuts, .kept-grid, .method, .comparison, .ladder, .guard-cards { grid-template-columns: 1fr; }
+    .cuts .cut:last-child { grid-column: auto; }
+    .code-pane + .code-pane { border-top: 1px solid var(--border-soft); border-left: 0; }
+    .metric { min-height: 105px; }
+    h1 { max-width: 12ch; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to audit</a>
+<header class="topbar">
+  <nav class="nav" aria-label="Audit sections">
+    <span class="nav-mark">JET / FRICTION</span>
+    <div class="nav-links">
+      <a href="#verdict">Verdict</a>
+      <a href="#cuts">Deep cuts</a>
+      <a href="#decisions">Decisions</a>
+      <a href="#prevention">Prevention</a>
+      <a href="#bugs">Cards</a>
+      <a href="#kept">Kept</a>
+      <a href="#loses">Loses</a>
+      <a href="#method">Method</a>
+    </div>
+  </nav>
+</header>
+
+<main id="content" class="page">
+  <section id="verdict" class="hero" aria-labelledby="verdict-title">
+    <p class="eyebrow">2026-08-30 / whole corpus</p>
+    <h1 id="verdict-title">The surface is mostly right. The corpus takes the long way.</h1>
+    <p class="lead">A code-level audit for Jet maintainers and owners. Scan the verdict, inspect the evidence, compare the same program before and after, then review eight ratified outcome-A changes.</p>
+
+    <div class="metrics" aria-label="Audit metrics">
+      <article class="metric"><strong class="metric-value">3,566</strong><span class="metric-label">files read</span></article>
+      <article class="metric"><strong class="metric-value">38</strong><span class="metric-label">lane findings</span></article>
+      <article class="metric"><strong class="metric-value">6</strong><span class="metric-label">cards</span></article>
+      <article class="metric"><strong class="metric-value">8</strong><span class="metric-label">ratified outcome-A decisions</span></article>
+    </div>
+    <div class="metrics prevention-metrics" aria-label="Finding disposition and prevention metrics">
+      <article class="metric"><strong class="metric-value">36</strong><span class="metric-label">API/default/recipe/generator corrections</span></article>
+      <article class="metric"><strong class="metric-value">2</strong><span class="metric-label">compiler predicate bugs</span></article>
+      <article class="metric"><strong class="metric-value">0</strong><span class="metric-label">audit-only</span></article>
+      <article class="metric"><strong class="metric-value">2</strong><span class="metric-label">prevention guard cards</span></article>
+    </div>
+    <p class="scope-note">Eight audit lanes produced 38 findings. The canonical report rolls them into 14 ranked findings.</p>
+    <p class="scope-note">Finding disposition: 36 API/default/recipe/generator corrections, 2 compiler predicate bugs, 0 audit-only, 2 prevention guard cards.</p>
+    <p class="scope-note">State boundary: #2372, #2373, and #2374 are done. #2372 includes the shared-builder regression; #2373 and #2374 include verified compiler regressions. All eight owner decisions were ratified as outcome A on 2026-08-30.</p>
+
+    <p class="thesis"><strong>Verdict:</strong> adopt the typed surfaces Jet already has, close the few proven data and text gaps, and fix the boundary defects that turn simple repair into guesswork. This shortens more real code than a new mechanism would.</p>
+
+    <div class="frequency-panel" aria-labelledby="frequency-title">
+      <h2 id="frequency-title" class="frequency-title">Semantic corpus frequency</h2>
+      <div class="table-scroll">
+        <table class="frequency-table">
+          <caption>Lexical counts across the 3,566-file Jet corpus; comments, tests, and fixtures are included.</caption>
+          <thead><tr><th scope="col">Operation</th><th scope="col">Count</th><th scope="col">Relative frequency</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>name :: value</code></th>
+              <td class="frequency-count">10,794</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="220" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>print(...)</code></th>
+              <td class="frequency-count">8,526</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="174" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>type-annotation colon</code></th>
+              <td class="frequency-count">5,461</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="111" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>function definition</code></th>
+              <td class="frequency-count">5,309</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="108" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>??</code></th>
+              <td class="frequency-count">3,366</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="69" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>fn run(...)</code></th>
+              <td class="frequency-count">3,206</td>
+              <td><svg class="frequency-bar" viewBox="0 0 220 12" aria-hidden="true"><rect width="220" height="8" y="2" rx="4" fill="#152534"></rect><rect width="65" height="8" y="2" rx="4" fill="#f4b860"></rect></svg></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="cuts" aria-labelledby="cuts-title">
+    <div class="section-head">
+      <span class="trace-label">Three deep cuts</span>
+      <h2 id="cuts-title">Most friction comes from three sources</h2>
+      <p>Each cut links a broad claim to corpus counts and a concrete deletion target.</p>
+    </div>
+    <div class="cuts">
+      <article class="cut">
+        <span class="observed">Observed</span>
+        <h3>Typed boundaries are already right, but underused</h3>
+        <p><code>#CLI</code>, structural Codable, duration literals, effect inference, list equality, and <code>url.parse</code> already ship. Real programs still frame these jobs by hand.</p>
+        <div class="stat-list">
+          <div class="stat-row"><strong>78</strong><div><div>raw <code>process.argv()</code></div><div class="mini-bar"><span style="width:100%"></span></div></div></div>
+          <div class="stat-row"><strong>19</strong><div><div>typed <code>fn run(args: T)</code> declarations</div><div class="mini-bar"><span style="width:24%"></span></div></div></div>
+          <div class="stat-row"><strong>38</strong><div><div><code>#CLI</code> markers</div><div class="mini-bar"><span style="width:49%"></span></div></div></div>
+          <div class="stat-row"><strong>120</strong><div><div>lines in Jetpack's hand parser</div><div class="mini-bar"><span style="width:100%"></span></div></div></div>
+          <div class="stat-row"><strong>87</strong><div><div>hand-matched flag literals</div><div class="mini-bar"><span style="width:73%"></span></div></div></div>
+          <div class="stat-row"><strong>#2372</strong><div>historical surplus-argument behavior is fixed; typed and shared-builder regressions now guard the shared parser</div></div>
+        </div>
+      </article>
+
+      <article class="cut">
+        <span class="decision">Ratified</span>
+        <h3>Narrow data and text gaps cause repeated hand framing</h3>
+        <p>Missing row metadata, dynamic comparison, plain decimals, and small helpers force code that peers express in one call.</p>
+        <svg class="cut-chart" viewBox="0 0 420 108" role="img" aria-labelledby="gap-chart-title gap-chart-desc">
+          <title id="gap-chart-title">Repeated data and text workarounds</title>
+          <desc id="gap-chart-desc">About six hundred sixty-two DataTree dogfood lines, about one hundred semantic equality lines, thirty-eight body text sites, twenty-six ASCII replacements, five TSV adapters, and three decimal cleanup workarounds.</desc>
+          <rect x="0" y="3" width="230" height="8" rx="4" fill="#f4b860"/><text x="238" y="11">~662 DataTree dogfood lines</text>
+          <rect x="0" y="21" width="150" height="8" rx="4" fill="#f4b860"/><text x="158" y="29">~100 semantic equality lines</text>
+          <rect x="0" y="39" width="86" height="8" rx="4" fill="#6dd7e8"/><text x="94" y="47">38 body().text sites</text>
+          <rect x="0" y="57" width="65" height="8" rx="4" fill="#6dd7e8"/><text x="73" y="65">26 ASCII replacements</text>
+          <rect x="0" y="75" width="28" height="8" rx="4" fill="#6dd7e8"/><text x="36" y="83">5 TSV adapters</text>
+          <rect x="0" y="93" width="18" height="8" rx="4" fill="#6dd7e8"/><text x="26" y="101">3 decimal cleanup workarounds</text>
+        </svg>
+      </article>
+
+      <article class="cut">
+        <span class="observed">Observed</span>
+        <h3>Defaults and diagnostics set the repair cost</h3>
+        <p>A good default removes a branch. Examples that teach retired ceremony and diagnostics with no correct repair make the common path look harder than it is.</p>
+        <div class="stat-list">
+          <div class="stat-row"><strong>104</strong><div>false <code>L0508</code> sites on print loops</div></div>
+          <div class="stat-row"><strong>20</strong><div>documented <code>fn build(</code> sites exposed to lint noise</div></div>
+          <div class="stat-row"><strong>Examples</strong><div>teach redundant <code>#Codable</code>, duration constructors, effect rows, sigils, task groups, counters, and run wrappers</div></div>
+          <div class="stat-row"><strong>13/16</strong><div>paired gauntlet entries are already shorter than Python, which supports adoption and narrow fixes</div></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="decisions" aria-labelledby="decisions-title">
+    <div class="section-head">
+      <span class="trace-label">Ratified decisions / 8</span>
+      <h2 id="decisions-title">Eight outcome-A decisions close the surface</h2>
+      <p>All eight owner decisions were ratified as outcome A on 2026-08-30. Each panel preserves the fixed program/task comparison and its historical alternatives.</p>
+    </div>
+
+    <div class="queue">
+      <article class="ballot" id="d-cli-recipe1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-CLI-RECIPE1</span><span class="badge">Card #2378</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Typed CLI entry becomes the canonical input recipe</h3>
+          <p class="gist">Which spelling a program with fixed inputs should normally use to read them.</p>
+        </header>
+        <blockquote class="evidence"><q>args :: process.argv(); if args.len() != 2 -&gt; panic("usage: incident_report INPUT_FILE")</q><cite>tests/agent_workloads/adapters/incident_report.jet:9-13</cite></blockquote>
+        <div class="comparison" aria-label="Incident report CLI before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>raw argv</span></div><pre><code>use core.files as fs
+use core.process as process
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -&gt;
+        panic(<span class="code-string">"usage: incident_report INPUT_FILE"</span>)
+    input :: args.get(1) ?? panic(<span class="code-string">"missing input file"</span>)
+    text :: fs.read(input) ?? panic(<span class="code-string">"cannot read input"</span>)
+}</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>typed #CLI</span></div><pre><code>use core.files as fs
+
+#CLI
+struct IncidentArgs {
+    input: String
+}
+
+fn run(args: IncidentArgs) {
+    text :: fs.read(args.input) ?? panic(<span class="code-string">"cannot read input"</span>)
+}</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Typed entry is the canon</h4><p>Teach <code>#CLI</code> for fixed inputs. Keep the builder and raw argv as explicit escapes. Card #2372 must reject surplus values.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Promote defaulted fields to positionals</h4><p>Also let bare values fill defaulted fields. Calls get shorter, but typo-adjacent binding becomes ambiguous.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Keep raw argv as the taught floor</h4><p>Avoid migration. Keep length checks, indexes, usage text, and conversions in every new program.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-fmt-plain1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-FMT-PLAIN1</span><span class="badge">Card #2379</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Machine-plain decimals: what Fixed(n) prints</h3>
+          <p class="gist">Whether {x:Fixed(2)} prints 1234.50 or 1,234.50.</p>
+        </header>
+        <blockquote class="evidence"><q>sum :: "{group.sum:Fixed(2)}".replace(",", "")</q><cite>gauntlet/entries/csvtransform/jet/main.jet:13-17</cite></blockquote>
+        <div class="comparison" aria-label="CSV summary decimal before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>group then strip</span></div><pre><code>sum :: <span class="code-string">"{group.sum:Fixed(2)}"</span>.replace(<span class="code-string">","</span>, <span class="code-string">""</span>)
+print(<span class="code-string">"{group.key} n={group.count} sum={sum}"</span>)
+<span class="code-comment">// 1234.50 — safe only after cleanup</span></code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>plain default</span></div><pre><code>sum :: <span class="code-string">"{group.sum:Fixed(2)}"</span>
+print(<span class="code-string">"{group.key} n={group.count} sum={sum}"</span>)
+<span class="code-comment">// 1234.50 — machine-safe by default</span></code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Fixed is plain; Grouped is explicit</h4><p><code>Fixed(2)</code> prints <code>1234.50</code>. A sibling <code>Grouped(2)</code> keeps the human report form.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Keep grouped Fixed; add Plain</h4><p>No golden churn, but the shortest spelling stays unsafe for CSV and protocols.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Add a grouping argument</h4><p>Keep one selector and add configuration. The call site states a flag instead of intent.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-datatree-ergo1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-DATATREE-ERGO1</span><span class="badge">Card #2380</span><span class="badge keep">Ratified · A</span></div>
+          <h3>DataTree scalar access and unordered equality</h3>
+          <p class="gist">Which helpers dynamic JSON values get for reading scalars and comparing documents.</p>
+        </header>
+        <blockquote class="evidence"><q>if !semantic_equal(~left_value, ~right_value) -&gt; return false</q><cite>dogfood/tower/run.jet:258-367</cite></blockquote>
+        <div class="comparison" aria-label="Tower snapshot comparison before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>local recursion</span></div><pre><code>if !semantic_equal(~left_value, ~right_value) -&gt; return false</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>named policy</span></div><pre><code>if !left_value.equal_unordered(right_value) -&gt; return false</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Add equal_unordered and scalar to_text</h4><p>Ignore object key order, keep array order, and return optional text for scalar leaves. Do not add truthiness.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Option A plus truthy()</h4><p>Collapse Tower's ladders, but freeze one source-language coercion policy into Core.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Keep explicit matching</h4><p>Keep the surface small and retain the proven 100-line duplication in dogfood.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-rows1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-ROWS1</span><span class="badge">Card #2381</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Delimited rows: delimiter and header options on csv.rows</h3>
+          <p class="gist">How a program reads tab-separated and other delimited text without hand framing.</p>
+        </header>
+        <blockquote class="evidence"><q>line_number += 1; fields :: line.split("\t").to_list(); if fields.len() != 3 -&gt; panic("bad row {line_number}")</q><cite>tests/agent_workloads/adapters/incident_report.jet:17-23</cite></blockquote>
+        <div class="comparison" aria-label="Incident report TSV parsing before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>manual framing</span></div><pre><code>line_number := 0
+loop line in text.split(<span class="code-string">"\n"</span>) {
+    line_number += 1
+    if line_number != 1 &amp;&amp; line != <span class="code-string">""</span> {
+        fields :: line.split(<span class="code-string">"\t"</span>).to_list()
+        if fields.len() != 3 -&gt; panic(<span class="code-string">"bad row {line_number}"</span>)
+    }
+}</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>row surface</span></div><pre><code>loop row in csv.rows(
+    text, delimiter: <span class="code-string">"\t"</span>, header: true, skip_blank: true
+) {
+    fields :: row.fields
+    if fields.len() != 3 -&gt; panic(<span class="code-string">"bad row {row.line}"</span>)
+}</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Extend csv.rows</h4><p>Add delimiter, header, and blank-line options. Rows carry one-based source lines. Comma remains the default.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Add a tsv module</h4><p>Make tabs easy to find, but duplicate one mechanism and leave other delimiters uncovered.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Add line framing only</h4><p>Number and skip lines, but keep field split and validation in each caller.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-http-msg1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-HTTP-MSG1</span><span class="badge">Card #2382</span><span class="badge keep">Ratified · A</span></div>
+          <h3>HTTP message-level text and typed JSON request bodies</h3>
+          <p class="gist">Whether HTTP messages get direct text reads, typed JSON request bodies, and request-free route handlers.</p>
+        </header>
+        <blockquote class="evidence"><q>sent :: post.header("origin", "https://app.example").body("{{\"city\":\"Reno\",\"degrees\":31}}")</q><cite>examples/features/net/http_web_defaults.jet:44-46</cite></blockquote>
+        <div class="comparison" aria-label="HTTP reading request before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>body mechanics</span></div><pre><code>sent :: post.header(<span class="code-string">"origin"</span>, <span class="code-string">"https://app.example"</span>)
+    .body(<span class="code-string">"{{\"city\":\"Reno\",\"degrees\":31}}"</span>)
+answer :: sent.send() ?? panic(<span class="code-string">"request failed"</span>)
+print(answer.body().text(8 * 1024 * 1024) ?? <span class="code-string">"invalid body"</span>)</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>message projections</span></div><pre><code>sent :: post.header(<span class="code-string">"origin"</span>, <span class="code-string">"https://app.example"</span>)
+    .json(Reading{city: <span class="code-string">"Reno"</span>, degrees: 31})
+answer :: sent.send() ?? panic(<span class="code-string">"request failed"</span>)
+print(answer.text() ?? <span class="code-string">"invalid body"</span>)</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Ship all three projections</h4><p>Add request and response <code>text()</code>, typed request <code>json(value)</code>, and zero-argument fixed-route handlers.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Text projections only</h4><p>Fix the most frequent call. Keep request JSON strings and unused route parameters.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Keep the body wrapper as the surface</h4><p>Retain one uniform path and keep the common case one hop and one limit longer.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-unit-scalar1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-UNIT-SCALAR1</span><span class="badge">Card #2383</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Unit scalar scaling preserves the unit</h3>
+          <p class="gist">Whether a unit-tagged value can be multiplied by a plain number without losing its unit.</p>
+        </header>
+        <blockquote class="evidence"><q>Usd.from_float(price.raw() * Float.from_int(qty))</q><cite>examples/features/types/unit_family.jet:5-9</cite></blockquote>
+        <div class="comparison" aria-label="Unit subtotal before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>erase and rewrap</span></div><pre><code>fn subtotal(price: Usd, qty: Int) Usd -&gt;
+    Usd.from_float(price.raw() * Float.from_int(qty))</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>unit stays typed</span></div><pre><code>fn subtotal(price: Usd, qty: Int) Usd -&gt;
+    price * qty</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Scalar multiply and divide preserve the unit</h4><p>Allow unit × scalar, scalar × unit, and unit ÷ scalar. Keep unit × unit rejected.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Add scale(n)</h4><p>Make scaling explicit, but turn ordinary arithmetic into method calls and chains.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Keep erase, convert, rewrap</h4><p>Avoid an operator rule. Lose unit protection during the guarded formula.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-crypto-digest1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-CRYPTO-DIGEST1</span><span class="badge">Card #2384</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Typed digests canonical: delete hex-string _bytes aliases</h3>
+          <p class="gist">Whether the hash functions whose names end in _bytes, but return hex text, survive.</p>
+        </header>
+        <blockquote class="evidence"><q>sha256_bytes -&gt; String while sha256 -&gt; Digest256</q><cite>crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2326</cite></blockquote>
+        <div class="comparison" aria-label="SHA-256 text digest before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>name says bytes</span></div><pre><code>actual :: crypto.sha256_bytes(<span class="code-string">"abc"</span>.bytes())
+print(actual) <span class="code-comment">// hex text</span></code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>representation explicit</span></div><pre><code>actual :: crypto.sha256(<span class="code-string">"abc"</span>.bytes()).hex()
+print(actual) <span class="code-comment">// hex text</span></code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Delete aliases; use digest plus hex()</h4><p>Migrate all 12 call sites. The typed digest is the one path to bytes or explicit text.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Rename aliases to _hex</h4><p>Fix the lie but keep two permanent hash entry points and two teaching paths.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Make _bytes return bytes</h4><p>Make the name true, but change current caller behavior and retain a duplicate entry point.</p></div>
+        </div>
+      </article>
+
+      <article class="ballot" id="d-stdlib-small1">
+        <header class="ballot-head">
+          <div class="ballot-id"><span class="decision">D-STDLIB-SMALL1</span><span class="badge">Card #2385</span><span class="badge keep">Ratified · A</span></div>
+          <h3>Small stdlib holes: ascii fold, path containment, file walk, args view</h3>
+          <p class="gist">Whether four small, dogfood-proven helper gaps ship as stdlib methods.</p>
+        </header>
+        <blockquote class="evidence"><q>folded = folded.replace("A", "a"); folded = folded.replace("B", "b"); … through Z</q><cite>dogfood/jetpack/src/store/path_laws.jet:6-34</cite></blockquote>
+        <div class="comparison" aria-label="ASCII path-law fold before and after">
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>26 replacements</span></div><pre><code>fn ascii_fold(name: String) String -&gt; {
+    folded := name
+    folded = folded.replace(<span class="code-string">"A"</span>, <span class="code-string">"a"</span>)
+    folded = folded.replace(<span class="code-string">"B"</span>, <span class="code-string">"b"</span>)
+    <span class="code-comment">// ... the same operation through Z</span>
+    return folded
+}</code></pre></div>
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>exact ASCII contract</span></div><pre><code>fn ascii_fold(name: String) String -&gt; {
+    return name.to_ascii_lower()
+}</code></pre></div>
+        </div>
+        <div class="options">
+          <div class="option ratified"><div class="option-top"><span class="option-key">A</span><span class="ratified-badge">Ratified</span></div><h4>Ship all four</h4><p>Add ASCII case fold, component-aware <code>Path.is_within</code>, <code>fs.walk_files</code>, and argv-without-program <code>process.args</code>.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">B</span></div><h4>Ship two security helpers</h4><p>Add ASCII fold and path containment. Leave file walks and raw args on local patterns.</p></div>
+          <div class="option"><div class="option-top"><span class="option-key">C</span></div><h4>Decline all four</h4><p>Keep the smaller surface and the exact dogfood code that proved each gap.</p></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="prevention" aria-labelledby="prevention-title">
+    <div class="section-head">
+      <span class="trace-label">Systemic prevention / 2 guard cards</span>
+      <h2 id="prevention-title">Prevention system</h2>
+      <p>Close each finding at the earliest reliable layer. Keep the common path easy, make expert control explicit, and make recurrence machine-visible.</p>
+    </div>
+
+    <div class="prevention-callout" role="note" aria-label="Prevention boundaries">
+      <p>The first version of this report treated migration as closure. That was wrong. A friction finding is closed only when the product makes the canonical form the easy form and a durable guard prevents the audited inferior form from returning.</p>
+      <p><strong>Prevention boundary:</strong> Lints never substitute for missing APIs. Rules use AST/sema/generator IR rather than text. Statement-scoped <code>#allow</code> is the expert escape. Zero findings remain rewrite-later.</p>
+      <p>Never use source-text matching, identifier spelling, line counts, a global strict mode, or a lint for a missing API.</p>
+      <p>Result of prevention pass: 36 of 38 findings need a better API/default/recipe or generator; two are compiler predicate bugs; zero may remain audit-only.</p>
+    </div>
+
+    <div class="prevention-block">
+      <h3>Visual enforcement ladder</h3>
+      <p>Use the earliest reliable layer that can make the canonical form easy or the inferior form impossible.</p>
+      <ol class="ladder" aria-label="Construction or default to canonical-corpus ratchet">
+        <li class="ladder-rung">
+          <span class="ladder-step">Layer 1</span>
+          <h4>Construction or default</h4>
+          <p>Make the wrong result impossible, or make the safe common result the direct spelling.</p>
+        </li>
+        <li class="ladder-rung">
+          <span class="ladder-step">Layer 2</span>
+          <h4>Generated recipe</h4>
+          <p><code>jet new</code>, package starters, docs, examples, scaffolds, and bindgen emit the canonical form.</p>
+        </li>
+        <li class="ladder-rung">
+          <span class="ladder-step">Layer 3</span>
+          <h4>Compiler diagnostic</h4>
+          <p>Reject only forms that are wrong. Registered What/Why/Fix copy and a UI snapshot are mandatory.</p>
+        </li>
+        <li class="ladder-rung">
+          <span class="ladder-step">Layer 4</span>
+          <h4>Default-on semantic lint</h4>
+          <p>Warn only after the replacement exists and the compiler can prove the exact inferior shape. Every warning has a mechanical fix or a choice between named APIs. The existing statement-scoped <code>#allow</code> is the expert escape.</p>
+        </li>
+        <li class="ladder-rung">
+          <span class="ladder-step">Layer 5</span>
+          <h4>Canonical-corpus ratchet</h4>
+          <p>Maintained examples, dogfood, workloads, starters, and generators are machine-checked teaching surfaces. Exceptions are per file and rule, with a required reason.</p>
+        </li>
+      </ol>
+    </div>
+
+    <div class="prevention-block">
+      <h3>No-regression matrix</h3>
+      <p>All 14 audited families map to a primary correction, a durable recurrence guard, an expert escape, and an owner.</p>
+      <div class="table-panel">
+        <div class="table-scroll">
+          <table class="prevention-table">
+            <caption>Fourteen audited families and their prevention paths</caption>
+            <thead>
+              <tr><th scope="col">Audited family</th><th scope="col">Primary correction</th><th scope="col">Durable recurrence guard</th><th scope="col">Expert escape</th><th scope="col">Owner</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Surplus CLI arguments</th><td>Shared parser rejects every unconsumed value with exit 2 and usage</td><td>Typed and shared-builder regressions</td><td>Open builder/raw grammar</td><td><code>#2372</code> done</td></tr>
+              <tr><th scope="row">Hand-written fixed CLI</th><td>Typed <code>#CLI</code> becomes starter, docs, example, and dogfood recipe</td><td>Closed-corpus fixed-shape/dataflow rule; no noisy arbitrary-user CLI lint</td><td><code>core.args</code>, raw argv, occurrence-scoped expert role</td><td><code>D-CLI-RECIPE1=A</code>, <code>#2378</code>, <code>#2396</code></td></tr>
+              <tr><th scope="row">Grouped machine decimals</th><td><code>Fixed(n)</code> becomes plain; <code>Grouped(n)</code> is explicit</td><td>Formatter/tier tests plus exact redundant-cleanup lint</td><td><code>Grouped(n)</code> or lower-level formatter</td><td><code>D-FMT-PLAIN1=A</code>, <code>#2379</code>, <code>#2397</code></td></tr>
+              <tr><th scope="row">DataTree ladders</th><td><code>to_text()</code> and <code>equal_unordered()</code> own the mechanical semantics</td><td>Dogfood semantic rule rejects duplicate generic ladders</td><td>Explicit domain matching and ordered <code>==</code></td><td><code>D-DATATREE-ERGO1=A</code>, <code>#2380</code>, <code>#2396</code></td></tr>
+              <tr><th scope="row">Hand-framed delimited rows</th><td>Parameterize the existing CSV engine</td><td>Workload corpus rule and RFC-4180/tier proofs</td><td>Raw split for a different grammar</td><td><code>D-ROWS1=A</code>, <code>#2381</code>, <code>#2396</code></td></tr>
+              <tr><th scope="row">HTTP body/JSON ceremony</th><td>Message text, typed JSON, and request-free route forms</td><td>Exact default-cap wrapper lint plus example/corpus rule</td><td><code>body()</code>, explicit limits, binary/streaming</td><td><code>D-HTTP-MSG1=A</code>, <code>#2382</code>, <code>#2397</code></td></tr>
+              <tr><th scope="row">Unit unwrap/rewrap scaling</th><td>Linear unit/scalar operators preserve the unit</td><td>Exact policy-free rewrap lint plus affine/inverse negative proofs</td><td>FFI, calibration, rounded conversion boundary</td><td><code>D-UNIT-SCALAR1=A</code>, <code>#2383</code>, <code>#2397</code></td></tr>
+              <tr><th scope="row">Lying digest aliases</th><td>Delete aliases; typed digest owns <code>.hex()</code> and <code>.bytes()</code></td><td>Public-surface, unknown-symbol, docs, table, and tier tests</td><td>Explicit <code>.bytes()</code> projection</td><td><code>D-CRYPTO-DIGEST1=A</code>, <code>#2384</code></td></tr>
+              <tr><th scope="row">Small stdlib reimplementations</th><td>ASCII, path, walk, and args APIs</td><td>Exact semantic lint shapes plus dogfood/workload corpus rules</td><td>Raw traversal/path/process policy with local allow</td><td><code>D-STDLIB-SMALL1=A</code>, <code>#2385</code>, <code>#2397</code></td></tr>
+              <tr><th scope="row">False <code>L0508</code></th><td>Correct the typed Unit/non-Unit predicate</td><td>Positive Unit and neighboring non-Unit UI snapshots</td><td>Targeted allow only for a real deliberate discard</td><td><code>#2373</code> done</td></tr>
+              <tr><th scope="row">False build lints</th><td>Treat the selected build entry as a compiler liveness root</td><td>Build-root and neighboring-real-lint snapshots</td><td>None for compiler-owned roots</td><td><code>#2374</code> done</td></tr>
+              <tr><th scope="row">Retired example ceremony</th><td>Migrate to current syntax and APIs</td><td>Semantic canonical-corpus rule in existing golden/tier gates</td><td>Manifest role for expert/negative lessons</td><td><code>#2375</code>, <code>#2396</code></td></tr>
+              <tr><th scope="row">Dogfood stdlib duplication</th><td>Delete local helpers after behavior parity</td><td>Scoped semantic dogfood policy</td><td>Documented different protocol/policy</td><td><code>#2376</code> ready, <code>#2396</code></td></tr>
+              <tr><th scope="row">Repeated generated FFI envelopes</th><td>One decoder emitted per binding</td><td>Renderer IR tests assert one helper and delegation</td><td>Per-binding foreign-protocol override</td><td><code>#2377</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="prevention-block">
+      <h3>Light semantic lint set</h3>
+      <p>Card #2397 targets seven provable default-on warnings in the existing diagnostics system:</p>
+      <div class="table-panel">
+        <div class="table-scroll">
+          <table class="lint-table">
+            <caption>Seven semantic rules; each warning must prove the positive shape and stay quiet for the listed expert case.</caption>
+            <thead>
+              <tr><th scope="col">Rule</th><th scope="col">Positive trigger</th><th scope="col">Must stay quiet</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row"><code>process_args_view</code></th><td>Direct resolved <code>process.argv().skip(1)</code></td><td>Alias/index/dataflow cases; code needing <code>argv[0]</code></td></tr>
+              <tr><th scope="row"><code>message_text</code></th><td>Sema exposes the public default-cap identity and constant evaluation proves <code>body().text</code> uses it</td><td>Explicit different limit, binary, streaming</td></tr>
+              <tr><th scope="row"><code>redundant_fixed_cleanup</code></th><td>The relevant output component is solely a plain <code>Fixed(n)</code> projection and immediately removes grouping</td><td>Mixed or arbitrary comma cleanup</td></tr>
+              <tr><th scope="row"><code>unit_scalar_rewrap</code></th><td>One typed expression unwraps the same linear unit, scales, and immediately rewraps with no policy call</td><td>Helpers, FFI, calibration, rounding, affine points</td></tr>
+              <tr><th scope="row"><code>path_containment_string_prefix</code></th><td>Typed <code>Path</code> provenance reaches the normalized separator-aware prefix idiom</td><td>String-only legacy helpers; physical/symlink policy</td></tr>
+              <tr><th scope="row"><code>complete_ascii_case_ladder</code></th><td>Complete constant A-Z or a-z same-value ladder with no intervening observation</td><td>Partial/domain replacement</td></tr>
+              <tr><th scope="row"><code>walk_files_filter</code></th><td>Direct <code>fs.walk</code> control flow only excludes directories and remaining uses are path-only</td><td>Aliases, metadata, custom traversal, early-exit policy</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p>Fixed-shape CLI is a corpus policy, not an arbitrary-user lint. The overbroad <code>L0515 manual_cli_when_typed</code> source, spec, and fixture surface was removed and verified; #2378 retains the remaining product criteria. Delimited-reader intent, DataTree truthiness, HTTP JSON intent, unused request parameters, and nontrivial aliases are not arbitrary-user lints. The compiler cannot prove their intent without noise. Card #2396 will handle known maintained recipes with exact semantic rules and occurrence-scoped exceptions.</p>
+    </div>
+
+    <div class="prevention-block">
+      <h3>Prevention guard cards</h3>
+      <div class="guard-cards">
+        <article class="guard-card" id="card-2396">
+          <span class="guard-label">Card #2396</span>
+          <h4>Semantic canonical-corpus ratchet</h4>
+          <p>Card #2396 specifies one closed-perimeter checked-in manifest of every maintained Jet source role and every generated-source producer: executable docs blocks, site sources, nested examples and learn solutions, dogfood, gauntlet, workloads, performance receipts, starters, fixture roles, and all binding renderers. Its acceptance terms require a new eligible file or producer without a classification to fail. One <code>tests/support</code> <code>CorpusPolicy</code> adapter owns the inventory, semantic rule registry, occurrence-scoped exception validation, and producer-to-artifact provenance. The focused manifest, provenance, occurrence-exception, AST-shape, and protocol tests now pass. The card stays open until every domain gate and every named finding and producer criterion is proved. This policy must never become a user warning or scan source text.</p>
+        </article>
+        <article class="guard-card" id="card-2397">
+          <span class="guard-label">Card #2397</span>
+          <h4>Default-on semantic guidance</h4>
+          <p>Card #2397 targets seven provable default-on warnings in the existing diagnostics system. Each warning must have a mechanical fix; the existing statement-scoped <code>#allow</code> remains the expert escape. Implementation has started and lint snapshots pass. The card stays open until exact-trigger, quiet-neighbor, one-diagnostic, edit, allow, precedence, and diagnostics-coverage criteria are proved.</p>
+        </article>
+        <article class="guard-card" id="card-2398">
+          <span class="guard-label">Card #2398 · closed</span>
+          <h4>Statement-position <code>if</code> correctness</h4>
+          <p>Prevention proof exposed a compiler defect in discarded branch values, deep else-if lowering, Result-subject evaluation, and no-else fallthrough. Five all-tier regressions now pass, and a Luna-max semantic review returned zero findings.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="bugs" aria-labelledby="bugs-title">
+    <div class="section-head">
+      <span class="trace-label">Carded work / #2372–#2377</span>
+      <h2 id="bugs-title">Fix defects, then migrate the corpus</h2>
+      <p>Red marks reproduced compiler or parser defects only. Adoption and generator work stay neutral.</p>
+    </div>
+    <div class="table-panel">
+      <div class="table-scroll">
+        <table>
+          <caption>Six cards created by the canonical report</caption>
+            <thead><tr><th scope="col">Card</th><th scope="col">Class</th><th scope="col">Problem</th><th scope="col">Evidence</th><th scope="col">Required result</th></tr></thead>
+          <tbody>
+            <tr><td>#2372</td><td><span class="badge keep">Done</span></td><td>Parser fix, typed regression, and shared-builder regression landed.</td><td class="file">crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs:763-777</td><td>Every unconsumed value produces parse help and exit 2 on typed and builder paths.</td></tr>
+            <tr><td>#2373</td><td><span class="badge keep">Done</span></td><td>Historical false <code>L0508</code> on <code>loop x in xs -&gt; print(x)</code>; the compiler fix landed with verified regressions.</td><td class="file">examples/features/basics/first_hour.jet:11</td><td>Keep valid source unchanged and report no problem.</td></tr>
+            <tr><td>#2374</td><td><span class="badge keep">Done</span></td><td>Historical compiler-discovered <code>fn build</code> dead-code and Display lint noise; the compiler fix landed with verified regressions.</td><td class="file">examples/features/tooling/programmable_build/run.jet:1-7</td><td>Treat the build entry as a compiler root and hide build-only Display noise.</td></tr>
+            <tr><td>#2375</td><td><span class="badge">Examples</span></td><td>Examples teach retired ceremony: redundant derives, constructors, rows, sigils, groups, and wrappers.</td><td class="file">corpus-wide teaching findings</td><td>Teach current defaults in first-contact examples and keep expert contracts explicit.</td></tr>
+            <tr><td>#2376</td><td><span class="badge keep">Ready</span></td><td>Jetpack and Tower reimplement JSON, URL, list equality, CLI, and directory defaults.</td><td class="file">dogfood/jetpack + dogfood/tower</td><td>Run the ready dogfood migration with explicit CLI, JSON, URL, equality, directory, path, DataTree comparison, and named domain-truthiness criteria.</td></tr>
+            <tr><td>#2377</td><td><span class="badge">Generator</span></td><td>Generated FFI bindings repeat the status and JSON envelope across Lua, R, Perl, PHP, Ruby, PowerShell, and Octave; the corpus has 57 <code>abi.take_error()</code> sites.</td><td class="file">examples/interop/r/.jet/bindings/r/ops.jet:57-78</td><td>Generate one envelope decoder per binding and route operations through it.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="kept" aria-labelledby="kept-title">
+    <div class="section-head">
+      <span class="trace-label">Kept as-is</span>
+      <h2 id="kept-title">Preserve the defaults that already win</h2>
+      <p>The audit found strong beginner defaults with clear expert escapes. Do not trade them away while fixing nearby friction.</p>
+    </div>
+    <div class="kept-grid">
+      <article class="kept-card"><span class="keep">Keep</span><h3>Typed process boundary</h3><p><code>#CLI</code> makes the entry type the schema. One shared parser supplies defaults and help. <code>#Env</code>/<code>#Short</code> precedence, compiled command metadata, and argv tier parity are proven.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>Direct program and error flow</h3><p>The implicit top-level <code>fn run</code> body, one <code>print</code> form, <code>??</code> propagation, and <code>?? panic("context")</code> keep small programs honest.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>File and stream rungs</h3><p><code>fs.read</code> and <code>fs.write</code> cover whole files. <code>files.open().lines()</code> and <code>io.stdin().lines()</code> expose bounded streams. APIs accept <code>String | Path</code>.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>One collection model</h3><p>Eager collections are the default. <code>.lazy()</code> is the visible escape. <code>.counts()</code>, <code>.group_by()</code>, and <code>.top_n()</code> cover common data work.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>Structural data by default</h3><p>Eligible records are Codable without a marker. <code>#!Codable</code> rejects generation. Typed and dynamic JSON remain separate, clear paths.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>Explicit expert contracts</h3><p>Effect inference is the default. <code>-[]&gt;</code> and <code>-[!E]&gt;</code> remain expert contracts. Ownership sigils, duration literals, raw message bodies, raw argv, and builders stay available when policy matters.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>Concurrency as expressions</h3><p><code>task.race</code>, <code>task.any</code>, and <code>task.all</code> work directly. Groups remain for child ownership and scoped cleanup.</p></article>
+      <article class="kept-card"><span class="keep">Keep</span><h3>Short and full process/network rungs</h3><p><code>process.cmd</code> captures by default. Pipelines can run checked. <code>http.get/post</code> sit beside the request builder. <code>core.math.random</code> and <code>core.crypto.random</code> keep ordinary and secure randomness distinct.</p></article>
+    </div>
+    <div class="win"><strong>13/16</strong><p>Jet is already shorter than Python in 13 of 16 paired gauntlet entries. It ties bulkrename and loses only nbody and sieve, where the audit found no broad new mechanism to add.</p></div>
+  </section>
+
+  <section id="loses" aria-labelledby="loses-title">
+    <div class="section-head">
+      <span class="trace-label">Field comparison</span>
+      <h2 id="loses-title">Audit-start losses and current response</h2>
+      <p>Three measured gaps put Jet behind a peer on the same job; ratified outcome-A corrections now name the response.</p>
+    </div>
+    <div class="table-panel">
+      <div class="table-scroll">
+        <table>
+          <caption>Audit-start losses and current response from the canonical report</caption>
+          <thead><tr><th scope="col">Surface</th><th scope="col">Peer result</th><th scope="col">Jet result</th></tr></thead>
+          <tbody>
+            <tr><td>Delimited text</td><td>Python <code>csv</code> and enumerate-style iteration frame the workload adapters directly.</td><td>Jet hand-frames rows, headers, blanks, and line numbers.</td></tr>
+            <tr><td>Machine numeric output</td><td>Every compared peer prints plain fixed decimals by default.</td><td>Jet groups <code>Fixed</code> output until D-FMT-PLAIN1 lands.</td></tr>
+            <tr><td>CLI trust</td><td>Python argparse rejects surplus arguments.</td><td>The shared parser fix and typed/builder regressions landed; card <code>#2372</code> is done.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="method" aria-labelledby="method-title">
+    <div class="section-head">
+      <span class="trace-label">Method and limit</span>
+      <h2 id="method-title">Evidence is broad; frequency is lexical</h2>
+    </div>
+    <div class="method">
+      <article class="method-card"><h3>Read and checked</h3><p>Eight Luna (gpt-5.6, max reasoning) lanes read every assigned Jet file across dogfood, examples, gauntlet, workloads, site, and perf tools. The fixture corpus was frequency-mined.</p><p><strong>Orchestrator-verified:</strong> surplus arguments and false <code>L0508</code>. <strong>Lane-verified:</strong> grouped decimals with no plain formatter, missing TSV support, unit scaling rejected with <code>E0127</code>, missing <code>DataTree.truthy</code>, and missing <code>Path.is_within</code>.</p></article>
+      <article class="method-card"><h3>Strongest unverified assumption</h3><p>Lexical <code>rg</code> counts approximate developer frequency. Generated time fixtures, comments, and negative tests inflate some rows. No out-of-repo Jet corpus exists yet.</p></article>
+    </div>
+  </section>
+
+  <footer>
+    Friction audit companion · 2026-08-30 · Source: canonical report, eight lane reports, and ratified decisions D-CLI-RECIPE1 through D-STDLIB-SMALL1.
+  </footer>
+</main>
+</body>
+</html>

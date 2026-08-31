@@ -23,11 +23,11 @@ const fresh = () => {
 
 const ballot = (extra = {}) => ({
   ballotMode: 'full',
-  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
-  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
+  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
   rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' }],
   recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
-  hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
+  hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
   ...extra,
 });
 
@@ -135,12 +135,12 @@ test('an open decision carries its full options text verbatim (owner decides fro
   const p = buildBrief(st.load(), '#1');
   const d = p.decisions.find(x => x.id === 'D-2');
   assert.equal(d.status, 'open');
-  assert.equal(d.lesson, 'Concept, mechanics, terms, stakes, and a tiny example.');
+  assert.equal(d.lesson, 'Concept, mechanics, terms, and stakes.');
   assert.equal(d.story, 'Priya wants a terse literal.');
   assert.equal(d.inWild, 'x := [1,2,3] in examples/features/lists.jet');
   assert.equal(d.rec, 'A');
   assert.equal(d.ballotMode, 'full');
-  assert.equal(d.reviewPasses.boilOcean, 'The boil-the-ocean pass tested the broad solution space.');
+  assert.equal(d.reviewPasses.boilOcean, 'The breadth review checked for missing choices.');
   assert.equal(d.recommendation.whyNot[0].key, 'B');
   assert.equal(d.hybrid.result, 'A');
   assert.deepEqual(d.options, [
@@ -152,7 +152,7 @@ test('an open decision carries its full options text verbatim (owner decides fro
 test('a draft decision is marked draft and still carries its options', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-3', title: 'WIP ballot', draft: true, gist: 'unfinished' }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-3', title: 'WIP ballot', draft: true, ...ballot({ gist: 'unfinished' }) }));
   const p = buildBrief(st.load(), '#1');
   const d = p.decisions.find(x => x.id === 'D-3');
   assert.equal(d.draft, true);

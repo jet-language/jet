@@ -1,12 +1,15 @@
-use core.process as process
+#CLI
+struct ReaderArgs {
+    n: Int{1000000}
+}
 
-fn run() {
-    n :: Int.parse(process.argv().get(1) ?? "1000") ?? 1000
+fn run(args: ReaderArgs) !Err {
+    n :: args.n
     data :: "A".repeat(n).bytes()
     reader :: Reader.over(data)
     total := Int{0}
     loop _ in 0..<n {
-        byte :: reader.read_u8() ?? return Err("short reader")
+        byte :: reader.read_u8() ?? return
         total += Int.from_u8(byte)
     }
     keep(total)

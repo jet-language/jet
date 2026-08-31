@@ -5,6 +5,15 @@
 //! system trust roots. Use `--no-default-features` only for size/freestanding
 //! builds that knowingly drop HTTPS.
 
+use std::fs::File;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    windows
+))]
+use std::fs;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
@@ -199,8 +208,7 @@ fn fetch_with_root_timeout(
     base_dir: &Path,
 ) -> Result<Vec<u8>, FetchError> {
     if let Some(path) = url.strip_prefix("file://") {
-        let path = scoped_file_path(path, base_dir)?;
-        let file = std::fs::File::open(path).map_err(|e| FetchError::IO(e.to_string()))?;
+        let file = open_scoped_file(path, base_dir)?;
         read_limited(file, MAX_FETCH_BYTES).map_err(|e| FetchError::IO(e.to_string()))
     } else if url.starts_with("http://") || url.starts_with("https://") {
         read_limited(comptime_http_stream(url, timeout)?, MAX_FETCH_BYTES)
@@ -213,27 +221,370 @@ fn fetch_with_root_timeout(
     }
 }
 
-fn scoped_file_path(raw_path: &str, base_dir: &Path) -> Result<std::path::PathBuf, FetchError> {
-    #[cfg(unix)]
-    if Path::new(raw_path) == Path::new("/dev/null") {
-        return Ok(Path::new(raw_path).to_path_buf());
+fn open_scoped_file(raw_path: &str, base_dir: &Path) -> Result<File, FetchError> {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    {
+        if raw_path == "/dev/null" {
+            return local_authority::open_no_follow(Path::new(raw_path))
+                .map_err(|error| FetchError::IO(error.to_string()));
+        }
+
+        let before = fs::symlink_metadata(base_dir)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        if before.file_type().is_symlink() || !before.is_dir() {
+            return Err(FetchError::IO(
+                "compile-time source directory must be a real directory".to_string(),
+            ));
+        }
+        let root = fs::canonicalize(base_dir)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        let after = fs::symlink_metadata(base_dir)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        if after.file_type().is_symlink()
+            || !after.is_dir()
+            || !local_authority::same_directory(&before, &after)
+        {
+            return Err(FetchError::IO(
+                "compile-time source directory changed during resolution".to_string(),
+            ));
+        }
+
+        let root_handle = local_authority::open_root(&root)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        let opened_root = root_handle
+            .metadata()
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        if !local_authority::same_directory(&after, &opened_root) {
+            return Err(FetchError::IO(
+                "compile-time source directory changed during resolution".to_string(),
+            ));
+        }
+
+        let requested = Path::new(raw_path);
+        let requested = if requested.is_absolute() {
+            requested.to_path_buf()
+        } else {
+            root.join(requested)
+        };
+        let canonical = fs::canonicalize(&requested)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        if !canonical.starts_with(&root) {
+            return Err(FetchError::IO(
+                "file URL resolves outside the compile-time source directory".to_string(),
+            ));
+        }
+        let relative = canonical.strip_prefix(&root).map_err(|_| {
+            FetchError::IO("file URL resolves outside the compile-time source directory".to_string())
+        })?;
+        let file = local_authority::open_relative(&root_handle, relative)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        if !metadata.is_file()
+            || !local_authority::is_single_link_file(&file)
+                .map_err(|error| FetchError::IO(error.to_string()))?
+        {
+            return Err(FetchError::IO(
+                "file URL must name a regular, unshared file".to_string(),
+            ));
+        }
+        return Ok(file);
     }
-    let root = std::fs::canonicalize(base_dir)
-        .map_err(|error| FetchError::IO(error.to_string()))?;
-    let requested = Path::new(raw_path);
-    let requested = if requested.is_absolute() {
-        requested.to_path_buf()
-    } else {
-        root.join(requested)
-    };
-    let canonical = std::fs::canonicalize(&requested)
-        .map_err(|error| FetchError::IO(error.to_string()))?;
-    if !canonical.starts_with(&root) {
-        return Err(FetchError::IO(
-            "file URL resolves outside the compile-time source directory".to_string(),
-        ));
+
+    #[cfg(windows)]
+    {
+        let root = fs::canonicalize(base_dir)
+            .map_err(|error| FetchError::IO(error.to_string()))?;
+        let requested = Path::new(raw_path);
+        let requested = if requested.is_absolute() {
+            requested.to_path_buf()
+        } else {
+            root.join(requested)
+        };
+        return local_authority::open_file(&root, &requested)
+            .map_err(|error| FetchError::IO(error.to_string()));
     }
-    Ok(canonical)
+
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    )))]
+    {
+        let _ = (raw_path, base_dir);
+        Err(FetchError::IO(
+            "descriptor-relative no-follow file access is unavailable on this platform".to_string(),
+        ))
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+mod local_authority {
+    use super::*;
+    use std::ffi::{c_char, CString};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::path::Component;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_DIRECTORY: i32 = 0o200000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_DIRECTORY: i32 = 0x00100000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+    }
+
+    pub(super) fn same_directory(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+        left.is_dir() && right.is_dir() && left.dev() == right.dev() && left.ino() == right.ino()
+    }
+
+    pub(super) fn open_no_follow(path: &Path) -> std::io::Result<File> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NOFOLLOW | O_CLOEXEC)
+            .open(path)
+    }
+
+    pub(super) fn open_root(path: &Path) -> std::io::Result<File> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            .open(path)
+    }
+
+    pub(super) fn open_relative(root: &File, relative: &Path) -> std::io::Result<File> {
+        let components = relative.components().collect::<Vec<_>>();
+        if components.is_empty() {
+            return root.try_clone();
+        }
+        let mut current = root.try_clone()?;
+        for (index, component) in components.iter().enumerate() {
+            let Component::Normal(name) = component else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "file authority path has unsupported components",
+                ));
+            };
+            let name = CString::new(name.as_bytes()).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "file authority path contains NUL",
+                )
+            })?;
+            let last = index + 1 == components.len();
+            let flags = if last {
+                O_NOFOLLOW | O_CLOEXEC
+            } else {
+                O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+            };
+            let fd = unsafe { openat(current.as_raw_fd(), name.as_ptr(), flags, 0) };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let opened = unsafe { File::from_raw_fd(fd) };
+            if last {
+                return Ok(opened);
+            }
+            current = opened;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "file authority path is empty",
+        ))
+    }
+
+    /// A hardlink inside the root can name an inode whose original path is
+    /// outside the root. Path containment cannot distinguish that alias.
+    pub(super) fn is_single_link_file(file: &File) -> std::io::Result<bool> {
+        Ok(file.metadata()?.nlink() == 1)
+    }
+}
+
+#[cfg(windows)]
+mod local_authority {
+    use super::*;
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+
+    type Handle = *mut c_void;
+
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+    #[repr(C)]
+    struct FileStandardInfo {
+        allocation_size: i64,
+        end_of_file: i64,
+        number_of_links: u32,
+        delete_pending: u8,
+        directory: u8,
+    }
+
+    unsafe extern "system" {
+        fn GetFileAttributesW(name: *const u16) -> u32;
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_len: u32,
+            flags: u32,
+        ) -> u32;
+        fn GetFileInformationByHandleEx(
+            file: Handle,
+            information_class: u32,
+            information: *mut c_void,
+            buffer_size: u32,
+        ) -> i32;
+    }
+
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    fn is_reparse(path: &Path) -> std::io::Result<bool> {
+        let wide = wide_path(path);
+        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+        if attributes == u32::MAX {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    }
+
+    fn final_path(file: &File) -> std::io::Result<String> {
+        let needed = unsafe {
+            GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0)
+        };
+        if needed == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut buffer = vec![0u16; needed as usize + 1];
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0,
+            )
+        };
+        if written == 0 || written as usize >= buffer.len() {
+            return Err(std::io::Error::last_os_error());
+        }
+        buffer.truncate(written as usize);
+        Ok(String::from_utf16_lossy(&buffer))
+    }
+
+    fn is_single_link_file(file: &File) -> std::io::Result<bool> {
+        let mut information = std::mem::MaybeUninit::<FileStandardInfo>::zeroed();
+        let result = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                1,
+                information.as_mut_ptr().cast(),
+                std::mem::size_of::<FileStandardInfo>() as u32,
+            )
+        };
+        if result == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { information.assume_init() }.number_of_links == 1)
+    }
+
+    fn normalized_final_path(path: String) -> String {
+        path.replace('/', "\\")
+            .trim_start_matches(r"\\?\")
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    }
+
+    fn is_beneath(root: &str, candidate: &str) -> bool {
+        candidate == root
+            || candidate
+                .strip_prefix(root)
+                .is_some_and(|tail| tail.starts_with('\\'))
+    }
+
+    pub(super) fn open_file(root: &Path, requested: &Path) -> std::io::Result<File> {
+        let root_handle = open_root(root)?;
+        let root_final = normalized_final_path(final_path(&root_handle)?);
+        let expected_root = normalized_final_path(root.to_string_lossy().into_owned());
+        if root_final != expected_root {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "compile-time source directory changed during resolution",
+            ));
+        }
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(requested)?;
+        if !file.metadata()?.is_file()
+            || is_reparse(requested)?
+            || !is_single_link_file(&file)?
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "opened object is not a regular, unshared non-reparse file",
+            ));
+        }
+        let file_final = normalized_final_path(final_path(&file)?);
+        if !is_beneath(&root_final, &file_final) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "opened file escapes the compile-time source directory",
+            ));
+        }
+        Ok(file)
+    }
+
+    fn open_root(path: &Path) -> std::io::Result<File> {
+        if is_reparse(path)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "compile-time source directory is a reparse point",
+            ));
+        }
+        let root = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(GENERIC_READ)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        if is_reparse(path)? || !root.metadata()?.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "compile-time source directory is not a real directory",
+            ));
+        }
+        Ok(root)
+    }
 }
 
 fn comptime_http_stream(
@@ -361,14 +712,45 @@ pub fn get_stream(url: &str, timeout: Duration) -> Result<StreamResponse, FetchE
     get_stream_with_timeout(url, timeout)
 }
 
+/// Perform one redirect-free request using an address set resolved by the
+/// caller. The URL remains host-based so HTTPS keeps its normal SNI and
+/// certificate-host verification; the resolver prevents ureq from doing a
+/// second DNS lookup for the socket destination.
+pub fn get_stream_pinned(
+    url: &str,
+    addresses: &[SocketAddr],
+    timeout: Duration,
+) -> Result<StreamResponse, FetchError> {
+    if addresses.is_empty() {
+        return Err(FetchError::IO(
+            "pinned network transport has no resolved addresses".to_string(),
+        ));
+    }
+    get_stream_with_agent(url, timeout, {
+        let addresses = addresses.to_vec();
+        ureq::AgentBuilder::new()
+            .redirects(0)
+            .resolver(move |_: &str| Ok(addresses.clone()))
+            .build()
+    })
+}
+
 fn get_stream_with_timeout(url: &str, timeout: Duration) -> Result<StreamResponse, FetchError> {
+    get_stream_with_agent(url, timeout, (*HTTP_AGENT).clone())
+}
+
+fn get_stream_with_agent(
+    url: &str,
+    timeout: Duration,
+    agent: ureq::Agent,
+) -> Result<StreamResponse, FetchError> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         let scheme = url.find("://").map(|i| &url[..i]).unwrap_or(url);
         return Err(FetchError::Scheme(format!(
             "unsupported URL scheme `{scheme}`; expected `http://` or `https://`"
         )));
     }
-    let response = match HTTP_AGENT
+    let response = match agent
         .get(url)
         .timeout(timeout)
         .set("Accept-Encoding", "identity")
@@ -403,6 +785,26 @@ pub fn get_stream_follow_redirects(
     timeout: Duration,
     max_redirects: usize,
 ) -> Result<StreamResponse, FetchError> {
+    get_stream_follow_redirects_with(url, timeout, max_redirects, |current, location| {
+        resolve_redirect(current, location).map_err(|error| error.to_string())
+    })
+}
+
+/// Follow redirects through a caller-supplied policy.
+///
+/// The policy receives the URL that produced the redirect and its raw
+/// `Location` value. It must return the next URL or reject the hop. The
+/// ordinary redirect helper above keeps its historical permissive behavior;
+/// security-sensitive callers can enforce an origin or scheme invariant here.
+pub fn get_stream_follow_redirects_with<F>(
+    url: &str,
+    timeout: Duration,
+    max_redirects: usize,
+    mut redirect: F,
+) -> Result<StreamResponse, FetchError>
+where
+    F: FnMut(&str, &str) -> Result<String, String>,
+{
     let mut current = url.to_string();
     for _ in 0..=max_redirects {
         let response = get_stream_with_timeout(&current, timeout)?;
@@ -415,12 +817,57 @@ pub fn get_stream_follow_redirects(
                 "redirect response has no Location header".to_string(),
             )
         })?;
-        current = resolve_redirect(&current, location)?;
+        let next = redirect(&current, location)
+            .map_err(|detail| FetchError::http(&current, detail))?;
+        current = next;
     }
     Err(FetchError::http(
         url,
         format!("too many redirects (limit {max_redirects})"),
     ))
+}
+
+/// Fetch a bounded body while applying a caller-supplied redirect policy.
+///
+/// This keeps timeout, redirect-count, response-size, and framing checks in
+/// the shared network seam while allowing a caller to bind redirects to its
+/// own security origin.
+pub fn fetch_bounded_with_redirect_policy<F>(
+    url: &str,
+    timeout: Duration,
+    max_redirects: usize,
+    limit: u64,
+    redirect: F,
+) -> Result<Vec<u8>, FetchError>
+where
+    F: FnMut(&str, &str) -> Result<String, String>,
+{
+    let response = get_stream_follow_redirects_with(url, timeout, max_redirects, redirect)?;
+    if !(200..300).contains(&response.status()) {
+        return Err(FetchError::http(
+            url,
+            format!("URL returned HTTP {}", response.status()),
+        ));
+    }
+    let content_length = response.content_length();
+    if content_length.is_some_and(|length| length > limit) {
+        return Err(FetchError::http(url, "response exceeds its size bound".to_string()));
+    }
+    let mut body = Vec::new();
+    response
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut body)
+        .map_err(|error| FetchError::http(url, format!("could not read response: {error}")))?;
+    if body.len() as u64 > limit {
+        return Err(FetchError::http(url, "response exceeds its size bound".to_string()));
+    }
+    if content_length.is_some_and(|length| length != body.len() as u64) {
+        return Err(FetchError::http(
+            url,
+            "response Content-Length disagrees".to_string(),
+        ));
+    }
+    Ok(body)
 }
 
 fn resolve_redirect(current: &str, location: &str) -> Result<String, FetchError> {
@@ -532,6 +979,60 @@ mod tests {
         let _ = std::fs::remove_file(outside);
     }
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn comptime_file_fetch_is_race_safe_against_symlink_swap() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-net-fetch-race-root-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "jet-net-fetch-race-outside-{}",
+            std::process::id()
+        ));
+        let target = root.join("target");
+        let safe_slot = root.join("safe-slot");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&root).expect("create source root");
+        std::fs::write(&target, b"inside").expect("write source fixture");
+        std::fs::write(&outside, b"outside").expect("write outside fixture");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let mutator_stop = Arc::clone(&stop);
+        let mutator_outside = outside.clone();
+        let mutator = thread::spawn(move || {
+            while !mutator_stop.load(Ordering::Relaxed) {
+                std::fs::rename(&target, &safe_slot).expect("move source fixture aside");
+                std::os::unix::fs::symlink(&mutator_outside, &target)
+                    .expect("install escape symlink");
+                std::fs::remove_file(&target).expect("remove escape symlink");
+                std::fs::rename(&safe_slot, &target).expect("restore source fixture");
+            }
+        });
+
+        for _ in 0..2048 {
+            if let Ok(bytes) = fetch_in_root("file://target", &root) {
+                assert_eq!(bytes, b"inside", "a file fetch followed the escape symlink");
+            }
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        mutator.join().expect("source mutator joins");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
     #[test]
     fn comptime_http_fetch_rejects_loopback_before_connecting() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback fixture");
@@ -544,6 +1045,67 @@ mod tests {
             .set_nonblocking(true)
             .expect("make listener nonblocking");
         assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn public_destination_policy_rejects_reserved_ipv4_space() {
+        for address in ["192.0.0.1", "192.0.0.9", "192.0.0.255"] {
+            let address = address.parse().expect("reserved IPv4 fixture");
+            assert!(!is_public_ip(address), "reserved address was accepted: {address}");
+        }
+        assert!(is_public_ip("8.8.8.8".parse().expect("public IPv4 fixture")));
+    }
+
+    #[test]
+    fn redirect_policy_hook_is_applied_to_each_hop() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind redirect fixture");
+        let address = listener.local_addr().expect("redirect fixture address");
+        let server = thread::spawn(move || {
+            for (expected_path, location) in [
+                ("/one", Some("/two")),
+                ("/two", Some("/done")),
+                ("/done", None),
+            ] {
+                let (mut stream, _) = listener.accept().expect("accept redirect request");
+                let mut request = [0_u8; 1024];
+                let length = stream.read(&mut request).expect("read redirect request");
+                let request = String::from_utf8_lossy(&request[..length]);
+                assert!(
+                    request.starts_with(&format!("GET {expected_path} HTTP/1.1")),
+                    "unexpected request: {request}"
+                );
+                let response = match location {
+                    Some(location) => format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ),
+                    None => {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone"
+                            .to_string()
+                    }
+                };
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write redirect response");
+            }
+        });
+
+        let mut hops = Vec::new();
+        let body = fetch_bounded_with_redirect_policy(
+            &format!("http://{address}/one"),
+            Duration::from_secs(1),
+            5,
+            16,
+            |current, location| {
+                hops.push((current.to_string(), location.to_string()));
+                resolve_redirect(current, location).map_err(|error| error.to_string())
+            },
+        )
+        .expect("redirect chain fetch");
+        assert_eq!(body, b"done");
+        assert_eq!(hops.len(), 2);
+        assert_eq!(hops[0].1, "/two");
+        assert_eq!(hops[1].1, "/done");
+        server.join().expect("redirect fixture joins");
     }
 
     #[test]

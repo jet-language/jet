@@ -1,9 +1,9 @@
 //! The one typed export surface shared by native Library and sandbox outputs.
 //!
 //! Driver validation and both lowerers read this table. It is deliberately
-//! small: top-level `pub fn` items with one homogeneous scalar shape.
+//! small: marked top-level functions with one homogeneous scalar shape.
 
-use crate::AST::{AccessConvention, Func, Item, ProgramBundle, Type};
+use crate::AST::{AccessConvention, Func, ProgramBundle};
 
 /// Scalar types admitted at both foreign-host boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,53 +71,33 @@ pub struct ExportFunction {
 
 /// Classify one function's homogeneous foreign-boundary shape.
 pub fn export_shape(function: &Func) -> Option<ExportScalar> {
-    let mut shape = None;
-    let note = |ty: &Type, shape: &mut Option<ExportScalar>| -> bool {
-        let scalar = match ty {
-            Type::Int => ExportScalar::Int,
-            Type::Float => ExportScalar::Float,
-            Type::Bool => ExportScalar::Bool,
-            Type::String => ExportScalar::Text,
-            _ => return false,
-        };
-        match shape {
-            Some(existing) => *existing == scalar,
-            None => {
-                *shape = Some(scalar);
-                true
-            }
-        }
-    };
-    for parameter in &function.params {
-        if !note(&parameter.ty, &mut shape) {
-            return None;
-        }
-    }
-    match &function.return_type {
-        Some(ty) if note(ty, &mut shape) => shape,
-        _ => None,
-    }
+    crate::Sema::guest_export_signature(function)
+        .and_then(|guest| guest.scalar)
+        .map(|scalar| match scalar {
+            crate::Sema::GuestScalar::Int => ExportScalar::Int,
+            crate::Sema::GuestScalar::Float => ExportScalar::Float,
+            crate::Sema::GuestScalar::Bool => ExportScalar::Bool,
+            crate::Sema::GuestScalar::Text => ExportScalar::Text,
+        })
 }
 
 /// Collect the exact top-level export list consumed by both artifact paths.
 pub fn export_surface(bundle: &ProgramBundle) -> Vec<ExportFunction> {
-    bundle.modules[bundle.entry]
-        .items
-        .iter()
-        .filter_map(|item| {
-            let Item::Func(function) = item else {
-                return None;
-            };
-            if !function.is_pub || !bundle.name_ledger.public(bundle.entry, &function.name) {
-                return None;
-            }
+    crate::Sema::guest_export_surface(bundle)
+        .into_iter()
+        .filter_map(|guest| {
             Some(ExportFunction {
-                name: function.name.clone(),
-                scalar: export_shape(function)?,
-                params: function
+                name: guest.name,
+                scalar: match guest.scalar? {
+                    crate::Sema::GuestScalar::Int => ExportScalar::Int,
+                    crate::Sema::GuestScalar::Float => ExportScalar::Float,
+                    crate::Sema::GuestScalar::Bool => ExportScalar::Bool,
+                    crate::Sema::GuestScalar::Text => ExportScalar::Text,
+                },
+                params: guest
                     .params
-                    .iter()
-                    .map(|parameter| parameter.convention)
+                    .into_iter()
+                    .map(|(convention, _)| convention)
                     .collect(),
             })
         })

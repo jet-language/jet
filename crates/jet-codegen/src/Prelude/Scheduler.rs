@@ -87,6 +87,19 @@ fn jet_scheduler_transported_report(text: &str) -> bool {
     (head.starts_with("Stop [") || head.starts_with("Error [")) && head.contains("]: ")
 }
 
+/// Private transport for a panic that did not originate in Jet runtime
+/// semantics. The host turns this marker into its existing compiler-fault rail;
+/// it must never be mistaken for a public task-failure row.
+pub const JET_HOST_FAULT_PREFIX: &str = "__jet_host_fault__: ";
+
+pub fn jet_scheduler_host_fault_reason(message: &str) -> Option<&str> {
+    message.strip_prefix(JET_HOST_FAULT_PREFIX)
+}
+
+fn jet_scheduler_host_fault_message(message: &str) -> String {
+    format!("{JET_HOST_FAULT_PREFIX}{message}")
+}
+
 /// The complete set of panic payloads a scheduler catch frame turns into a
 /// status or republishes as a report: the two typed control transfers, a
 /// transported report, and the one private foreign-boundary marker that
@@ -103,7 +116,9 @@ fn jet_scheduler_converted_unwind(payload: &(dyn std::any::Any + Send)) -> bool 
     else {
         return false;
     };
-    text.starts_with("__jet_ffi_runtime__: ") || jet_scheduler_transported_report(text)
+    text.starts_with("__jet_ffi_runtime__: ")
+        || text.starts_with(JET_HOST_FAULT_PREFIX)
+        || jet_scheduler_transported_report(text)
 }
 
 /// Whether the hook must stay quiet for this panic. A live catch frame is only
@@ -125,7 +140,7 @@ fn jet_scheduler_install_panic_hook() {
     std::sync::LazyLock::force(&JET_SCHEDULER_PANIC_HOOK);
 }
 
-fn jet_scheduler_catch_task_unwind<F, T>(f: F) -> std::thread::Result<T>
+pub(crate) fn jet_scheduler_catch_task_unwind<F, T>(f: F) -> std::thread::Result<T>
 where
     F: FnOnce() -> T,
 {
@@ -194,7 +209,7 @@ fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         .downcast_ref::<String>()
         .cloned()
         .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
-        .unwrap_or_else(|| "task panicked".to_string());
+        .unwrap_or_else(|| jet_scheduler_host_fault_message("task carried a non-Jet payload"));
     // A child runtime stop carries its complete report while it crosses the
     // Rust unwind boundary. The parent task must receive only the stop's
     // message; it renders the one report at the user-visible call site.
@@ -280,10 +295,15 @@ pub fn jet_scheduler_catch_foreign_boundary<F, T>(
 where
     F: FnOnce() -> T,
 {
-    jet_scheduler_install_panic_hook();
     JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
         let previous = catching.replace(true);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        // Install the hook inside the same catch frame as the foreign call.
+        // Lazy initialization is process state too: if it panics, that panic
+        // must not cross the extern-C seam that calls this helper.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            jet_scheduler_install_panic_hook();
+            f()
+        }));
         catching.set(previous);
         result
     })
@@ -306,9 +326,21 @@ pub fn jet_scheduler_classify_unwind<T>(
     }
     let message = payload
         .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
-        .unwrap_or_else(|| "scheduler wait panicked".to_string());
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .map(|message| {
+            if message.starts_with("__jet_ffi_runtime__: ")
+                || message.starts_with(JET_HOST_FAULT_PREFIX)
+                || jet_scheduler_transported_report(message)
+            {
+                message.to_string()
+            } else {
+                jet_scheduler_host_fault_message(message)
+            }
+        })
+        .unwrap_or_else(|| {
+            jet_scheduler_host_fault_message("scheduler wait carried a non-Jet payload")
+        });
     JetSchedulerWait::Panicked(message)
 }
 
@@ -629,7 +661,6 @@ impl JetObserveControl for JetTaskControl {
         JetTaskControl::cancel(self);
     }
 }
-
 thread_local! {
     static TASK_CONTROL: std::cell::RefCell<Option<Arc<JetTaskControl>>> =
         const { std::cell::RefCell::new(None) };
@@ -2760,6 +2791,7 @@ fn scheduler() -> Arc<Scheduler> {
     jet_observe_register_exit_drain(jet_scheduler_drain_after_exit);
     SCHEDULER
         .get_or_init(|| {
+            jet_observe_register_exit_drain(jet_scheduler_drain_after_exit);
             let n = worker_count();
             JET_OBSERVE_WORKERS.store(n, Ordering::Relaxed);
             let sched = Arc::new(Scheduler {
@@ -2808,9 +2840,27 @@ pub fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
 
 pub struct JetSchedulerJoin<T> {
     rx: std::sync::mpsc::Receiver<JetSchedulerResult<T>>,
+    /// A completion probe must not consume a typed value before the later
+    /// source-order join. Keep the one received result here until `join()` or
+    /// the shared scheduler selector takes ownership.
+    pending: Mutex<Option<JetSchedulerResult<T>>>,
     completion_order: Arc<OnceLock<u128>>,
     completion_wait: Arc<ParkSlot>,
+    /// Preserve the child identity after registry cleanup so a disconnected
+    /// completion still reaches the typed failure rail with useful context.
+    identity: String,
 }
+
+/// A status-only task observation used by heterogeneous `task.all`'s
+/// fail-fast wait. Completion order is metadata only; no typed task result crosses
+/// this boundary, so later source-order joins retain ownership and their types.
+#[derive(Clone, Debug)]
+pub enum JetSchedulerTaskPoll {
+    Pending,
+    Complete(u128),
+    Failed(jet_std::JetTaskFailure, u128),
+}
+
 
 /// One parent-wait deadline policy for AOT and Cranelift adapters. A child
 /// deadline is a `TaskFailure`; an expired joining context is the E3003 control
@@ -2827,29 +2877,74 @@ pub fn jet_task_join_deadline_check() {
 }
 
 impl<T> JetSchedulerJoin<T> {
+    fn fill_pending(&self) -> bool {
+        let mut pending = self.pending.lock().unwrap();
+        if pending.is_some() {
+            return true;
+        }
+        match self.rx.try_recv() {
+            Ok(result) => {
+                *pending = Some(result);
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                *pending = Some(JetSchedulerResult::Panicked(
+                    jet_observe_task_failure_message_for_identity(
+                        &self.identity,
+                        "task completion disconnected".to_string(),
+                    ),
+                ));
+                true
+            }
+        }
+    }
+
+    fn take_ready(&self) -> Option<JetSchedulerResult<T>> {
+        self.fill_pending();
+        self.pending.lock().unwrap().take()
+    }
+
+    /// Probe completion without consuming the typed result. Heterogeneous
+    /// `task.all` uses this status-only view, then joins each original handle
+    /// with its concrete type after the shared wait reports success.
+    pub fn poll(&self) -> JetSchedulerTaskPoll {
+        self.fill_pending();
+        let order = self.completion_order().unwrap_or(u128::MAX);
+        match self.pending.lock().unwrap().as_ref() {
+            None => JetSchedulerTaskPoll::Pending,
+            Some(JetSchedulerResult::Value(_)) => JetSchedulerTaskPoll::Complete(order),
+            Some(JetSchedulerResult::Cancelled) => {
+                JetSchedulerTaskPoll::Failed(jet_std::JetTaskFailure::Cancelled, order)
+            }
+            Some(JetSchedulerResult::Deadline(_)) => {
+                JetSchedulerTaskPoll::Failed(jet_std::JetTaskFailure::DeadlineBlown, order)
+            }
+            Some(JetSchedulerResult::Panicked(reason)) => JetSchedulerTaskPoll::Failed(
+                jet_std::JetTaskFailure::Panicked(reason.clone()),
+                order,
+            ),
+        }
+    }
+
     /// D-CONC-FAIL1=A: child control failures are ordinary values on the
     /// language failure rail. Only cancellation of the joining parent remains
     /// a scheduler unwind at this wait point.
     pub fn join(&mut self) -> Result<T, jet_std::JetTaskFailure> {
         loop {
             jet_task_wait_point_cancel_check();
-            match self.rx.try_recv() {
-                Ok(JetSchedulerResult::Value(value)) => return Ok(value),
-                Ok(JetSchedulerResult::Panicked(reason)) => {
+            match self.take_ready() {
+                Some(JetSchedulerResult::Value(value)) => return Ok(value),
+                Some(JetSchedulerResult::Panicked(reason)) => {
                     return Err(jet_std::JetTaskFailure::Panicked(reason));
                 }
-                Ok(JetSchedulerResult::Cancelled) => {
+                Some(JetSchedulerResult::Cancelled) => {
                     return Err(jet_std::JetTaskFailure::Cancelled);
                 }
-                Ok(JetSchedulerResult::Deadline(_rendered)) => {
+                Some(JetSchedulerResult::Deadline(_rendered)) => {
                     return Err(jet_std::JetTaskFailure::DeadlineBlown);
                 }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    return Err(jet_std::JetTaskFailure::Panicked(
-                        "task completion disconnected".to_string(),
-                    ));
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                None => {
                     jet_scheduler_yield("task join", &self.completion_wait, None);
                 }
             }
@@ -2857,13 +2952,7 @@ impl<T> JetSchedulerJoin<T> {
     }
 
     pub fn try_recv(&self) -> Option<JetSchedulerResult<T>> {
-        match self.rx.try_recv() {
-            Ok(r) => Some(r),
-            Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked(
-                "task completion disconnected".to_string(),
-            )),
-        }
+        self.take_ready()
     }
 
     fn completion_order(&self) -> Option<u128> {
@@ -2872,8 +2961,69 @@ impl<T> JetSchedulerJoin<T> {
 
     pub fn drain(self) {
         jet_scheduler_blocking_wait_enter();
-        let _ = self.rx.recv();
+        if self.pending.lock().unwrap().is_none() {
+            let _ = self.rx.recv();
+        }
         jet_scheduler_blocking_wait_leave();
+    }
+}
+
+fn jet_scheduler_all_wait<'a>(
+    mut probes: Vec<Box<dyn FnMut() -> JetSchedulerTaskPoll + 'a>>,
+    mut cancels: Vec<Box<dyn FnMut() + 'a>>,
+    mut drains: Vec<Box<dyn FnMut() + 'a>>,
+) -> Result<(), jet_std::JetTaskFailure> {
+    loop {
+        if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task selection")
+            .is_some()
+        {
+            for cancel in &mut cancels {
+                cancel();
+            }
+            for drain in &mut drains {
+                drain();
+            }
+            jet_deadline_exceeded("task selection");
+        }
+        if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+            for cancel in &mut cancels {
+                cancel();
+            }
+            for drain in &mut drains {
+                drain();
+            }
+            jet_task_deliver_cancel();
+            return Err(jet_std::JetTaskFailure::Cancelled);
+        }
+        let mut all_complete = true;
+        let mut first_failure: Option<(u128, jet_std::JetTaskFailure)> = None;
+        for probe in &mut probes {
+            match probe() {
+                JetSchedulerTaskPoll::Pending => all_complete = false,
+                JetSchedulerTaskPoll::Complete(_) => {}
+                JetSchedulerTaskPoll::Failed(error, order) => {
+                    if first_failure
+                        .as_ref()
+                        .is_none_or(|(first_order, _)| order < *first_order)
+                    {
+                        first_failure = Some((order, error));
+                    }
+                }
+            }
+        }
+        if let Some((_, error)) = first_failure {
+            for cancel in &mut cancels {
+                cancel();
+            }
+            for drain in &mut drains {
+                drain();
+            }
+            return Err(error);
+        }
+        if all_complete {
+            return Ok(());
+        }
+        jet_scheduler_yield_now();
     }
 }
 
@@ -3022,34 +3172,44 @@ pub fn jet_scheduler_try_select_int_channels_tagged(
     }
 }
 
-/// Submit `f` to the M:N pool and return a join handle.
+/// Submit `f` to the M:N pool and return a join handle. An empty label keeps
+/// the bounded registry's `task@site` fallback.
 pub fn jet_scheduler_spawn<F, T>(f: F) -> JetSchedulerJoin<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_at(0, f)
+    jet_scheduler_spawn_at(0, "", f)
 }
 
-/// Submit a task with its compiler-assigned spawn-site label.
-pub fn jet_scheduler_spawn_at<F, T>(spawn_site: usize, f: F) -> JetSchedulerJoin<T>
+/// Submit a task with its compiler-assigned spawn-site and optional source
+/// label.
+pub fn jet_scheduler_spawn_at<F, T>(
+    spawn_site: usize,
+    label: &str,
+    f: F,
+) -> JetSchedulerJoin<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_with_control_at(spawn_site, f, JetTaskControl::new())
+    jet_scheduler_spawn_with_control_at(spawn_site, label, f, JetTaskControl::new())
 }
 
 pub fn jet_scheduler_spawn_blocking<F,T>(f:F)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    jet_scheduler_spawn_blocking_at(0, f)
+    jet_scheduler_spawn_blocking_at(0, "", f)
 }
 
-pub fn jet_scheduler_spawn_blocking_at<F,T>(spawn_site: usize, f:F)->JetSchedulerJoin<T>
+pub fn jet_scheduler_spawn_blocking_at<F,T>(
+    spawn_site: usize,
+    label: &str,
+    f:F,
+)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    jet_scheduler_spawn_blocking_with_control_at(spawn_site, f, JetTaskControl::new())
+    jet_scheduler_spawn_blocking_with_control_at(spawn_site, label, f, JetTaskControl::new())
 }
 
 pub fn jet_scheduler_spawn_with_control<F, T>(
@@ -3060,11 +3220,12 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_with_control_at(0, f, control)
+    jet_scheduler_spawn_with_control_at(0, "", f, control)
 }
 
 pub fn jet_scheduler_spawn_with_control_at<F, T>(
     spawn_site: usize,
+    label: &str,
     f: F,
     control: Arc<JetTaskControl>,
 ) -> JetSchedulerJoin<T>
@@ -3072,27 +3233,32 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_with_control_kind(spawn_site, f, control, false)
+    jet_scheduler_spawn_with_control_kind(spawn_site, label, f, control, false)
 }
 
-pub fn jet_scheduler_spawn_blocking_with_control<F,T>(f:F,control:Arc<JetTaskControl>)->JetSchedulerJoin<T>
-where F:FnOnce()->T+Send+'static,T:Send+'static,
-{
-    jet_scheduler_spawn_blocking_with_control_at(0, f, control)
-}
-
-pub fn jet_scheduler_spawn_blocking_with_control_at<F,T>(
-    spawn_site: usize,
+pub fn jet_scheduler_spawn_blocking_with_control<F,T>(
     f:F,
     control:Arc<JetTaskControl>,
 )->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    jet_scheduler_spawn_with_control_kind(spawn_site, f, control, true)
+    jet_scheduler_spawn_blocking_with_control_at(0, "", f, control)
+}
+
+pub fn jet_scheduler_spawn_blocking_with_control_at<F,T>(
+    spawn_site: usize,
+    label: &str,
+    f:F,
+    control:Arc<JetTaskControl>,
+)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
+    jet_scheduler_spawn_with_control_kind(spawn_site, label, f, control, true)
 }
 
 fn jet_scheduler_spawn_with_control_kind<F,T>(
     spawn_site: usize,
+    label: &str,
     f:F,
     control:Arc<JetTaskControl>,
     blocking:bool,
@@ -3104,6 +3270,8 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
         spawn_site,
         Some(&control),
     );
+    jet_observe_task_set_label(observe_id, label);
+    let identity = jet_observe_task_identity(observe_id);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
@@ -3161,11 +3329,12 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
     })});
     JetSchedulerJoin {
         rx,
+        pending: Mutex::new(None),
         completion_order,
         completion_wait,
+        identity,
     }
 }
-
 /// Block until the scheduler queue drains (for tests/shutdown hooks).
 pub fn jet_scheduler_drain() {
     let sched = scheduler();
@@ -3473,5 +3642,40 @@ mod interrupt_boundary_tests {
                 "{label} must keep its message when no catch frame is live"
             );
         }
+    }
+
+    #[test]
+    fn arbitrary_wait_payload_is_host_fault_not_jet_runtime_failure() {
+        let JetSchedulerWait::Panicked(message) =
+            jet_scheduler_classify_unwind::<()>(Box::new("host helper failed".to_string()))
+        else {
+            panic!("arbitrary string payload must remain a panic status");
+        };
+        assert_eq!(
+            jet_scheduler_host_fault_reason(&message),
+            Some("host helper failed")
+        );
+
+        let JetSchedulerWait::Panicked(message) =
+            jet_scheduler_classify_unwind::<()>(Box::new(7u8))
+        else {
+            panic!("arbitrary payload must remain a panic status");
+        };
+        assert_eq!(
+            jet_scheduler_host_fault_reason(&message),
+            Some("scheduler wait carried a non-Jet payload")
+        );
+    }
+
+    #[test]
+    fn transported_runtime_report_is_not_reclassified_as_host_fault() {
+        let report = "Stop [E3014]: foreign function failed\n  --> ffi.jet:7:1\n";
+        let JetSchedulerWait::Panicked(message) =
+            jet_scheduler_classify_unwind::<()>(Box::new(report.to_string()))
+        else {
+            panic!("transported runtime report must remain a panic status");
+        };
+        assert_eq!(message, report);
+        assert!(jet_scheduler_host_fault_reason(&message).is_none());
     }
 }

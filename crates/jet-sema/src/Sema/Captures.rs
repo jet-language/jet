@@ -148,6 +148,7 @@ pub(crate) fn walk_expr_for_const_refs(
                 taken.insert(name.clone());
             }
         }
+        Expr::Unit(_) => {}
         Expr::Str(parts, _) => {
             for p in parts {
                 if let StrPart::Interp(e, _) = p {
@@ -357,6 +358,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
     match e {
         Expr::PtrFromAddr { addr, .. } => expr_refs_name(addr, name),
         Expr::Ident(n, _) => n == name,
+        Expr::Unit(_) => false,
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)

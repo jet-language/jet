@@ -19,6 +19,7 @@ mod project_scan;
 mod project_transactions;
 mod query_actions;
 mod source_model;
+pub(crate) use source_model::read_source_without_symlinks;
 pub use source_model::source_revision;
 pub use debug_source_git::DebugSessions;
 mod validation_json;

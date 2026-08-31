@@ -317,8 +317,11 @@ pub enum StrFormat {
     Debug,
     /// `{value:Pretty}` — expands canonical `Debug` output by nesting level.
     Pretty,
-    /// `{value:Fixed(n)}` — uses `core.text.fmt.decimal(value, n)`.
+    /// `{value:Fixed(n)}` — plain fixed-point digits from `core.text.fmt.decimal(value, n)`.
     Fixed(i64),
+    /// `{value:Grouped(n)}` — grouped fixed-point digits from
+    /// `core.text.fmt.grouped(value, n)`.
+    Grouped(i64),
     /// `{value:Hex(n)}` — uses `core.text.fmt.hex(value, n)`.
     Hex(i64),
     /// `{value:Pad(n[, "fill"])}` — uses `core.text.fmt.pad`.
@@ -413,6 +416,11 @@ pub struct LambdaMeta {
     /// `Result` carrier (`Task<T !E>`), or the rendered Rust `?` sits inside
     /// a `()` closure and rustc rejects the generated code (I2).
     pub fallible_propagation: bool,
+    /// D-FAILURE-FOUNDATION1: the callback's inferred failure carrier. This
+    /// is distinct from the enclosing function's return type: a collection
+    /// callback may propagate into its own `Result` even when the enclosing
+    /// expression handles that result locally with `??`.
+    pub fallible_carrier: Option<Type>,
 }
 
 /// S46/S47 (M8): `(params) -> body`; captures are inferred.
@@ -564,6 +572,9 @@ pub enum Expr {
     /// typed context (e.g. `x: F32 = 1.5`). `false` = default F64/Float.
     Float(f64, Span, bool, Option<String>),
     Bool(bool, Span),
+    /// D-VOID1=A: the public no-information result literal `()`.
+    /// Sema and TIR carry the existing internal `Unit` representation.
+    Unit(Span),
     /// S41: single-quoted `'a'`.
     Char(char, Span),
     /// S37: `[a, b, c]` or `[]`.
@@ -877,6 +888,7 @@ impl Expr {
             | Expr::Int(_, s, _, _)
             | Expr::Float(_, s, _, _)
             | Expr::Bool(_, s)
+            | Expr::Unit(s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)
             | Expr::MemberSpread { span: s, .. }
@@ -934,6 +946,7 @@ impl Expr {
             | Expr::Int(_, current, _, _)
             | Expr::Float(_, current, _, _)
             | Expr::Bool(_, current)
+            | Expr::Unit(current)
             | Expr::Char(_, current)
             | Expr::ListLit(_, current)
             | Expr::Spread(_, current)
@@ -1158,6 +1171,7 @@ impl Expr {
                 | Expr::Int(..)
                 | Expr::Float(..)
                 | Expr::Bool(..)
+                | Expr::Unit(..)
                 | Expr::Char(..)
                 | Expr::Ident(..)
                 | Expr::UnitLit { .. }

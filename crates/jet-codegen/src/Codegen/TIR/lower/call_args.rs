@@ -546,8 +546,8 @@ pub(crate) fn builtin_dispatch_ty(ty: Type) -> Type {
 
 /// c109 Phase 9: the receiver type of a built-in method call, read off the TIR
 /// lowering env's slot types. Only `Ident` (via its slot type), `Str`/`Char`, and
-/// chained `chars`/`split`/other method calls resolve; everything else (notably a
-/// struct `Field` read) is `None`.
+/// transparent `Paren`/`Copy` wrappers around those or chained method calls
+/// resolve; everything else (notably a struct `Field` read) is `None`.
 ///
 /// That partiality is load-bearing for the callers that read a `None` as a fact —
 /// the for-in `lines` split (a `child.stdout` receiver is recognized by its BASE),
@@ -580,7 +580,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     }
 
     match e {
-        Expr::Paren(inner, _) => tir_recv_jet_ty(inner, env),
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => tir_recv_jet_ty(inner, env),
         Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => {
             Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
         }
@@ -588,6 +588,11 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
         Expr::TupleLit(_, _, Some(ty)) => Some(builtin_dispatch_ty(ty.clone())),
+        Expr::Try(inner, ..) => tir_recv_jet_ty(inner, env).map(|ty| match ty {
+            Type::Result { ok, .. } => builtin_dispatch_ty(*ok),
+            Type::Option(inner) => builtin_dispatch_ty(*inner),
+            other => other,
+        }),
         Expr::MethodCall {
             receiver,
             method,

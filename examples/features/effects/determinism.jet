@@ -8,7 +8,6 @@
 //
 // For the rare case where you KNOW a construct is deterministic but the checker
 // can't prove it, `assume_deterministic { … }` is the expert escape hatch.
-use core.time as time
 use core.math.random as random
 
 // Pure: reads time + randomness only through the injected inputs.
@@ -47,11 +46,11 @@ fn run() {
     rng.shuffle(&deck)
     print("deck={deck}")
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
-    // `wait`. Type-owned unit methods mint checked runtime durations.
+    // `wait`. Fixed waits use exact duration literals.
     print("now={clock.now()}")
     print("advanced={clock.advance(5000)}")
-    span :: Duration.seconds(2) ?? return Err("duration")
-    span_ms :: span.in(.Milliseconds) ?? return Err("duration read")
+    span :: 2s
+    span_ms :: span.in(.Milliseconds)
     print("span={span_ms}ms waited={clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.

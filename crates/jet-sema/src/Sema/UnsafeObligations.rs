@@ -61,6 +61,7 @@ pub fn inspect_with_gates(bundle: &ProgramBundle, gates: Policy::GateSet) -> Uns
             );
         }
     }
+    apply_package_surface_policy(bundle, &mut result);
     result.gates.sort_by(|a, b| {
         (&a.source, a.span.start, a.span.end).cmp(&(&b.source, b.span.start, b.span.end))
     });
@@ -83,6 +84,156 @@ pub(crate) fn check_and_strip_with_gates(
         .map(|entry| entry.diagnostic)
         .collect()
 }
+fn apply_package_surface_policy(bundle: &ProgramBundle, result: &mut UnsafeInspection) {
+    if let Some(allowed_paths) = &bundle.package_guarantees.unsafe_paths {
+        let gates = result
+            .gates
+            .iter()
+            .map(|gate| (gate.source.clone(), gate.span))
+            .collect::<Vec<_>>();
+        for (source, span) in gates {
+            let Some(module) = bundle
+                .modules
+                .iter()
+                .find(|module| module.display == source || module.path.to_string_lossy() == source)
+            else {
+                continue;
+            };
+            let Some(path) = crate::Sema::package_policy_source_path(bundle, module) else {
+                continue;
+            };
+            if !allowed_paths
+                .iter()
+                .any(|allowed| crate::Sema::package_policy_path_covers(allowed, &path))
+            {
+                push_diagnostic(
+                    result,
+                    &source,
+                    Diagnostic::from_row(
+                        "E2960",
+                        &[
+                            ("rule", "policy.unsafe"),
+                            ("subject", "#Unsafe"),
+                            ("path", &path),
+                        ],
+                        Some(span),
+                    ),
+                );
+            }
+        }
+    }
+    if bundle.package_guarantees.expert == Some(false) {
+        for module in &bundle.modules {
+            let Some(path) = crate::Sema::package_policy_source_path(bundle, module) else {
+                continue;
+            };
+            if module.no_prelude {
+                push_diagnostic(
+                    result,
+                    &module.display,
+                    expert_policy_diagnostic("#NoPrelude", &path, None),
+                );
+            }
+            for item in &module.items {
+                if let Some((subject, span)) = expert_item(item) {
+                    push_diagnostic(
+                        result,
+                        &module.display,
+                        expert_policy_diagnostic(&subject, &path, Some(span)),
+                    );
+                }
+            }
+        }
+    }
+}
+fn expert_policy_diagnostic(subject: &str, path: &str, span: Option<Span>) -> Diagnostic {
+    Diagnostic::from_row(
+        "E2960",
+        &[
+            ("rule", "policy.expert"),
+            ("subject", subject),
+            ("path", path),
+        ],
+        span,
+    )
+}
+
+fn expert_item(item: &Item) -> Option<(String, Span)> {
+    match item {
+        Item::Func(function) => {
+            if function.is_replayable {
+                return Some(("#Replayable".to_string(), function.replayable_span.unwrap_or(function.name_span)));
+            }
+            expert_body(&function.body)
+        }
+        Item::Struct(definition) => definition
+            .methods
+            .iter()
+            .find_map(expert_function)
+            .or_else(|| {
+                definition
+                    .trait_impls
+                    .iter()
+                    .flat_map(|implementation| implementation.methods.iter())
+                    .find_map(expert_function)
+            }),
+        Item::Enum(definition) => definition
+            .methods
+            .iter()
+            .find_map(expert_function)
+            .or_else(|| {
+                definition
+                    .trait_impls
+                    .iter()
+                    .flat_map(|implementation| implementation.methods.iter())
+                    .find_map(expert_function)
+            }),
+        Item::Impl(implementation) => implementation.methods.iter().find_map(expert_function),
+        Item::Test(test) => expert_body(&test.body),
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .and_then(|items| items.iter().find_map(expert_item)),
+        _ => None,
+    }
+}
+
+fn expert_function(function: &Func) -> Option<(String, Span)> {
+    if function.is_replayable {
+        Some((
+            "#Replayable".to_string(),
+            function.replayable_span.unwrap_or(function.name_span),
+        ))
+    } else {
+        expert_body(&function.body)
+    }
+}
+
+fn expert_body(body: &[Stmt]) -> Option<(String, Span)> {
+    for statement in body {
+        let found = match statement {
+            Stmt::Impure { span, .. } => Some(("#Impure".to_string(), *span)),
+            Stmt::Shield { span, .. } => Some(("#Shield".to_string(), *span)),
+            Stmt::Region { span, .. } => Some(("#Region".to_string(), *span)),
+            Stmt::AuthorityScope { span, .. } => Some(("#FX".to_string(), *span)),
+            Stmt::ContextBlock { span, .. } => Some(("#Context".to_string(), *span)),
+            Stmt::Transact { span, .. } => Some(("#Transact".to_string(), *span)),
+            Stmt::Live { span, .. } => Some(("#Live".to_string(), *span)),
+            Stmt::AssumeDet { span, .. } => Some(("assume_deterministic".to_string(), *span)),
+            Stmt::Val(binding) if binding.uninit => {
+                Some(("uninit".to_string(), binding.name_span))
+            }
+            _ => nested_bodies(statement)
+                .into_iter()
+                .find_map(expert_body),
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
 
 fn push_diagnostic(result: &mut UnsafeInspection, source: &str, diagnostic: Diagnostic) {
     result.diagnostics.push(UnsafeDiagnostic {

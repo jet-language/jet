@@ -940,6 +940,7 @@ module.exports = grammar({
         $.type_identifier,
         $.copy_expr,
         $.primitive_type,
+        $.task_selector_expr,
         $.task_expr,
         $.call_expr,
         $.turbofish_call,
@@ -1161,6 +1162,50 @@ module.exports = grammar({
           choice($.block, $._expr),
         ),
       ),
+
+    // D-CONC-ALLNAMED1=A: only `task.all` accepts named branches;
+    // `task.race` and `task.any` remain positional. The editor grammar keeps
+    // both `task.all` branch alternatives so the compiler owns mixed-form E1117.
+    task_selector_expr: ($) =>
+      prec.right(
+        2,
+        choice(
+          $._task_all_selector,
+          $._task_positional_selector,
+        ),
+      ),
+
+    _task_all_selector: ($) =>
+      seq(
+        "task",
+        ".",
+        "all",
+        "{",
+        commaSep($.task_branch),
+        "}",
+      ),
+
+    _task_positional_selector: ($) =>
+      seq(
+        "task",
+        ".",
+        choice("race", "any"),
+        "{",
+        commaSep($._task_positional_branch),
+        "}",
+      ),
+
+    task_branch: ($) =>
+      choice(
+        seq(
+          field("name", $.identifier),
+          ":",
+          field("value", choice($.block, $._expr)),
+        ),
+        $._task_positional_branch,
+      ),
+
+    _task_positional_branch: ($) => choice($.block, $._expr),
 
     // D-JPK-BUILDRECIPE1: the finite adapter recipe surface. Keep these
     // lower-case leading-dot values scoped to Recipe.build.

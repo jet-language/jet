@@ -225,6 +225,61 @@ fn reader_of(recv: &CtValue) -> Option<kernel::JetReader> {
     })
 }
 
+/// Move the Reader buffer through one evaluator operation instead of cloning
+/// it out of and back into `CtValue` on every read.
+fn take_reader(recv: &mut CtValue) -> Option<kernel::JetReader> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != READER {
+        return None;
+    }
+    let pos = fields
+        .iter()
+        .find(|(name, _)| name == "pos")
+        .and_then(|(_, value)| match value {
+            CtValue::Int(pos) => usize::try_from(*pos).ok(),
+            _ => None,
+        })?;
+    let buf =
+        fields
+            .iter_mut()
+            .find(|(name, _)| name == "buf")
+            .and_then(|(_, value)| match value {
+                CtValue::Bytes(buf) => Some(std::mem::take(buf)),
+                _ => None,
+            })?;
+    Some(kernel::JetReader { buf, pos })
+}
+
+fn restore_reader(recv: &mut CtValue, reader: kernel::JetReader) -> Option<()> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != READER {
+        return None;
+    }
+    let buf =
+        fields
+            .iter_mut()
+            .find(|(name, _)| name == "buf")
+            .and_then(|(_, value)| match value {
+                CtValue::Bytes(buf) => Some(buf),
+                _ => None,
+            })?;
+    *buf = reader.buf;
+    let pos =
+        fields
+            .iter_mut()
+            .find(|(name, _)| name == "pos")
+            .and_then(|(_, value)| match value {
+                CtValue::Int(pos) => Some(pos),
+                _ => None,
+            })?;
+    *pos = i64::try_from(reader.pos).ok()?;
+    Some(())
+}
+
 fn reader_ct(r: &kernel::JetReader) -> CtValue {
     CtValue::Struct {
         type_name: READER.to_string(),
@@ -277,9 +332,9 @@ fn with_reader(
     span: Span,
     call: impl FnOnce(&mut kernel::JetReader) -> Result<CtValue, String>,
 ) -> Result<CtValue, Diagnostic> {
-    let mut r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
-    let out = call(&mut r);
-    *recv = reader_ct(&r);
+    let mut reader = take_reader(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
+    let out = call(&mut reader);
+    restore_reader(recv, reader).ok_or_else(|| unsupported("Reader receiver storage", span))?;
     Ok(result_ct(out))
 }
 

@@ -484,7 +484,7 @@ impl JetHTTPBody {
     fn from_reader_with_length(reader: JetFileReader, length: i64) -> Result<Self, JetHTTPError> {
         let length = usize::try_from(length).ok().filter(|length| *length <= 1024 * 1024 * 1024)
             .ok_or(JetHTTPError::BodyTooLarge { limit: length })?;
-        Ok(Self::reader(reader.inner, Some(length)))
+        Ok(Self::reader(std::io::Read::take(reader.inner, length as u64), Some(length)))
     }
 
     fn bridge(
@@ -679,7 +679,7 @@ fn jet_http_body_json_text_defaulted(
     body: &JetHTTPBody,
     limit: Option<i64>,
 ) -> Result<String, JetHTTPError> {
-    jet_http_body_json_text(body, limit.unwrap_or(JET_HTTP_MAX_BODY_BYTES as i64))
+    jet_http_body_json_text(body, limit.unwrap_or(jet_http_default_body_limit()))
 }
 
 fn jet_http_json_decode_error() -> JetHTTPError {
@@ -741,13 +741,13 @@ fn jet_http_body_chunks(body: &JetHTTPBody, max_chunk: i64) -> JetHTTPBodyChunks
 
 impl PartialEq<&str> for JetHTTPBody {
     fn eq(&self, expected: &&str) -> bool {
-        self.text(1024 * 1024).as_deref() == Ok(*expected)
+        self.text(jet_http_default_body_limit() as usize).as_deref() == Ok(*expected)
     }
 }
 
 impl PartialEq<String> for JetHTTPBody {
     fn eq(&self, expected: &String) -> bool {
-        self.text(1024 * 1024).as_ref() == Ok(expected)
+        self.text(jet_http_default_body_limit() as usize).as_ref() == Ok(expected)
     }
 }
 
@@ -794,6 +794,32 @@ struct JetHTTPResponse {
     timings_ms: Vec<i64>,
     reused_connection: bool,
     raw_content_encoding: Option<String>,
+}
+
+fn jet_http_default_body_limit() -> i64 {
+    JET_HTTP_MAX_BODY_BYTES as i64
+}
+
+fn jet_http_request_text_with_limit(
+    request: &JetHTTPRequest,
+    limit: i64,
+) -> Result<String, JetHTTPError> {
+    jet_http_body_text(&request.body, limit)
+}
+
+fn jet_http_request_text(request: &JetHTTPRequest) -> Result<String, JetHTTPError> {
+    jet_http_request_text_with_limit(request, jet_http_default_body_limit())
+}
+
+fn jet_http_response_text_with_limit(
+    response: &JetHTTPResponse,
+    limit: i64,
+) -> Result<String, JetHTTPError> {
+    jet_http_body_text(&response.body, limit)
+}
+
+fn jet_http_response_text(response: &JetHTTPResponse) -> Result<String, JetHTTPError> {
+    jet_http_response_text_with_limit(response, jet_http_default_body_limit())
 }
 
 type JetHTTPHandler = std::sync::Arc<

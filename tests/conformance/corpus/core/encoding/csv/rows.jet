@@ -1,0 +1,16 @@
+// core-conformance: core.encoding.csv.rows
+use core.encoding.csv as csv
+
+fn run() {
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("fixture")
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    result :: csv.rows(
+        raw,
+        delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("rows")
+    print(result.len())
+    print(result[0].line)
+    print(result[0].fields[0])
+    note :: result[0].fields[1]
+    print(note.replace(crlf, "|"))
+}

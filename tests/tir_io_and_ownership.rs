@@ -8,7 +8,7 @@ mod tir_support;
 use std::fs;
 use std::process::Command;
 
-use tir_support::{build_and_run, build_and_run_multi, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc};
 
 /// Build `src` to a binary, then run it with `stdin` piped in. Like `build_and_run`
 /// but feeds a deterministic stdin so an `io.input(...)` reads known lines (and EOF).
@@ -503,4 +503,27 @@ fn run() {
     let (code, stdout) = build_and_run("tir_generic_method_clone_bounds", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n1\n3\n");
+}
+
+#[test]
+fn path_parent_exhaustive_match_preserves_option_shape() {
+    let src = r#"
+fn classify(path: Path) String -[]> {
+    parent :: path.parent()
+    if parent == {
+        .Val(next) -> return "present:{next.to_string()}"
+        .None -> return "none"
+    }
+}
+
+fn run() {
+    print(classify(Path.from("/tmp/jet-parent/child")))
+    print(classify(Path.from("/")))
+}
+"#;
+    assert_tiers_agree(
+        "path_parent_exhaustive_match",
+        src,
+        "present:/tmp/jet-parent\nnone\n",
+    );
 }

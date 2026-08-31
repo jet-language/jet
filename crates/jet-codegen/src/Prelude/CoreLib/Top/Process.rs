@@ -1006,6 +1006,29 @@ fn jet_process_output_state_snapshot(
     })
 }
 
+fn jet_process_output_reserve(
+    limit: usize,
+    budget: &std::sync::atomic::AtomicUsize,
+    count: usize,
+) -> usize {
+    let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
+    loop {
+        let kept = limit.saturating_sub(used).min(count);
+        let Some(next) = used.checked_add(kept) else {
+            return 0;
+        };
+        match budget.compare_exchange(
+            used,
+            next,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => return kept,
+            Err(next) => used = next,
+        }
+    }
+}
+
 fn jet_process_output_worker<R>(
     mut reader: R,
     state: std::sync::Arc<jet_std::ProcessOutputState>,
@@ -1035,23 +1058,7 @@ where
                     let budget = budget
                         .as_ref()
                         .expect("bounded process output needs a shared budget");
-                    let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
-                    loop {
-                        let available = limit.saturating_sub(used);
-                        let kept = available.min(count);
-                        if kept == 0 {
-                            break 0;
-                        }
-                        match budget.compare_exchange(
-                            used,
-                            used + kept,
-                            std::sync::atomic::Ordering::AcqRel,
-                            std::sync::atomic::Ordering::Acquire,
-                        ) {
-                            Ok(_) => break kept,
-                            Err(next) => used = next,
-                        }
-                    }
+                    jet_process_output_reserve(limit, budget, count)
                 }
             };
             if kept != 0 {
@@ -1145,60 +1152,61 @@ fn jet_process_drain_reader<R>(
     limit: Option<usize>,
     budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>
 where
     R: std::io::Read + Send + 'static,
 {
     reader.map(|mut reader| {
         std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let mut exceeded = false;
-            let mut chunk = [0u8; 8192];
-            loop {
-                let count = std::io::Read::read(&mut reader, &mut chunk)?;
-                if count == 0 {
-                    break;
-                }
-                let kept = match limit {
-                    None => {
-                        bytes.extend_from_slice(&chunk[..count]);
-                        count
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut bytes = Vec::new();
+                let mut exceeded = false;
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let count = std::io::Read::read(&mut reader, &mut chunk)?;
+                    if count == 0 {
+                        break;
                     }
-                    Some(limit) => {
-                        let budget = budget
-                            .as_ref()
-                            .expect("bounded process output needs a shared budget");
-                        let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
-                        loop {
-                            let available = limit.saturating_sub(used);
-                            let kept = available.min(count);
-                            if kept == 0 {
-                                break 0;
-                            }
-                            match budget.compare_exchange(
-                                used,
-                                used + kept,
-                                std::sync::atomic::Ordering::AcqRel,
-                                std::sync::atomic::Ordering::Acquire,
-                            ) {
-                                Ok(_) => {
-                                    bytes.extend_from_slice(&chunk[..kept]);
-                                    break kept;
-                                }
-                                Err(next) => used = next,
-                            }
+                    let kept = match limit {
+                        None => {
+                            bytes.extend_from_slice(&chunk[..count]);
+                            count
                         }
+                        Some(limit) => {
+                            let budget = budget
+                                .as_ref()
+                                .expect("bounded process output needs a shared budget");
+                            let kept = jet_process_output_reserve(limit, budget, count);
+                            if kept != 0 {
+                                bytes.extend_from_slice(&chunk[..kept]);
+                            }
+                            kept
+                        }
+                    };
+                    if kept < count {
+                        exceeded = true;
+                        limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                        break;
                     }
-                };
-                if kept < count {
-                    exceeded = true;
-                    limit_hit.store(true, std::sync::atomic::Ordering::Release);
-                    break;
+                }
+                let text = String::from_utf8(bytes).map_err(|error| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+                })?;
+                Ok(JetProcessOutput { text, exceeded })
+            }));
+            match result {
+                Ok(result) => {
+                    if result.is_err() {
+                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    result
+                }
+                Err(payload) => {
+                    cancel.store(true, std::sync::atomic::Ordering::Release);
+                    std::panic::resume_unwind(payload);
                 }
             }
-            let text = String::from_utf8(bytes)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-            Ok(JetProcessOutput { text, exceeded })
         })
     })
 }
@@ -1225,6 +1233,42 @@ fn jet_process_finish_output_drain(
             jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
         })
 }
+
+fn jet_process_collect_pipeline_drains(
+    output_drain: Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
+    stderr_drains: Vec<Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>>,
+) -> Result<(JetProcessOutput, String), jet_std::IOError> {
+    let mut first_error = None;
+    let mut output = JetProcessOutput {
+        text: String::new(),
+        exceeded: false,
+    };
+    match jet_process_finish_output_drain(output_drain, "pipeline stdout") {
+        Ok(result) => output = result,
+        Err(error) => first_error = Some(error),
+    }
+    let mut output_exceeded = output.exceeded;
+    let mut errors = String::new();
+    for drain in stderr_drains {
+        match jet_process_finish_output_drain(drain, "pipeline stderr") {
+            Ok(result) => {
+                output_exceeded |= result.exceeded;
+                errors.push_str(&result.text);
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    output.exceeded = output_exceeded;
+    Ok((output, errors))
+}
+
 fn jet_process_collect_output(
     drains: (
         Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
@@ -1502,15 +1546,137 @@ fn jet_process_sandbox_pipeline_spawn(
     .map_err(|error| jet_process_sandbox_error(spec, error))
 }
 
-fn jet_process_pipeline_cleanup(children: &mut [std::process::Child]) {
+struct JetProcessPipelineChild {
+    child: std::process::Child,
+    #[cfg(windows)]
+    job: Option<std::fs::File>,
+}
+
+fn jet_process_pipeline_child(
+    child: std::process::Child,
+    spec: &jet_std::ProcessSpec,
+) -> Result<JetProcessPipelineChild, jet_std::IOError> {
+    #[cfg(windows)]
+    {
+        let mut child = child;
+        let job = if spec.detached {
+            None
+        } else {
+            use std::os::windows::io::AsRawHandle;
+            match jet_process_pty::attach_job(
+                child.as_raw_handle(),
+                jet_process_native_limits(spec),
+            ) {
+                Ok(job) => Some(job),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(jet_std::IOError::other(
+                        jet_std::IOOperation::Resolve,
+                        spec.cmd.first().cloned(),
+                        error,
+                    ));
+                }
+            }
+        };
+        return Ok(JetProcessPipelineChild { child, job });
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = spec;
+        Ok(JetProcessPipelineChild { child })
+    }
+}
+
+fn jet_process_pipeline_child_stop(child: &mut JetProcessPipelineChild) {
+    #[cfg(unix)]
+    let _ = jet_process_pty::signal_group(child.child.id(), jet_process_signal_kill());
+    #[cfg(windows)]
+    if let Some(job) = child.job.take() {
+        let _ = jet_process_pty::terminate(&job);
+    }
+    let _ = child.child.kill();
+}
+
+fn jet_process_pipeline_cleanup(children: &mut [JetProcessPipelineChild]) {
     for child in children.iter_mut() {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let _ = jet_process_pty::signal_group(child.id(), jet_process_signal_kill());
-        let _ = child.kill();
+        jet_process_pipeline_child_stop(child);
     }
     for child in children.iter_mut() {
-        let _ = child.wait();
+        let _ = child.child.wait();
     }
+}
+
+fn jet_process_forward_pipeline_output(
+    mut reader: std::process::ChildStdout,
+    mut writer: std::process::ChildStdin,
+    limit: usize,
+    budget: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::io::Result<()> {
+    let result = (|| {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let count = std::io::Read::read(&mut reader, &mut chunk)?;
+            if count == 0 {
+                return Ok(());
+            }
+            let kept = jet_process_output_reserve(limit, &budget, count);
+            if kept < count {
+                limit_hit.store(true, std::sync::atomic::Ordering::Release);
+            }
+            if kept != 0 {
+                match std::io::Write::write_all(&mut writer, &chunk[..kept]) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                        return Err(error)
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            if kept < count {
+                return Ok(());
+            }
+        }
+    })();
+    if result.is_err() {
+        cancel.store(true, std::sync::atomic::Ordering::Release);
+    }
+    result
+}
+
+fn jet_process_join_pipeline_forwarders(
+    forwarders: &mut Vec<std::thread::JoinHandle<std::io::Result<()>>>,
+) -> Result<(), jet_std::IOError> {
+    let mut first_error = None;
+    while let Some(forwarder) = forwarders.pop() {
+        let result = forwarder.join().map_err(|_| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Read,
+                Some("pipeline stdout".to_string()),
+                "pipeline output forwarder panicked",
+            )
+        });
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                if first_error.is_none() {
+                    first_error = Some(jet_std::IOError::other(
+                        jet_std::IOOperation::Read,
+                        Some("pipeline stdout".to_string()),
+                        error,
+                    ));
+                }
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 fn jet_process_spec_pipeline(
@@ -1549,13 +1715,32 @@ fn jet_process_spec_pipeline(
             jet_process_verify_launch_plan(spec, plan)?;
         }
     }
-    let mut children: Vec<std::process::Child> = Vec::new();
+    let mut children: Vec<JetProcessPipelineChild> = Vec::new();
     let mut stage_started = Vec::with_capacity(specs.len());
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
+    let stage_budgets = specs
+        .iter()
+        .map(|spec| {
+            spec.output_limit
+                .map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)))
+        })
+        .collect::<Vec<_>>();
+    let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let pipeline_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut forwarders = Vec::new();
     for (index, (spec, launch_plan)) in specs.iter().zip(launch_plans.iter()).enumerate() {
         let is_last = index + 1 == specs.len();
         let input = prev_stdout.take();
-        let child = {
+        let limited_input = index
+            .checked_sub(1)
+            .and_then(|previous| specs[previous].output_limit)
+            .is_some();
+        let (input, forward_input) = if limited_input {
+            (None, input)
+        } else {
+            (input, None)
+        };
+        let child = (|| -> Result<std::process::Child, jet_std::IOError> {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             if spec.policy_wire.is_some() {
                 jet_process_sandbox_pipeline_spawn(
@@ -1572,6 +1757,9 @@ fn jet_process_spec_pipeline(
                         .as_ref()
                         .map(|plan| plan.executable_identity.as_str()),
                 )?;
+                if forward_input.is_some() {
+                    command.stdin(std::process::Stdio::piped());
+                }
                 if let Some(stdout) = input {
                     command.stdin(std::process::Stdio::from(stdout));
                 }
@@ -1605,6 +1793,9 @@ fn jet_process_spec_pipeline(
                         .as_ref()
                         .map(|plan| plan.executable_identity.as_str()),
                 )?;
+                if forward_input.is_some() {
+                    command.stdin(std::process::Stdio::piped());
+                }
                 if let Some(stdout) = input {
                     command.stdin(std::process::Stdio::from(stdout));
                 }
@@ -1630,26 +1821,89 @@ fn jet_process_spec_pipeline(
                     )
                 })
             }
-        };
+        })();
         let mut child = match child {
-            Ok(child) => child,
+            Ok(child) => match jet_process_pipeline_child(child, spec) {
+                Ok(child) => child,
+                Err(error) => {
+                    jet_process_pipeline_cleanup(&mut children);
+                    let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
+                    return Err(error);
+                }
+            },
             Err(error) => {
                 jet_process_pipeline_cleanup(&mut children);
+                let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
                 return Err(error);
             }
         };
-        prev_stdout = child.stdout.take();
+        if let Some(stdout) = forward_input {
+            let Some(previous) = index.checked_sub(1) else {
+                jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
+                jet_process_pipeline_cleanup(&mut children);
+                let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    "limited pipeline input has no preceding stage",
+                ));
+            };
+            let Some(stdin) = child.child.stdin.take() else {
+                jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
+                jet_process_pipeline_cleanup(&mut children);
+                let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    "limited pipeline stage did not provide stdin",
+                ));
+            };
+            let Some(limit) = specs[previous]
+                .output_limit
+                .map(|value| value.max(0) as usize)
+            else {
+                jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
+                jet_process_pipeline_cleanup(&mut children);
+                let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    "limited pipeline input has no output limit",
+                ));
+            };
+            let Some(budget) = stage_budgets[previous]
+                .clone()
+            else {
+                jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
+                jet_process_pipeline_cleanup(&mut children);
+                let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    "limited pipeline input has no shared budget",
+                ));
+            };
+            let limit_hit = pipeline_limit_hit.clone();
+            let cancel = pipeline_cancel.clone();
+            forwarders.push(std::thread::spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    jet_process_forward_pipeline_output(
+                        stdout, stdin, limit, budget, limit_hit, cancel.clone(),
+                    )
+                }));
+                match result {
+                    Ok(result) => result,
+                    Err(payload) => {
+                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                        std::panic::resume_unwind(payload);
+                    }
+                }
+            }));
+        }
+        prev_stdout = child.child.stdout.take();
         children.push(child);
         stage_started.push(std::time::Instant::now());
     }
-    let stage_budgets = specs
-        .iter()
-        .map(|spec| {
-            spec.output_limit
-                .map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)))
-        })
-        .collect::<Vec<_>>();
-    let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let final_limit = specs
         .last()
         .and_then(|spec| spec.output_limit)
@@ -1660,6 +1914,7 @@ fn jet_process_spec_pipeline(
             final_limit,
             stage_budgets.last().cloned().flatten(),
             pipeline_limit_hit.clone(),
+            pipeline_cancel.clone(),
         )
     });
     let stderr_drains = children
@@ -1667,10 +1922,11 @@ fn jet_process_spec_pipeline(
         .enumerate()
         .map(|(index, child)| {
             jet_process_drain_reader(
-                child.stderr.take().map(std::io::BufReader::new),
+                child.child.stderr.take().map(std::io::BufReader::new),
                 specs[index].output_limit.map(|limit| limit.max(0) as usize),
                 stage_budgets[index].clone(),
                 pipeline_limit_hit.clone(),
+                pipeline_cancel.clone(),
             )
         })
         .collect::<Vec<_>>();
@@ -1679,6 +1935,7 @@ fn jet_process_spec_pipeline(
     let mut timed_out = false;
     let mut output_limit_exceeded = false;
     let mut resource_limit = None;
+    let mut wait_error = None;
     let mut stage_finished = vec![false; children.len()];
     'stages: for index in 0..children.len() {
         if stage_finished[index] {
@@ -1690,36 +1947,44 @@ fn jet_process_spec_pipeline(
                 output_limit_exceeded = true;
                 break None;
             }
+            if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
+                jet_process_pipeline_cleanup(&mut children);
+                break None;
+            }
             let mut current_status = None;
             for stage in 0..children.len() {
                 if stage_finished[stage] {
                     continue;
                 }
-                if let Some(limit) =
-                    jet_process_live_resource_limit(children[stage].id(), &specs[stage])
+                if let Some(limit) = jet_process_live_resource_limit(
+                    children[stage].child.id(),
+                    &specs[stage],
+                )
                 {
                     jet_process_pipeline_cleanup(&mut children);
                     resource_limit = Some(limit);
                     break 'wait None;
                 }
-                if let Some(status) = children[stage].try_wait().map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Close,
-                        Some("pipeline process".to_string()),
-                        error,
-                    )
-                })? {
+                let status = match children[stage].child.try_wait() {
+                    Ok(status) => status,
+                    Err(error) => {
+                        jet_process_pipeline_cleanup(&mut children);
+                        wait_error = Some(jet_std::IOError::other(
+                            jet_std::IOOperation::Close,
+                            Some("pipeline process".to_string()),
+                            error,
+                        ));
+                        break 'wait None;
+                    }
+                };
+                if let Some(status) = status {
                     if let Some(limit) = jet_process_status_resource_limit(&status, &specs[stage]) {
                         jet_process_pipeline_cleanup(&mut children);
                         resource_limit = Some(limit);
                         break 'wait None;
                     }
                     stage_finished[stage] = true;
-                    #[cfg(unix)]
-                    let _ = jet_process_pty::signal_group(
-                        children[stage].id(),
-                        jet_process_signal_kill(),
-                    );
+                    jet_process_pipeline_child_stop(&mut children[stage]);
                     if !status.success() {
                         success = false;
                         code = status.code().unwrap_or(-1) as i64;
@@ -1750,17 +2015,22 @@ fn jet_process_spec_pipeline(
             break 'stages;
         };
     }
-    let output = jet_process_finish_output_drain(output_drain, "pipeline stdout")?;
-    let mut output_exceeded = output.exceeded;
-    let mut errors = String::new();
-    for drain in stderr_drains {
-        let result = jet_process_finish_output_drain(drain, "pipeline stderr")?;
-        output_exceeded |= result.exceeded;
-        errors.push_str(&result.text);
+    if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
+        jet_process_pipeline_cleanup(&mut children);
+    }
+    let forwarder_result = jet_process_join_pipeline_forwarders(&mut forwarders);
+    let pipeline_output_exceeded = pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire);
+    let drains = jet_process_collect_pipeline_drains(output_drain, stderr_drains);
+    forwarder_result?;
+    let (output, errors) = drains?;
+    let output_exceeded = output.exceeded;
+    if let Some(error) = wait_error {
+        return Err(error);
     }
     if let Some(limit) = resource_limit {
         return Err(jet_std::IOError::ResourceLimit(limit));
     }
+    output_limit_exceeded |= pipeline_output_exceeded;
     if output_exceeded || output_limit_exceeded {
         return Err(jet_std::IOError::ResourceLimit(
             jet_std::ProcessResourceLimit::Output,

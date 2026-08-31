@@ -15,7 +15,8 @@ const JET_FLOORDIV_OVERFLOW: &str = JET_ARITHMETIC_DIVIDE_OVERFLOW;
 // Fixed-width `/` uses one policy for signed and unsigned values. The caller
 // supplies the result range because the evaluator carries every IntN value in
 // an i64, while AOT calls this with the concrete Rust width.
-const JET_DIVISION_ERROR: &str = JET_ARITHMETIC_DIVISION_ERROR;
+const JET_DIVIDE_ZERO: &str = JET_ARITHMETIC_DIVIDE_ZERO;
+const JET_DIVIDE_OVERFLOW: &str = JET_ARITHMETIC_DIVIDE_OVERFLOW;
 
 pub fn jet_division(
     left: i128,
@@ -23,11 +24,14 @@ pub fn jet_division(
     minimum: i128,
     maximum: i128,
 ) -> Result<i128, &'static str> {
-    let quotient = left.checked_div(right).ok_or(JET_DIVISION_ERROR)?;
+    if right == 0 {
+        return Err(JET_DIVIDE_ZERO);
+    }
+    let quotient = left.checked_div(right).ok_or(JET_DIVIDE_OVERFLOW)?;
     if (minimum..=maximum).contains(&quotient) {
         Ok(quotient)
     } else {
-        Err(JET_DIVISION_ERROR)
+        Err(JET_DIVIDE_OVERFLOW)
     }
 }
 

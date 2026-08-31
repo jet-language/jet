@@ -1,31 +1,31 @@
 use core.time as time
 
 fn run() {
-    ns :: Duration.nanoseconds(400) ?? return Err("ns")
-    us :: Duration.microseconds(400) ?? return Err("us")
-    ns_read :: ns.in(.Nanoseconds) ?? return Err("read")
+    ns :: 400ns
+    us :: 400us
+    ns_read :: ns.in(.Nanoseconds)
     print(ns_read)
-    us_read :: us.in(.Microseconds) ?? return Err("read")
+    us_read :: us.in(.Microseconds)
     print(us_read)
-    us_ns :: us.in(.Nanoseconds) ?? return Err("read")
+    us_ns :: us.in(.Nanoseconds)
     print(us_ns)
     print(ns.is_zero())
-    zero :: Duration.milliseconds(0) ?? return Err("zero")
+    zero :: 0ms
     print(zero.is_zero())
-    sec :: Duration.seconds(2) ?? return Err("sec")
+    sec :: 2s
     print(sec.total_seconds())
-    a :: Duration.milliseconds(1500) ?? return Err("a")
-    b :: Duration.milliseconds(500) ?? return Err("b")
-    diff :: a.difference(b).in(.Milliseconds) ?? return Err("diff")
+    a :: 1500ms
+    b :: 500ms
+    diff :: a.difference(b).in(.Milliseconds)
     print(diff)
-    literal_ns :: (250ns).in(.Nanoseconds) ?? return Err("literal read")
+    literal_ns :: (250ns).in(.Nanoseconds)
     print(literal_ns)
-    literal_us :: (3us).in(.Microseconds) ?? return Err("literal read")
+    literal_us :: (3us).in(.Microseconds)
     print(literal_us)
     inst :: time.instant()
     later :: inst + 5min
     print(later >= inst)
-    delta :: (later - inst).in(.Minutes) ?? return Err("point delta")
+    delta :: (later - inst).in(.Minutes)
     print(delta)
     elapsed :: inst.elapsed()
     print(elapsed.total_seconds() >= 0)

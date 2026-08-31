@@ -93,6 +93,7 @@ pub(super) fn substitute_expr(
         | Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
+        | Expr::Unit(..)
         | Expr::Absent(..)
         | Expr::ReduceMarker(..)
         | Expr::Todo { .. }
@@ -124,8 +125,18 @@ pub(super) fn substitute_expr(
         | Expr::Err(inner, _)
         | Expr::Paren(inner, _)
         | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
-        Expr::Try(inner, _, _, note) => {
+        Expr::Try(inner, _, convert, note) => {
             substitute_expr(inner, types, values);
+            if let crate::AST::TryConvert::Typed {
+                fn_name,
+                source,
+                target,
+            } = convert
+            {
+                *source = crate::Generics::substitute_type(source, types);
+                *target = crate::Generics::substitute_type(target, types);
+                *fn_name = crate::Sema::error_conv_fn_name(&source.name(), &target.name());
+            }
             if let Some(note) = note {
                 substitute_expr(note, types, values);
             }

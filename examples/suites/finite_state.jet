@@ -1,0 +1,60 @@
+// User story: a build job exposes legal states and legal transitions.
+//
+// Anti-pattern from the dogfood port: `state := "running"` plus parallel
+// `seen_started := true` / `seen_finished := false` values allowed impossible
+// combinations. Rule D-TAG1/D-STATE1: model finite values with an enum and a
+// nested variant group, group equivalent arms with `|`, and use typestate
+// transitions for order that must be checked at compile time.
+tag ParsedManifest { deny: [Net] }
+
+enum Phase {
+    Draft
+    Active
+    Terminal {
+        Done
+        Failed
+    }
+}
+
+// A tag records parser provenance without another state boolean.
+fn parse_manifest(name: String) #ParsedManifest String -> ~name
+
+fn phase_kind(phase: Phase) String -> {
+    label := "unknown"
+    if phase == {
+        .Draft -> { label = "pending" }
+        .Active -> { label = "working" }
+        // The group arm covers both terminal leaves.
+        .Terminal -> { label = "terminal" }
+    }
+    return label
+}
+
+struct Build {
+    state { Queued, Running, Finished }
+
+    name: String
+}
+
+impl Build {
+    #Transition(_, Queued) fn queue(name: String) Build -> {name: ~name}
+
+    #Transition(Queued, Running) fn start(self: ^Build) Build -> self
+
+    #Transition(Running, Finished) fn finish(self: ^Build) Build -> self
+
+    #State(Finished) fn report(self) String -> "finished:{self.name}"
+}
+
+fn run() {
+    print(phase_kind(Phase.Draft))
+    print(phase_kind(Phase.Terminal.Failed))
+
+    parsed :: parse_manifest("manifest")
+    print("tagged:{parsed}")
+
+    build := Build.queue("compile")
+    build = build.start()
+    build = build.finish()
+    print(build.report())
+}

@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::AST::{binder_descriptor, ForeignLanguage};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindResult {
     pub source: String,
@@ -92,6 +94,18 @@ pub fn bind(
             "`{lib}` is not a valid Jet library name"
         )));
     }
+    let source_path = source_path
+        .canonicalize()
+        .map_err(|e| BindError::IO(format!("could not resolve Java source: {e}")))?;
+    let source_on_disk = std::fs::read_to_string(&source_path)
+        .map_err(|e| BindError::IO(format!("could not read Java source: {e}")))?;
+    if source_on_disk != source {
+        return Err(BindError::Source(
+            "Java source text does not match the declared source file".into(),
+        ));
+    }
+    let descriptor = *binder_descriptor(ForeignLanguage::Java)
+        .ok_or_else(|| BindError::Source("Java binder descriptor is not registered".into()))?;
     let class = source_path
         .file_stem()
         .and_then(|v| v.to_str())
@@ -111,7 +125,7 @@ pub fn bind(
         Command::new("javac")
             .args(["-encoding", "UTF-8", "-d"])
             .arg(&classes)
-            .arg(source_path),
+            .arg(&source_path),
         "javac",
     )?;
     let javap = run(
@@ -135,7 +149,8 @@ pub fn bind(
     let bridge = cache.join(format!("{stem}.c"));
     let object = cache.join(format!("{stem}.o"));
     let archive = cache.join(format!("lib{stem}.a"));
-    std::fs::write(&bridge, render_c(lib, &surface, &classes))
+    let bridge_source = render_c(lib, &surface, &classes);
+    std::fs::write(&bridge, &bridge_source)
         .map_err(|e| BindError::IO(format!("could not write JNI bridge: {e}")))?;
     run(
         Command::new("cc")
@@ -154,18 +169,74 @@ pub fn bind(
     )?;
     let _ = std::fs::remove_file(&object);
     let _ = std::fs::remove_file(&bridge);
-    let mut identity = Vec::new();
-    identity.extend_from_slice(b"jet-java-bind-v1\0");
-    identity.extend_from_slice(source.as_bytes());
-    identity.push(0);
-    identity.extend_from_slice(&javap.stdout);
-    identity.push(0);
-    identity.extend_from_slice(classes.to_string_lossy().as_bytes());
-    let provenance = format!(
-        "schema=jet-java-bind-v1\nsha256={}\nclass={}\n",
-        crate::SHA256::sha256_hex(&identity),
-        class
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
+        crate::ForeignBridge::IDENTITY_SCHEMA,
     );
+    identity.field("language", ForeignLanguage::Java.root().as_bytes());
+    identity.field("binder_schema", b"jet-java-bind-v1");
+    identity.field("library", lib.as_bytes());
+    identity.field("abi", format!("jet_java_{lib}").as_bytes());
+    identity.field("descriptor", descriptor.stamp().as_bytes());
+    identity.field("source_path", source_path.as_os_str().as_encoded_bytes());
+    identity.field("source_bytes", source.as_bytes());
+    identity.field("javap", &javap.stdout);
+    identity.field("bridge", bridge_source.as_bytes());
+    identity.field("classes", classes.as_os_str().as_encoded_bytes());
+    identity.field("jvm", jvm_dir.as_os_str().as_encoded_bytes());
+    identity.field(
+        "javac_toolchain",
+        crate::ForeignBridge::tool_identity("javac").as_bytes(),
+    );
+    identity.field(
+        "javap_toolchain",
+        crate::ForeignBridge::tool_identity("javap").as_bytes(),
+    );
+    identity.field("cc", crate::ForeignBridge::tool_identity("cc").as_bytes());
+    identity.field("ar", crate::ForeignBridge::tool_identity("ar").as_bytes());
+    let identity = identity.finish();
+    let fields: Vec<(String, String)> = vec![
+        ("language".into(), ForeignLanguage::Java.root().into()),
+        ("abi".into(), format!("jet_java_{lib}")),
+        ("transport".into(), "embedded-jvm-jni".into()),
+        ("binder-schema".into(), "jet-java-bind-v1".into()),
+        ("descriptor".into(), descriptor.stamp()),
+        ("class".into(), class.to_string()),
+        ("source".into(), source_path.to_string_lossy().into_owned()),
+        (
+            "source-sha256".into(),
+            crate::ForeignBridge::sha_file(&source_path).map_err(BindError::Source)?,
+        ),
+        (
+            "javap-sha256".into(),
+            crate::SHA256::sha256_hex(&javap.stdout),
+        ),
+        ("classes".into(), classes.to_string_lossy().into_owned()),
+        ("jvm".into(), jvm_dir.to_string_lossy().into_owned()),
+        (
+            "javac-toolchain".into(),
+            crate::ForeignBridge::tool_identity("javac"),
+        ),
+        (
+            "javap-toolchain".into(),
+            crate::ForeignBridge::tool_identity("javap"),
+        ),
+        ("cc".into(), crate::ForeignBridge::tool_identity("cc")),
+        ("ar".into(), crate::ForeignBridge::tool_identity("ar")),
+    ];
+    let field_refs: Vec<(&str, &str)> = fields
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    let artifacts = vec![(
+        archive
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        crate::ForeignBridge::sha_file(&archive).map_err(BindError::Source)?,
+    )];
+    let provenance = crate::ForeignBridge::render_provenance(&identity, &field_refs, &artifacts)
+        .map_err(BindError::Source)?;
     let bound = surface
         .methods
         .iter()

@@ -33,7 +33,7 @@ Top-level fields:
 | `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
 | `packages` | Parsed `package.jet` facts for the root package and workspace members. |
 | `targets` | Package/build targets projected from `package.jet` with package path and manifest source. |
-| `outputs` | The valid build outputs exposed by the normal IDE launcher. Selecting one updates the resident session run selection. |
+| `outputs` | The valid build outputs exposed by the normal IDE launcher. Output and target choices remain local until Run sends those exact values through command authority. |
 | `envs` / `services` | `env.jet` projection from Jetpack module evaluation, including package refs, prompt, secrets, and dev services. |
 | `files` | Projected source-truth files with per-file revisions and kinds. |
 | `locks` | `.jet/lock` facts used by the projection. |
@@ -78,6 +78,10 @@ The Canvas and application listeners are intentionally different. Canvas
 routes belong to the IDE transport. Application routes, custom hosts, ports,
 middleware, and reload policy remain application-owned and are only described
 by the session boundary.
+
+For a web dev session, `--canvas-port` selects the Canvas control listener and
+`--port` selects the application preview listener. Omitting either flag lets
+that listener choose its own port; both still read the same resident session.
 
 ## Project Transaction V1
 
@@ -574,10 +578,14 @@ Execute an approved command:
 Endpoint: `POST /__jet_canvas/command` or `POST /canvas/command`.
 
 The endpoint accepts only whitelisted Canvas command actions (`run`, `check`,
-`build`). Requests may include the graph's `source_id`; the command, checked
-revision, diagnostics, and receipt then refer to that selected project file.
-`build` writes build outputs and requires `confirmed:true`. The server does not
-accept arbitrary argv.
+`test`, `build`, and `service.start`). Requests may include the graph's
+`source_id`; the command, checked revision, diagnostics, and receipt then refer
+to that selected project file. `run` also accepts the selected `output` and
+`target` values and passes them as exact CLI arguments. `test`, `build`, and
+`service.start` write or start external work and require `confirmed:true`.
+`service.start` runs the real `jet services up` supervisor path. A long-running
+`dev` command is not advertised as a Canvas action. The server does not accept
+arbitrary argv.
 
 Successful receipt:
 

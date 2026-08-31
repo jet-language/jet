@@ -1975,6 +1975,216 @@ fn explain_golden() {
 }
 
 #[test]
+fn cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let semantic = root.join("tests/cli/cost_rows.jet");
+    let lint = Command::new(jet())
+        .args(["lint", "--cost", semantic.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        lint.status.code(),
+        Some(1),
+        "semantic hot-loop costs must fail the opt-in lint: {}",
+        String::from_utf8_lossy(&lint.stderr)
+    );
+    let check = Command::new(jet())
+        .args(["check", semantic.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check should report cost lints without failing: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_stderr = String::from_utf8_lossy(&check.stderr);
+    assert_eq!(
+        check_stderr
+            .matches("Warning [L2510] (hidden_cost_in_loop):")
+            .count(),
+        5,
+        "check must deduplicate one diagnostic per semantic cost kind:\n{check_stderr}"
+    );
+    assert_eq!(
+        check_stderr
+            .matches("view into an owned slot")
+            .count(),
+        1,
+        "check must emit the sema view-copy diagnostic once:\n{check_stderr}"
+    );
+    let lint_stderr = String::from_utf8_lossy(&lint.stderr);
+    assert!(
+        lint_stderr.contains("L2510")
+            && lint_stderr.contains("Why:")
+            && lint_stderr.contains("Fix:"),
+        "semantic cost lint lost its registered What/Why/Fix surface:\n{lint_stderr}"
+    );
+    for operation in [
+        "Editing a shared map backing store",
+        "An exact Int operation may spill to bigint",
+        "Using a generic collection representation",
+        "Constructing an Outcome carrier",
+    ] {
+        assert_eq!(
+            lint_stderr.matches(operation).count(),
+            1,
+            "semantic cost lint must emit `{operation}` once:\n{lint_stderr}"
+        );
+    }
+    assert_eq!(
+        lint_stderr
+            .matches("view into an owned slot")
+            .count(),
+        1,
+        "lint must emit the sema view-copy diagnostic once:\n{lint_stderr}"
+    );
+    assert_eq!(
+        lint_stderr
+            .matches("Warning [L2510] (hidden_cost_in_loop):")
+            .count(),
+        5,
+        "lint must deduplicate one diagnostic per semantic cost kind:\n{lint_stderr}"
+    );
+
+    let explain = Command::new(jet())
+        .args([
+            "explain",
+            "--cost",
+            semantic.to_str().unwrap(),
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        explain.status.success(),
+        "semantic cost explanation failed: {}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    let explain_stdout = String::from_utf8_lossy(&explain.stdout);
+    for kind in [
+        "view materialization",
+        "map copy-on-write",
+        "exact Int spill",
+        "outcome construction",
+        "generic representation fallback",
+    ] {
+        assert!(
+            explain_stdout.contains(&format!("\"kind\":\"{kind}\"")),
+            "cost explanation omitted `{kind}`:\n{explain_stdout}"
+        );
+    }
+    assert!(
+        explain_stdout.contains("\"state\":\"semantic remainder\""),
+        "cost explanation omitted semantic remainder state:\n{explain_stdout}"
+    );
+    assert_eq!(
+        explain_stdout.matches("\"tier\":\"shared-tir\"").count(),
+        5,
+        "each explained cost row must carry one shared TIR tier label:\n{explain_stdout}"
+    );
+    assert!(
+        !explain_stdout.contains("\"source\":\"shared-tir\""),
+        "explain must not add a redundant shared TIR source field:\n{explain_stdout}"
+    );
+
+    let explain_human = Command::new(jet())
+        .args(["explain", "--cost", semantic.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        explain_human.status.success(),
+        "human cost explanation failed: {}",
+        String::from_utf8_lossy(&explain_human.stderr)
+    );
+    let explain_human_stdout = String::from_utf8_lossy(&explain_human.stdout);
+    assert!(
+        explain_human_stdout
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .all(|line| line.contains("tier=shared-tir")),
+        "human explain rows must identify the shared TIR tier:\n{explain_human_stdout}"
+    );
+
+    let removed = root.join("tests/cli/cost_removed.jet");
+    let removed_lint = Command::new(jet())
+        .args(["lint", "--cost", removed.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        removed_lint.status.code(),
+        Some(0),
+        "optimizer-proven exact Int removal must not lint: {}",
+        String::from_utf8_lossy(&removed_lint.stderr)
+    );
+    let removed_out = String::from_utf8_lossy(&removed_lint.stdout);
+    let removed_err = String::from_utf8_lossy(&removed_lint.stderr);
+    assert!(
+        removed_out.contains("no hidden dynamic costs in loops")
+            && !removed_out.contains("L2510")
+            && !removed_err.contains("L2510"),
+        "optimizer-proven removal unexpectedly emitted a lint:\nstdout={removed_out}\nstderr={removed_err}"
+    );
+
+    let removed_explain = Command::new(jet())
+        .args([
+            "explain",
+            "--cost",
+            removed.to_str().unwrap(),
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        removed_explain.status.success(),
+        "removed cost explanation failed: {}",
+        String::from_utf8_lossy(&removed_explain.stderr)
+    );
+    let removed_stdout = String::from_utf8_lossy(&removed_explain.stdout);
+    assert!(
+        removed_stdout.contains("\"kind\":\"exact Int spill\"")
+            && removed_stdout.contains("\"state\":\"optimizer-proven removed\""),
+        "explain omitted optimizer proof for exact Int:\n{removed_stdout}"
+    );
+}
+
+#[test]
+fn cost_cli_rejects_incomplete_reachable_tir_projection() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (fixture, surface) in [
+        ("cost_incomplete_generic.jet", "identity"),
+        ("cost_incomplete_foreign.jet", "value"),
+    ] {
+        let file = root.join("tests/cli").join(fixture);
+        for args in [
+            vec!["check", file.to_str().unwrap()],
+            vec!["lint", "--cost", file.to_str().unwrap()],
+            vec!["explain", "--cost", file.to_str().unwrap(), "--json"],
+        ] {
+            let output = Command::new(jet())
+                .args(args)
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !output.status.success()
+                    && stderr.contains("E2104")
+                    && stderr.contains("cost projection")
+                    && stderr.contains("incomplete")
+                    && stderr.contains(surface),
+                "{fixture} must reject the omitted reachable {surface} surface:\n{stderr}"
+            );
+        }
+    }
+}
+
+#[test]
 fn explain_golden_e1803_application_authority() {
     let out = Command::new(jet())
         .arg("explain")
@@ -2041,6 +2251,7 @@ fn explain_typed_build_setting_golden() {
 fn explain_runtime_stop_golden() {
     for code in [
         "E3001", "E3002", "E3003", "E3004", "E3005", "E3010", "E3011", "E3012",
+        "E3014",
     ] {
         let out = Command::new(jet())
             .arg("explain")

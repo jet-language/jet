@@ -10,7 +10,7 @@ use jet_codegen::Codegen::TIR::{
     self, JitProgram, TExpr, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda,
     TLambdaBody, TStmt, TirWorklist,
 };
-use jet_foundation::AST::Type;
+use jet_foundation::AST::{AccessConvention, Type};
 use std::collections::{HashMap, HashSet};
 
 use super::lower_ctx::LowerCtx;
@@ -24,6 +24,13 @@ use crate::{Cell, Collections};
 
 fn spawn_body_name(index: usize) -> String {
     jet_foundation::Names::mangle(&format!("jit_spawn_body_{index}"))
+}
+
+struct CompiledProgram {
+    entry_id: FuncId,
+    cli_entry: bool,
+    cli_adapters: Vec<(String, FuncId, bool)>,
+    func_ids: HashMap<String, FuncId>,
 }
 
 fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
@@ -94,7 +101,7 @@ fn unpack_memo_return(
 }
 
 fn cli_frame_value(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     builder: &mut FunctionBuilder<'_>,
     frame: Value,
@@ -120,7 +127,7 @@ fn cli_frame_value(
 }
 
 fn cli_target_args(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     builder: &mut FunctionBuilder<'_>,
     target: &TFunc,
@@ -237,7 +244,7 @@ fn cli_pack_return(
 }
 
 fn define_cli_adapter(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     target: &TFunc,
@@ -295,7 +302,7 @@ fn memo_slot(tir: &TFunc, field: &str) -> i64 {
 /// payload words back into the callable's real Cranelift argument types, calls
 /// the original function value, and returns packed result bits.
 pub(crate) fn lower_option_lift2_adapter(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     fn_ty: &Type,
@@ -445,7 +452,7 @@ fn fn_ty_return(ty: &Type) -> Option<&Type> {
     }
 }
 
-fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signature {
+fn spawn_lambda_signature(module: &dyn Module, lam: &TJitSpawnLambda) -> Signature {
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
     for _ in &lam.captures {
@@ -462,7 +469,7 @@ fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signatur
 }
 
 fn lower_spawn_function(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TJitSpawnLambda,
@@ -670,7 +677,7 @@ fn block_has_valued_return(stmts: &[TStmt]) -> bool {
 }
 
 pub(crate) fn lower_callable_lambda(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TLambda,
@@ -699,7 +706,7 @@ pub(crate) fn lower_callable_lambda(
 /// the shared Prelude; this function only supplies its native callback ABI and
 /// keeps the opaque capture environment current across callback invocations.
 pub(crate) fn lower_collection_callable_lambda(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TLambda,
@@ -728,7 +735,7 @@ pub(crate) fn lower_collection_callable_lambda(
 /// callback receives an environment handle, including capture-free lambdas.
 /// The zero environment value is the canonical empty environment.
 pub(crate) fn lower_interrupt_callable_lambda(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TLambda,
@@ -757,7 +764,7 @@ pub(crate) fn lower_interrupt_callable_lambda(
 /// inline lambda. The environment is intentionally ignored; this keeps the
 /// dispatcher from selecting ABI variants at runtime.
 pub(crate) fn lower_interrupt_named_callback(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     name: &str,
     ty: &Type,
     meta: &JitMeta<'_>,
@@ -800,6 +807,171 @@ pub(crate) fn lower_interrupt_named_callback(
     module.clear_context(&mut ctx);
     Ok(id)
 }
+/// Compile the resident thunk used when a named Jet function enters a
+/// source-level function value. Ordinary declarations return the effective
+/// `Result<success, Err>` carrier, while a `fn(...) T` value exposes only `T`.
+/// The thunk is the ABI boundary: it calls the declared function directly,
+/// unwraps the default carrier, and turns a failed default call into the
+/// existing resident trap path instead of leaking the carrier handle as `T`.
+pub(crate) fn lower_named_fn_value(
+    module: &mut dyn Module,
+    host: &HostFns,
+    name: &str,
+    ty: &Type,
+    meta: &JitMeta<'_>,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<FuncId, String> {
+    let target = func_ids
+        .get(name)
+        .copied()
+        .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
+    let wrapper_name = format!("__jet_jit_fn_value_{}", name.replace("::", "_"));
+    if let Some(cranelift_module::FuncOrDataId::Func(id)) = module.get_name(&wrapper_name) {
+        return Ok(id);
+    }
+    let sig = fn_value_signature(module, ty, meta)?;
+    let id = module
+        .declare_function(&wrapper_name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig.clone();
+    let mut fbcx = FunctionBuilderContext::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let wrapper_params = b.block_params(entry).to_vec();
+        let Type::Fn {
+            params,
+            call_metadata,
+            ..
+        } = ty
+        else {
+            return Err(format!("jit named fn value type unsupported: {ty:?}"));
+        };
+        if params.len() != wrapper_params.len() {
+            return Err(format!(
+                "jit named fn value parameter count mismatch for `{name}`"
+            ));
+        }
+        let mut target_params = Vec::with_capacity(wrapper_params.len());
+        for (index, (param_ty, value)) in params.iter().zip(wrapper_params).enumerate() {
+            let convention = call_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.conventions.get(index))
+                .copied()
+                .unwrap_or(AccessConvention::Read);
+            let value = if matches!(convention, AccessConvention::Write)
+                && matches!(
+                    param_ty,
+                    Type::Int
+                        | Type::IntN { .. }
+                        | Type::InlineRange { .. }
+                        | Type::Float
+                        | Type::Float32
+                        | Type::Bool
+                        | Type::Char
+                )
+            {
+                match b.func.dfg.value_type(value) {
+                    ty if ty == types::F64 => b.ins().bitcast(
+                        types::I64,
+                        MemFlags::new().with_endianness(Endianness::Little),
+                        value,
+                    ),
+                    ty if ty == types::I8 || ty == types::I32 => {
+                        b.ins().uextend(types::I64, value)
+                    }
+                    ty if ty == types::I64 => value,
+                    ty => {
+                        return Err(format!(
+                            "jit named fn value write parameter unsupported: {param_ty:?} ({ty})"
+                        ));
+                    }
+                }
+            } else {
+                value
+            };
+            target_params.push(value);
+        }
+        let target = module.declare_func_in_func(target, b.func);
+        let call = b.ins().call(target, &target_params);
+        let target_result = b.inst_results(call).first().copied();
+        let source_ret = fn_ty_return(ty);
+        let default_carrier = source_ret.is_none_or(|ret| {
+            !matches!(ret, Type::Option(_) | Type::Result { .. })
+        });
+        if !default_carrier {
+            let result = target_result.ok_or_else(|| {
+                format!("jit named fn value `{name}` has no callable return value")
+            })?;
+            b.ins().return_(&[result]);
+        } else if let Some(handle) = target_result {
+            let result_is_ok = module.declare_func_in_func(host.result_is_ok, b.func);
+            let is_ok_call = b.ins().call(result_is_ok, &[handle]);
+            let is_ok = b.inst_results(is_ok_call)[0];
+            let ok_block = b.create_block();
+            let err_block = b.create_block();
+            b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+            b.switch_to_block(err_block);
+            b.seal_block(err_block);
+            let trap = module.declare_func_in_func(host.trap_panic, b.func);
+            let zero = b.ins().iconst(types::I64, 0);
+            b.ins().call(trap, &[zero]);
+            if let Some(ret) = sig.returns.first() {
+                let dummy = if ret.value_type == types::F64 {
+                    b.ins().f64const(0.0)
+                } else {
+                    b.ins().iconst(ret.value_type, 0)
+                };
+                b.ins().return_(&[dummy]);
+            } else {
+                b.ins().return_(&[]);
+            }
+
+            b.switch_to_block(ok_block);
+            b.seal_block(ok_block);
+            if let Some(ret) = sig.returns.first() {
+                let getter = match ret.value_type {
+                    ty if ty == types::F64 => host.result_get_f64,
+                    ty if ty == types::I8 => host.result_get_i8,
+                    ty if ty == types::I32 => host.result_get_i32,
+                    ty if ty == types::I64 => host.result_get_i64,
+                    ty => {
+                        return Err(format!(
+                            "jit named fn value return unsupported: {source_ret:?} ({ty})"
+                        ));
+                    }
+                };
+                let getter = module.declare_func_in_func(getter, b.func);
+                let value = b.ins().call(getter, &[handle]);
+                let value = b.inst_results(value)[0];
+                b.ins().return_(&[value]);
+            } else {
+                b.ins().return_(&[]);
+            }
+        } else if sig.returns.is_empty() {
+            b.ins().return_(&[]);
+        } else {
+            return Err(format!(
+                "jit named fn value `{name}` default result has no carrier"
+            ));
+        }
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{wrapper_name}: verifier: {error:?}"))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    super::tier_cache::abort_capture();
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
 
 /// Compile the callback retained by a transactional `Shared<T>.edit`.
 ///
@@ -808,7 +980,7 @@ pub(crate) fn lower_interrupt_named_callback(
 /// packed value into the lambda's real argument, runs the already-lowered
 /// lambda, and returns the updated packed value to the resident host.
 pub(crate) fn lower_shared_transaction_lambda(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TLambda,
@@ -1035,7 +1207,7 @@ pub(crate) fn lower_shared_transaction_lambda(
 }
 
 fn lower_callable_lambda_with_env(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     lam: &TLambda,
@@ -1290,7 +1462,7 @@ fn lower_callable_lambda_with_env(
 /// expression. The factory body is borrowed only during this compilation
 /// pass, while the generated function owns the resulting machine code.
 pub(crate) fn lower_option_lift2_factory(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     body: &TExpr,
@@ -1431,7 +1603,7 @@ pub(crate) fn lower_option_lift2_factory(
 }
 
 fn lower_function(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     tir: &TFunc,
@@ -1712,7 +1884,7 @@ fn is_generator(tir: &TFunc) -> bool {
     matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == "Stream")
 }
 
-fn generator_body_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
+fn generator_body_signature(module: &dyn Module, tir: &TFunc) -> Result<Signature, String> {
     if func_has_receiver(tir) {
         return Err("jit generator methods unsupported".to_string());
     }
@@ -1730,7 +1902,7 @@ fn generator_body_signature(module: &JITModule, tir: &TFunc) -> Result<Signature
 }
 
 fn lower_generator_body(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     meta: &JitMeta<'_>,
     tir: &TFunc,
@@ -1834,7 +2006,7 @@ fn lower_generator_body(
 }
 
 fn lower_generator_wrapper(
-    module: &mut JITModule,
+    module: &mut dyn Module,
     host: &HostFns,
     tir: &TFunc,
     func_id: FuncId,
@@ -1912,6 +2084,26 @@ pub(crate) fn compile_program(
     )
 }
 
+/// Compile a checked program into an object module. The lowering is identical
+/// to the resident path; only JIT finalization and in-process pointer installs
+/// are omitted because `ObjectModule` owns its own relocation table.
+pub(crate) fn compile_program_object(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &JitProgram,
+    runtime: &mut JitRuntime,
+) -> Result<FuncId, String> {
+    Ok(compile_program_tiered_inner(
+        module,
+        host,
+        program,
+        runtime,
+        None,
+        &HashMap::new(),
+    )?
+    .entry_id)
+}
+
 /// Compile with optional per-function interpreter deopt stubs (#778).
 /// `deopt_index` maps function name → packed host index.
 pub(crate) fn compile_program_tiered(
@@ -1922,6 +2114,51 @@ pub(crate) fn compile_program_tiered(
     existing_main: Option<FuncId>,
     deopt_index: &HashMap<String, i64>,
 ) -> Result<FuncId, String> {
+    let compiled = compile_program_tiered_inner(
+        module,
+        host,
+        program,
+        runtime,
+        existing_main,
+        deopt_index,
+    )?;
+    module.finalize_definitions().map_err(|e| e.to_string())?;
+    crate::Data::bind_lazy_callables(module);
+    if compiled.cli_entry {
+        if let Some((_, adapter_id, _)) = compiled
+            .cli_adapters
+            .iter()
+            .find(|(name, _, _)| name == "run")
+        {
+            let code = module.get_finalized_function(*adapter_id);
+            crate::CLI::install_cli_run_ptr(code);
+        } else {
+            let run_id = compiled
+                .func_ids
+                .get("run")
+                .copied()
+                .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
+            let code = module.get_finalized_function(run_id);
+            crate::CLI::install_cli_run_ptr(code);
+        }
+        for (function, adapter_id, _) in &compiled.cli_adapters {
+            if function != "run" {
+                let code = module.get_finalized_function(*adapter_id);
+                crate::CLI::install_cli_command_ptr(function, code);
+            }
+        }
+    }
+    Ok(compiled.entry_id)
+}
+
+fn compile_program_tiered_inner(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &JitProgram,
+    runtime: &mut JitRuntime,
+    existing_main: Option<FuncId>,
+    deopt_index: &HashMap<String, i64>,
+) -> Result<CompiledProgram, String> {
     if !deopt_index.is_empty() {
         super::tier_cache::abort_capture();
     }
@@ -2150,34 +2387,18 @@ pub(crate) fn compile_program_tiered(
         module.clear_context(&mut ctx);
     }
 
-    module.finalize_definitions().map_err(|e| e.to_string())?;
-    crate::Data::bind_lazy_callables(module);
-    if cli_entry {
-        if let Some((_, adapter_id, _)) = cli_adapters.iter().find(|(name, _, _)| name == "run") {
-            let code = module.get_finalized_function(*adapter_id);
-            crate::CLI::install_cli_run_ptr(code);
-        } else {
-            let run_id = func_ids
-                .get("run")
-                .copied()
-                .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
-            let code = module.get_finalized_function(run_id);
-            crate::CLI::install_cli_run_ptr(code);
-        }
-        for (function, adapter_id, _) in &cli_adapters {
-            if function != "run" {
-                let code = module.get_finalized_function(*adapter_id);
-                crate::CLI::install_cli_command_ptr(function, code);
-            }
-        }
-    }
     // Snapshot before any run mutates/clears the arena so warm-run cache +
     // reset_run_heap can reinstall the same handles Cranelift baked in.
     runtime.snapshot_compile_strings();
-    Ok(func_ids
-        .get(&program.entry)
-        .copied()
-        .ok_or_else(|| format!("jit program missing selected entry `{}`", program.entry))?)
+    Ok(CompiledProgram {
+        entry_id: func_ids
+            .get(&program.entry)
+            .copied()
+            .ok_or_else(|| format!("jit program missing selected entry `{}`", program.entry))?,
+        cli_entry,
+        cli_adapters,
+        func_ids,
+    })
 }
 
 #[cfg(test)]

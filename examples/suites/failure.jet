@@ -1,0 +1,75 @@
+// User story: a command keeps ordinary failure flow short and typed.
+//
+// Anti-pattern from the dogfood port: lower layers returned `Bool !E` with
+// `Ok(false)`, then callers unpacked each result and rebuilt string errors:
+// `ok :: read_config(path)` followed by a hand-written `if !ok` branch.
+// Rule D-FAILURE-FOUNDATION1: ordinary functions use the implicit `Err` route;
+// expert boundaries name `!E`. Rule D-ERR-CONV: one declared conversion
+// carries a lower-level error upward.
+#Error
+enum ConfigFailure {
+    Missing
+    Invalid
+}
+
+#Error
+enum AppFailure {
+    Config(String)
+}
+
+impl ConfigFailure -> AppFailure {
+    if self == {
+        .Missing -> return AppFailure.Config("missing")
+        .Invalid -> return AppFailure.Config("invalid")
+    }
+}
+
+// The omitted contract is the beginner-facing implicit default `Err` route.
+fn lookup(name: String) Int -> {
+    if name == "" -> return Err("missing lookup key")
+    return Ok(7)
+}
+
+fn read_config(path: String) String !ConfigFailure -> {
+    if path == "" -> return Err(ConfigFailure.Missing)
+    if path == "bad" -> return Ok("bad")
+    return Ok("42")
+}
+
+fn parse_port(raw: String) Int !ConfigFailure -> {
+    if raw == "bad" -> return Err(ConfigFailure.Invalid)
+    return Ok(42)
+}
+
+// Expert contract: callers can see the single application failure domain.
+fn load(path: String) Int !AppFailure -> {
+    raw :: read_config(path)
+    port :: parse_port(raw)
+    return Ok(port)
+}
+
+fn failure_label(error: AppFailure) String -> {
+    if error == {
+        .Config(label) -> "config:{label}"
+    }
+}
+
+fn run() {
+    // No `!Err` spelling is needed: this successful call uses the implicit route.
+    value :: lookup("ready")
+    print("implicit:{value}")
+
+    if lookup("") == {
+        .Ok(_) -> { print("implicit-error:unexpected-success") }
+        .Err(error) -> print("implicit-error:{error.message}")
+    }
+
+    if load("") == {
+        .Ok(_) -> { print("missing:unexpected-success") }
+        .Err(error) -> print(failure_label(error))
+    }
+    if load("bad") == {
+        .Ok(_) -> print("invalid:unexpected-success")
+        .Err(error) -> print(failure_label(error))
+    }
+}

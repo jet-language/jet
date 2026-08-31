@@ -1,0 +1,56 @@
+use core.files as fs
+use core.files as files
+
+fn run() {
+    root :: "."
+    #allow(walk_files_filter) loop entry in fs.walk(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+    }
+
+    loop entry in fs.walk(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+    }
+
+    loop entry in files.walk(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+    }
+
+    entries :: fs.walk(root) ?? []
+    loop entry in entries {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+    }
+
+    loop entry in fs.walk_parallel(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+    }
+
+    loop entry in fs.walk(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.path)
+        break
+    }
+
+    loop entry in fs.walk(root) ?? [] {
+        if entry.is_dir {
+            next
+        }
+        print(entry.depth)
+    }
+}

@@ -238,6 +238,40 @@ fn report_is_registered_in_cli_surfaces() {
 }
 
 #[test]
+fn compile_cascade_json_snapshot_keeps_roots_and_pruned_sites() {
+    let source = include_str!("ui/e2392_root_cascade.jet");
+    let diagnostics = jet::check_with_path("tests/ui/e2392_root_cascade.jet");
+    assert!(!diagnostics.is_empty(), "cascade fixture must be rejected");
+    let actual = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_process("<e2392_root_cascade.jet>"),
+        source,
+        &diagnostics,
+    );
+    assert_eq!(
+        actual,
+        include_str!("ui/e2392_root_cascade.json"),
+        "JSON must retain one report per failure domain after pruning repeated sites"
+    );
+}
+
+#[test]
+fn compile_linked_cascade_json_snapshot_keeps_cause_chain() {
+    let source = include_str!("ui/e2392_linked_cascade.jet");
+    let diagnostics = jet::check_with_path("tests/ui/e2392_linked_cascade.jet");
+    assert!(!diagnostics.is_empty(), "linked cascade fixture must be rejected");
+    let actual = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_process("<e2392_linked_cascade.jet>"),
+        source,
+        &diagnostics,
+    );
+    assert_eq!(
+        actual,
+        include_str!("ui/e2392_linked_cascade.json"),
+        "JSON must preserve the root-first cause chain"
+    );
+}
+
+#[test]
 fn report_rejects_send_flag_without_writing_bundle() {
     let root = scratch("reject-send");
     for args in [

@@ -595,12 +595,13 @@ pub const C_MODULE_ROOT: &str = "c"; // S59
 pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 /// S59 / D-CFFI-CANON1: marker on generated C binding modules — `#Bindgen module`.
 pub const MARKER_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
-/// S59 / D-CFFI-CANON1: marker on user C overlay modules — `#Extern module`.
-pub const MARKER_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
+/// D-ADOPT-GUEST1=A: marker on user C import modules — `#Import module`.
+/// The same marker name is used by per-function `#Import(c)` declarations.
+/// `CModuleKind::Extern` remains an internal AST compatibility name only.
 /// D-CFFI-SYNTAX-REOPEN / D-CFFI-CANON1: retired C FFI marker spellings,
 /// recognized only for E0060 teaching diagnostics.
 pub const MARKER_BINDGEN_RETIRED: &str = "bindgen";
-pub const MARKER_EXTERN_MODULE_RETIRED: &str = "extern";
+pub const MARKER_EXTERN_MODULE_RETIRED: &str = "Extern";
 
 /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): the inline foreign tier
 /// directive marker — `#FFI(<lang>) fn name(sig) { """<foreign source>""" }`.

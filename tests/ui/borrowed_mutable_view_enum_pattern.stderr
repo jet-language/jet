@@ -6,21 +6,3 @@ Error [E0120]: `choice` was not moved here, so its contents cannot be taken apar
  Why: `choice` grants read-only access to `Choice`, so its non-copyable parts cannot be taken apart with the move marker `^`
  Fix: change the parameter to `choice: ^Choice` with the move marker `^`, or inspect it without binding its contents
 More: jet-lang.dev/e/E0120
-
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/borrowed_mutable_view_enum_pattern.jet:8:29
-    |
-  8 |         .First(selected) -> print(selected[0])
-    |                             ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116
-
-Error [E0116]: `print` doesn't hand back a value
-  --> tests/ui/borrowed_mutable_view_enum_pattern.jet:9:30
-    |
-  9 |         .Second(selected) -> print(selected[0])
-    |                              ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
-More: jet-lang.dev/e/E0116

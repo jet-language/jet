@@ -91,7 +91,10 @@ fn run() {
 "#;
     let once = jet::format_source(source).expect("arithmetic policy block should format");
     assert!(once.contains("#Arithmetic(.Wrapping)"), "{once}");
-    assert!(!once.contains("wrapping("), "retired expression wrapper leaked:\n{once}");
+    assert!(
+        !once.contains("wrapping("),
+        "retired expression wrapper leaked:\n{once}"
+    );
     let twice = jet::format_source(&once).expect("formatted arithmetic policy should reformat");
     assert_eq!(once, twice, "arithmetic policy formatting must be stable");
 }
@@ -141,6 +144,16 @@ fn fixed_interpolation_selector_is_stable() {
     );
     let twice = jet::format_source(&once).expect("fixed interpolation should re-format");
     assert_eq!(twice, once);
+}
+
+#[test]
+fn grouped_interpolation_selector_is_stable() {
+    let src = "fn run(){price::1234.5\nprint(\"{price:Grouped(2)}\") }\n";
+    let once = jet::format_source(src).expect("grouped interpolation should format");
+    assert_eq!(
+        once,
+        "fn run() {\n    price :: 1234.5\n    print(\"{price:Grouped(2)}\")\n}\n"
+    );
 }
 
 #[test]
@@ -273,7 +286,10 @@ fn bar_formatting_is_stable() {
 
     let bit_or = jet::format_source("fn run() { value :: 1 | 2 }")
         .expect("formatter should preserve value-position bitwise OR");
-    assert!(bit_or.contains("value :: 1 | 2"), "formatter lost bitwise OR:\n{bit_or}");
+    assert!(
+        bit_or.contains("value :: 1 | 2"),
+        "formatter lost bitwise OR:\n{bit_or}"
+    );
     assert_eq!(
         bit_or,
         jet::format_source(&bit_or).unwrap(),
@@ -594,6 +610,43 @@ fn fmt_preserves_concise_dispatch_arms() {
 }
 "#;
     assert_fmt_stable(src, "concise dispatch arms");
+}
+
+#[test]
+fn fmt_keeps_dispatch_return_arms_parseable_before_leading_dot_arms() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        // A return already terminates the arm. Do not add braces merely because
+        // the following variant arm starts with a leading dot.
+        let source = r#"fn run() {
+    if result == {
+        .Err(error) -> return error_result(error.message)
+        .Ok(value) -> {
+            if nested == {
+                .Err(error) -> return error_result(error.message)
+                .Ok(inner) -> print(inner)
+            }
+        }
+    }
+}
+"#;
+        let formatted = jet::format_source(source).expect("dispatch return arms should format");
+        assert!(
+            formatted.contains(".Err(error) -> return error_result(error.message)"),
+            "direct return arm should stay canonical:\n{formatted}"
+        );
+
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&formatted);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        jet::Parser::parse_for_fmt(&tokens).unwrap_or_else(|diagnostics| {
+            panic!("fmt wrote source it cannot read:\n{formatted}\n{diagnostics:?}")
+        });
+
+        let twice = jet::format_source(&formatted).expect("formatted dispatch should reformat");
+        assert_eq!(
+            formatted, twice,
+            "dispatch return-arm formatting must be idempotent"
+        );
+    });
 }
 
 #[test]
@@ -1896,7 +1949,8 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
 fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
     let blocked = "fn pick(value: Int !String) String -> value ? ok -> { saved :: ok; saved } ! error -> { saved_error :: error; saved_error }\n";
     let nested = "fn pick(value: Int !String) Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
-    let nested_if = "fn pick(value: Int !String) Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
+    let nested_if =
+        "fn pick(value: Int !String) Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
     let commented = "fn pick(value: Int !String) String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
     let commented_failure = "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
 
@@ -2543,7 +2597,10 @@ fn fmt_layout_compiler_fact_and_field_selector_stability() {
 fn fmt_origin_compiler_fact_stability() {
     let src = "fn run() {\n    #Track speed :: 3.5\n    @speed_origin :: speed.@origin\n}\n";
     let once = jet::format_source(src).expect("origin compiler fact should parse");
-    assert!(once.contains("speed.@origin"), "fact spelling was lost:\n{once}");
+    assert!(
+        once.contains("speed.@origin"),
+        "fact spelling was lost:\n{once}"
+    );
     let twice = jet::format_source(&once).expect("formatted origin fact should parse");
     assert_eq!(once, twice, "origin fact formatting must be idempotent");
 }
@@ -2991,13 +3048,28 @@ fn effect_control_arrows_format_as_one_statement_bodies() {
 }
 
 #[test]
-fn fmt_value_dropping_loop_body_is_canonical_and_stable() {
-    let src = "fn run() {\n    values := [1, 2]\n    loop v in values { v * 2 }\n}\n";
-    let once = jet::format_source(src).expect("value-dropping loop should format");
-    assert!(once.contains("loop v in values -> v * 2"), "{once}");
+fn fmt_preserves_braced_loop_value_drop_and_is_stable() {
+    let src = "fn value() String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value() }\n}\n";
+    let once = jet::format_source(src).expect("braced value-dropping loop should format");
+    assert!(once.contains("loop v in values { value() }"), "{once}");
+    assert!(!once.contains("loop v in values ->"), "{once}");
     assert_eq!(
         once,
-        jet::format_source(&once).expect("canonical value-dropping loop should reformat")
+        jet::format_source(&once).expect("braced value-dropping loop should reformat")
+    );
+}
+
+#[test]
+fn fmt_canonicalizes_explicit_drop_to_arrow_loop_body() {
+    let src = "fn value() String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value().drop(\"checked\") }\n}\n";
+    let once = jet::format_source(src).expect("explicit-drop loop should format");
+    assert!(
+        once.contains("loop v in values -> value().drop(\"checked\")"),
+        "{once}"
+    );
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("explicit-drop arrow loop should reformat")
     );
 }
 
@@ -3006,9 +3078,9 @@ fn loop_headers_use_in_binding_and_comma_clauses() {
     let src = "fn run() {\n    loop item in [1, 2, 3], 2 { print(item) }\n    loop (key, value) in counts { print(key) }\n    loop i in 0..<3 { print(i) }\n}\n";
     let once = jet::format_source(src).expect("fmt should accept canonical loop headers");
     for expected in [
-        "loop item in [1, 2, 3], 2 -> print(item)",
-        "loop (key, value) in counts -> print(key)",
-        "loop i in 0..<3 -> print(i)",
+        "loop item in [1, 2, 3], 2 { print(item) }",
+        "loop (key, value) in counts { print(key) }",
+        "loop i in 0..<3 { print(i) }",
     ] {
         assert!(once.contains(expected), "missing `{expected}`:\n{once}");
     }

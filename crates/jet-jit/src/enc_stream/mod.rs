@@ -26,6 +26,7 @@ mod fs_ops_kernel {
 pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    pub(crate) use jet_foundation::CsvKernel as jet_csv_kernel;
     trait JetShow {
         fn jet_show(&self) -> String;
     }
@@ -270,9 +271,21 @@ pub(crate) mod runtime {
             pub(crate) finished: bool,
             pub(crate) pending_lf: bool,
         }
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct CSVRow {
+            pub fields: Vec<String>,
+            pub line: i64,
+        }
         pub struct CSVReader {
             pub(crate) input: super::JetFileReader,
             pub(crate) limits: EncodingLimits,
+            pub(crate) delimiter: char,
+            pub(crate) header: bool,
+            pub(crate) skip_blank: bool,
+            pub(crate) parser: super::jet_csv_kernel::CsvParser,
+            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(crate) utf8: [u8; 4],
+            pub(crate) utf8_len: usize,
             pub(crate) total: i64,
             pub(crate) offset: i64,
             pub(crate) line: i64,
@@ -498,8 +511,11 @@ pub(crate) mod runtime {
     pub(crate) fn enc_csv_reader(
         input: JetFileReader,
         limits: jet_std::EncodingLimits,
+        delimiter: String,
+        header: bool,
+        skip_blank: bool,
     ) -> Result<jet_std::CSVReader, jet_std::EncodingError> {
-        jet_enc_csv_reader(input, limits)
+        jet_enc_csv_reader(input, limits, delimiter, header, skip_blank)
     }
     pub(crate) fn enc_csv_writer_write(
         writer: &mut jet_std::CSVWriter,
@@ -519,7 +535,7 @@ pub(crate) mod runtime {
     }
     pub(crate) fn enc_csv_reader_next(
         reader: &mut jet_std::CSVReader,
-    ) -> Result<Option<Vec<String>>, jet_std::EncodingError> {
+    ) -> Result<Option<jet_std::CSVRow>, jet_std::EncodingError> {
         jet_enc_csv_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_cbor_writer(
@@ -1251,6 +1267,36 @@ pub(crate) fn ambient_core_call(
             ))
         }
         ("core.encoding.csv", "reader") => {
+            let delimiter = match args.get(2) {
+                None => ",".to_string(),
+                Some(CtValue::Str(value)) => value.clone(),
+                Some(_) => {
+                    return Some(Err(ambient_unsupported(
+                        "core.encoding.csv.reader delimiter String",
+                        span,
+                    )))
+                }
+            };
+            let header = match args.get(3) {
+                None => false,
+                Some(CtValue::Bool(value)) => *value,
+                Some(_) => {
+                    return Some(Err(ambient_unsupported(
+                        "core.encoding.csv.reader header Bool",
+                        span,
+                    )))
+                }
+            };
+            let skip_blank = match args.get(4) {
+                None => false,
+                Some(CtValue::Bool(value)) => *value,
+                Some(_) => {
+                    return Some(Err(ambient_unsupported(
+                        "core.encoding.csv.reader skip_blank Bool",
+                        span,
+                    )))
+                }
+            };
             let Some(CtValue::Int(file)) = args.first() else {
                 return Some(Err(ambient_unsupported(
                     "core.encoding.csv.reader FileReader",
@@ -1267,7 +1313,13 @@ pub(crate) fn ambient_core_call(
                 }
             };
             Some(Ok(
-                match runtime::enc_csv_reader(reader, ambient_limits(args.get(1))) {
+                match runtime::enc_csv_reader(
+                    reader,
+                    ambient_limits(args.get(1)),
+                    delimiter,
+                    header,
+                    skip_blank,
+                ) {
                     Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
                         AmbientStream::CSVReader(reader),
                     ))),
@@ -1614,8 +1666,17 @@ pub(crate) fn ambient_handle(
         "CSVReaderNext" => ambient_stream_with(handle, |stream| match stream {
             AmbientStream::CSVReader(reader) => Ok(ambient_next(
                 runtime::enc_csv_reader_next(reader),
-                Type::List(Box::new(Type::String)),
-                |row| CtValue::List(row.into_iter().map(CtValue::Str).collect()),
+                Type::Named("CSVRow".to_string()),
+                |row| CtValue::Struct {
+                    type_name: "CSVRow".to_string(),
+                    fields: vec![
+                        (
+                            "fields".to_string(),
+                            CtValue::List(row.fields.into_iter().map(CtValue::Str).collect()),
+                        ),
+                        ("line".to_string(), CtValue::Int(row.line)),
+                    ],
+                },
             )),
             _ => Err("expected CSVReader".to_string()),
         }),
@@ -2259,7 +2320,13 @@ pub(crate) fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_csv_reader(
+    file: i64,
+    limits: i64,
+    delimiter: i64,
+    header: i64,
+    skip_blank: i64,
+) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2269,7 +2336,13 @@ pub(crate) fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
     } else {
         read_limits(limits)
     };
-    match runtime::enc_csv_reader(r, lim) {
+    match runtime::enc_csv_reader(
+        r,
+        lim,
+        clone_string(delimiter),
+        header != 0,
+        skip_blank != 0,
+    ) {
         Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
                 push_codec!(rt, csv_readers, CSVReaderSlot, reader)
@@ -2521,15 +2594,18 @@ pub(crate) fn jet_jit_csv_reader_next(handle: i64) -> i64 {
     }) {
         Some(Ok(None)) => push_ok_handle(0),
         Some(Ok(Some(row))) => {
-            let list = Concurrency::with_runtime_mut(|rt| {
-                let list = rt.heap.alloc_empty_list();
-                for cell in row {
+            let row = Concurrency::with_runtime_mut(|rt| {
+                let fields = rt.heap.alloc_empty_list();
+                for cell in row.fields {
                     let sid = rt.heap.alloc_string(cell);
-                    let _ = rt.heap.list_push_int(list, sid);
+                    let _ = rt.heap.list_push_int(fields, sid);
                 }
-                list
+                let record = rt.heap.alloc_record(2);
+                let _ = rt.heap.record_set_int(record, 0, fields);
+                let _ = rt.heap.record_set_int(record, 1, row.line);
+                record
             });
-            push_ok_handle(option_bits(Some(list)) as i64)
+            push_ok_handle(option_bits(Some(row)) as i64)
         }
         Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CSVReader"),
@@ -2652,6 +2728,11 @@ host_fns! {
         sig_ternary.params.push(AbiParam::new(types::I64));
         sig_ternary.params.push(AbiParam::new(types::I64));
         sig_ternary.returns.push(AbiParam::new(types::I64));
+        let mut sig_quinary = Signature::new(cc);
+        for _ in 0..5 {
+            sig_quinary.params.push(AbiParam::new(types::I64));
+        }
+        sig_quinary.returns.push(AbiParam::new(types::I64));
     }
     fs_create: "jet_jit_fs_create" => jet_jit_fs_create: sig_unary;
     fs_open: "jet_jit_fs_open" => jet_jit_fs_open: sig_unary;
@@ -2660,7 +2741,7 @@ host_fns! {
     jsonl_writer: "jet_jit_jsonl_writer" => jet_jit_jsonl_writer: sig_binary;
     jsonl_reader: "jet_jit_jsonl_reader" => jet_jit_jsonl_reader: sig_binary;
     csv_writer: "jet_jit_csv_writer" => jet_jit_csv_writer: sig_binary;
-    csv_reader: "jet_jit_csv_reader" => jet_jit_csv_reader: sig_binary;
+    csv_reader: "jet_jit_csv_reader" => jet_jit_csv_reader: sig_quinary;
     cbor_writer: "jet_jit_cbor_writer" => jet_jit_cbor_writer: sig_binary;
     cbor_reader: "jet_jit_cbor_reader" => jet_jit_cbor_reader: sig_binary;
     xml_writer: "jet_jit_xml_writer" => jet_jit_xml_writer: sig_binary;

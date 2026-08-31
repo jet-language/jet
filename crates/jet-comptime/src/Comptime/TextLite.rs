@@ -117,6 +117,18 @@ mod text_kernel {
         }
 
         #[derive(Clone, Debug, PartialEq)]
+        pub struct Stat {
+            pub size: i64,
+            pub modified_ms: i64,
+            pub created_ms: i64,
+            pub readonly: bool,
+            pub is_file: bool,
+            pub is_dir: bool,
+            pub is_symlink: bool,
+            pub kind: String,
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
         pub struct WalkEntry {
             pub path: String,
             pub relative: String,
@@ -141,6 +153,7 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -361,6 +374,23 @@ mod text_kernel {
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(entries)
     }
+    pub(super) fn fs_walk_files_parallel(
+        path: &str,
+    ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+        let mut entries = jet_fs_walk_files_parallel(
+            path,
+            path,
+            |path, relative, is_dir, depth| jet_std::WalkEntry {
+                path,
+                relative,
+                is_dir,
+                depth,
+            },
+            |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+        )?;
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(entries)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -501,6 +531,37 @@ pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
         ))
     })
 }
+pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
+    text_kernel::jet_std_fs_absolute(&path.to_string())
+        .map_err(io_error_ct)
+}
+pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
+    text_kernel::jet_fs_stat(&path.to_string())
+        .map(|stat| crate::AST::CtValue::Struct {
+            type_name: "Stat".to_string(),
+            fields: vec![
+                ("size".to_string(), crate::AST::CtValue::Int(stat.size)),
+                (
+                    "modified_ms".to_string(),
+                    crate::AST::CtValue::Int(stat.modified_ms),
+                ),
+                (
+                    "created_ms".to_string(),
+                    crate::AST::CtValue::Int(stat.created_ms),
+                ),
+                ("readonly".to_string(), crate::AST::CtValue::Bool(stat.readonly)),
+                ("is_file".to_string(), crate::AST::CtValue::Bool(stat.is_file)),
+                ("is_dir".to_string(), crate::AST::CtValue::Bool(stat.is_dir)),
+                (
+                    "is_symlink".to_string(),
+                    crate::AST::CtValue::Bool(stat.is_symlink),
+                ),
+                ("kind".to_string(), crate::AST::CtValue::Str(stat.kind)),
+                ("mode".to_string(), crate::AST::CtValue::Int(stat.mode)),
+            ],
+        })
+        .map_err(io_error_ct)
+}
 pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
     text_kernel::jet_fs_glob(pattern).map_err(|error| {
         io_error_ct(text_kernel::jet_std::io_error_at(
@@ -523,6 +584,16 @@ pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
 }
 pub(super) fn fs_walk_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
     text_kernel::fs_walk_parallel(path)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.path, entry.relative, entry.is_dir, entry.depth))
+                .collect()
+        })
+        .map_err(io_error_ct)
+}
+pub(super) fn fs_walk_files_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
+    text_kernel::fs_walk_files_parallel(path)
         .map(|entries| {
             entries
                 .into_iter()

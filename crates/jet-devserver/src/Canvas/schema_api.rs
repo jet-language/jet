@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -24,10 +23,11 @@ use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
     apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
     apply_project_remove_dependency, apply_project_rename, clean_project_rel_path, diagnostic_json,
-    rel_path, required_project_touched_files, validate_touched_project_files,
+    rel_path, required_project_touched_files, validate_project_path,
+    validate_touched_project_files,
 };
 use super::query_actions::{
-    canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
+    canvas_actions, canvas_authority_context, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
     canvas_preview_rename, canvas_project_find, canvas_project_preview_rename,
     canvas_project_references, canvas_references, canvas_source_to_graph,
 };
@@ -37,7 +37,7 @@ use super::validation_json::{
     validate_query_ident,
 };
 use super::edit_transaction;
-use super::source_model::source_revision;
+use super::source_model::{read_source_without_symlinks, source_revision};
 
 pub const GRAPH_SCHEMA_VERSION: u32 = 1;
 pub use edit_transaction::EDIT_SCHEMA_VERSION;
@@ -73,7 +73,7 @@ pub fn graph_json_for_file(path: &Path) -> Result<String, Vec<Diagnostic>> {
 
 /// Render graph projection diagnostics through the same machine-output door.
 pub fn graph_json_error_for_file(path: &Path, diags: &[Diagnostic]) -> String {
-    let src = fs::read_to_string(path).unwrap_or_default();
+    let src = read_source_without_symlinks(path).unwrap_or_default();
     canvas_machine_error(
         "canvas.graph",
         &query_error(
@@ -180,6 +180,7 @@ fn project_path_for_source_id_on_compiler_stack(entry: &Path, source_id: &str) -
     let candidate = ctx.project_root.join(&wanted);
     if candidate.is_file()
         && candidate.extension().and_then(|e| e.to_str()) == Some(jet_driver::Syntax::FILE_EXT)
+        && validate_project_path(&ctx.project_root, &candidate, &wanted).is_ok()
         && project_source_roots(&ctx)
             .iter()
             .any(|root| canonical_path(&candidate).starts_with(canonical_path(root)))
@@ -448,7 +449,7 @@ pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String>
 }
 
 fn query_json_for_file_inner(path: &Path, request: &str) -> Result<String, String> {
-    let src = fs::read_to_string(path).map_err(|e| query_error("io", &e.to_string()))?;
+    let src = read_source_without_symlinks(path).map_err(|e| query_error("io", &e.to_string()))?;
     let revision = required_query_string(request, "revision")?;
     if revision != source_revision(&src) {
         return Err(query_error(
@@ -510,7 +511,8 @@ fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, Str
     let op = json_string_field(request, "op");
     let expected_project_revision = json_string_field(request, "project_revision");
     if op.as_deref() == Some("project_search") {
-        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let src = read_source_without_symlinks(&path)
+            .map_err(|e| query_error("io", &e.to_string()))?;
         let revision = required_query_string(request, "revision")?;
         if revision != source_revision(&src) {
             return Err(query_error(
@@ -527,7 +529,8 @@ fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, Str
         );
     }
     if op.as_deref() == Some("references") {
-        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let src = read_source_without_symlinks(&path)
+            .map_err(|e| query_error("io", &e.to_string()))?;
         let revision = required_query_string(request, "revision")?;
         if revision != source_revision(&src) {
             return Err(query_error(
@@ -544,7 +547,8 @@ fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, Str
         );
     }
     if op.as_deref() == Some("preview_rename") && expected_project_revision.is_some() {
-        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let src = read_source_without_symlinks(&path)
+            .map_err(|e| query_error("io", &e.to_string()))?;
         let revision = required_query_string(request, "revision")?;
         if revision != source_revision(&src) {
             return Err(query_error(
@@ -572,7 +576,8 @@ fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, Str
 pub fn core_catalog_json_for_entry(entry: &Path, query: &str) -> Result<String, String> {
     let result = (|| {
         let path = resolve_entry_source_path(entry, None)?;
-        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let src = read_source_without_symlinks(&path)
+            .map_err(|e| query_error("io", &e.to_string()))?;
         canvas_core_catalog(&path, &src, query)
     })();
     result
@@ -587,7 +592,7 @@ pub fn source_control_json_for_file(path: &Path) -> String {
 }
 
 fn source_control_json_for_file_inner(path: &Path) -> String {
-    let src = fs::read_to_string(path).unwrap_or_default();
+    let src = read_source_without_symlinks(path).unwrap_or_default();
     let semantic_ops = semantic_ops_json(path, &src);
     let Some(root) = git_root(path) else {
         return format!(
@@ -686,7 +691,7 @@ fn source_control_json_for_entry_inner(path: &Path) -> String {
         .iter()
         .map(|file| {
             let abs = ctx.project_root.join(&file.path);
-            let src = fs::read_to_string(&abs).unwrap_or_default();
+            let src = read_source_without_symlinks(&abs).unwrap_or_default();
             let mut status = String::new();
             let mut diff = String::new();
             let mut dirty = false;
@@ -726,7 +731,7 @@ fn source_control_json_for_entry_inner(path: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    let entry_src = fs::read_to_string(path).unwrap_or_default();
+    let entry_src = read_source_without_symlinks(path).unwrap_or_default();
     let history = git_root
         .as_deref()
         .and_then(|root| {
@@ -775,7 +780,8 @@ fn proof_json_for_entry_with_receipt_inner(
     command_receipt: Option<&str>,
 ) -> Result<String, String> {
     let path = resolve_entry_source_path(entry, source_id)?;
-    let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+    let src = read_source_without_symlinks(&path)
+        .map_err(|e| query_error("io", &e.to_string()))?;
     let revision = source_revision(&src);
     let check = match project_file(&path) {
         Ok(_) => {
@@ -882,7 +888,8 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
 fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, String> {
     let source_id = json_string_field(request, "source_id");
     let source_path = resolve_entry_source_path(entry, source_id.as_deref())?;
-    let src = fs::read_to_string(&source_path).map_err(|e| query_error("io", &e.to_string()))?;
+    let src = read_source_without_symlinks(&source_path)
+        .map_err(|e| query_error("io", &e.to_string()))?;
     let revision = required_string(request, "revision")?;
     if revision != source_revision(&src) {
         return Err(query_error(
@@ -891,34 +898,52 @@ fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<S
         ));
     }
     let action_id = required_string(request, "action_id")?;
-    let source = source_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(jet_driver::Syntax::DEFAULT_ENTRY_FILE);
+    let authority = canvas_authority_context(&source_path);
+    let source = authority.touched_file.clone();
     let source_label = source_id.clone().unwrap_or_else(|| {
         let ctx = project_context_for_entry(entry);
         rel_path(&ctx.project_root, &source_path)
     });
-    let (label, args, writes, requires_confirmation) = match action_id.as_str() {
-        "canvas.command:run" => ("Run program", vec!["run", source], "none", false),
-        "canvas.command:check" => ("Check project", vec!["check", source], "none", false),
+    let (label, mut args, writes, requires_confirmation) = match action_id.as_str() {
+        "canvas.command:run" => ("Run program", vec!["run".to_string(), source.clone()], "none", false),
+        "canvas.command:check" => ("Check project", vec!["check".to_string(), source.clone()], "none", false),
+        "canvas.command:test" => (
+            "Test project",
+            vec!["test".to_string(), source.clone()],
+            "test_outputs",
+            true,
+        ),
         "canvas.command:build" => (
             "Build project",
-            vec!["build", source],
+            vec!["build".to_string(), source.clone()],
             "build_outputs",
+            true,
+        ),
+        "canvas.command:service.start" => (
+            "Start service",
+            vec!["services".to_string(), "up".to_string()],
+            "service_process",
             true,
         ),
         _ => {
             return Err(query_error(
                 "unsupported",
-                "Canvas command execution only supports run, check, and build receipts",
+                "Canvas command execution only supports run, check, test, build, and service.start receipts",
             ))
         }
     };
+    if action_id == "canvas.command:run" {
+        if let Some(output) = json_string_field(request, "output").filter(|value| !value.is_empty()) {
+            args.push(format!("--output={output}"));
+        }
+        if let Some(target) = json_string_field(request, "target").filter(|value| !value.is_empty()) {
+            args.push(format!("--target={target}"));
+        }
+    }
     if requires_confirmation && !json_bool_field(request, "confirmed").unwrap_or(false) {
         return Err(query_error(
             "confirmation_required",
-            "this Canvas command writes build outputs and needs confirmed:true",
+            "this Canvas command writes outputs or starts a service and needs confirmed:true",
         ));
     }
     let started = std::time::Instant::now();
@@ -954,7 +979,7 @@ fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<S
             )
         }
     } else {
-        let output = run_jet_command(&source_path, &args)?;
+        let output = run_jet_command(&authority.project_root, &args)?;
         (
             output.status.success(),
             output.status.code(),
@@ -989,18 +1014,20 @@ fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<S
     ))
 }
 
-fn run_jet_command(entry: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    let cwd = entry.parent().unwrap_or_else(|| Path::new("."));
+fn run_jet_command(cwd: &Path, args: &[String]) -> Result<std::process::Output, String> {
     if let Ok(exe) = std::env::current_exe() {
-        if let Ok(output) = Command::new(&exe).args(args).current_dir(cwd).output() {
-            return Ok(output);
+        let mut command = Command::new(&exe);
+        command.args(args).current_dir(cwd);
+        match crate::command_output_bounded(&mut command, crate::MAX_CHILD_OUTPUT_BYTES) {
+            Ok(output) => return Ok(output),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(query_error("resource_limit", &error.to_string())),
         }
     }
-    Command::new("jet")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| query_error("io", &e.to_string()))
+    let mut command = Command::new("jet");
+    command.args(args).current_dir(cwd);
+    crate::command_output_bounded(&mut command, crate::MAX_CHILD_OUTPUT_BYTES)
+        .map_err(|error| query_error("resource_limit", &error.to_string()))
 }
 
 /// Apply one versioned Canvas edit transaction and write ordinary Jet source.
@@ -1066,7 +1093,7 @@ fn debug_session_json_for_file_with_sessions_inner(
     request: &str,
     sessions: &DebugSessions,
 ) -> Result<String, String> {
-    let src = match fs::read_to_string(path) {
+    let src = match read_source_without_symlinks(path) {
         Ok(src) => src,
         Err(error) => {
             if let Some(id) = json_string_field(request, "session_id") {
@@ -1141,7 +1168,7 @@ fn debug_session_json_for_file_with_sessions_inner(
     if execution.status == jet_debug::SessionStatus::Failed {
         return Err(debug_error("diagnostic", &execution.transcript));
     }
-    let current_src = fs::read_to_string(path)
+    let current_src = read_source_without_symlinks(path)
         .map_err(|error| debug_error("io", &format!("couldn't re-read debug source: {error}")))?;
     if current_src != src {
         if execution.status == jet_debug::SessionStatus::Running {

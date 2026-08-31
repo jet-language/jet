@@ -1,0 +1,26 @@
+{
+  "description": "adjacent categorical guards expose an ordered subject-table refactor action",
+  "source": "fn run() {\n    key :: \"rev\"\n    if key == \"revision\" || key == \"rev\" {\n        print(\"revision\")\n    }\n    if key == \"path\" {\n        print(\"path\")\n    }\n    if key == \"profile\" {\n        print(\"profile\")\n    }\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["codeActionProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_adjacent_subject_dispatch.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///tmp/lsp_adjacent_subject_dispatch.jet"},"range":{"start":{"line":2,"character":4},"end":{"line":4,"character":1}},"context":{"diagnostics":[]}}},
+      "expect_contains": ["refactor.rewrite", "Rewrite adjacent guards as an ordered subject table", "if key == {", "\\\"revision\\\" | \\\"rev\\\"", "path", "profile", "else -> {}"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

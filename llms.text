@@ -308,6 +308,16 @@ fn run() {
 }
 ```
 
+## Canonical idiom suites
+
+Each idiom has one executable, golden-backed source of truth under `examples/suites/`.
+
+- Dispatch: `examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.
+- Failure: `examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.
+- Finite state: `examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.
+- Ownership: `examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.
+- Wire output: `examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.
+
 ## Keywords
 
 - fn
@@ -583,7 +593,7 @@ core.encoding.base64	encode, decode, encode_url, decode_url
 core.encoding.base32	encode, decode
 core.text	Cursor, nfc, nfd, nfkc, nfkd, casefold, caseless_eq, lower, upper, graphemes, words, sentences, display_width, scalar_count, byte_count, is_alphabetic, is_numeric, is_whitespace, is_ascii, scalars, splitn, rsplitn, trim, trim_start, trim_end, pad_start, pad_end, center, starts_any, ends_any, inspect, char_indices
 core.text.fmt	number, pretty, decimal, percent, bytes, duration, ordinal, plural, pad_left, pad_right, pad_center
-core.regex	flags, escape, compile, compile_with, is_match, full_match, match, find, find_all, matches, replace, replace_all, split, split_limit
+core.regex	flags, escape, compile, compile_with, is_match, full_match, match, find, find_all, matches, replace, replace_first, split, split_limit
 core.net	ip_addr, ip_to_string, ip_is_ipv4, socket_addr, socket_addr_parse, socket_host, socket_port, socket_to_string, tcp_listen, tcp_listen_addr, tcp_accept, tcp_connect, tcp_connect_addr, tcp_connect_timeout, tcp_connect_happy, tcp_read, tcp_write, tcp_read_bytes, tcp_read_text, tcp_write_bytes, tcp_write_all_bytes, tcp_write_text, tcp_shutdown, tcp_close, tcp_ready, ready_readable, ready_writable, error_operation, error_address, error_name, error_message, error_os_code, tcp_local_addr, tcp_peer_addr, tcp_local_socket_addr, tcp_peer_socket_addr, listener_local_socket_addr, set_timeout, set_read_timeout, set_write_timeout, nodelay, set_nodelay, ttl, set_ttl, socket_type, sendfile, tcp_reply, udp_bind, udp_bind_addr, udp_local_addr, udp_set_timeout, udp_send_to, udp_recv_from, udp_send_bytes_to, udp_receive, udp_packet_data, udp_packet_addr, udp_packet_bytes, udp_packet_original_len, udp_packet_truncated, unix_listen, unix_accept, unix_connect, unix_read, unix_write, unix_read_bytes, unix_write_all_bytes, unix_shutdown, unix_close, dns_a, dns_aaaa, dns_a_at, dns_aaaa_at, dns_txt, dns_txt_at, dns_ptr, dns_srv, dns_srv_at, dns_srv_target, dns_srv_port, dns_srv_priority, dns_srv_weight, getservbyname, getservbyport, tls_connect, tls_read, tls_write, tls_close
 core.net.tls	ClientConfig, RootCertificates, ClientIdentity, TLSVersion, TLSPeerIdentity, TLSCertificate, client, read, read_text, write, write_all, write_text, close
 core.net.ws	connect, upgrade
@@ -592,7 +602,7 @@ core.net.mime	parse, from_extension, extension
 core.http	get, post, serve
 core.http.client	Client, Proxy, RedirectPolicy, get, post, request
 core.http.server	bind, mux, serve, serve_once, serve_once_listener, response, tls, sse, static_file, static_file_range, access_log, request_id, json, static_files, cors, cors_policy
-core.crypto	Secret, SigningKey, VerifyKey, X25519SecretKey, X25519PublicKey, SharedSecret, Signature, Sealed, WrappedKey, PasswordHash, Digest256, Digest512, Hasher, CryptoError, FileCryptoError, sha256, sha256_bytes, sha1, sha224, sha384, sha3_224, sha3_256, sha3_384, sha3_512, pbkdf2_hmac, sha512_bytes, blake3_bytes, constant_time_equal_bytes, hkdf_sha256, x25519_public, x25519_shared, password_hash, password_hash_with_salt, password_verify, seal, open, file_seal, file_open, sign, verify, wrap, unwrap, x25519, blake3, sha512, constant_time_equal
+core.crypto	Secret, SigningKey, VerifyKey, X25519SecretKey, X25519PublicKey, SharedSecret, Signature, Sealed, WrappedKey, PasswordHash, Digest256, Digest512, Hasher, CryptoError, FileCryptoError, sha256, sha1, sha224, sha384, sha3_224, sha3_256, sha3_384, sha3_512, pbkdf2_hmac, constant_time_equal_bytes, hkdf_sha256, x25519_public, x25519_shared, password_hash, password_hash_with_salt, password_verify, seal, open, file_seal, file_open, sign, verify, wrap, unwrap, x25519, blake3, sha512, constant_time_equal
 core.crypto.random	bytes
 core.crypto.uuid	v4, v7, v5, parse
 core.crypto.vault	ExpiringSecret, KeyRef, MutationPlan, VaultWrite, Rotation, WrappedImportPlan, KeyStatus, VaultError, WrappedVaultKey, KeyUnlock, KeyWrapError, get, current, versions, load, status, prepare_generate, prepare_store, prepare_rotate, prepare_retire, prepare_revoke, authorize_write, commit_generate, commit_store, commit_rotate, commit_retire, commit_revoke, export_to_recipients, export_to_passphrase, prepare_import_wrapped, authorize_wrapped_import, commit_import_wrapped, prepare_import_signing, prepare_import_x25519, commit_import_signing, commit_import_x25519
@@ -1362,7 +1372,6 @@ L2001	active	jet	lint	compile	a deprecated item still compiles but should be mig
 L2101	active	jet	lint	compile	`jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2)	`jet self doctor` found an environment problem with a known fix.	Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build.	Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet self doctor --fix`.	true	-
 E2701	active	runtime	error	compile	malformed input to a ring library parse function — row/line number and detail (E2-M9)	`{parser}` found malformed input at row/line {n} — {detail}.	The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record.	Fix the input at the location named, or validate it before parsing.	true	-
 E2702	active	sema	error	compile	compiler-known crypto API misuse at the boundary (E2-M9, D-CRYPTO-DIAG1)	crypto API misuse	{why}	{fix}	true	crypto_misuse
-L2701	reserved	sema	lint	compile	advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9)	This regex pattern may catastrophically backtrack on certain inputs.	A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns.	Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers.	true	-
 E2903	active	sema	error	compile	performance-budget declaration, typed value, unit, direction, comparison, or applicability is invalid (D-PERFBUDGET-OUTPUT1)	performance budget `{name}` is not valid	One grammar rule, typed value, unit, direction, comparison, or applicability constraint is invalid.	Use the one legal typed budget form named by the diagnostic.	true	-
 E2904	active	sema	error	compile	two performance budgets overlap on one effective key (D-PERFBUDGET-OUTPUT1)	performance budgets `{a}` and `{b}` overlap	Both declarations cover the same effective metric, scope, provider, target, profile, and applicability key.	Remove one declaration or make their applicability disjoint.	true	-
 E2905	active	sema	error	compile	performance-budget scope, target, profile, or provider cannot resolve uniquely (D-PERFBUDGET-OUTPUT1)	performance budget `{name}` cannot resolve `{attachment}`	The attachment has zero or multiple canonical matches.	Name one qualified scope, target, profile, or provider identity.	true	-

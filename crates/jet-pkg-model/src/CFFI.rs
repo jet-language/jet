@@ -28,8 +28,9 @@ use crate::AST::{
     Item, LoadedModule, ProgramBundle,
 };
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // Struct defs live in AST for cross-seam sharing; re-export for callers.
 pub use crate::AST::{CFfi, CImportLink, CLib};
@@ -178,11 +179,11 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             lib,
             Syntax::FILE_EXT,
             Syntax::BINARY_NAME,
-            Syntax::MARKER_EXTERN_MODULE,
+            Syntax::MARKER_IMPORT,
         ),
         format!(
             "edit your overlay file with `#{} module`, or regenerate the cache with `{} inspect bind`",
-            Syntax::MARKER_EXTERN_MODULE,
+            Syntax::MARKER_IMPORT,
             Syntax::BINARY_NAME,
         ),
         Some(span),
@@ -196,7 +197,7 @@ fn e3205(lib: &str, name: &str, span: Span) -> Diagnostic {
         format!("overlay `{}` disagrees with the generated binding", name),
         format!(
             "user `#{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
-            Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib,
+            Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT, lib,
         ),
         "match the generated signature, or rename your overlay function".to_string(),
         Some(span),
@@ -242,6 +243,11 @@ pub fn rustc_link_args_for_target(
     for lib in &cffi.libs {
         match resolve_link_for_target(&lib.lib, project_root, target) {
             Ok(flags) => {
+                if let Err(diagnostic) = validate_link_inputs(&lib.lib, project_root, target, &flags)
+                {
+                    diags.push(diagnostic);
+                    continue;
+                }
                 for dir in &flags.lib_dirs {
                     args.push("-L".to_string());
                     args.push(format!("native={dir}"));
@@ -262,6 +268,494 @@ pub fn rustc_link_args_for_target(
         return Err(diags);
     }
     Ok(args)
+}
+
+fn validate_link_inputs(
+    lib: &str,
+    project_root: &Path,
+    target: &str,
+    flags: &LinkFlags,
+) -> Result<(), Diagnostic> {
+    if let Some(actual) = lib.strip_prefix("jet_cpp_") {
+        let directory = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Cpp.bindings_subdir());
+        let archive = directory.join(format!("libjet_cpp_{actual}.a"));
+        validate_generated_artifact(
+            &directory.join(format!("{actual}.provenance")),
+            &archive,
+            lib,
+        )?;
+        return validate_cpp_symbols(actual, lib, &archive, target, flags);
+    }
+    for (language, prefix) in [
+        (ForeignLanguage::Java, "jet_java_"),
+        (ForeignLanguage::JS, "jet_js_"),
+        (ForeignLanguage::Py, "jet_py_"),
+    ] {
+        if let Some(actual) = lib.strip_prefix(prefix) {
+            let directory = project_root
+                .join(Syntax::SOURCE_ROOT_DIR)
+                .join(language.bindings_subdir());
+            let archive = directory.join(format!("lib{prefix}{actual}.a"));
+            return validate_generated_artifact(
+                &directory.join(format!("{actual}.provenance")),
+                &archive,
+                lib,
+            );
+        }
+    }
+    if let Some(actual) = lib.strip_prefix("jet_com_") {
+        let directory = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Com.bindings_subdir());
+        let archive = directory.join(format!("libjet_com_{actual}.a"));
+        return validate_com_binding(actual, &directory, &archive);
+    }
+    validate_c_binding(lib, project_root)
+}
+
+fn validate_com_binding(
+    lib: &str,
+    directory: &Path,
+    archive: &Path,
+) -> Result<(), Diagnostic> {
+    let generated_source = directory.join(format!("{lib}.jet"));
+    let provenance = directory.join(format!("{lib}.provenance"));
+    crate::ComBind::validate_provenance(&provenance, &generated_source, archive, lib).map_err(
+        |reason| {
+            e3208(
+                &provenance.display().to_string(),
+                &format!("jet_com_{lib}"),
+                &format!("the COM binding is invalid ({reason})"),
+            )
+        },
+    )
+}
+
+fn validate_generated_artifact(
+    provenance_path: &Path,
+    archive: &Path,
+    lib: &str,
+) -> Result<(), Diagnostic> {
+    if !provenance_path.is_file() {
+        return Ok(());
+    }
+    let provenance = crate::ForeignBridge::read_provenance(provenance_path).map_err(|reason| {
+        e3208(
+            &provenance_path.display().to_string(),
+            lib,
+            &format!("the binding provenance is invalid ({reason})"),
+        )
+    })?;
+    let artifact_name = archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let artifact_key = format!("artifact.{artifact_name}");
+    let expected = provenance.value(&artifact_key).ok_or_else(|| {
+        e3208(
+            &provenance_path.display().to_string(),
+            lib,
+            &format!("the binding provenance has no digest for `{artifact_name}`"),
+        )
+    })?;
+    let actual = crate::ForeignBridge::sha_file(archive).map_err(|reason| {
+        e3208(
+            &provenance_path.display().to_string(),
+            lib,
+            &format!("the generated archive could not be read ({reason})"),
+        )
+    })?;
+    if expected != actual {
+        return Err(e3208(
+            &provenance_path.display().to_string(),
+            lib,
+            "the generated archive digest differs from its binding provenance; regenerate the binding",
+        ));
+    }
+    validate_provenance_source_inputs(&provenance, provenance_path, lib)?;
+    validate_provenance_archive_inputs(&provenance, provenance_path, lib)
+}
+
+fn validate_provenance_source_inputs(
+    provenance: &crate::ForeignBridge::Provenance,
+    provenance_path: &Path,
+    lib: &str,
+) -> Result<(), Diagnostic> {
+    for role in ["source", "runtime", "declaration", "worker", "link"] {
+        let digest_key = format!("{role}-sha256");
+        let Some(paths) = provenance.fields.get(role) else {
+            if provenance.fields.contains_key(digest_key.as_str()) {
+                return Err(e3208(
+                    &provenance_path.display().to_string(),
+                    lib,
+                    &format!("the binding provenance has no path for `{role}`"),
+                ));
+            }
+            continue;
+        };
+        let Some(digests) = provenance.fields.get(digest_key.as_str()) else {
+            return Err(e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                &format!("the binding provenance has no digest for `{role}`"),
+            ));
+        };
+        if paths.len() != digests.len() {
+            return Err(e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                &format!("the binding provenance has an incomplete `{role}` inventory"),
+            ));
+        }
+        for (path, expected) in paths.iter().zip(digests) {
+            let path = Path::new(path);
+            let actual = crate::ForeignBridge::sha_file(path).map_err(|reason| {
+                e3208(
+                    &provenance_path.display().to_string(),
+                    lib,
+                    &format!(
+                        "foreign `{role}` `{}` could not be read ({reason}); regenerate the binding",
+                        path.display()
+                    ),
+                )
+            })?;
+            if actual != expected.as_str() {
+                return Err(e3208(
+                    &provenance_path.display().to_string(),
+                    lib,
+                    &format!(
+                        "foreign `{role}` `{}` differs from binding provenance; regenerate the binding",
+                        path.display()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_provenance_archive_inputs(
+    provenance: &crate::ForeignBridge::Provenance,
+    provenance_path: &Path,
+    lib: &str,
+) -> Result<(), Diagnostic> {
+    let paths = provenance
+        .fields
+        .get("linked-archive")
+        .cloned()
+        .unwrap_or_default();
+    let digests = provenance
+        .fields
+        .get("linked-archive-sha256")
+        .cloned()
+        .unwrap_or_default();
+    if paths.len() != digests.len() {
+        return Err(e3208(
+            &provenance_path.display().to_string(),
+            lib,
+            "the binding provenance has an incomplete local archive inventory",
+        ));
+    }
+    for (path, expected) in paths.iter().zip(digests) {
+        let actual = std::fs::read(path)
+            .ok()
+            .map(|bytes| crate::SHA256::sha256_hex(&bytes))
+            .unwrap_or_else(|| "missing".into());
+        if actual != expected {
+            return Err(e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                &format!(
+                    "local archive `{path}` differs from binding provenance; regenerate the binding"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_c_binding(lib: &str, project_root: &Path) -> Result<(), Diagnostic> {
+    let cache = binding_cache_file(project_root, ForeignLanguage::C, lib);
+    if !cache.is_file() {
+        return Ok(());
+    }
+    let provenance_path = cache.with_extension("provenance");
+    if provenance_path.is_file() {
+        let provenance = crate::ForeignBridge::read_provenance(&provenance_path).map_err(|reason| {
+            e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                &format!("the C binding provenance is invalid ({reason})"),
+            )
+        })?;
+        let header = provenance.value("source").ok_or_else(|| {
+            e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                "the C binding provenance has no source header",
+            )
+        })?;
+        let expected = c_binding_identity(project_root, lib, Path::new(header), &cache)
+            .map_err(|reason| {
+                e3208(
+                    &provenance_path.display().to_string(),
+                    lib,
+                    &format!("the C binding inputs could not be read ({reason})"),
+                )
+            })?;
+        if provenance.identity != expected {
+            return Err(e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                "the C header, generated cache, or local archive changed after binding; regenerate the binding",
+            ));
+        }
+        let cache_name = cache
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let expected_cache = provenance.value(&format!("artifact.{cache_name}"));
+        let actual_cache = crate::ForeignBridge::sha_file(&cache).map_err(|reason| {
+            e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                &format!("the generated C cache could not be read ({reason})"),
+            )
+        })?;
+        if expected_cache != Some(actual_cache.as_str()) {
+            return Err(e3208(
+                &provenance_path.display().to_string(),
+                lib,
+                "the generated C cache digest differs from its binding provenance; regenerate the binding",
+            ));
+        }
+    }
+
+    let Some(input) = local_c_archive_inputs(project_root, lib).into_iter().next() else {
+        return Ok(());
+    };
+    if !input.path.is_file() {
+        return Ok(());
+    }
+    if input.bytes.is_none() {
+        return Err(e3208(
+            &cache.display().to_string(),
+            lib,
+            &format!("the local archive `{}` could not be read", input.path.display()),
+        ));
+    }
+    let source = std::fs::read_to_string(&cache).map_err(|reason| {
+        e3208(
+            &cache.display().to_string(),
+            lib,
+            &format!("the generated C cache could not be read ({reason})"),
+        )
+    })?;
+    let expected = binding_symbols(&source);
+    if expected.is_empty() {
+        return Ok(());
+    }
+    let defined = nm_symbols(&input.path, false).map_err(|reason| {
+        e3208(
+            &cache.display().to_string(),
+            lib,
+            &format!("could not inventory exported symbols in `{}` ({reason})", input.path.display()),
+        )
+    })?;
+    let missing: Vec<String> = expected
+        .into_iter()
+        .filter(|symbol| !defined.contains(&normalize_nm_symbol(symbol)))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(e3208(
+            &cache.display().to_string(),
+            lib,
+            &format!(
+                "the local archive `{}` is missing bound export symbol(s): {}; the binding is stale",
+                input.path.display(),
+                missing.join(", ")
+            ),
+        ))
+    }
+}
+
+fn binding_symbols(source: &str) -> BTreeSet<String> {
+    let mut symbols = BTreeSet::new();
+    for line in source.lines() {
+        let Some((_, value)) = line.rsplit_once("= \"") else {
+            continue;
+        };
+        let Some(symbol) = value.split('"').next() else {
+            continue;
+        };
+        if !symbol.is_empty() {
+            symbols.insert(symbol.to_string());
+        }
+    }
+    symbols
+}
+
+fn validate_cpp_symbols(
+    actual: &str,
+    lib: &str,
+    generated_archive: &Path,
+    target: &str,
+    flags: &LinkFlags,
+) -> Result<(), Diagnostic> {
+    let generated_name = format!("jet_cpp_{actual}");
+    let directories: Vec<PathBuf> = flags.lib_dirs.iter().map(PathBuf::from).collect();
+    let libraries: Vec<String> = flags
+        .link_names
+        .iter()
+        .filter_map(|name| {
+            let name = name
+                .strip_prefix("static=")
+                .or_else(|| name.strip_prefix("dylib="))
+                .or_else(|| name.strip_prefix("framework="))
+                .unwrap_or(name);
+            (name != generated_name && !cpp_runtime_library(name, target))
+                .then(|| name.to_string())
+        })
+        .collect();
+    let inputs = crate::ForeignBridge::local_archive_inputs(&directories, &libraries);
+    let inputs: Vec<_> = inputs
+        .into_iter()
+        .filter(|input| input.path.is_file())
+        .collect();
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let mut defined = BTreeSet::new();
+    for input in &inputs {
+        if input.bytes.is_none() {
+            return Err(e3208(
+                &generated_archive.display().to_string(),
+                lib,
+                &format!("the local archive `{}` could not be read", input.path.display()),
+            ));
+        }
+        defined.extend(nm_symbols(&input.path, false).map_err(|reason| {
+            e3208(
+                &generated_archive.display().to_string(),
+                lib,
+                &format!("could not inventory exported symbols in `{}` ({reason})", input.path.display()),
+            )
+        })?);
+    }
+    let undefined = nm_symbols(generated_archive, true).map_err(|reason| {
+        e3208(
+            &generated_archive.display().to_string(),
+            lib,
+            &format!("could not inventory bound symbols in `{}` ({reason})", generated_archive.display()),
+        )
+    })?;
+    let missing: Vec<String> = undefined
+        .into_iter()
+        .filter(|symbol| !ignorable_cpp_symbol(symbol))
+        .filter(|symbol| !defined.contains(symbol))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(e3208(
+            &generated_archive.display().to_string(),
+            lib,
+            &format!(
+                "local C++ archive inventory is missing bound symbol(s): {}; regenerate the binding or restore the archive",
+                missing.join(", ")
+            ),
+        ))
+    }
+}
+
+fn cpp_runtime_library(name: &str, target: &str) -> bool {
+    name == crate::FFI::cxx_runtime_for_target(target)
+        || matches!(name, "c" | "m" | "dl" | "pthread" | "rt" | "gcc_s")
+}
+
+fn nm_symbols(path: &Path, undefined: bool) -> Result<BTreeSet<String>, String> {
+    let mut command = Command::new("nm");
+    command.arg("-g");
+    if undefined {
+        command.arg("-u");
+    }
+    let output = command.arg(path).output().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            "the provisioned nm tool was not found".to_string()
+        } else {
+            format!("could not start nm: {error}")
+        }
+    })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "nm rejected the native archive".into()
+        } else {
+            detail
+        });
+    }
+    Ok(parse_nm_symbols(&output.stdout, undefined))
+}
+
+fn parse_nm_symbols(output: &[u8], undefined: bool) -> BTreeSet<String> {
+    let mut symbols = BTreeSet::new();
+    for line in String::from_utf8_lossy(output).lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() < 2 {
+            continue;
+        }
+        let is_undefined = tokens.iter().any(|token| *token == "U" || *token == "u");
+        if undefined != is_undefined {
+            continue;
+        }
+        let symbol = tokens.last().copied().unwrap_or_default();
+        if symbol.is_empty() || symbol == "?" {
+            continue;
+        }
+        symbols.insert(normalize_nm_symbol(symbol));
+    }
+    symbols
+}
+
+fn normalize_nm_symbol(symbol: &str) -> String {
+    symbol.strip_prefix('_').unwrap_or(symbol).to_string()
+}
+
+fn ignorable_cpp_symbol(symbol: &str) -> bool {
+    let symbol = symbol.trim_start_matches('_');
+    symbol.starts_with("ZSt")
+        || symbol.starts_with("ZNSt")
+        || symbol.starts_with("ZNKSt")
+        || symbol.starts_with("ZNS")
+        || symbol.starts_with("ZNKS")
+        || symbol.starts_with("ZTI")
+        || symbol.starts_with("ZTV")
+        || symbol.starts_with("ZTS")
+        || symbol.starts_with("ZTT")
+        || symbol.starts_with("Zda")
+        || symbol.starts_with("Zdl")
+        || symbol.starts_with("Zna")
+        || symbol.starts_with("Znw")
+        || symbol.contains("cxa")
+        || symbol.contains("gxx_personality")
+        || symbol.contains("Unwind")
+        || symbol.starts_with("atomic_")
+        || symbol.starts_with("dynamic_cast")
+        || symbol.starts_with("errno_location")
+        || symbol.starts_with("gthread")
+        || symbol.starts_with("pthread")
+        || symbol.starts_with("dl")
+        || symbol.starts_with("sched_")
+        || symbol.starts_with("stack_chk")
+        || symbol.starts_with("__")
+        || matches!(
+            symbol,
+            "abort" | "free" | "malloc" | "memcpy" | "memmove" | "memset" | "strlen"
+        )
 }
 
 /// Run the whole C-FFI assembly pass over a freshly loaded bundle. Removes
@@ -995,6 +1489,20 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             }
             if std::fs::write(&cache_path, &result.source).is_ok() {
                 let _ = crate::CBind::write_bind_hash(&cache_path, header_src, "");
+                let header = resolve_header_path(header_path, &bundle.project_root);
+                if let Err(reason) = write_c_binding_provenance(
+                    &bundle.project_root,
+                    &lib,
+                    &header,
+                    &cache_path,
+                ) {
+                    diags.push(e3208(header_path, &lib, &reason));
+                    continue;
+                }
+            } else {
+                let reason = format!("could not write generated cache `{}`", cache_path.display());
+                diags.push(e3208(header_path, &lib, &reason));
+                continue;
             }
             load_cache_source(
                 &result.source,
@@ -1011,6 +1519,25 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             Ok(s) => s,
             Err(_) => continue,
         };
+        if let Some(header_path) = lib_header.get(&lib) {
+            // A provenance sidecar is an immutable record of the bind that
+            // produced this cache. Do not refresh it on every check: doing so
+            // would replace an old local-archive digest before link-time
+            // validation could report the archive as stale.
+            let provenance_path = cache_path.with_extension("provenance");
+            if !provenance_path.is_file() {
+                let header = resolve_header_path(header_path, &bundle.project_root);
+                if let Err(reason) = write_c_binding_provenance(
+                    &bundle.project_root,
+                    &lib,
+                    &header,
+                    &cache_path,
+                ) {
+                    diags.push(e3208(header_path, &lib, &reason));
+                    continue;
+                }
+            }
+        }
         load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
     }
 }
@@ -1024,6 +1551,144 @@ fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std
     } else {
         project_root.join(header_path)
     }
+}
+
+const C_BINDER_SCHEMA: &str = "jet-c-bind-v1";
+
+fn local_c_archive_inputs(project_root: &Path, lib: &str) -> Vec<crate::ForeignBridge::ArchiveInput> {
+    let Some(target) = declared_c_dep(lib, project_root) else {
+        return Vec::new();
+    };
+    if target == Syntax::SYSTEM_LIB_TARGET || target.starts_with(NIXPKGS_TARGET_PREFIX) {
+        return Vec::new();
+    }
+    let directory = PathBuf::from(&target);
+    let directory = if directory.is_absolute() {
+        directory
+    } else {
+        project_root.join(directory)
+    };
+    crate::ForeignBridge::local_archive_inputs(
+        &[directory],
+        &[lib.to_string()],
+    )
+}
+
+/// Build the unified C binding identity from the exact header/cache bytes and
+/// any declared local archive input. The old header-only hash remains the
+/// quick rebind check; this record is the link-time truth.
+pub fn c_binding_identity(
+    project_root: &Path,
+    lib: &str,
+    header: &Path,
+    cache: &Path,
+) -> Result<String, String> {
+    let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
+    let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
+    let header_bytes = std::fs::read(&header).map_err(|error| {
+        format!(
+            "could not read {} for C binding identity: {error}",
+            header.display()
+        )
+    })?;
+    let cache_bytes = std::fs::read(&cache).map_err(|error| {
+        format!(
+            "could not read {} for C binding identity: {error}",
+            cache.display()
+        )
+    })?;
+    let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
+        .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
+        crate::ForeignBridge::IDENTITY_SCHEMA,
+    );
+    identity.field("language", ForeignLanguage::C.root().as_bytes());
+    identity.field("binder_schema", C_BINDER_SCHEMA.as_bytes());
+    identity.field("library", lib.as_bytes());
+    identity.field("abi", format!("c_{lib}").as_bytes());
+    identity.field("descriptor", descriptor.stamp().as_bytes());
+    identity.field("header_path", header.as_os_str().as_encoded_bytes());
+    identity.field("header_bytes", &header_bytes);
+    identity.field("cache_path", cache.as_os_str().as_encoded_bytes());
+    identity.field("cache_bytes", &cache_bytes);
+    identity.field("cflags", b"");
+    identity.field("cc", crate::ForeignBridge::tool_identity("cc").as_bytes());
+    identity.field("ar", crate::ForeignBridge::tool_identity("ar").as_bytes());
+    if let Some(target) = declared_c_dep(lib, project_root) {
+        identity.field("dependency", target.as_bytes());
+    } else {
+        identity.field("dependency_missing", b"true");
+    }
+    let local_archives = local_c_archive_inputs(project_root, lib);
+    crate::ForeignBridge::add_archive_inputs(&mut identity, &local_archives);
+    Ok(identity.finish())
+}
+
+/// Publish the C binding's common provenance record beside its generated
+/// cache. This records the local archive bytes when a package names a local C
+/// dependency, so a changed implementation cannot reuse a header-only cache.
+pub fn write_c_binding_provenance(
+    project_root: &Path,
+    lib: &str,
+    header: &Path,
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
+    let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
+    let identity = c_binding_identity(project_root, lib, &header, &cache)?;
+    let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
+        .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+    let mut fields = vec![
+        ("language", ForeignLanguage::C.root().to_string()),
+        ("abi", format!("c_{lib}")),
+        ("transport", "direct-c-abi".to_string()),
+        ("binder-schema", C_BINDER_SCHEMA.to_string()),
+        ("descriptor", descriptor.stamp()),
+        ("source", header.to_string_lossy().into_owned()),
+        (
+            "source-sha256",
+            crate::ForeignBridge::sha_file(&header)?,
+        ),
+        ("cache", cache.to_string_lossy().into_owned()),
+        ("cache-sha256", crate::ForeignBridge::sha_file(&cache)?),
+        ("cc", crate::ForeignBridge::tool_identity("cc")),
+        ("ar", crate::ForeignBridge::tool_identity("ar")),
+    ];
+    if let Some(target) = declared_c_dep(lib, project_root) {
+        fields.push(("dependency", target));
+    }
+    for input in local_c_archive_inputs(project_root, lib) {
+        fields.push(("linked-library", input.library));
+        fields.push((
+            "linked-archive",
+            input.path.to_string_lossy().into_owned(),
+        ));
+        fields.push((
+            "linked-archive-sha256",
+            input
+                .bytes
+                .as_deref()
+                .map(crate::SHA256::sha256_hex)
+                .unwrap_or_else(|| "missing".into()),
+        ));
+    }
+    let field_refs: Vec<(&str, &str)> = fields
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect();
+    let artifacts = vec![
+        (
+            cache
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            crate::ForeignBridge::sha_file(&cache)?,
+        ),
+    ];
+    let provenance = cache.with_extension("provenance");
+    crate::ForeignBridge::write_provenance(&provenance, &identity, &field_refs, &artifacts)?;
+    Ok(provenance)
 }
 
 fn e3208(header: &str, lib: &str, reason: &str) -> Diagnostic {
@@ -1501,7 +2166,11 @@ pub fn resolve_link_for_target(
             .join(Syntax::SOURCE_ROOT_DIR)
             .join(ForeignLanguage::Com.bindings_subdir());
         let archive = dir.join(format!("libjet_com_{actual}.a"));
-        if cfg!(target_os = "windows") && archive.is_file() {
+        let host_target = crate::FFI::host_target();
+        if host_target.to_ascii_lowercase().contains("windows")
+            && target.to_ascii_lowercase().contains("windows")
+            && archive.is_file()
+        {
             return Ok(LinkFlags {
                 lib_dirs: vec![dir.display().to_string()],
                 link_names: vec![

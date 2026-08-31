@@ -2033,6 +2033,7 @@ fn check_func_body_bundle_scoped(
         effect_facts,
         consts: &st.consts,
         modules: Some(states),
+        nominal_owner_cache: std::cell::RefCell::new(HashMap::new()),
         items: &st.items,
         module_idx,
         imports: &scoped_imports,
@@ -2059,6 +2060,7 @@ fn check_func_body_bundle_scoped(
         name_ledger,
         diags: Vec::new(),
         statement_lint_allows: Vec::new(),
+        stdlib_lint_candidates: HashMap::new(),
         unused_bindings: Vec::new(),
         unused_binding_refs: HashSet::new(),
         flow: crate::Sema::FlowFacts::FlowFacts {
@@ -2127,6 +2129,7 @@ fn check_func_body_bundle_scoped(
         compiler_generated: f.compiler_generated,
         raw_protocol_return,
         declared_return_type: f.return_type.clone(),
+        current_return_type_span: f.return_type_span,
         current_param_names: f
             .params
             .iter()
@@ -2513,16 +2516,17 @@ fn function_value_param_contract(
                 .param_info
                 .get(index)
                 .is_some_and(|(name, _)| name == label);
-        contract.push((
-            if implicit_local_label {
-                String::new()
-            } else {
-                label.clone()
-            },
-            *zone,
-        ));
+        let label = match zone {
+            crate::AST::ParamZone::PositionalOnly => String::new(),
+            crate::AST::ParamZone::Either if implicit_local_label => String::new(),
+            _ => label.clone(),
+        };
+        contract.push((label, *zone));
     }
-    (!contract.is_empty()).then_some(contract)
+    contract
+        .iter()
+        .any(|(label, zone)| !label.is_empty() || *zone != crate::AST::ParamZone::Either)
+        .then_some(contract)
 }
 
 pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
@@ -2630,7 +2634,7 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
     let return_compatible = match (wr, gr) {
         (None, None) => true,
         (Some(a), Some(b)) => carrier_compatible(a, b),
-        _ => false,
+        (None, Some(b)) | (Some(b), None) => crate::AST::is_unit_callable_return(b),
     };
     return_compatible && effect_bound_compatible(we.as_ref(), ge.as_ref())
 }

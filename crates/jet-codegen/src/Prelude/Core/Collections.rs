@@ -18,9 +18,7 @@ where
     if chunk_count == 0 {
         return Vec::new();
     }
-    let worker_count = worker_cap
-        .min(worker_limit.max(1))
-        .min(chunk_count);
+    let worker_count = worker_cap.min(worker_limit.max(1)).min(chunk_count);
     if worker_count == 1 {
         return (0..chunk_count)
             .map(|chunk| {
@@ -59,9 +57,7 @@ where
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
-        if self.bound == Some(0)
-            || self.entries.iter().any(|(stored, _)| stored == &key)
-        {
+        if self.bound == Some(0) || self.entries.iter().any(|(stored, _)| stored == &key) {
             return false;
         }
         self.put(key, value);
@@ -290,6 +286,30 @@ where
     xs.sort_by_key(|item| std::cmp::Reverse(f(item)));
 }
 
+fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut Vec<T>, mut f: F) -> Result<(), E>
+where
+    F: FnMut(&T) -> Result<K, E>,
+{
+    let keys: Result<Vec<K>, E> = xs.iter().map(|item| f(item)).collect();
+    let keys = keys?;
+    let mut keyed: Vec<_> = std::mem::take(xs).into_iter().zip(keys).collect();
+    keyed.sort_by(|left, right| left.1.cmp(&right.1));
+    *xs = keyed.into_iter().map(|(item, _)| item).collect();
+    Ok(())
+}
+
+fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut Vec<T>, mut f: F) -> Result<(), E>
+where
+    F: FnMut(&T) -> Result<K, E>,
+{
+    let keys: Result<Vec<K>, E> = xs.iter().map(|item| f(item)).collect();
+    let keys = keys?;
+    let mut keyed: Vec<_> = std::mem::take(xs).into_iter().zip(keys).collect();
+    keyed.sort_by(|left, right| right.1.cmp(&left.1));
+    *xs = keyed.into_iter().map(|(item, _)| item).collect();
+    Ok(())
+}
+
 // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
 // reservations stay here; map storage insertion is a representation hook.
 // AOT, JIT, and TIR-eval marshal these functions.
@@ -441,9 +461,7 @@ fn jet_map_equal_kernel<K: Ord + PartialEq, V: PartialEq>(
     left == right
 }
 
-fn jet_map_first_key_kernel<K: Ord + Clone, V>(
-    m: &JetMap<K, V>,
-) -> JetOutcome<K, JetAbsent> {
+fn jet_map_first_key_kernel<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> {
     jet_outcome_of(m.keys().next().cloned())
 }
 
@@ -465,15 +483,11 @@ fn jet_map_top_n<K: Ord + Clone, V: Ord + Clone>(m: &JetMap<K, V>, n: i64) -> Ve
     entries
 }
 
-fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(
-    m: &JetMap<K, V>,
-) -> JetOutcome<V, JetAbsent> {
+fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(m.values().min().cloned())
 }
 
-fn jet_map_max_value_kernel<K: Ord, V: Ord + Clone>(
-    m: &JetMap<K, V>,
-) -> JetOutcome<V, JetAbsent> {
+fn jet_map_max_value_kernel<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(m.values().max().cloned())
 }
 
@@ -496,26 +510,15 @@ fn jet_map_slice_keys_kernel<K: Ord + Clone, V: Clone>(
         .collect()
 }
 
-fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(
-    keys: Vec<K>,
-    default: V,
-) -> JetMap<K, V> {
-    keys.into_iter()
-        .map(|key| (key, default.clone()))
-        .collect()
+fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
+    keys.into_iter().map(|key| (key, default.clone())).collect()
 }
 
-fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(
-    m: &JetMap<K, V>,
-    needle: &V,
-) -> bool {
+fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(
-    m: &mut M,
-    key: &K,
-) -> JetOutcome<V, JetAbsent>
+fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(m: &mut M, key: &K) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -562,7 +565,9 @@ impl<T: PartialEq> JetSetPopKernel for Vec<T> {
     type Item = T;
 
     fn pop_value(&mut self, value: &Self::Item) -> Option<Self::Item> {
-        self.iter().position(|item| item == value).map(|index| self.remove(index))
+        self.iter()
+            .position(|item| item == value)
+            .map(|index| self.remove(index))
     }
 }
 
@@ -714,25 +719,23 @@ fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
         let mut offset = 0usize;
         // 0 = leading empty; 1 = chars; 2 = done after trailing empty.
         let mut phase = 0u8;
-        return JetIter(Box::new(std::iter::from_fn(move || {
-            match phase {
-                0 => {
-                    phase = 1;
-                    Some(String::new())
-                }
-                1 => {
-                    if offset >= s.len() {
-                        phase = 2;
-                        return Some(String::new());
-                    }
-                    let ch = s[offset..].chars().next().expect("offset in bounds");
-                    let len = ch.len_utf8();
-                    let out = s[offset..offset + len].to_string();
-                    offset += len;
-                    Some(out)
-                }
-                _ => None,
+        return JetIter(Box::new(std::iter::from_fn(move || match phase {
+            0 => {
+                phase = 1;
+                Some(String::new())
             }
+            1 => {
+                if offset >= s.len() {
+                    phase = 2;
+                    return Some(String::new());
+                }
+                let ch = s[offset..].chars().next().expect("offset in bounds");
+                let len = ch.len_utf8();
+                let out = s[offset..offset + len].to_string();
+                offset += len;
+                Some(out)
+            }
+            _ => None,
         })));
     }
     let mut start = 0usize;
@@ -894,10 +897,7 @@ where
 {
     JetIter(Box::new(it.0.map(move |x| f(&x))))
 }
-fn jet_iter_try_map<T: 'static, U: 'static, E, F>(
-    it: JetIter<T>,
-    mut f: F,
-) -> Result<JetIter<U>, E>
+fn jet_iter_try_map<T: 'static, U: 'static, E, F>(it: JetIter<T>, mut f: F) -> Result<JetIter<U>, E>
 where
     F: FnMut(&T) -> Result<U, E>,
 {
@@ -997,17 +997,11 @@ fn jet_iter_intersperse<T: 'static + Clone>(it: JetIter<T>, sep: T) -> JetIter<T
         started: false,
     }))
 }
-fn jet_iter_enumerate<T: 'static, U: 'static, F: 'static>(
-    it: JetIter<T>,
-    mut f: F,
-) -> JetIter<U>
+fn jet_iter_enumerate<T: 'static, U: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<U>
 where
     F: FnMut(i64, T) -> U,
 {
-    JetIter(Box::new(
-        it.0.enumerate()
-            .map(move |(i, x)| f(i as i64, x)),
-    ))
+    JetIter(Box::new(it.0.enumerate().map(move |(i, x)| f(i as i64, x))))
 }
 /// D-RANGE-EXCL1=C: every valid Int index for a sequence of length `n`.
 fn jet_iter_indexes(n: i64) -> JetIter<i64> {
@@ -1040,13 +1034,13 @@ fn jet_iter_zip_strict<A: 'static, B: 'static, O: 'static, F: 'static>(
 where
     F: FnMut(A, B) -> O,
 {
-    JetIter(Box::new(std::iter::from_fn(move || {
-        match jet_zip_strict_step(a.0.next(), b.0.next()) {
+    JetIter(Box::new(std::iter::from_fn(
+        move || match jet_zip_strict_step(a.0.next(), b.0.next()) {
             Ok(Some((x, y))) => Some(f(x, y)),
             Ok(None) => None,
             Err(()) => jet_panic("<core.collections>", 0, jet_zip_length_mismatch_message()),
-        }
-    })))
+        },
+    )))
 }
 
 fn jet_zip_length_mismatch_message() -> &'static str {
@@ -1062,12 +1056,12 @@ fn jet_iter_zip_pad<A: 'static + Clone, B: 'static + Clone, O: 'static, F: 'stat
 where
     F: FnMut(A, B) -> O,
 {
-    JetIter(Box::new(std::iter::from_fn(move || {
-        match jet_zip_pad_step(a.0.next(), b.0.next(), fill_a.clone(), fill_b.clone()) {
+    JetIter(Box::new(std::iter::from_fn(
+        move || match jet_zip_pad_step(a.0.next(), b.0.next(), fill_a.clone(), fill_b.clone()) {
             Some((x, y)) => Some(f(x, y)),
             None => None,
-        }
-    })))
+        },
+    )))
 }
 
 // D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection map/filter are eager.
@@ -1123,7 +1117,10 @@ where
     F: FnMut(&T) -> U,
     P: FnMut(&U) -> bool,
 {
-    xs.iter().map(|x| map(x)).filter(|value| keep(value)).collect()
+    xs.iter()
+        .map(|x| map(x))
+        .filter(|value| keep(value))
+        .collect()
 }
 
 // List-shaped helpers serve eager concrete-List adapters and materializing
@@ -1374,7 +1371,10 @@ where
     jet_iter_from_vec(out)
 }
 
-fn jet_iter_last_index_of<T: 'static + PartialEq>(it: JetIter<T>, needle: T) -> JetOutcome<i64, JetAbsent> {
+fn jet_iter_last_index_of<T: 'static + PartialEq>(
+    it: JetIter<T>,
+    needle: T,
+) -> JetOutcome<i64, JetAbsent> {
     let xs = it.to_list();
     jet_outcome_of(xs.iter().rposition(|x| x == &needle).map(|i| i as i64))
 }
@@ -1447,7 +1447,11 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
     let len = xs.len() as i64;
     let s = start.clamp(0, len) as usize;
     let e = end.clamp(0, len) as usize;
-    if e <= s { Vec::new() } else { xs[s..e].to_vec() }
+    if e <= s {
+        Vec::new()
+    } else {
+        xs[s..e].to_vec()
+    }
 }
 /// Sorted membership search. Returns the matching position as `?Int`; with
 /// duplicates, the matching position is unspecified and is not a lower bound.
@@ -1457,26 +1461,39 @@ fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAb
 /// Comparator form of sorted membership search. Returns `?Int`, not an
 /// insertion point or a promise to select the first duplicate.
 fn jet_list_binary_search_by<T, F>(xs: &[T], mut f: F) -> JetOutcome<i64, JetAbsent>
-where F: FnMut(&T) -> std::cmp::Ordering {
+where
+    F: FnMut(&T) -> std::cmp::Ordering,
+{
     jet_outcome_of(xs.binary_search_by(|x| f(x)).ok().map(|i| i as i64))
 }
 fn jet_list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
     let mut out = left.to_vec();
-    for x in right { if !out.contains(x) { out.push(x.clone()); } }
+    for x in right {
+        if !out.contains(x) {
+            out.push(x.clone());
+        }
+    }
     out
 }
 fn jet_list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
     let mut out = Vec::new();
     for x in left {
-        if right.contains(x) && !out.contains(x) { out.push(x.clone()); }
+        if right.contains(x) && !out.contains(x) {
+            out.push(x.clone());
+        }
     }
     out
 }
 fn jet_list_difference<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
-    left.iter().filter(|x| !right.contains(x)).cloned().collect()
+    left.iter()
+        .filter(|x| !right.contains(x))
+        .cloned()
+        .collect()
 }
 fn jet_list_random<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
-    if xs.is_empty() { return Err(JetAbsent); }
+    if xs.is_empty() {
+        return Err(JetAbsent);
+    }
     let mut state: u64 = 0xC0FF_EE42;
     state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
     Ok(xs[((state >> 33) as usize) % xs.len()].clone())
@@ -1488,14 +1505,23 @@ fn jet_list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
     }
     out
 }
-fn jet_list_min_max<T: Ord + Clone, R>(xs: &[T], build: impl FnOnce(T, T) -> R) -> JetOutcome<R, JetAbsent> {
+fn jet_list_min_max<T: Ord + Clone, R>(
+    xs: &[T],
+    build: impl FnOnce(T, T) -> R,
+) -> JetOutcome<R, JetAbsent> {
     match (xs.iter().min(), xs.iter().max()) {
         (Some(lo), Some(hi)) => Ok(build(lo.clone(), hi.clone())),
         _ => Err(JetAbsent),
     }
 }
-fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(xs: &[T], mut f: F, build: impl FnOnce(T, T) -> R) -> JetOutcome<R, JetAbsent>
-where F: FnMut(&T) -> K {
+fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(
+    xs: &[T],
+    mut f: F,
+    build: impl FnOnce(T, T) -> R,
+) -> JetOutcome<R, JetAbsent>
+where
+    F: FnMut(&T) -> K,
+{
     let min = jet_list_min_by(xs.iter().cloned(), |x| f(x));
     let max = jet_list_max_by(xs.iter().cloned(), |x| f(x));
     match (min, max) {
@@ -1514,6 +1540,20 @@ fn jet_list_ends_with<T: PartialEq>(xs: &[T], suffix: &[T]) -> bool {
 
 fn jet_list_equal<T: PartialEq>(left: &[T], right: &[T]) -> bool {
     left == right
+}
+
+/// Lexicographic list ordering. `None` preserves Rust's `PartialOrd` result
+/// for a list containing an unordered element such as `Float::NaN`.
+///
+/// The numeric tags are the resident ABI used to rebuild `<`, `<=`, `>` and
+/// `>=` without making either execution engine own this ordering law.
+fn jet_list_order<T: PartialOrd>(left: &[T], right: &[T]) -> i8 {
+    match left.partial_cmp(right) {
+        Some(std::cmp::Ordering::Less) => 0,
+        Some(std::cmp::Ordering::Equal) => 1,
+        Some(std::cmp::Ordering::Greater) => 2,
+        None => 3,
+    }
 }
 
 fn jet_list_unzip<T, U, I>(xs: I) -> (Vec<T>, Vec<U>)

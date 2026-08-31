@@ -200,22 +200,7 @@ fn zstd_frame_header(out: &mut Vec<u8>, len: u64) {
 }
 
 pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
-    let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-    if data.is_empty() {
-        out.extend_from_slice(&[1, 0, 0, 255, 255]);
-    } else {
-        let mut blocks = data.chunks(u16::MAX as usize).peekable();
-        while let Some(block) = blocks.next() {
-            out.push(u8::from(blocks.peek().is_none()));
-            let len = block.len() as u16;
-            put_u16(&mut out, len);
-            put_u16(&mut out, !len);
-            out.extend_from_slice(block);
-        }
-    }
-    put_u32(&mut out, crc32(data));
-    put_u32(&mut out, data.len() as u32);
-    out
+    jet_foundation::GzipKernel::jet_compress_gzip_compress(data)
 }
 
 pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {

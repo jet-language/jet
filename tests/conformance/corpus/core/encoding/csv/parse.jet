@@ -2,6 +2,10 @@
 use core.encoding.csv as csv
 
 fn run() {
-    result :: csv.parse("name,score\nada,9\n") ?? panic("parse")
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    result :: csv.parse(
+        raw,
+        delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("parse")
     print(result)
 }

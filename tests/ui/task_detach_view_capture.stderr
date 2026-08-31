@@ -1,26 +1,26 @@
-Error [E2305]: a returned view cannot borrow from a temporary argument
-  --> tests/ui/task_detach_view_capture.jet:5:20
+Error [E2305]: A returned view cannot borrow from a temporary argument
+  --> tests/ui/task_detach_view_capture.jet:6:20
     |
-  5 |     t :: task peek([1, 2, 3])
+  6 |     t :: task peek([1, 2, 3])
     |                    ^^^^^^^^^
- Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
- Fix: store the owner in a named binding first, then pass that binding to the view-returning call
+ Why: The temporary owner is dropped at the end of this statement, while the returned view remains live
+ Fix: Store the owner in a named binding first, then pass that binding to the view-returning call
 More: jet-lang.dev/e/E2305
 
-Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:5:15
+Error [E1102]: This task returns a view that cannot be shared — it does not live long enough to cross into a task
+  --> tests/ui/task_detach_view_capture.jet:6:15
     |
-  5 |     t :: task peek([1, 2, 3])
+  6 |     t :: task peek([1, 2, 3])
     |               ^^^^
- Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E1106]: can't detach task `t` — it captured a `view` borrow that may not live long enough
-  --> tests/ui/task_detach_view_capture.jet:6:7
+Error [E1106]: Can't detach task `t` — it captured a `view` borrow that may not live long enough
+  --> tests/ui/task_detach_view_capture.jet:7:7
     |
-  6 |     t.detach()
+  7 |     t.detach()
     |       ^^^^^^
- Why: a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
- Fix: pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`
+ Why: A detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
+ Fix: Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`
 More: jet-lang.dev/e/E1106

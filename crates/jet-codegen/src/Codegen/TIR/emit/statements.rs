@@ -7,6 +7,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_let_ty_clause;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
+use crate::Codegen::TIR::emit::helpers::root_path;
 use crate::Codegen::TIR::emit::expressions::{is_compute_view_mut, is_float_view, is_view};
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_pattern;
@@ -19,7 +20,8 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::{
-    TExpr, TExprKind, TOrFallback, TOutcomeFastBuffer, TOutcomeFastPath, TBuiltinOp,
+    TBuiltinOp, TExpr, TExprKind, TOrFallback, TOutcomeFastBuffer, TOutcomeFastPath,
+    TReaderFixedWidth,
 };
 use crate::AST::BinOp;
 use crate::AST::Type;
@@ -89,9 +91,7 @@ fn map_alias_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
         TExprKind::Local(local) => !local.deref && !same_local(local, root),
         TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
             crate::Codegen::TIR::TStrPart::Lit(_) => true,
-            crate::Codegen::TIR::TStrPart::Interp(value, _) => {
-                map_alias_expr_safe(value, root)
-            }
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => map_alias_expr_safe(value, root),
         }),
         TExprKind::Binary { lhs, rhs, .. } => {
             map_alias_expr_safe(lhs, root) && map_alias_expr_safe(rhs, root)
@@ -114,11 +114,13 @@ fn map_alias_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
             map_alias_expr_safe(value, root)
                 && match fallback {
                     TOrFallback::Value(value) => map_alias_expr_safe(value, root),
+                    TOrFallback::Return(Some(value)) => map_alias_expr_safe(value, root),
+                    TOrFallback::Return(None) => true,
+                    TOrFallback::Panic { msg, .. } => map_alias_expr_safe(msg, root),
                     TOrFallback::Break
                     | TOrFallback::Continue
                     | TOrFallback::BreakLabel(_)
                     | TOrFallback::ContinueLabel(_) => true,
-                    TOrFallback::Return(_) | TOrFallback::Panic { .. } => false,
                 }
         }
         TExprKind::BuiltinMethod { recv, op, args } => {
@@ -143,16 +145,23 @@ fn map_alias_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
                 map_alias_expr_safe(base, root) && map_alias_expr_safe(index, root)
             }
         }
-        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
-            map_alias_expr_safe(key, root) && map_alias_expr_safe(value, root)
-        }),
+        TExprKind::MapLit(entries) => entries
+            .iter()
+            .all(|(key, value)| map_alias_expr_safe(key, root) && map_alias_expr_safe(value, root)),
         TExprKind::ListLit(items) => items.iter().all(|item| map_alias_expr_safe(item, root)),
         TExprKind::TupleLit { fields, .. } => fields
             .iter()
             .all(|(_, value)| map_alias_expr_safe(value, root)),
-        TExprKind::Call { args, .. } => args
-            .iter()
-            .all(|arg| map_alias_expr_safe(&arg.value, root)),
+        // TIR carries argument access facts, but no purity/alias fact for a
+        // general call. Do not infer that an unknown callee leaves `root`
+        // uniquely owned merely because its visible arguments are disjoint.
+        TExprKind::Call { .. } => false,
+        // Core calls are Prelude-owned semantic operations. A local can stay
+        // unique when no argument reaches it; the call may fail or mutate
+        // unrelated state, but it cannot acquire this map's backing store.
+        TExprKind::CoreCall { args, .. } => {
+            args.iter().all(|arg| map_alias_expr_safe(arg, root))
+        }
         _ => false,
     }
 }
@@ -167,18 +176,123 @@ fn direct_map_mutation_root(expr: &TExpr) -> Option<TLocal> {
                     | TBuiltinOp::AddNewMap
                     | TBuiltinOp::RemoveMap
                     | TBuiltinOp::Clear
-            ) => map_root_local(recv),
+            ) =>
+        {
+            map_root_local(recv)
+        }
         _ => None,
     }
+}
+fn map_alias_cond_safe(cond: &TIfCond, root: &TLocal) -> bool {
+    match cond {
+        TIfCond::Plain(expr) | TIfCond::IsNone { subj: expr } => {
+            map_alias_expr_safe(expr, root)
+        }
+        TIfCond::And { left, right } => {
+            map_alias_cond_safe(left, root) && map_alias_cond_safe(right, root)
+        }
+        // Pattern bindings can introduce an alias with a scope that is not
+        // represented by the statement-local proof. Keep this boundary
+        // conservative until those bindings carry explicit ownership facts.
+        TIfCond::IfLet { .. } => false,
+        TIfCond::Matches { subj, .. } => map_alias_expr_safe(subj, root),
+        TIfCond::WithPrelude { prelude, cond } => {
+            prelude.iter().all(|stmt| map_alias_stmt_safe(stmt, root))
+                && map_alias_cond_safe(cond, root)
+        }
+    }
+}
+
+fn map_mutation_root_in_stmt(stmt: &TStmt) -> Option<TLocal> {
+    match stmt {
+        TStmt::IndexAssign { base, is_map, .. } if *is_map => map_root_local(base),
+        TStmt::ExprStmt(expr) => direct_map_mutation_root(expr),
+        TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let then_root = map_mutation_root(then_body);
+            let else_root = else_body
+                .as_deref()
+                .and_then(map_mutation_root);
+            match (then_root, else_root) {
+                (Some(left), Some(right)) if !same_local(&left, &right) => None,
+                (Some(root), _) | (_, Some(root)) => Some(root),
+                (None, None) => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn map_mutation_root(body: &[TStmt]) -> Option<TLocal> {
+    let mut root = None;
+    for stmt in body {
+        let Some(candidate) = map_mutation_root_in_stmt(stmt) else {
+            continue;
+        };
+        match &root {
+            Some(existing) if !same_local(existing, &candidate) => return None,
+            None => root = Some(candidate),
+            _ => {}
+        }
+    }
+    root
 }
 
 fn map_alias_stmt_safe(stmt: &TStmt, root: &TLocal) -> bool {
     match stmt {
         TStmt::SourceSpan(_) | TStmt::LineMarker(_) | TStmt::Break(_) | TStmt::Continue(_) => true,
-        // A nested binding can shadow the root's Rust spelling. The TIR local
-        // identity is intentionally name-based, so keep this proof boundary
-        // closed unless the whole loop body has no declarations.
-        TStmt::Let { .. } => false,
+        TStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            map_alias_cond_safe(cond, root)
+                && then_body.iter().all(|stmt| map_alias_stmt_safe(stmt, root))
+                && else_body.as_ref().map_or(true, |body| {
+                body.iter().all(|stmt| map_alias_stmt_safe(stmt, root))
+                })
+        }
+        TStmt::ForIn {
+            var,
+            var2,
+            source,
+            collection,
+            step,
+            body,
+            ..
+        } => {
+            mangle(var) != root.rust_name()
+                && var2
+                    .as_ref()
+                    .is_none_or(|var| mangle(var) != root.rust_name())
+                && map_alias_expr_safe(source, root)
+                && map_alias_expr_safe(collection, root)
+                && step
+                    .as_ref()
+                    .is_none_or(|step| map_alias_expr_safe(step, root))
+                && body
+                    .iter()
+                    .all(|stmt| map_alias_stmt_safe(stmt, root))
+        }
+        // A binding is safe when its initializer cannot alias the hoisted map.
+        // Rejecting the root's Rust spelling also prevents a nested declaration
+        // from shadowing the storage borrow introduced by the fast path.
+        TStmt::Let {
+            name,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } => {
+            mangle(name) != root.rust_name()
+                && gc_promotion.is_none()
+                && !*gc_transferred
+                && map_alias_expr_safe(init, root)
+        }
         TStmt::ExprStmt(init) => map_alias_expr_safe(init, root),
         TStmt::Assign { place, value, .. } => {
             let place_safe = match place {
@@ -209,20 +323,169 @@ fn map_alias_stmt_safe(stmt: &TStmt, root: &TLocal) -> bool {
     }
 }
 
+
+/// Prove that a map local still owns its sole backing `Arc` before the loop.
+/// A mutable binding is not enough: `copy()`/`~` and an unknown call can leave
+/// another owner alive, making an in-loop `make_mut` materially different.
+/// The proof starts only at a fresh map literal and then accepts the same
+/// closed read/mutation grammar used for the loop body. Unknown control flow
+/// or an aliasing expression drops the proof permanently.
+fn map_root_unique_before(stmts: &[TStmt], root: &TLocal) -> bool {
+    let mut unique = false;
+    for stmt in stmts {
+        if let TStmt::Let {
+            name,
+            kw,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } = stmt
+        {
+            if mangle(name) == root.rust_name() {
+                unique = *kw == "let mut"
+                    && gc_promotion.is_none()
+                    && !*gc_transferred
+                    && matches!(init.ty, Type::Map { .. })
+                    && matches!(init.kind, TExprKind::MapLit(_))
+                    && map_alias_expr_safe(init, root);
+                continue;
+            }
+        }
+        if unique && !map_alias_stmt_safe(stmt, root) {
+            unique = false;
+        }
+    }
+    unique
+}
+
 fn map_hoist_root(
     source: &TExpr,
     collection: &TExpr,
     step: Option<&TExpr>,
     body: &[TStmt],
+    unique_root: Option<&TLocal>,
 ) -> Option<TLocal> {
+    let root = map_mutation_root(body)?;
+    if !unique_root.is_some_and(|proven| same_local(proven, &root)) {
+        return None;
+    }
+    if !map_alias_expr_safe(source, &root)
+        || !map_alias_expr_safe(collection, &root)
+        || step.is_some_and(|step| !map_alias_expr_safe(step, &root))
+        || !body.iter().all(|stmt| map_alias_stmt_safe(stmt, &root))
+    {
+        return None;
+    }
+    Some(root)
+}
+
+fn list_root_local(expr: &TExpr) -> Option<TLocal> {
+    match &expr.kind {
+        TExprKind::Local(local)
+            if local.mutable
+                && !local.deref
+                && !local.is_persistent()
+                && matches!(expr.ty, Type::List(_)) =>
+        {
+            Some(local.clone())
+        }
+        _ => None,
+    }
+}
+
+fn list_alias_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        TExprKind::Local(local) => !local.deref && !same_local(local, root),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            list_alias_expr_safe(lhs, root) && list_alias_expr_safe(rhs, root)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::MaterializeView(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::RawOf(operand) => list_alias_expr_safe(operand, root),
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            ..
+        } => {
+            if let Some(local) = list_root_local(base) {
+                same_local(&local, root) && !*is_map && list_alias_expr_safe(index, root)
+            } else {
+                list_alias_expr_safe(base, root) && list_alias_expr_safe(index, root)
+            }
+        }
+        TExprKind::ListLit(items) => items.iter().all(|item| list_alias_expr_safe(item, root)),
+        _ => false,
+    }
+}
+
+fn list_alias_cond_safe(cond: &TIfCond, root: &TLocal) -> bool {
+    match cond {
+        TIfCond::Plain(expr) | TIfCond::IsNone { subj: expr } => {
+            list_alias_expr_safe(expr, root)
+        }
+        TIfCond::And { left, right } => {
+            list_alias_cond_safe(left, root) && list_alias_cond_safe(right, root)
+        }
+        // Pattern bindings can introduce an alias with a scope that is not
+        // represented by the statement-local proof. Keep this boundary
+        // conservative until those bindings carry explicit ownership facts.
+        TIfCond::IfLet { .. } => false,
+        TIfCond::Matches { subj, .. } => list_alias_expr_safe(subj, root),
+        TIfCond::WithPrelude { prelude, cond } => {
+            prelude.iter().all(|stmt| list_alias_stmt_safe(stmt, root))
+                && list_alias_cond_safe(cond, root)
+        }
+    }
+}
+
+fn list_mutation_root_in_stmt(stmt: &TStmt) -> Option<TLocal> {
+    match stmt {
+        TStmt::IndexAssign {
+            base,
+            is_map: false,
+            ..
+        } => list_root_local(base),
+        TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let then_root = list_mutation_root(then_body);
+            let else_root = else_body
+                .as_deref()
+                .and_then(list_mutation_root);
+            match (then_root, else_root) {
+                (Some(left), Some(right)) if !same_local(&left, &right) => None,
+                (Some(root), _) | (_, Some(root)) => Some(root),
+                (None, None) => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn list_mutation_root(body: &[TStmt]) -> Option<TLocal> {
     let mut root = None;
     for stmt in body {
-        let candidate = match stmt {
-            TStmt::IndexAssign { base, is_map, .. } if *is_map => map_root_local(base),
-            TStmt::ExprStmt(expr) => direct_map_mutation_root(expr),
-            _ => None,
-        };
-        let Some(candidate) = candidate else {
+        let Some(candidate) = list_mutation_root_in_stmt(stmt) else {
             continue;
         };
         match &root {
@@ -231,11 +494,80 @@ fn map_hoist_root(
             _ => {}
         }
     }
-    let root = root?;
-    if !map_alias_expr_safe(source, &root)
-        || !map_alias_expr_safe(collection, &root)
-        || step.is_some_and(|step| !map_alias_expr_safe(step, &root))
-        || !body.iter().all(|stmt| map_alias_stmt_safe(stmt, &root))
+    root
+}
+
+fn list_alias_stmt_safe(stmt: &TStmt, root: &TLocal) -> bool {
+    match stmt {
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) | TStmt::Break(_) | TStmt::Continue(_) => true,
+        TStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            list_alias_cond_safe(cond, root)
+                && then_body.iter().all(|stmt| list_alias_stmt_safe(stmt, root))
+                && else_body.as_ref().map_or(true, |body| {
+                    body.iter().all(|stmt| list_alias_stmt_safe(stmt, root))
+                })
+        }
+        TStmt::IndexAssign {
+            base,
+            index,
+            is_map: false,
+            value,
+            ..
+        } => {
+            list_root_local(base).is_some_and(|local| same_local(&local, root))
+                && list_alias_expr_safe(index, root)
+                && list_alias_expr_safe(value, root)
+        }
+        _ => false,
+    }
+}
+
+fn list_root_unique_before(stmts: &[TStmt], root: &TLocal) -> bool {
+    let mut unique = false;
+    for stmt in stmts {
+        if let TStmt::Let {
+            name,
+            kw,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } = stmt
+        {
+            if mangle(name) == root.rust_name() {
+                unique = *kw == "let mut"
+                    && gc_promotion.is_none()
+                    && !*gc_transferred
+                    && matches!(init.ty, Type::List(_))
+                    && matches!(init.kind, TExprKind::ListLit(_));
+                continue;
+            }
+        }
+        if unique && !list_alias_stmt_safe(stmt, root) {
+            unique = false;
+        }
+    }
+    unique
+}
+
+fn list_hoist_root(
+    source: &TExpr,
+    collection: &TExpr,
+    step: Option<&TExpr>,
+    body: &[TStmt],
+    unique_root: Option<&TLocal>,
+) -> Option<TLocal> {
+    let root = list_mutation_root(body)?;
+    if !unique_root.is_some_and(|proven| same_local(proven, &root))
+        || !list_alias_expr_safe(source, &root)
+        || !list_alias_expr_safe(collection, &root)
+        || step.is_some_and(|step| !list_alias_expr_safe(step, &root))
+        || !body.iter().all(|stmt| list_alias_stmt_safe(stmt, &root))
     {
         return None;
     }
@@ -281,8 +613,7 @@ fn same_pure_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
         (TExprKind::FloatLit(a), TExprKind::FloatLit(b)) => a == b,
         (TExprKind::BoolLit(a), TExprKind::BoolLit(b)) => a == b,
         (TExprKind::CharLit(a), TExprKind::CharLit(b)) => a == b,
-        (TExprKind::Unit, TExprKind::Unit)
-        | (TExprKind::DefaultLit, TExprKind::DefaultLit) => true,
+        (TExprKind::Unit, TExprKind::Unit) | (TExprKind::DefaultLit, TExprKind::DefaultLit) => true,
         (TExprKind::ConstRef(a), TExprKind::ConstRef(b)) => a == b,
         (TExprKind::Local(a), TExprKind::Local(b)) => a == b,
         (TExprKind::StrLit(a), TExprKind::StrLit(b)) => {
@@ -296,8 +627,14 @@ fn same_pure_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
                 })
         }
         (
-            TExprKind::Unary { op: a, operand: left },
-            TExprKind::Unary { op: b, operand: right },
+            TExprKind::Unary {
+                op: a,
+                operand: left,
+            },
+            TExprKind::Unary {
+                op: b,
+                operand: right,
+            },
         ) => a == b && same_pure_expr(left, right, root),
         (TExprKind::Clone(left), TExprKind::Clone(right))
         | (TExprKind::ExplicitCopy(left), TExprKind::ExplicitCopy(right)) => {
@@ -349,9 +686,7 @@ fn same_pure_key_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
 
 fn strip_copy_wrappers(expr: &TExpr) -> &TExpr {
     match &expr.kind {
-        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
-            strip_copy_wrappers(inner)
-        }
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => strip_copy_wrappers(inner),
         _ => expr,
     }
 }
@@ -411,6 +746,110 @@ fn map_update_shape<'a>(
     Some((root, *op, default, rhs))
 }
 
+fn string_bytes_init_source(init: &TExpr) -> Option<&TLocal> {
+    let TExprKind::OrFallback { value, fallback } = &init.kind else {
+        return None;
+    };
+    if !matches!(fallback, TOrFallback::Panic { .. }) {
+        return None;
+    }
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::StringFromBytes,
+        args,
+    } = &value.kind
+    else {
+        return None;
+    };
+    if !args.is_empty() {
+        return None;
+    }
+    match &recv.kind {
+        TExprKind::Local(local) => Some(local),
+        _ => None,
+    }
+}
+
+fn map_update_expr_mentions_local(expr: &TExpr, rust_name: &str) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..) => false,
+        TExprKind::Local(local) => local.rust_name() == rust_name,
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand) => {
+            map_update_expr_mentions_local(operand, rust_name)
+        }
+        TExprKind::Binary { lhs, rhs, .. } => {
+            map_update_expr_mentions_local(lhs, rust_name)
+                || map_update_expr_mentions_local(rhs, rust_name)
+        }
+        // `map_update_expr_safe` rejects every other expression form. Keep
+        // this visitor conservative if that admission grammar grows later.
+        _ => true,
+    }
+}
+
+fn next_non_marker_stmt(stmts: &[TStmt], index: usize) -> Option<usize> {
+    let mut next = index.saturating_add(1);
+    while matches!(stmts.get(next), Some(TStmt::SourceSpan(_) | TStmt::LineMarker(_))) {
+        next += 1;
+    }
+    (next < stmts.len()).then_some(next)
+}
+
+/// Find a dead decoded string immediately consumed by the generic map update.
+/// The source local carries the lowering proof that no sibling reads the String
+/// after this statement; the TIR shape check below supplies the map/key proof.
+fn string_bytes_map_fusion(stmts: &[TStmt], index: usize) -> Option<(usize, &TLocal)> {
+    let TStmt::Let { name, init, .. } = stmts.get(index)? else {
+        return None;
+    };
+    let source = string_bytes_init_source(init)?;
+    let next = next_non_marker_stmt(stmts, index)?;
+    let TStmt::IndexAssign {
+        base,
+        index: key,
+        is_map: true,
+        value,
+        ..
+    } = &stmts[next]
+    else {
+        return None;
+    };
+    let TExprKind::Local(key_local) = &key.kind else {
+        return None;
+    };
+    if key_local.rust_name() != mangle(name)
+        || !key_local
+            .string_bytes_source
+            .as_deref()
+            .is_some_and(|candidate| same_local(candidate, source))
+    {
+        return None;
+    }
+    let Type::Map { key: key_ty, .. } = &base.ty else {
+        return None;
+    };
+    if **key_ty != Type::String {
+        return None;
+    }
+    let (_, _, default, delta) = map_update_shape(base, key, value)?;
+    if map_update_expr_mentions_local(default, &key_local.rust_name())
+        || map_update_expr_mentions_local(delta, &key_local.rust_name())
+    {
+        return None;
+    }
+    Some((next, source))
+}
+
+
 /// A split callback cannot carry a Jet `return`, `break`, `next`, or deferred
 /// control-flow lowering out through a Rust closure. Keep the admitted body
 /// subset structural and conservative; unsupported bodies retain the ordinary
@@ -454,22 +893,19 @@ fn split_callback_expr_safe(expr: &TExpr) -> bool {
                 && matches!(fallback, TOrFallback::Value(fallback) if split_callback_expr_safe(fallback))
         }
         TExprKind::BuiltinMethod { recv, args, .. } => {
-            split_callback_expr_safe(recv)
-                && args.iter().all(split_callback_expr_safe)
+            split_callback_expr_safe(recv) && args.iter().all(split_callback_expr_safe)
         }
         TExprKind::Index { base, index, .. } => {
             split_callback_expr_safe(base) && split_callback_expr_safe(index)
         }
-        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
-            split_callback_expr_safe(key) && split_callback_expr_safe(value)
-        }),
+        TExprKind::MapLit(entries) => entries
+            .iter()
+            .all(|(key, value)| split_callback_expr_safe(key) && split_callback_expr_safe(value)),
         TExprKind::ListLit(items) => items.iter().all(split_callback_expr_safe),
         TExprKind::TupleLit { fields, .. } => fields
             .iter()
             .all(|(_, value)| split_callback_expr_safe(value)),
-        TExprKind::Call { args, .. } => args
-            .iter()
-            .all(|arg| split_callback_expr_safe(&arg.value)),
+        TExprKind::Call { args, .. } => args.iter().all(|arg| split_callback_expr_safe(&arg.value)),
         _ => false,
     }
 }
@@ -487,10 +923,7 @@ fn split_callback_stmt_safe(stmt: &TStmt) -> bool {
             place_safe && split_callback_expr_safe(value)
         }
         TStmt::IndexAssign {
-            base,
-            index,
-            value,
-            ..
+            base, index, value, ..
         } => {
             split_callback_expr_safe(base)
                 && split_callback_expr_safe(index)
@@ -501,7 +934,10 @@ fn split_callback_stmt_safe(stmt: &TStmt) -> bool {
     }
 }
 
-fn split_callback_parts<'a>(collection: &'a TExpr, body: &'a [TStmt]) -> Option<(&'a TExpr, &'a TExpr)> {
+fn split_callback_parts<'a>(
+    collection: &'a TExpr,
+    body: &'a [TStmt],
+) -> Option<(&'a TExpr, &'a TExpr)> {
     let TExprKind::BuiltinMethod {
         recv,
         op: TBuiltinOp::Split,
@@ -524,14 +960,26 @@ fn split_callback_parts<'a>(collection: &'a TExpr, body: &'a [TStmt]) -> Option<
 
 /// The AOT Reader-region fast path is a use-site optimization for the same
 /// sema-resolved fixed-width/immediate-outcome capability published by the
-/// operation table. It admits one direct byte read per range iteration and
-/// rejects every unknown body shape; omission costs speed, never safety.
+/// operation table. It admits one direct fixed-width load per range iteration
+/// and rejects every unknown body shape; omission costs speed, never safety.
 struct ReaderRegionPlan {
     reader: TLocal,
     read_name: String,
+    read: TReaderFixedWidth,
 }
 
-fn reader_region_read_root(expr: &TExpr) -> Option<TLocal> {
+/// `InlineRange<Int>` is a checked refinement of the same `i64` carrier as
+/// `Int`. It is safe for the region helper, while an `IntN` range needs a
+/// width-aware conversion that this emitter must not invent.
+fn reader_region_default_int_carrier(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Int => true,
+        Type::InlineRange { base, .. } => matches!(base.without_user_tags(), Type::Int),
+        _ => false,
+    }
+}
+
+fn reader_region_read_root(expr: &TExpr) -> Option<(TLocal, TReaderFixedWidth)> {
     let TExprKind::OrFallback { value, .. } = &expr.kind else {
         return None;
     };
@@ -546,22 +994,26 @@ fn reader_region_read_root(expr: &TExpr) -> Option<TLocal> {
     }
     let TOutcomeFastPath::FixedRead {
         buffer: TOutcomeFastBuffer::Reader,
-        width: 1,
+        width,
         ..
     } = op.outcome_fast_path()?
     else {
         return None;
     };
+    let read = op.reader_fixed_width()?;
+    if read.width() != width {
+        return None;
+    }
     let TExprKind::Local(reader) = &recv.kind else {
         return None;
     };
     if reader.deref || !reader.mutable || reader.is_persistent() {
         return None;
     }
-    Some(reader.clone())
+    Some((reader.clone(), read))
 }
 
-fn reader_region_read_stmt(stmt: &TStmt) -> Option<(&str, TLocal)> {
+fn reader_region_read_stmt(stmt: &TStmt) -> Option<(&str, TLocal, TReaderFixedWidth)> {
     let TStmt::Let {
         name,
         init,
@@ -575,7 +1027,7 @@ fn reader_region_read_stmt(stmt: &TStmt) -> Option<(&str, TLocal)> {
     if gc_promotion.is_some() || *gc_transferred {
         return None;
     }
-    reader_region_read_root(init).map(|reader| (name.as_str(), reader))
+    reader_region_read_root(init).map(|(reader, read)| (name.as_str(), reader, read))
 }
 
 fn reader_region_expr_safe(expr: &TExpr, reader: &TLocal) -> bool {
@@ -612,9 +1064,9 @@ fn reader_region_expr_safe(expr: &TExpr, reader: &TLocal) -> bool {
         TExprKind::Call { args, .. } => args
             .iter()
             .all(|arg| reader_region_expr_safe(&arg.value, reader)),
-        TExprKind::CoreCall { args, .. } => args
-            .iter()
-            .all(|arg| reader_region_expr_safe(arg, reader)),
+        TExprKind::CoreCall { args, .. } => {
+            args.iter().all(|arg| reader_region_expr_safe(arg, reader))
+        }
         TExprKind::BuiltinMethod { recv, args, .. }
         | TExprKind::HandleMethod { recv, args, .. } => {
             reader_region_expr_safe(recv, reader)
@@ -656,10 +1108,12 @@ fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bo
             gc_promotion,
             gc_transferred,
             ..
-        } if name == read_name => reader_region_read_root(init)
-            .is_some_and(|candidate| same_local(&candidate, reader))
-            && gc_promotion.is_none()
-            && !*gc_transferred,
+        } if name == read_name => {
+            reader_region_read_root(init)
+                .is_some_and(|(candidate, _)| same_local(&candidate, reader))
+                && gc_promotion.is_none()
+                && !*gc_transferred
+        }
         TStmt::Let {
             name,
             init,
@@ -687,27 +1141,41 @@ fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bo
 fn reader_region_plan(body: &[TStmt]) -> Option<ReaderRegionPlan> {
     let mut candidate = None;
     for stmt in body {
-        if let Some((read_name, reader)) = reader_region_read_stmt(stmt) {
+        if let Some((read_name, reader, read)) = reader_region_read_stmt(stmt) {
             if candidate.is_some() {
                 return None;
             }
-            candidate = Some((read_name.to_string(), reader));
+            candidate = Some((read_name.to_string(), reader, read));
         }
     }
-    let (read_name, reader) = candidate?;
+    let (read_name, reader, read) = candidate?;
     if !body
         .iter()
         .all(|stmt| reader_region_stmt_safe(stmt, &reader, &read_name))
     {
         return None;
     }
-    Some(ReaderRegionPlan { reader, read_name })
+    Some(ReaderRegionPlan {
+        reader,
+        read_name,
+        read,
+    })
+}
+
+fn reader_region_load(read: TReaderFixedWidth, chunk: &str) -> String {
+    read.emit_load(|offset| {
+        if read.width() == 1 {
+            chunk.to_string()
+        } else {
+            format!("{chunk}[{offset}]")
+        }
+    })
 }
 
 fn emit_reader_region_stmts(
     body: &[TStmt],
     plan: &ReaderRegionPlan,
-    byte: &str,
+    chunk: &str,
     cx: &Cx,
     out: &mut String,
     indent: usize,
@@ -727,17 +1195,18 @@ fn emit_reader_region_stmts(
                 && gc_promotion.is_none()
                 && !*gc_transferred
                 && reader_region_read_root(init)
-                    .is_some_and(|reader| same_local(&reader, &plan.reader))
+                    .is_some_and(|(reader, _)| same_local(&reader, &plan.reader))
             {
                 let pad = "    ".repeat(indent);
                 let ty_clause = emit_let_ty_clause(let_ty, cx);
+                let value = reader_region_load(plan.read, chunk);
                 out.push_str(&format!(
                     "{}{} {}{} = {};\n",
                     pad,
                     kw,
                     mangle(name),
                     ty_clause,
-                    byte
+                    value
                 ));
                 continue;
             }
@@ -760,11 +1229,13 @@ fn emit_reader_region_range(
     if !matches!(&start.kind, TExprKind::IntLit(0, _)) {
         return false;
     }
-    // `jet_reader_region_bounds` accepts the language's default `Int` count.
-    // Fixed-width range counters keep the ordinary emitter until a matching
-    // checked region representation exists; this avoids an emitter-side cast
-    // changing the source range's overflow behavior.
-    if !matches!(&start.ty, Type::Int) || !matches!(&end.ty, Type::Int) {
+    // `jet_reader_region_bounds` accepts the language's default `Int` carrier.
+    // Inline ranges over that carrier are already checked refinements and are
+    // erased to the same `i64`; fixed-width counters keep the ordinary emitter
+    // until a matching checked region representation exists.
+    if !reader_region_default_int_carrier(&start.ty)
+        || !reader_region_default_int_carrier(&end.ty)
+    {
         return false;
     }
     let Some(plan) = reader_region_plan(body) else {
@@ -786,32 +1257,84 @@ fn emit_reader_region_range(
     let region_count = mangle_generated("reader_region_count");
     let region_start = mangle_generated("reader_region_start");
     let region_end = mangle_generated("reader_region_end");
-    let region_byte = mangle_generated("reader_region_byte");
+    let region_slice = mangle_generated("reader_region_slice");
+    let region_chunk = mangle_generated("reader_region_chunk");
     let lbl = tir_label_prefix(label);
     let loop_var = mangle(var);
+    let unused_index = var == "_";
+    let width = plan.read.width();
+    let region_bounds = if width == 1 {
+        format!(
+            "{}jet_reader_region_bounds(&{}, {})",
+            cx.root_prefix, reader, region_count
+        )
+    } else {
+        format!(
+            "({}).checked_mul({}).and_then(|bytes| {}jet_reader_region_bounds(&{}, bytes))",
+            region_count, width, cx.root_prefix, reader
+        )
+    };
+    let item_iter = if width == 1 {
+        "iter().copied()".to_string()
+    } else {
+        format!("chunks_exact({width})")
+    };
 
     out.push_str(&format!("{}{{\n", pad));
     out.push_str(&format!("{}let {} = {};\n", inner_pad, region_count, end));
     out.push_str(&format!(
-        "{}if let Some(({}, {})) = {}jet_reader_region_bounds(&{}, {}) {{\n",
-        inner_pad, region_start, region_end, cx.root_prefix, reader, region_count
+        "{}if let Some(({}, {})) = {} {{\n",
+        inner_pad,
+        region_start,
+        region_end,
+        region_bounds,
     ));
+    // The bounds proof creates one immutable slice view. Keep that view as the
+    // loop's only input so the hot read is a plain slice iteration; the cursor
+    // remains available for the one post-loop commit below.
     out.push_str(&format!(
-        "{}{}for ({}, {}) in ({}..{}).zip(({}).buf[{}..{}].iter().copied()) {{\n",
-        body_pad, lbl, loop_var, region_byte, start, region_count, reader, region_start, region_end
+        "{}let {} = &({}).buf[{}..{}];\n",
+        body_pad, region_slice, reader, region_start, region_end
     ));
-    emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
+    if unused_index {
+        out.push_str(&format!(
+            "{}{}for {} in {}.{} {{\n",
+            body_pad, lbl, region_chunk, region_slice, item_iter
+        ));
+    } else {
+        out.push_str(&format!(
+            "{}{}for ({}, {}) in ({}..{}).zip({}.{}) {{\n",
+            body_pad,
+            lbl,
+            loop_var,
+            region_chunk,
+            start,
+            region_count,
+            region_slice,
+            item_iter
+        ));
+    }
+    emit_scalar_loop_barrier(
+        cx,
+        out,
+        indent + 3,
+        (!unused_index).then_some(loop_var.as_str()),
+    );
     emit_reader_region_stmts(
         body,
         &plan,
-        &region_byte,
+        &region_chunk,
         cx,
         out,
         indent + 3,
         active_deferred_closes,
     );
     out.push_str(&format!("{}}}\n", body_pad));
-    out.push_str(&format!("{}{}.pos = {};\n", body_pad, reader, region_end));
+    // The region proof excludes reader observers, aliases, and early exits from
+    // the body. Commit the cursor once after the direct slice has been consumed;
+    // keeping this write out of the loop is what lets the hot load stay a plain
+    // bounded slice iteration.
+    out.push_str(&format!("{}{}.pos = {};\n", inner_pad, reader, region_end));
     out.push_str(&format!("{}}} else {{\n", inner_pad));
     out.push_str(&format!(
         "{}{}for {} in ({}..{}) {{\n",
@@ -825,11 +1348,7 @@ fn emit_reader_region_range(
     true
 }
 
-fn emit_split_separator(
-    sep: &TExpr,
-    cx: &Cx,
-    active_deferred_closes: &[ActiveCleanup],
-) -> String {
+fn emit_split_separator(sep: &TExpr, cx: &Cx, active_deferred_closes: &[ActiveCleanup]) -> String {
     if let TExprKind::StrLit(parts) = &sep.kind {
         let mut literal = String::new();
         if parts.iter().all(|part| match part {
@@ -867,7 +1386,7 @@ fn prelude_compound_call(
     let float = matches!(ty, Type::Float | Type::Float32);
     Some(match op {
         BinOp::Add if matches!(ty, Type::String) => {
-            format!("jet_string_concat(&({place}), &({value}))")
+            format!("{root_prefix}jet_string_concat_hot!(&({place}), &({value}))")
         }
         BinOp::Add if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) => {
             format!("{root_prefix}jet_decimal_add(&({place}), &({value}))")
@@ -879,25 +1398,25 @@ fn prelude_compound_call(
             format!("{root_prefix}jet_decimal_mul(&({place}), &({value}))")
         }
         BinOp::Add if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_add({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_add_hot!(({place}), ({value}))")
         }
         BinOp::Sub if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_sub({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_sub_hot!(({place}), ({value}))")
         }
         BinOp::Mul if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_mul({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_mul_hot!(({place}), ({value}))")
         }
         BinOp::Div if matches!(ty, Type::Int) => {
             format!("{root_prefix}jet_std::jet_int_div({place}, {value}, {file:?}, {line})")
         }
         BinOp::BitAnd if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_bit_and({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_bit_and_hot!({place}, {value})")
         }
         BinOp::BitOr if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_bit_or({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_bit_or_hot!({place}, {value})")
         }
         BinOp::BitXor if matches!(ty, Type::Int) => {
-            format!("{root_prefix}jet_std::jet_int_bit_xor({place}, {value})")
+            format!("{root_prefix}jet_std::jet_int_bit_xor_hot!({place}, {value})")
         }
         BinOp::Shl if matches!(ty, Type::Int) => {
             format!("{root_prefix}jet_std::jet_int_shl({place}, {value}, {file:?}, {line})")
@@ -947,8 +1466,76 @@ fn emit_tir_stmts_inline(
     indent: usize,
     active_cleanups: &mut Vec<ActiveCleanup>,
 ) {
-    for s in stmts {
-        emit_tir_stmt(s, cx, out, indent, active_cleanups);
+    let mut index = 0;
+    let mut source_line = 0;
+    while index < stmts.len() {
+        let s = &stmts[index];
+        match s {
+            TStmt::SourceSpan(span) => {
+                source_line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+            }
+            TStmt::LineMarker(line) => source_line = *line as u32,
+            _ => {}
+        }
+        if let Some((next, bytes_source)) = string_bytes_map_fusion(stmts, index) {
+            // Keep source markers between the removed binding and the fused
+            // assignment. They remain useful to the debugger and do not alter
+            // the generated execution shape.
+            let error_line = source_line;
+            for marker_index in index + 1..next {
+                let marker = &stmts[marker_index];
+                if let TStmt::SourceSpan(span) = marker {
+                    source_line =
+                        crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                } else if let TStmt::LineMarker(line) = marker {
+                    source_line = *line as u32;
+                }
+                emit_tir_stmt_with_collection_proof(
+                    marker,
+                    cx,
+                    out,
+                    indent,
+                    active_cleanups,
+                    None,
+                    None,
+                    None,
+                );
+            }
+            emit_tir_stmt_with_collection_proof(
+                &stmts[next],
+                cx,
+                out,
+                indent,
+                active_cleanups,
+                None,
+                None,
+                Some((bytes_source, error_line)),
+            );
+            index = next + 1;
+            continue;
+        }
+        let unique_map_root = match s {
+            TStmt::ForIn { body, .. } => {
+                map_mutation_root(body).filter(|root| map_root_unique_before(&stmts[..index], root))
+            }
+            _ => None,
+        };
+        let unique_list_root = match s {
+            TStmt::ForIn { body, .. } => list_mutation_root(body)
+                .filter(|root| list_root_unique_before(&stmts[..index], root)),
+            _ => None,
+        };
+        emit_tir_stmt_with_collection_proof(
+            s,
+            cx,
+            out,
+            indent,
+            active_cleanups,
+            unique_map_root.as_ref(),
+            unique_list_root.as_ref(),
+            None,
+        );
+        index += 1;
     }
 }
 
@@ -970,26 +1557,17 @@ fn emit_tir_stmts_nested(
 /// legally turn the surrounding loop into a packed vector loop. Range indices
 /// are shadowed with the unchanged returned value; other loop kinds use a unit
 /// token and therefore never consume or alter the user's binding.
-fn emit_scalar_loop_barrier(
-    cx: &Cx,
-    out: &mut String,
-    indent: usize,
-    loop_var: Option<&str>,
-) {
+fn emit_scalar_loop_barrier(cx: &Cx, out: &mut String, indent: usize, loop_var: Option<&str>) {
     if !cx.scalar_function.get() {
         return;
     }
     let pad = "    ".repeat(indent);
-    out.push_str(&format!(
-        "{pad}// D-SIMD3=B: #Scalar scalar-loop barrier\n"
-    ));
+    out.push_str(&format!("{pad}// D-SIMD3=B: #Scalar scalar-loop barrier\n"));
     match loop_var {
         Some(loop_var) => out.push_str(&format!(
             "{pad}let {loop_var} = jet_scalar_loop_barrier({loop_var});\n"
         )),
-        None => out.push_str(&format!(
-            "{pad}let _ = jet_scalar_loop_barrier(());\n"
-        )),
+        None => out.push_str(&format!("{pad}let _ = jet_scalar_loop_barrier(());\n")),
     }
 }
 
@@ -1460,6 +2038,28 @@ fn emit_tir_stmt(
     out: &mut String,
     indent: usize,
     active_deferred_closes: &mut Vec<ActiveCleanup>,
+) {
+    emit_tir_stmt_with_collection_proof(
+        s,
+        cx,
+        out,
+        indent,
+        active_deferred_closes,
+        None,
+        None,
+        None,
+    );
+}
+
+fn emit_tir_stmt_with_collection_proof(
+    s: &TStmt,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &mut Vec<ActiveCleanup>,
+    unique_map_root: Option<&TLocal>,
+    unique_list_root: Option<&TLocal>,
+    _string_bytes_source: Option<(&TLocal, u32)>,
 ) {
     let pad = "    ".repeat(indent);
     match s {
@@ -2108,7 +2708,10 @@ fn emit_tir_stmt(
         } => {
             let lbl = tir_label_prefix(label);
             if !cx.scalar_function.get() {
-                if let Some(facts) = auto_vectorization.as_ref() {
+                if let Some(facts) = auto_vectorization
+                    .as_ref()
+                    .filter(|facts| facts.no_cross_iteration_deps)
+                {
                     out.push_str(&format!(
                         "{pad}/* jet-auto-vectorize-loop: element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n",
                         facts.element_type.name(),
@@ -2342,9 +2945,7 @@ fn emit_tir_stmt(
                     }
                     _ => emit_expr_with_cleanups(base, cx, active_deferred_closes),
                 }
-            } else if is_compute_view_mut(&base.ty)
-                || is_float_view(&base.ty)
-                || is_view(&base.ty)
+            } else if is_compute_view_mut(&base.ty) || is_float_view(&base.ty) || is_view(&base.ty)
             {
                 emit_expr_with_cleanups(base, cx, active_deferred_closes)
             } else {
@@ -2355,21 +2956,39 @@ fn emit_tir_stmt(
                 if let Some((_, op, default, delta)) = map_update_shape(base, index, value) {
                     let default = emit_expr_with_cleanups(default, cx, active_deferred_closes);
                     let delta = emit_expr_with_cleanups(delta, cx, active_deferred_closes);
-                    let helper = match op {
-                        BinOp::Add => "jet_int_add",
-                        BinOp::Sub => "jet_int_sub",
-                        BinOp::Mul => "jet_int_mul",
+                    let helper_name = match op {
+                        BinOp::Add => "add",
+                        BinOp::Sub => "sub",
+                        BinOp::Mul => "mul",
                         _ => unreachable!("map update shape only admits integer add/sub/mul"),
                     };
-                    let helper = format!("{}jet_std::{helper}", cx.root_prefix);
+                    let helper = format!("{}jet_std::jet_int_{helper_name}_hot!", cx.root_prefix);
                     let old = mangle_generated("map_old");
+                    let string_key = matches!(
+                        &base.ty,
+                        Type::Map { key, .. } if **key == Type::String
+                    );
+                    let map_update = root_path(
+                        cx,
+                        if string_key {
+                            "jet_map_update_string"
+                        } else {
+                            "jet_map_update"
+                        },
+                    );
+                    let key = if string_key {
+                        format!("&({i})")
+                    } else {
+                        format!("({i}).clone()")
+                    };
                     out.push_str(&format!(
-                        "{pad}{{ jet_map_update(&mut ({b}), ({i}).clone(), |{old}| {{ {helper}({old}.cloned().unwrap_or_else(|| {default}), {delta}) }}); }}\n"
+                        "{pad}{{ {map_update}(&mut ({b}), {key}, |{old}| {{ {helper}({old}.cloned().unwrap_or_else(|| {default}), {delta}) }}); }}\n"
                     ));
                 } else {
                     let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
+                    let map_insert = root_path(cx, "jet_map_insert");
                     out.push_str(&jet_format!(
-                        "{pad}{{ let {jet_prefix}v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), {jet_prefix}v); }}\n",
+                        "{pad}{{ let {jet_prefix}v = {v}; {map_insert}(&mut ({b}), ({i}).clone(), {jet_prefix}v); }}\n",
                     ));
                 }
             } else if *uninit {
@@ -2537,12 +3156,23 @@ fn emit_tir_stmt(
                 stride_suffix = String::new();
                 source_rust.as_str()
             };
-            let map_hoist = map_hoist_root(source, collection, step.as_ref(), body);
-            if let Some(root) = &map_hoist {
-                out.push_str(&format!(
-                    "{pad}{{ let mut {name} = jet_map_make_mut(&mut ({name}));\n",
-                    name = root.rust_name(),
-                ));
+            let map_hoist =
+                map_hoist_root(source, collection, step.as_ref(), body, unique_map_root);
+            let list_hoist =
+                list_hoist_root(source, collection, step.as_ref(), body, unique_list_root);
+            let collection_hoist = map_hoist
+                .map(|root| (true, root))
+                .or_else(|| list_hoist.map(|root| (false, root)));
+            if let Some((is_map, root)) = &collection_hoist {
+                let name = root.rust_name();
+                if *is_map {
+                    out.push_str(&format!(
+                        "{pad}{{ let mut {name} = {make_mut}(&mut ({name}));\n",
+                        make_mut = root_path(cx, "jet_map_make_mut"),
+                    ));
+                } else {
+                    out.push_str(&format!("{pad}{{ let mut {name} = &mut *({name});\n",));
+                }
             }
             if method_kind.is_none() && var2.is_none() && step.is_none() {
                 if let Some((recv, sep)) = split_callback_parts(collection, body) {
@@ -2552,20 +3182,11 @@ fn emit_tir_stmt(
                     out.push_str(&format!(
                         "{pad}jet_string_split_for_each(&({recv}), {sep}, |{item}| {{\n"
                     ));
-                    out.push_str(&format!(
-                        "{pad}    let {} = {item};\n",
-                        mangle(var)
-                    ));
+                    out.push_str(&format!("{pad}    let {} = {item};\n", mangle(var)));
                     emit_scalar_loop_barrier(cx, out, indent + 1, None);
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 1,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
                     out.push_str(&format!("{pad}}});\n"));
-                    if map_hoist.is_some() {
+                    if collection_hoist.is_some() {
                         out.push_str(&format!("{pad}}}\n"));
                     }
                     return;
@@ -2800,7 +3421,7 @@ fn emit_tir_stmt(
                                 active_deferred_closes,
                             );
                             out.push_str(&format!("{}}}\n", pad));
-                            if map_hoist.is_some() {
+                            if collection_hoist.is_some() {
                                 out.push_str(&format!("{}}}\n", pad));
                             }
                             if stride_wrapper {
@@ -2854,7 +3475,7 @@ fn emit_tir_stmt(
             if needs_extra_close {
                 out.push_str(&format!("{}}}\n", pad));
             }
-            if map_hoist.is_some() {
+            if collection_hoist.is_some() {
                 out.push_str(&format!("{}}}\n", pad));
             }
             if stride_wrapper {
@@ -2886,8 +3507,8 @@ fn emit_tir_stmt(
                 "jet_sentry_scope"
             };
             let gate_guard = format!(
-                "{}jet_mem::{scope}({}, {:?}, {}, \"\")",
-                cx.root_prefix, gate.enabled, gate.file, gate.line,
+                "{}jet_mem::{scope}({}, {:?}, {}, {:?})",
+                cx.root_prefix, gate.enabled, gate.file, gate.line, gate.reason,
             );
             out.push_str(&format!("{}unsafe {{\n", pad));
             out.push_str(&format!("{}    let _jet_sentry = {};\n", pad, gate_guard));

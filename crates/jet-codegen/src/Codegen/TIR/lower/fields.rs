@@ -17,7 +17,7 @@ pub(crate) fn imported_type_owners(bundle: &ProgramBundle, module_idx: usize) ->
         .collect()
 }
 
-fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
+pub(crate) fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
     let mut names = HashSet::new();
     // `Ordering` is NOT listed. It has no source Item because it is declared
     // once per generated crate and imported into every module (`MOD_USE`), so
@@ -93,6 +93,25 @@ fn canonical_nominal_name(
         .rsplit_once('.')
         .map_or(alias.target.as_str(), |(_, leaf)| leaf);
     canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen)
+}
+
+/// Resolve a nominal spelling as written *inside* `module_idx` to the canonical
+/// module-qualified identity of the declaration it names. This is the one
+/// resolution rule -- own declaration, member-list alias, or `alias.Leaf` path
+/// -- shared by field-shape qualification and #2252's runtime projection, so no
+/// engine re-derives an owner by matching table-key suffixes.
+pub(crate) fn canonical_nominal_from(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    name: &str,
+) -> Option<String> {
+    canonical_nominal_name(
+        bundle,
+        module_idx,
+        name,
+        &HashSet::new(),
+        &mut HashSet::new(),
+    )
 }
 
 fn qualify_imported_nominal_name(
@@ -267,79 +286,178 @@ pub(crate) fn register_imported_struct_shapes(
         else {
             continue;
         };
-        let owner = bundle
-            .name_ledger
-            .module_identity(target)
-            .expect("name ledger must contain every loaded module");
-        let qualified = imported_type_name(&owner, &definition.name);
-        let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
-        let target_type_names: HashSet<String> = bundle.modules[target]
-            .items
-            .iter()
-            .flat_map(|item| match item {
-                Item::Struct(definition) => vec![definition.name.clone()],
-                Item::Enum(definition) => vec![definition.name.clone()],
-                Item::UnitFamily(family) => family
-                    .distinct_defs()
-                    .iter()
-                    .map(|member| member.name.clone())
-                    .collect(),
-                Item::Distinct(definition) => vec![definition.name.clone()],
-                _ => Vec::new(),
-            })
-            .collect();
-        let fields = definition
-            .reflection_fields()
-            .map(|field| {
-                (
-                    field.name.clone(),
-                    qualify_imported_type(bundle, target, &owner, &field.ty),
-                )
-            })
-            .collect::<Vec<(String, Type)>>();
-        let reflection_fields = jet_foundation::Reflection::fields(definition)
-            .into_iter()
-            .map(|mut field| {
-                field.ty = qualify_imported_type(bundle, target, &owner, &field.ty);
-                field
-            })
-            .collect::<Vec<_>>();
-        cx.type_names.insert(qualified.clone());
-        cx.foreign_types.insert(qualified.clone(), rust_mod.clone());
-        cx.struct_fields.insert(qualified.clone(), fields.clone());
-        let computed = definition
-            .fields
-            .iter()
-            .filter(|field| field.computed.is_some())
-            .map(|field| field.name.clone())
-            .collect::<HashSet<_>>();
-        if !computed.is_empty() {
-            cx.computed_fields.insert(qualified.clone(), computed);
+        register_struct_shape(cx, bundle, target, definition);
+    }
+}
+
+/// #2252: the module that DECLARES a nominal knows it only by its local leaf,
+/// but its own items are lowered under the canonical owner whenever another
+/// context consumes them (the imported-module pass in `TIR/mod.rs` lowers
+/// `plan.jet`'s methods and generated codecs as `<dir>::plan.jet::ListReport::…`).
+/// A leaf-only shape table cannot answer that owner key, so the structural gate
+/// refused every such method and the default tier deopted on a method the
+/// program plainly declares. Registering the declaring module's own nominals
+/// through the same seam keeps ONE canonical qualified-shape fact per type,
+/// identical to the row a consumer context already holds.
+pub(crate) fn register_own_struct_shapes(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    for item in &bundle.modules[module_idx].items {
+        match item {
+            Item::Struct(definition) => {
+                register_struct_shape(cx, bundle, module_idx, definition);
+            }
+            Item::Enum(definition) if definition.type_params.is_empty() => {
+                register_enum_shape(cx, bundle, module_idx, definition);
+            }
+            _ => {}
         }
-        let (memo_fields, memo_dependencies) =
-            crate::Codegen::Context::memo_facts_for_struct(definition);
-        if !memo_fields.is_empty() {
-            cx.memo_fields.insert(qualified.clone(), memo_fields);
-        }
-        if !memo_dependencies.is_empty() {
-            cx.memo_dependencies
-                .insert(qualified.clone(), memo_dependencies);
-        }
-        cx.reflection_fields
-            .insert(qualified.clone(), reflection_fields);
-        if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
-            cx.cloneable.insert(qualified.clone());
-        }
-        if !definition.type_params.is_empty() {
-            let params = definition
-                .type_params
+    }
+}
+
+/// A generated codec can belong to a private enum just as it can to a private
+/// struct. Keep the variant payloads under the same canonical owner used by
+/// imported calls, so lowering does not depend on export visibility.
+fn register_enum_shape(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    target: usize,
+    definition: &crate::AST::EnumDef,
+) {
+    let owner = bundle
+        .name_ledger
+        .module_identity(target)
+        .expect("name ledger must contain every loaded module");
+    let qualified = imported_type_name(&owner, &definition.name);
+    cx.local_type_identities
+        .insert(definition.name.clone(), qualified.clone());
+    let variants = definition
+        .variants
+        .iter()
+        .map(|variant| {
+            (
+                variant.name.clone(),
+                qualify_variant_payload(bundle, target, &owner, &variant.payload),
+            )
+        })
+        .collect();
+    let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
+    cx.type_names.insert(qualified.clone());
+    cx.foreign_types.insert(qualified.clone(), rust_mod);
+    cx.enum_variants.insert(qualified.clone(), variants);
+    for variant in &definition.variants {
+        cx.variant_owner
+            .entry(variant.name.clone())
+            .or_insert_with(|| qualified.clone());
+    }
+}
+
+fn qualify_variant_payload(
+    bundle: &ProgramBundle,
+    target: usize,
+    owner: &str,
+    payload: &crate::AST::VariantPayload,
+) -> crate::AST::VariantPayload {
+    match payload {
+        crate::AST::VariantPayload::Unit => crate::AST::VariantPayload::Unit,
+        crate::AST::VariantPayload::Single(ty, span) => crate::AST::VariantPayload::Single(
+            qualify_imported_type(bundle, target, owner, ty),
+            *span,
+        ),
+        crate::AST::VariantPayload::Named(fields) => crate::AST::VariantPayload::Named(
+            fields
                 .iter()
-                .map(|param| param.name.clone())
-                .collect::<Vec<_>>();
-            cx.struct_type_params
-                .insert(qualified.clone(), params.iter().cloned().collect());
-            cx.struct_type_param_order.insert(qualified.clone(), params);
-        }
+                .map(|field| {
+                    let mut qualified = field.clone();
+                    qualified.ty = qualify_imported_type(bundle, target, owner, &field.ty);
+                    qualified
+                })
+                .collect(),
+        ),
+    }
+}
+
+/// One canonical nominal row: the shape facts a struct owned by `target` carries
+/// under its module identity. Field and reflection types are qualified through
+/// the same helper the call metadata uses, so nested references share one key.
+fn register_struct_shape(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    target: usize,
+    definition: &crate::AST::StructDef,
+) {
+    let owner = bundle
+        .name_ledger
+        .module_identity(target)
+        .expect("name ledger must contain every loaded module");
+    let qualified = imported_type_name(&owner, &definition.name);
+    cx.local_type_identities
+        .insert(definition.name.clone(), qualified.clone());
+    let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
+    let target_type_names: HashSet<String> = bundle.modules[target]
+        .items
+        .iter()
+        .flat_map(|item| match item {
+            Item::Struct(definition) => vec![definition.name.clone()],
+            Item::Enum(definition) => vec![definition.name.clone()],
+            Item::UnitFamily(family) => family
+                .distinct_defs()
+                .iter()
+                .map(|member| member.name.clone())
+                .collect(),
+            Item::Distinct(definition) => vec![definition.name.clone()],
+            _ => Vec::new(),
+        })
+        .collect();
+    let fields = definition
+        .reflection_fields()
+        .map(|field| {
+            (
+                field.name.clone(),
+                qualify_imported_type(bundle, target, &owner, &field.ty),
+            )
+        })
+        .collect::<Vec<(String, Type)>>();
+    let reflection_fields = jet_foundation::Reflection::fields(definition)
+        .into_iter()
+        .map(|mut field| {
+            field.ty = qualify_imported_type(bundle, target, &owner, &field.ty);
+            field
+        })
+        .collect::<Vec<_>>();
+    cx.type_names.insert(qualified.clone());
+    cx.foreign_types.insert(qualified.clone(), rust_mod);
+    cx.struct_fields.insert(qualified.clone(), fields);
+    let computed = definition
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_some())
+        .map(|field| field.name.clone())
+        .collect::<HashSet<_>>();
+    if !computed.is_empty() {
+        cx.computed_fields.insert(qualified.clone(), computed);
+    }
+    let (memo_fields, memo_dependencies) =
+        crate::Codegen::Context::memo_facts_for_struct(definition);
+    if !memo_fields.is_empty() {
+        cx.memo_fields.insert(qualified.clone(), memo_fields);
+    }
+    if !memo_dependencies.is_empty() {
+        cx.memo_dependencies
+            .insert(qualified.clone(), memo_dependencies);
+    }
+    cx.reflection_fields
+        .insert(qualified.clone(), reflection_fields);
+    if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
+        cx.cloneable.insert(qualified.clone());
+    }
+    if !definition.type_params.is_empty() {
+        let params = definition
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>();
+        cx.struct_type_params
+            .insert(qualified.clone(), params.iter().cloned().collect());
+        cx.struct_type_param_order.insert(qualified, params);
     }
 }
 
@@ -432,6 +550,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "DataColumn"
             | "DataStatus"
             | "DataSummary"
+            | "CSVRow"
             | "Claims"
     );
     if ui_name_collision && cx.type_names.contains(type_name) {
@@ -447,6 +566,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         n if n == Syntax::TYPE_ALLOC_ERROR => {
             matches!(member, "requested_bytes" | "allocator")
         }
+        "TextError" => member == "message",
+        "RangeError" => member == "reason",
         "ProcessResult" | "ProcessReceipt" => matches!(
             member,
             "code"
@@ -494,7 +615,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "StateInfo" => matches!(member, "name" | "path" | "terminal" | "reachable"),
         "EffectInfo" => member == "values",
         "OriginInfo" => {
-            matches!(member, "tracked" | "source" | "line" | "column" | "ambiguity")
+            matches!(
+                member,
+                "tracked" | "source" | "line" | "column" | "ambiguity"
+            )
         }
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
@@ -514,6 +638,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
                 | "is_dir"
                 | "is_symlink"
                 | "kind"
+                | "mode"
         ),
         "WalkEntry" => matches!(member, "path" | "relative" | "is_dir" | "depth"),
         "TempDir" | "TempFile" | "FileLock" => member == "path",
@@ -524,6 +649,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data fields
         // use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
+        "CSVRow" => matches!(member, "fields" | "line"),
         "DataLineOptions" => matches!(
             member,
             "title"
@@ -718,13 +844,30 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     // then does the reserved core shape answer. Codegen must agree with the
     // types sema already committed to; disagreeing is how rustc gets handed
     // Jet's own ill-typed output, which is an internal compiler error (I2).
+    // #2252: an imported nominal's shape row is registered under its DECLARING
+    // module's canonical identity, while the consumer names the same type by an
+    // alias path (`plan.ListReport`) or a bare leaf. Project the spelling
+    // through `imported_type_metadata_name` -- the one name-ledger-derived
+    // resolver every other backend fact (unit labels, quantities, distinct
+    // bases) already reads -- so an imported field answers with its declared
+    // type. Without it the miss fell through to the caller's
+    // `unwrap_or(Type::Int)` and handed rustc `jet_int_to_string(<String>)` for
+    // a `String` field, which is an internal compiler error (I2).
+    let shape_key = |name: &str| -> Option<String> {
+        if cx.struct_fields.contains_key(name) {
+            return Some(name.to_string());
+        }
+        cx.imported_type_metadata_name(name)
+            .filter(|identity| cx.struct_fields.contains_key(identity))
+    };
     if let Type::Apply { name, args } = recv_ty {
-        if let Some(fields) = cx.struct_fields.get(name) {
+        if let Some(key) = shape_key(name) {
+            let fields = cx.struct_fields.get(&key)?;
             let field_ty = fields
                 .iter()
                 .find(|(f, _)| f == field)
                 .map(|(_, t)| t.clone())?;
-            let params = cx.struct_type_param_order.get(name)?;
+            let params = cx.struct_type_param_order.get(&key)?;
             let subst = params
                 .iter()
                 .zip(args)
@@ -742,9 +885,8 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     let Type::Named(name) = recv_ty else {
         return None;
     };
-    if let Some(field_ty) = cx
-        .struct_fields
-        .get(name)
+    if let Some(field_ty) = shape_key(name)
+        .and_then(|key| cx.struct_fields.get(&key))
         .and_then(|fields| fields.iter().find(|(f, _)| f == field))
         .map(|(_, t)| t.clone())
     {
@@ -902,9 +1044,40 @@ pub(crate) fn imported_module_call_target_return(
     alias: &str,
     method: &str,
 ) -> Option<Type> {
-    cx.import_rets
-        .get(&(alias.to_string(), method.to_string()))
-        .map(|declared| module_call_target_return(cx, declared.as_ref()))
+    let declared = cx
+        .import_rets
+        .get(&(alias.to_string(), method.to_string()))?;
+    let direct_c_function = cx.import_mods.get(alias).is_some_and(|module| {
+        cx.direct_c_functions
+            .contains(&format!("{module}::{method}"))
+    });
+    if direct_c_function {
+        // CModule wrappers are emitted with the binding's declared C ABI return
+        // type. They are not Jet callables and must not acquire a hidden `?`.
+        return Some(declared.clone().unwrap_or_else(unit_type));
+    }
+    Some(module_call_target_return(cx, declared.as_ref()))
+}
+
+/// Resolve the source-visible return type of a cross-module target. The
+/// generated callable has the effective Result carrier, but a module call's
+/// `TExpr.ty` is the type the caller wrote and therefore must stay on the
+/// success side until the web/native emitter applies the carrier seam.
+pub(crate) fn module_call_source_return_type_with_args(
+    cx: &Cx,
+    name: &str,
+    type_args: &[Type],
+    args: &[crate::Codegen::TIR::TCallArg],
+) -> Type {
+    let declared = match cx.fn_types.get(name) {
+        Some(Type::Fn { ret, .. }) => ret
+            .as_deref()
+            .map(|ty| cx.expand_type_aliases(ty))
+            .unwrap_or_else(unit_type),
+        _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
+        _ => unit_type(),
+    };
+    substitute_call_type(cx, name, declared, type_args, args)
 }
 
 /// Resolve a generic call's result using the explicit arguments first, then
@@ -917,6 +1090,16 @@ pub(crate) fn call_return_type_with_args(
     args: &[crate::Codegen::TIR::TCallArg],
 ) -> Type {
     let declared = call_return_type(cx, name);
+    substitute_call_type(cx, name, declared, type_args, args)
+}
+
+fn substitute_call_type(
+    cx: &Cx,
+    name: &str,
+    declared: Type,
+    type_args: &[Type],
+    args: &[crate::Codegen::TIR::TCallArg],
+) -> Type {
     let Some(params) = cx.fn_type_params.get(name) else {
         return declared;
     };

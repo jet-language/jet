@@ -1,7 +1,7 @@
 // Shared filesystem operation kernels used by every native adapter.
 //
 // The surrounding Prelude parts own fault injection and `IOError` projection;
-// this part owns the actual rename/glob operation so AOT, JIT, and the
+// this part owns the actual filesystem operation so AOT, JIT, and the
 // interpreter cannot grow separate filesystem algorithms.
 //
 // Plain `//` comments: this file is `include!`d into jet-comptime, where
@@ -13,6 +13,10 @@ pub fn jet_fs_rename(from: &str, to: &str) -> std::io::Result<()> {
 
 pub fn jet_fs_open(path: &str) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
+}
+
+pub fn jet_fs_canonicalize(path: &str) -> std::io::Result<String> {
+    std::fs::canonicalize(path).map(|path| path.to_string_lossy().into_owned())
 }
 
 pub fn jet_fs_glob(pattern: &str) -> std::io::Result<Vec<String>> {
@@ -28,10 +32,7 @@ pub fn jet_fs_glob(pattern: &str) -> std::io::Result<Vec<String>> {
     Ok(matches)
 }
 
-fn collect_glob_entries(
-    root: &std::path::Path,
-    output: &mut Vec<String>,
-) -> std::io::Result<()> {
+fn collect_glob_entries(root: &std::path::Path, output: &mut Vec<String>) -> std::io::Result<()> {
     let mut entries = std::fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
@@ -50,12 +51,11 @@ fn jet_fs_glob_match(pattern: &str, text: &str) -> bool {
             return text.is_empty();
         }
         match pattern[0] {
-            b'*' => inner(&pattern[1..], text)
-                || (!text.is_empty() && inner(pattern, &text[1..])),
+            b'*' => inner(&pattern[1..], text) || (!text.is_empty() && inner(pattern, &text[1..])),
             b'?' => !text.is_empty() && inner(&pattern[1..], &text[1..]),
-            character => !text.is_empty()
-                && character == text[0]
-                && inner(&pattern[1..], &text[1..]),
+            character => {
+                !text.is_empty() && character == text[0] && inner(&pattern[1..], &text[1..])
+            }
         }
     }
     inner(pattern.as_bytes(), text.as_bytes())

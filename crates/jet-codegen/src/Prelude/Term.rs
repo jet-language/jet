@@ -569,6 +569,7 @@ mod jet_term_mode {
     unsafe extern "C" {
         fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
         fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
+        fn cfmakeraw(termios: *mut Termios);
     }
 
     std::thread_local! {
@@ -594,6 +595,24 @@ mod jet_term_mode {
             SAVED.with(|saved| saved.borrow_mut().push(saved_mode));
             true
         }
+    }
+
+    pub(super) fn configure_fd(fd: i32, raw: bool) -> std::io::Result<()> {
+        unsafe {
+            let mut mode = std::mem::zeroed::<Termios>();
+            if tcgetattr(fd, &mut mode) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if raw {
+                cfmakeraw(&mut mode);
+                mode.c_cc[VMIN] = 1;
+                mode.c_cc[VTIME] = 0;
+            }
+            if tcsetattr(fd, TCSANOW, &mode) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn leave() {
@@ -690,4 +709,39 @@ pub(crate) fn jet_term_mode_enter(raw: bool) -> bool {
 
 pub(crate) fn jet_term_mode_leave() {
     jet_term_mode::leave();
+}
+
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    )
+))]
+pub(crate) fn jet_term_configure_fd(fd: i32, raw: bool) -> std::io::Result<()> {
+    jet_term_mode::configure_fd(fd, raw)
+}
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))
+))]
+pub(crate) fn jet_term_configure_fd(_fd: i32, _raw: bool) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "terminal attributes are unsupported on this target",
+    ))
 }

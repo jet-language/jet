@@ -127,6 +127,24 @@ fn walk_builder(
                 provenance,
             );
         }
+        // Sema may materialize an owning value, preserve a read place, or lift
+        // the return payload through `Ok` around the root builder expression.
+        // These wrappers do not change the application graph, so keep walking
+        // through them.
+        Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Paren(inner, _)
+        | Expr::Ok(inner, _) => {
+            walk_builder(
+                inner,
+                graph,
+                diags,
+                current_render,
+                seen_paths,
+                known_fns,
+                provenance,
+            );
+        }
         Expr::Call(call) => {
             if is_app_ctor_name(&call.name) && call.args.is_empty() {
                 return;

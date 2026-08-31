@@ -8,6 +8,8 @@
 
 use crate::Diagnostics::{Diagnostic, Span, MAX_SOURCE_NESTING};
 use crate::Generics;
+use std::borrow::Cow;
+
 use crate::Lexer::{describe, StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{
@@ -168,13 +170,47 @@ pub fn parse_for_check_with_source(
     parse_for_check_inner(toks, Some(source))
 }
 
+fn prepare_tokens<'a>(
+    toks: &'a [Token],
+) -> Result<(Cow<'a, [Token]>, Vec<crate::AST::FencedStatement>), Vec<Diagnostic>> {
+    // Ordinary source has neither comments nor fences. Keep its lexer-owned
+    // token slice: the parser only reads tokens, and every span is already a
+    // byte offset into the original source. This avoids two full token-vector
+    // copies plus the fence scan on the common path.
+    let mut has_comments = false;
+    let mut has_fences = false;
+    for token in toks {
+        match &token.kind {
+            TokKind::LineComment(_) | TokKind::BlockComment(_) => has_comments = true,
+            TokKind::FenceOpen | TokKind::FenceClose => has_fences = true,
+            _ => {}
+        }
+        if has_comments && has_fences {
+            break;
+        }
+    }
+
+    let code = if has_comments {
+        Cow::Owned(crate::Lexer::without_comments(toks))
+    } else {
+        Cow::Borrowed(toks)
+    };
+    if has_fences {
+        let (expanded, fenced_statements) = crate::FencedNames::expand(code.as_ref())?;
+        check_token_nesting(&expanded)?;
+        Ok((Cow::Owned(expanded), fenced_statements))
+    } else {
+        check_token_nesting(code.as_ref())?;
+        Ok((code, Vec::new()))
+    }
+}
+
 fn parse_for_check_inner(
     toks: &[Token],
     source: Option<&str>,
 ) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let toks = crate::Lexer::without_comments(toks);
-    let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
-    check_token_nesting(&toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks)?;
+
     let mut p = Parser {
         toks: &toks,
         source: source.map(str::to_owned),
@@ -221,9 +257,7 @@ fn parse_inner(
     allow_environment_reads: bool,
     source: Option<&str>,
 ) -> Result<Program, Vec<Diagnostic>> {
-    let toks = crate::Lexer::without_comments(toks);
-    let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
-    check_token_nesting(&toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks)?;
     let mut p = Parser {
         toks: &toks,
         source: source.map(str::to_owned),
@@ -412,19 +446,103 @@ struct Parser<'a> {
 }
 
 fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
-    let mut depth = 0usize;
-    for t in toks {
-        match t.kind {
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
-                depth += 1;
-                if depth > MAX_SOURCE_NESTING {
-                    return Err(vec![Diagnostic::source_nesting_exceeded(depth, t.span)]);
+    // Interpolations own nested token slices. Walk those slices iteratively so
+    // a deep string-interpolation tree cannot bypass the source-depth guard or
+    // make this guard recurse on attacker-controlled input.
+    enum Frame<'a> {
+        Tokens {
+            tokens: &'a [Token],
+            position: usize,
+            depth: usize,
+        },
+        StringParts {
+            parts: &'a [StrTokPart],
+            position: usize,
+            depth: usize,
+        },
+    }
+
+    let mut pending = vec![Frame::Tokens {
+        tokens: toks,
+        position: 0,
+        depth: 0,
+    }];
+    while let Some(frame) = pending.pop() {
+        match frame {
+            Frame::Tokens {
+                tokens,
+                mut position,
+                mut depth,
+            } => {
+                let Some(token) = tokens.get(position) else {
+                    continue;
+                };
+                position += 1;
+                let mut string_parts = None;
+                match &token.kind {
+                    TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                        depth = depth.saturating_add(1);
+                        if depth > MAX_SOURCE_NESTING {
+                            return Err(vec![Diagnostic::source_nesting_exceeded(
+                                depth,
+                                token.span,
+                            )]);
+                        }
+                    }
+                    TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                        depth = depth.saturating_sub(1);
+                    }
+                    TokKind::Str(parts)
+                        if parts
+                            .iter()
+                            .any(|part| matches!(part, StrTokPart::Interp(_))) =>
+                    {
+                        let interpolation_depth = depth.saturating_add(1);
+                        if interpolation_depth > MAX_SOURCE_NESTING {
+                            return Err(vec![Diagnostic::source_nesting_exceeded(
+                                interpolation_depth,
+                                token.span,
+                            )]);
+                        }
+                        string_parts = Some((parts.as_slice(), interpolation_depth));
+                    }
+                    _ => {}
+                }
+                pending.push(Frame::Tokens {
+                    tokens,
+                    position,
+                    depth,
+                });
+                if let Some((parts, depth)) = string_parts {
+                    pending.push(Frame::StringParts {
+                        parts,
+                        position: 0,
+                        depth,
+                    });
                 }
             }
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-                depth = depth.saturating_sub(1);
+            Frame::StringParts {
+                parts,
+                mut position,
+                depth,
+            } => {
+                let Some(part) = parts.get(position) else {
+                    continue;
+                };
+                position += 1;
+                pending.push(Frame::StringParts {
+                    parts,
+                    position,
+                    depth,
+                });
+                if let StrTokPart::Interp(nested) = part {
+                    pending.push(Frame::Tokens {
+                        tokens: nested,
+                        position: 0,
+                        depth,
+                    });
+                }
             }
-            _ => {}
         }
     }
     Ok(())
@@ -882,6 +1000,20 @@ mod s61_tests {
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         parse(&toks).unwrap_or_else(|d| panic!("parse errors: {d:?}"))
+    }
+
+    #[test]
+    fn clean_preparation_reuses_byte_identical_tokens() {
+        let (tokens, errors) = lex("fn run() { value :: 1 }\n");
+        assert!(errors.is_empty(), "lex errors: {errors:?}");
+        let expected = crate::Lexer::without_comments(&tokens);
+        let (prepared, fences) = prepare_tokens(&tokens).expect("clean source");
+        assert!(fences.is_empty());
+        assert_eq!(prepared.as_ref(), expected.as_slice());
+        assert!(
+            std::ptr::eq(prepared.as_ref().as_ptr(), tokens.as_ptr()),
+            "clean source should borrow the lexer token slice"
+        );
     }
 
     #[test]

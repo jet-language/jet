@@ -91,21 +91,12 @@ pub fn add_authority_hold(raw: &str, effect: &str) -> String {
         return restore_newline(raw, out);
     }
     if let Some((open, close)) = inline_block_bounds(&out[holds_line], "holds") {
-        out[holds_line] = insert_inline_field(
-            &out[holds_line],
-            open,
-            close,
-            "allow: [",
-            effect,
-        );
+        out[holds_line] = insert_inline_field(&out[holds_line], open, close, "allow: [", effect);
         return restore_newline(raw, out);
     }
-    let Some((holds_start, holds_end)) = block_line_range_between(
-        &out,
-        "holds",
-        authority_start,
-        authority_end,
-    ) else {
+    let Some((holds_start, holds_end)) =
+        block_line_range_between(&out, "holds", authority_start, authority_end)
+    else {
         return raw.to_string();
     };
     out.insert(
@@ -169,7 +160,10 @@ fn add_to_inline_list(line: &str, field: &str, effect: &str) -> Option<String> {
         .saturating_add(field_start + marker.len());
     let close = line[open + 1..].find(']')?.saturating_add(open + 1);
     let body = &line[open + 1..close];
-    if body.split(',').any(|entry| normalized_effect(entry) == effect) {
+    if body
+        .split(',')
+        .any(|entry| normalized_effect(entry) == effect)
+    {
         return Some(line.to_string());
     }
     let addition = if body.trim().is_empty() {

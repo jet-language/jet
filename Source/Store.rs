@@ -8,7 +8,7 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::SHA256::tree_hash;
+use crate::SHA256::{try_tree_hash, TreeHashError};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -34,6 +34,65 @@ pub fn store_path(name: &str, version: &str, fingerprint: &str) -> PathBuf {
     store_dir().join(format!("{}-{}-{}", name, version, fp))
 }
 
+/// A private, immutable-by-construction source snapshot. Callers must keep
+/// this value alive while reading the package; the original path is never
+/// consulted after the snapshot has been made.
+pub struct SourceSnapshot {
+    path: PathBuf,
+    cleanup_root: PathBuf,
+    content_hash: String,
+}
+
+impl SourceSnapshot {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+}
+
+impl Drop for SourceSnapshot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.cleanup_root);
+    }
+}
+
+/// Copy a source tree into an exclusive temporary directory and hash the
+/// copied bytes. The returned hash describes the bytes callers must consume,
+/// not a later re-read of the mutable source path.
+pub fn snapshot_tree(source_dir: &Path) -> Result<SourceSnapshot, Diagnostic> {
+    validate_real_tree_root(source_dir)
+        .map_err(|error| io_error("checking package source", source_dir, error))?;
+    let root = store_dir().join(".snapshots");
+    ensure_directory(&root)
+        .map_err(|error| io_error("creating source snapshot root", &root, error))?;
+    let cleanup_root = jetpack::Provider::exclusive_temp_dir(&root, "source")
+        .map_err(|error| io_error("creating source snapshot", &root, error))?;
+    let path = cleanup_root.join("tree");
+    if let Err(error) = copy_jet_tree(source_dir, &path) {
+        let _ = fs::remove_dir_all(&cleanup_root);
+        return Err(io_error("snapshotting package source", source_dir, error));
+    }
+    let content_hash = match try_tree_hash(&path) {
+        Ok(hash) => hash,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&cleanup_root);
+            return Err(io_error(
+                "hashing source snapshot",
+                &path,
+                tree_hash_io_error(error),
+            ));
+        }
+    };
+    Ok(SourceSnapshot {
+        path,
+        cleanup_root,
+        content_hash,
+    })
+}
+
 // ──────────────────────────────────────────────
 // Install / link into project
 // ──────────────────────────────────────────────
@@ -47,27 +106,46 @@ pub fn ensure_path_dep(
     fingerprint: &str,
     source_dir: &Path,
 ) -> Result<(PathBuf, String), Diagnostic> {
-    validate_store_component(name).map_err(|reason| {
-        store_path_diagnostic(name, &reason)
-    })?;
-    validate_store_component(version).map_err(|reason| {
-        store_path_diagnostic(version, &reason)
-    })?;
+    validate_store_component(name).map_err(|reason| store_path_diagnostic(name, &reason))?;
+    validate_store_component(version).map_err(|reason| store_path_diagnostic(version, &reason))?;
     let fingerprint = fingerprint.strip_prefix("sha256-").unwrap_or(fingerprint);
-    validate_store_component(fingerprint).map_err(|reason| {
-        store_path_diagnostic(fingerprint, &reason)
-    })?;
-    validate_real_tree_root(source_dir).map_err(|e| io_error("checking package source", source_dir, e))?;
+    validate_store_component(fingerprint)
+        .map_err(|reason| store_path_diagnostic(fingerprint, &reason))?;
+    validate_real_tree_root(source_dir)
+        .map_err(|e| io_error("checking package source", source_dir, e))?;
     let dest = store_path(name, version, fingerprint);
-    validate_store_path(&dest)
-        .map_err(|e| io_error("checking store entry", &dest, e))?;
+    validate_store_path(&dest).map_err(|e| io_error("checking store entry", &dest, e))?;
     if is_real_dir(&dest).map_err(|e| io_error("checking store entry", &dest, e))? {
-        let hash = tree_hash(&dest);
+        let hash = try_tree_hash(&dest)
+            .map_err(|error| io_error("hashing store entry", &dest, tree_hash_io_error(error)))?;
         return Ok((dest, hash));
     }
-    ensure_directory(&dest).map_err(|e| io_error("creating store entry", &dest, e))?;
-    copy_jet_tree(source_dir, &dest).map_err(|e| io_error("copying to store", &dest, e))?;
-    let hash = tree_hash(&dest);
+    let parent = dest
+        .parent()
+        .ok_or_else(|| io_error("locating store entry parent", &dest, invalid_path_error()))?;
+    ensure_directory(parent).map_err(|e| io_error("creating store entry parent", parent, e))?;
+    let staging_root = jetpack::Provider::exclusive_temp_dir(parent, "entry")
+        .map_err(|e| io_error("creating store staging entry", parent, e))?;
+    let staging = staging_root.join("tree");
+    let result = (|| {
+        copy_jet_tree(source_dir, &staging).map_err(|e| io_error("copying to store", &dest, e))?;
+        let hash = try_tree_hash(&staging)
+            .map_err(|error| io_error("hashing store entry", &dest, tree_hash_io_error(error)))?;
+        match fs::rename(&staging, &dest) {
+            Ok(()) => Ok(hash),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => try_tree_hash(&dest)
+                .map_err(|error| {
+                    io_error(
+                        "hashing concurrent store entry",
+                        &dest,
+                        tree_hash_io_error(error),
+                    )
+                }),
+            Err(error) => Err(io_error("publishing store entry", &dest, error)),
+        }
+    })();
+    let _ = fs::remove_dir_all(&staging_root);
+    let hash = result?;
     Ok((dest, hash))
 }
 
@@ -90,7 +168,13 @@ pub fn verify_content_hash(
     if expected_content_hash.is_empty() {
         return Err(missing_content_hash(pkg_name));
     }
-    let actual = tree_hash(store_entry);
+    let actual = try_tree_hash(store_entry).map_err(|error| {
+        io_error(
+            "hashing store entry",
+            store_entry,
+            tree_hash_io_error(error),
+        )
+    })?;
     if actual != expected_content_hash {
         return Err(Diagnostic::error(
             "E1204",
@@ -121,10 +205,93 @@ pub fn ensure_git_dep(
 /// `link_root` is typically `<project>/.jet-build/deps/<name>/`.
 pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Diagnostic> {
     if is_real_dir(link_root).map_err(|e| io_error("checking dep link dir", link_root, e))? {
+        let expected = try_tree_hash(store_entry).map_err(|error| {
+            io_error(
+                "hashing store entry",
+                store_entry,
+                tree_hash_io_error(error),
+            )
+        })?;
+        let actual = try_tree_hash(link_root).map_err(|error| {
+            io_error(
+                "hashing dependency link",
+                link_root,
+                tree_hash_io_error(error),
+            )
+        })?;
+        if expected != actual {
+            return Err(io_error(
+                "checking dependency link",
+                link_root,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "existing dependency link does not match its immutable store entry",
+                ),
+            ));
+        }
         return Ok(());
     }
-    ensure_directory(link_root).map_err(|e| io_error("creating dep link dir", link_root, e))?;
-    link_or_copy_tree(store_entry, link_root)
+    let expected = try_tree_hash(store_entry).map_err(|error| {
+        io_error(
+            "hashing store entry",
+            store_entry,
+            tree_hash_io_error(error),
+        )
+    })?;
+    let parent = link_root
+        .parent()
+        .ok_or_else(|| io_error("locating dep link parent", link_root, invalid_path_error()))?;
+    ensure_directory(parent).map_err(|e| io_error("creating dep link parent", parent, e))?;
+    let staging_root = jetpack::Provider::exclusive_temp_dir(parent, "dep-link")
+        .map_err(|e| io_error("creating dep link staging dir", parent, e))?;
+    let staging = staging_root.join("tree");
+    let result = (|| {
+        link_or_copy_tree(store_entry, &staging)?;
+        let actual = try_tree_hash(&staging).map_err(|error| {
+            io_error(
+                "hashing staged dependency link",
+                &staging,
+                tree_hash_io_error(error),
+            )
+        })?;
+        if actual != expected {
+            return Err(io_error(
+                "checking staged dependency link",
+                &staging,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "staged dependency link does not match its immutable store entry",
+                ),
+            ));
+        }
+        match fs::rename(&staging, link_root) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let winner = try_tree_hash(link_root).map_err(|hash_error| {
+                    io_error(
+                        "hashing concurrent dependency link",
+                        link_root,
+                        tree_hash_io_error(hash_error),
+                    )
+                })?;
+                if winner == expected {
+                    Ok(())
+                } else {
+                    Err(io_error(
+                        "publishing dependency link",
+                        link_root,
+                        std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            "concurrent dependency link has different contents",
+                        ),
+                    ))
+                }
+            }
+            Err(error) => Err(io_error("publishing dependency link", link_root, error)),
+        }
+    })();
+    let _ = fs::remove_dir_all(&staging_root);
+    result
 }
 
 /// Copy an immutable Hangar object into a project without creating hardlinks
@@ -133,11 +300,94 @@ pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Dia
 /// legacy path/git stores retain `link_into_project`'s inode sharing.
 pub fn copy_into_project(store_entry: &Path, project_root: &Path) -> Result<(), Diagnostic> {
     if is_real_dir(project_root).map_err(|e| io_error("checking dep copy dir", project_root, e))? {
+        let expected = try_tree_hash(store_entry).map_err(|error| {
+            io_error(
+                "hashing store entry",
+                store_entry,
+                tree_hash_io_error(error),
+            )
+        })?;
+        let actual = try_tree_hash(project_root).map_err(|error| {
+            io_error("hashing dep copy", project_root, tree_hash_io_error(error))
+        })?;
+        if expected != actual {
+            return Err(io_error(
+                "checking dep copy",
+                project_root,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "existing dependency copy does not match its immutable store entry",
+                ),
+            ));
+        }
         return Ok(());
     }
-    ensure_directory(project_root).map_err(|e| io_error("creating dep copy dir", project_root, e))?;
-    copy_jet_tree(store_entry, project_root)
-        .map_err(|e| io_error("copying dep tree", project_root, e))
+    let parent = project_root.parent().ok_or_else(|| {
+        io_error(
+            "locating dep copy parent",
+            project_root,
+            invalid_path_error(),
+        )
+    })?;
+    let expected = try_tree_hash(store_entry).map_err(|error| {
+        io_error(
+            "hashing store entry",
+            store_entry,
+            tree_hash_io_error(error),
+        )
+    })?;
+    ensure_directory(parent).map_err(|e| io_error("creating dep copy parent", parent, e))?;
+    let staging_root = jetpack::Provider::exclusive_temp_dir(parent, "dep-copy")
+        .map_err(|e| io_error("creating dep copy staging dir", parent, e))?;
+    let staging = staging_root.join("tree");
+    let result = (|| {
+        copy_jet_tree(store_entry, &staging)
+            .map_err(|e| io_error("copying dep tree", &staging, e))?;
+        let actual = try_tree_hash(&staging).map_err(|error| {
+            io_error(
+                "hashing staged dep copy",
+                &staging,
+                tree_hash_io_error(error),
+            )
+        })?;
+        if actual != expected {
+            return Err(io_error(
+                "checking staged dep copy",
+                &staging,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "staged dependency copy does not match its immutable store entry",
+                ),
+            ));
+        }
+        match fs::rename(&staging, project_root) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let winner = try_tree_hash(project_root).map_err(|hash_error| {
+                    io_error(
+                        "hashing concurrent dep copy",
+                        project_root,
+                        tree_hash_io_error(hash_error),
+                    )
+                })?;
+                if winner == expected {
+                    Ok(())
+                } else {
+                    Err(io_error(
+                        "publishing dep copy",
+                        project_root,
+                        std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            "concurrent dependency copy has different contents",
+                        ),
+                    ))
+                }
+            }
+            Err(error) => Err(io_error("publishing dep copy", project_root, error)),
+        }
+    })();
+    let _ = fs::remove_dir_all(&staging_root);
+    result
 }
 
 /// Verify the content hash of a store entry matches expected. Returns E1204 on mismatch.
@@ -158,7 +408,13 @@ pub fn verify_entry(
     if expected_tree_hash.is_empty() {
         return Err(missing_content_hash(pkg_name));
     }
-    let actual = tree_hash(store_entry);
+    let actual = try_tree_hash(store_entry).map_err(|error| {
+        io_error(
+            "hashing store entry",
+            store_entry,
+            tree_hash_io_error(error),
+        )
+    })?;
     if actual != expected_tree_hash {
         return Err(Diagnostic::error(
             "E1204",
@@ -204,6 +460,7 @@ pub fn list_entries() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = rd
         .flatten()
         .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|name| name.to_str()) != Some(".snapshots"))
         .filter(|p| is_real_dir(p).unwrap_or(false))
         .collect();
     out.sort();
@@ -233,38 +490,151 @@ pub fn gc(in_use_fingerprints: &std::collections::HashSet<String>) -> Vec<PathBu
 // ──────────────────────────────────────────────
 
 fn copy_jet_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    validate_real_tree_root(src)?;
+    let source_metadata = validate_real_tree_root(src)?;
     ensure_directory(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let name = src_path.file_name().unwrap_or_default();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with('.') || name_str == "build" || name_str == "target" {
-            continue;
-        }
-        let dst_path = dst.join(name);
+    let mut names = fs::read_dir(src)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    names.sort_unstable();
+    for name in &names {
+        let src_path = src.join(name);
         let metadata = fs::symlink_metadata(&src_path)?;
         if metadata.file_type().is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                format!("refusing symlink in package source tree: {}", src_path.display()),
+                format!(
+                    "refusing symlink in package source tree: {}",
+                    src_path.display()
+                ),
             ));
         }
-        if metadata.is_dir() {
-            ensure_directory(&dst_path)?;
-            copy_jet_tree(&src_path, &dst_path)?;
-        } else if metadata.is_file() {
-            reject_existing_symlink(&dst_path)?;
-            fs::copy(&src_path, &dst_path)?;
-        } else {
+        if !metadata.is_dir() && !metadata.is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("unsupported package source entry: {}", src_path.display()),
             ));
         }
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with('.') || name_str == "build" || name_str == "target" {
+            continue;
+        }
+        let dst_path = dst.join(name);
+        if metadata.is_dir() {
+            ensure_directory(&dst_path)?;
+            copy_jet_tree(&src_path, &dst_path)?;
+            let after = fs::symlink_metadata(&src_path)?;
+            if !same_store_identity(&metadata, &after) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "package source directory changed while copying: {}",
+                        src_path.display()
+                    ),
+                ));
+            }
+        } else if metadata.is_file() {
+            reject_existing_symlink(&dst_path)?;
+            copy_regular_file_nofollow(&src_path, &dst_path, &metadata)?;
+        }
+    }
+    let mut after_names = fs::read_dir(src)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    after_names.sort_unstable();
+    let after_metadata = fs::symlink_metadata(src)?;
+    if !same_store_identity(&source_metadata, &after_metadata) || names != after_names {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("package source changed while copying `{}`", src.display()),
+        ));
     }
     Ok(())
+}
+
+fn copy_regular_file_nofollow(
+    src: &Path,
+    dst: &Path,
+    expected: &fs::Metadata,
+) -> std::io::Result<()> {
+    let mut source_options = fs::OpenOptions::new();
+    source_options.read(true);
+    add_nofollow_flags(&mut source_options);
+    let mut source = source_options.open(src)?;
+    let opened = source.metadata()?;
+    if !opened.is_file() || !same_store_file_identity(expected, &opened) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("package source file changed before copy: {}", src.display()),
+        ));
+    }
+    let mut destination_options = fs::OpenOptions::new();
+    destination_options.write(true).create(true).truncate(true);
+    add_nofollow_flags(&mut destination_options);
+    let mut destination = destination_options.open(dst)?;
+    std::io::copy(&mut source, &mut destination)?;
+    destination.sync_all()?;
+    let after = fs::symlink_metadata(src)?;
+    if !same_store_file_identity(expected, &after) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "package source file changed while copying: {}",
+                src.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn add_nofollow_flags(options: &mut fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_CLOEXEC: i32 = 0o2000000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_CLOEXEC: i32 = 0x01000000;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        const O_NOFOLLOW: i32 = 0o400000;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+}
+
+fn same_store_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type() && left.len() == right.len()
+    }
+}
+
+fn same_store_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok();
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
+    }
 }
 
 fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<(), Diagnostic> {
@@ -287,15 +657,14 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<(), Diagnostic> {
             ));
         }
         if metadata.is_dir() {
-            ensure_directory(&dst_path)
-                .map_err(|e| io_error("creating link dir", &dst_path, e))?;
+            ensure_directory(&dst_path).map_err(|e| io_error("creating link dir", &dst_path, e))?;
             link_or_copy_tree(&src_path, &dst_path)?;
         } else if metadata.is_file() {
             reject_existing_symlink(&dst_path)
                 .map_err(|e| io_error("checking dep file", &dst_path, e))?;
             // Try hardlink first, fall back to copy.
             if fs::hard_link(&src_path, &dst_path).is_err() {
-                fs::copy(&src_path, &dst_path)
+                copy_regular_file_nofollow(&src_path, &dst_path, &metadata)
                     .map_err(|e| io_error("copying dep file", &dst_path, e))?;
             }
         } else {
@@ -318,7 +687,10 @@ fn validate_store_component(value: &str) -> Result<(), String> {
         || value == ".."
         || value.contains(['/', '\\', ':'])
         || value.chars().any(char::is_control)
-        || !matches!(Path::new(value).components().next(), Some(std::path::Component::Normal(_)))
+        || !matches!(
+            Path::new(value).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
         || Path::new(value).components().nth(1).is_some()
     {
         return Err("the value must be one safe path component".to_string());
@@ -336,37 +708,46 @@ fn store_path_diagnostic(value: &str, reason: &str) -> Diagnostic {
     )
 }
 
-fn validate_real_tree_root(path: &Path) -> std::io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+fn validate_real_tree_root(path: &Path) -> std::io::Result<fs::Metadata> {
+    let components = path.components().collect::<Vec<_>>();
+    if components.is_empty() {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "package tree root must be a real directory",
+            std::io::ErrorKind::InvalidInput,
+            "package tree root is empty",
         ));
     }
-    let root = fs::canonicalize(path)?;
-    if root != path {
-        let metadata = fs::symlink_metadata(path)?;
-        if metadata.file_type().is_symlink() {
+    let mut current = PathBuf::new();
+    for component in components {
+        if component == std::path::Component::ParentDir {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "package tree root contains a parent component",
+            ));
+        }
+        current.push(component.as_os_str());
+        let metadata = fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "package tree root must not be a symlink",
+                "package tree root must contain only real directories",
             ));
         }
     }
-    Ok(())
+    fs::symlink_metadata(path)
 }
 
 fn validate_store_path(path: &Path) -> std::io::Result<()> {
     let root = store_dir();
-    let root_meta = fs::symlink_metadata(&root);
-    if let Ok(meta) = &root_meta {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
+    match fs::symlink_metadata(&root) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "store root must be a real directory",
             ));
         }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.file_type().is_symlink() {
@@ -411,27 +792,55 @@ fn reject_existing_symlink(path: &Path) -> std::io::Result<()> {
 }
 
 fn ensure_directory(path: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "directory must not be a symlink",
-        )),
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "directory path is not a directory",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                ensure_directory(parent)?;
-            }
-            fs::create_dir(path)
-        }
-        Err(error) => Err(error),
+    let components = path.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory path is empty",
+        ));
     }
+    let mut current = PathBuf::new();
+    for component in components {
+        if component == std::path::Component::ParentDir {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path contains a parent component",
+            ));
+        }
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "directory must not be a symlink",
+                ));
+            }
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "directory path is not a directory",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match fs::create_dir(&current) {
+                    Ok(()) => {}
+                    Err(create_error)
+                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(create_error) => return Err(create_error),
+                }
+                let metadata = fs::symlink_metadata(&current)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "directory must not be a symlink or non-directory",
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
@@ -441,6 +850,17 @@ fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
         "a filesystem operation failed during package installation".to_string(),
         format!("check permissions and disk space: {}", err),
         None,
+    )
+}
+
+fn tree_hash_io_error(error: TreeHashError) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+}
+
+fn invalid_path_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "store entry has no parent",
     )
 }
 

@@ -41,3 +41,12 @@ fn web_examples_are_documented_and_have_expected_outputs() {
         );
     }
 }
+
+#[test]
+fn semantic_corpus_policy_runs_with_site_sources() {
+    let policy = common::corpus_policy::CorpusPolicy::load().expect("corpus manifest");
+    policy.check_gate("site").expect("site corpus semantic policy");
+    policy
+        .check_gate("docs")
+        .expect("documentation corpus semantic policy");
+}

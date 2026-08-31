@@ -724,6 +724,49 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
     }
 }
 
+#[allow(dead_code)]
+mod auth_session_regression {
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+
+    static FAIL_ENTROPY: AtomicBool = AtomicBool::new(false);
+    static NEXT_BYTE: AtomicU8 = AtomicU8::new(1);
+
+    fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, ()> {
+        if FAIL_ENTROPY.load(Ordering::Relaxed) {
+            return Err(());
+        }
+        let count = usize::try_from(count).map_err(|_| ())?;
+        let byte = NEXT_BYTE.fetch_add(1, Ordering::Relaxed);
+        Ok(vec![byte; count])
+    }
+
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
+
+    #[test]
+    fn auth_tokens_are_opaque_and_fail_closed_without_entropy() {
+        FAIL_ENTROPY.store(false, Ordering::Relaxed);
+        let user = format!("auth-regression-{}@example.com", std::process::id());
+        jet_auth_register_user(user.clone(), "password-hash".into()).unwrap();
+
+        let first = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
+            .unwrap();
+        let second = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
+            .unwrap();
+        assert!(first.id.starts_with("sess-"));
+        assert!(second.id.starts_with("sess-"));
+        assert_ne!(first.id, second.id);
+
+        let magic = jet_auth_magic_link_issue(user.clone(), 0, 1_000).unwrap();
+        assert!(magic.starts_with("magic-"));
+        assert_ne!(magic, format!("magic-{}", "00".repeat(32)));
+        assert!(jet_auth_magic_link_consume(magic, 0, 1_000).is_ok());
+
+        FAIL_ENTROPY.store(true, Ordering::Relaxed);
+        assert!(jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000).is_err());
+        assert!(jet_auth_magic_link_issue(user, 0, 1_000).is_err());
+    }
+}
+
 #[test]
 fn uuid_entropy_shared_seam_is_live_and_fail_closed() {
     let first = runtime::jet_crypto_uuid_v4_result().expect("live entropy should produce UUID v4");

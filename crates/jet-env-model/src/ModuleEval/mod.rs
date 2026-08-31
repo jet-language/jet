@@ -44,7 +44,8 @@ pub use PackageOutput::{
 };
 pub use Source::{
     evaluate_env, evaluate_env_with_environment, evaluate_env_with_preset,
-    evaluate_env_with_selections, evaluate_package_profile, is_module_surface,
+    evaluate_env_with_selections, evaluate_env_with_source_loader, evaluate_package_profile,
+    is_module_surface, SourceLoader,
 };
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EnvironmentRead,

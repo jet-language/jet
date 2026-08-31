@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jet-lang.dev/adoption/schemas/release-calendar-v1.json",
+  "title": "Jet adoption release calendar handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "policy", "first_lts", "support_matrix", "owner_fields"],
+  "properties": {
+    "schema": { "const": "jet.adoption.release-calendar/v1" },
+    "status": { "const": "ratified-awaiting-schedule" },
+    "decision": { "const": "D-ADOPT-LTS1" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cadence", "active_months", "maintenance_months", "total_months", "maximum_overlapping_lines", "notice_rule", "backport_rule"],
+      "properties": {
+        "cadence": { "const": "annual" },
+        "active_months": { "const": 12 },
+        "maintenance_months": { "const": 24 },
+        "total_months": { "const": 36 },
+        "maximum_overlapping_lines": { "const": 3 },
+        "notice_rule": { "const": "publish calendar changes at least six months before effect; never shorten a live LTS line" },
+        "backport_rule": { "const": "active: security, critical compiler/runtime correctness, supported-host/toolchain breakage, and severe performance regressions; maintenance: security and critical data-loss, memory-safety, type-safety, or miscompilation fixes; no new language behavior" }
+      }
+    },
+    "first_lts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "active_until", "maintenance_until", "eol", "replacement"],
+      "properties": {
+        "start": { "const": "{owner:D-ADOPT-LTS1.first_lts_start}" },
+        "active_until": { "const": "{owner:D-ADOPT-LTS1.first_lts_active_until}" },
+        "maintenance_until": { "const": "{owner:D-ADOPT-LTS1.first_lts_maintenance_until}" },
+        "eol": { "const": "{owner:D-ADOPT-LTS1.first_lts_eol}" },
+        "replacement": { "const": "{owner:D-ADOPT-LTS1.first_lts_replacement}" }
+      }
+    },
+    "support_matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["editions", "hosts"],
+      "properties": {
+        "editions": { "const": "{owner:D-ADOPT-LTS1.supported_editions}" },
+        "hosts": { "const": "{owner:D-ADOPT-LTS1.supported_hosts}" }
+      }
+    },
+    "owner_fields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "owner": { "type": "string", "pattern": "^\\{owner:D-ADOPT-LTS1\\.[a-z0-9_.-]+\\}$" }
+  }
+}

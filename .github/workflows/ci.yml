@@ -179,8 +179,8 @@ jobs:
         run: nix develop .#full -c cargo test --test build_sandbox -- --nocapture
 
       # Card #1415 criterion 5: the script-to-system journey records its own
-      # receipt per host. It is already its own registered suite
-      # (tests/suites.txt), so the native rows run it here rather than
+      # receipt per host. The current tests/suites.txt entry is
+      # tests/script_to_system, so the native rows run it here rather than
       # re-hosting its #[test] inside another test binary -- doing that
       # double-included tests/common/mod.rs and broke the build with
       # "cannot define multiple global allocators".
@@ -212,6 +212,22 @@ jobs:
       - name: Agent workload gate self-check
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: nix develop .#full -c bash tools/ci/test-agent-workload-gate.sh
+
+      # Card #1414: keep the hosted compiled-workload contract and all seven
+      # validator removal canaries in CI. No measurement report is checked in;
+      # a real report still requires clean-machine runs and fresh review.
+      - name: Compiled workload gate (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: |
+          nix develop .#full -c bash tools/ci/compiled-workload-gate.sh --contract
+          nix develop .#full -c bash tools/ci/test-compiled-workload-gate.sh
+
+      - name: Compiled workload gate (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        shell: bash
+        run: |
+          bash tools/ci/compiled-workload-gate.sh --contract
+          bash tools/ci/test-compiled-workload-gate.sh
 
   # c730: named strict JIT↔AOT parity job. Matrix = every host where native
   # Cranelift JIT is supported today (x86_64 only). aarch64 / Apple Silicon /

@@ -201,6 +201,24 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn recursive_symlink_is_rejected_before_discovery_descent() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir("recursive-symlink");
+        std::fs::write(dir.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        let nested = dir.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        symlink("..", nested.join("loop")).unwrap();
+
+        assert!(matches!(
+            discover_module_in(&dir, "workspace"),
+            Err(DiscoveryError::NotFound { .. })
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn ambiguous_when_two_files_declare_the_same_module() {
         let dir = tempdir("ambiguous");

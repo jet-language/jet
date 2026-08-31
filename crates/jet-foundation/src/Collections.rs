@@ -77,17 +77,45 @@ pub fn is_map_key_type(ty: &Type) -> bool {
 }
 
 /// Whether `ty` may be used as a `Set` element — requires `Hash + Eq` (E0506).
+///
+/// This predicate owns the structural portion of the rule. Named types need a
+/// sema registry to resolve their fields, so the checker completes the walk.
 pub fn is_hashable_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Int
-            | Type::Bool
-            | Type::String
-            | Type::Char
-            | Type::Named(_)
-            | Type::IntN { .. }
-            | Type::InlineRange { .. }
-    )
+    match ty {
+        Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => is_hashable_type(inner),
+        Type::Result { ok, err } => is_hashable_type(ok) && is_hashable_type(err),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| is_hashable_type(field)),
+        Type::Union(members) => members.iter().all(is_hashable_type),
+        Type::Apply { name, .. } if name == "Id" => true,
+        Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "Task" | "Sender" | "Receiver" | "SharedGuard" | "Pool"
+            ) =>
+        {
+            false
+        }
+        Type::Apply { args, .. } if !args.is_empty() => {
+            args.iter().all(|arg| is_hashable_type(arg))
+        }
+        Type::Float
+        | Type::Float32
+        | Type::Map { .. }
+        | Type::Named(_)
+        | Type::TraitObject(_)
+        | Type::Shared(_)
+        | Type::Fn { .. }
+        | Type::Measure(_)
+        | Type::Apply { .. } => false,
+    }
 }
 
 /// M8 + D-ITER1: built-in methods that take a closure argument.
@@ -250,7 +278,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_desc sort_by sort_by_desc source ",
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
-    "to_int to_list to_lower to_radix to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
+    "to_ascii_lower to_ascii_upper to_int to_list to_lower to_radix to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
     "top_n trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade without from_radix round floor ceil hmac_sha256 ",
     "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
     "write_f32_be write_f32_le write_f64_be write_f64_le write_i16_be write_i16_le write_i32_be write_i32_le write_i64_be write_i64_le write_i8 write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
@@ -272,6 +300,93 @@ pub fn builtin_method_names(recv_ty: &Type) -> Vec<String> {
         })
         .map(str::to_owned)
         .collect()
+}
+
+fn compiler_package_method_return(
+    type_name: &str,
+    method: &str,
+    arg_count: usize,
+) -> Option<Option<Type>> {
+    if arg_count != 0 {
+        return None;
+    }
+    let string = || Type::String;
+    let boolean = || Type::Bool;
+    let integer = || Type::Int;
+    let optional_string = || Type::Option(Box::new(Type::String));
+    let string_list = || Type::List(Box::new(Type::String));
+    let named = |name: &str| Type::Named(name.to_string());
+    let list = |name: &str| Type::List(Box::new(named(name)));
+    let result = match type_name {
+        "CompilerPackageError" => match method {
+            "code" | "message" | "file" | "cause" => string(),
+            _ => return None,
+        },
+        "CompilerDependency" => match method {
+            "name" | "source" => string(),
+            _ => return None,
+        },
+        "CompilerPackageTarget" => match method {
+            "name" => string(),
+            "targets" => string_list(),
+            _ => return None,
+        },
+        "CompilerPackageOutput" => match method {
+            "name" | "kind" => string(),
+            "entry" => optional_string(),
+            _ => return None,
+        },
+        "CompilerBuildProfile" => match method {
+            "name" | "optimize" => string(),
+            "debug_info" | "small" => boolean(),
+            "panic" => optional_string(),
+            _ => return None,
+        },
+        "CompilerManifest" | "CompilerPackage" => match method {
+            "schema_version" => integer(),
+            "file" => string(),
+            "jet" | "edition" | "description" | "license" | "repository"
+            | "layer" | "target" => optional_string(),
+            "dependencies" => list("CompilerDependency"),
+            "packages" => list("CompilerPackageTarget"),
+            "outputs" => list("CompilerPackageOutput"),
+            "build_profiles" => list("CompilerBuildProfile"),
+            _ => return None,
+        },
+        "CompilerLockedPackage" => match method {
+            "name" | "version" | "source_kind" | "fingerprint" => string(),
+            "source" | "revision" | "content_hash" | "layer" | "inferred_layer" => {
+                optional_string()
+            }
+            "dependencies" => string_list(),
+            _ => return None,
+        },
+        "CompilerLock" => match method {
+            "schema_version" | "version" => integer(),
+            "file" => string(),
+            "root_dependencies" => string_list(),
+            "packages" => list("CompilerLockedPackage"),
+            _ => return None,
+        },
+        "CompilerKeyValue" => match method {
+            "key" | "value" => string(),
+            _ => return None,
+        },
+        "CompilerProfile" => match method {
+            "name" => string(),
+            "extends" | "packages" | "sources" => string_list(),
+            "collisions" => list("CompilerKeyValue"),
+            _ => return None,
+        },
+        "CompilerProfileSet" => match method {
+            "schema_version" => integer(),
+            "file" => string(),
+            "profiles" => list("CompilerProfile"),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(Some(result))
 }
 
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
@@ -413,6 +528,22 @@ pub fn builtin_method_return(
             ))))),
             _ => None,
         },
+        Type::Named(n)
+            if matches!(
+                n.as_str(),
+                "CompilerPackageError"
+                    | "CompilerDependency"
+                    | "CompilerPackageTarget"
+                    | "CompilerPackageOutput"
+                    | "CompilerBuildProfile"
+                    | "CompilerManifest"
+                    | "CompilerPackage"
+                    | "CompilerLockedPackage"
+                    | "CompilerLock"
+                    | "CompilerKeyValue"
+                    | "CompilerProfile"
+                    | "CompilerProfileSet"
+            ) => compiler_package_method_return(n, method, arg_count),
         Type::Named(n) if n == "FunctionInfo" => match (method, arg_count) {
             ("reaches_panic", 0) => Some(Some(Type::Bool)),
             _ => None,
@@ -1674,7 +1805,8 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         })),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         (
-            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_title" | "to_string",
+            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_ascii_lower"
+            | "to_ascii_upper" | "to_title" | "to_string",
             0,
         ) => Some(Some(Type::String)),
         ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii", 0) => {
@@ -1829,6 +1961,14 @@ fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         (crate::Syntax::METHOD_DURATION_IS_ZERO, 0) => Some(Some(Type::Bool)),
         (crate::Syntax::METHOD_DURATION_TOTAL_SECONDS, 0) => Some(Some(Type::Int)),
         ("difference", 1) => Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))),
+        ("abs" | "negated", 0) => {
+            Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())))
+        }
+        ("sign", 0) => Some(Some(Type::Int)),
+        ("total_in", 1) => Some(Some(Type::Float)),
+        ("round", 1..=3) => {
+            Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())))
+        }
         _ => None,
     }
 }
@@ -2618,6 +2758,12 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "difference" => {
             Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())])
+        }
+        Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "total_in" => {
+            Some(vec![Type::String])
+        }
+        Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "round" => {
+            Some(vec![Type::String, Type::Int, Type::String])
         }
         Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => {
             Some(vec![Type::String])

@@ -589,6 +589,26 @@ fn jet_inspect_semindex_reports_checked_output() {
 }
 
 #[test]
+fn jet_inspect_semindex_reports_explicit_failure_contract() {
+    let path = temp_fixture(
+        "inspect_explicit_failure.jet",
+        "#Error\nenum Problem { Bad }\nfn helper() Int !Problem -> { return Ok(1) }\nfn run() {}\n",
+    );
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
+        .output()
+        .expect("jet inspect semindex");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8_lossy(&output.stdout);
+    assert!(json.contains("\"failure_contract\":\"Int !Problem\""), "{json}");
+    assert!(json.contains("\"failure_source\":\"explicit !Problem\""), "{json}");
+}
+
+#[test]
 fn semantic_symbols_carry_shared_docs_and_provenance() {
     let src = r#"
 /// Scores one name.

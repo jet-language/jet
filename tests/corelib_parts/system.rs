@@ -254,7 +254,10 @@ use core.text.fmt as fmt
 
 fn run() {
     print(fmt.number(1204331))
-    print(fmt.decimal(1234.5678, 2))
+    print(fmt.decimal(Float{1234.5678}, 2))
+    print(fmt.grouped(Float{1234.5678}, 2))
+    print(fmt.decimal(1234, 2))
+    print(fmt.grouped(1234, 2))
     print(fmt.percent(0.1234, 1))
     print(fmt.bytes(1500000000))
     print(fmt.duration(222000))
@@ -271,7 +274,7 @@ fn run() {
     assert_eq!(code, 0, "core.text.fmt program failed: {stderr}");
     assert_eq!(
         stdout,
-        "1,204,331\n1,234.57\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n"
+        "1,204,331\n1234.57\n1,234.57\n1234.00\n1,234.00\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

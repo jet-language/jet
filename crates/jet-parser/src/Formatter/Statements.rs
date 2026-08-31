@@ -875,7 +875,17 @@ impl<'a> Fmt<'a> {
             self.pending_blank = saved_pending_blank;
             self.comment_i = saved_comment_i;
         }
-        let force_braces = !arrow_body && body.len() == 1 && is_loop_exit_stmt(&body[0]);
+        // An expression in an author-braced loop may return a non-Unit value.
+        // The formatter has no sema type information, so collapsing that body
+        // to `->` could create L0508 on the next check. Keep the existing brace
+        // as the conservative spelling; bare bodies still take the canonical
+        // arrow path below.
+        let preserve_braced_expr = !arrow_body
+            && body.len() == 1
+            && matches!(body[0], Stmt::Expr(_))
+            && self.single_stmt_braces(&body[0]).is_some();
+        let force_braces = preserve_braced_expr
+            || (!arrow_body && body.len() == 1 && is_loop_exit_stmt(&body[0]));
         self.fmt_control_body_after_header(body, force_braces);
     }
 
@@ -1112,13 +1122,18 @@ impl<'a> Fmt<'a> {
     /// Preserve `head -> statement` when the author chose that shape and the
     /// rendered arm still fits the width limit. Braced and multiline bodies
     /// keep their explicit scope. Add concise braces when the next leading-dot
-    /// arm would otherwise parse as a chain on this body's final expression.
+    /// arm would otherwise parse as a chain on an expression body; direct
+    /// returns already provide an unambiguous arm boundary.
     fn fmt_arm_body(&mut self, body: &[Stmt], force_braces: bool) {
         if body.is_empty() {
             self.write(" {}");
             return;
         }
         let was_braceless = self.arm_body_was_braceless(body);
+        // A direct return is already a complete arm boundary. Keeping it
+        // braceless is the canonical shape and avoids making the enclosing
+        // dispatch unreadable when the next arm starts with a leading dot.
+        let force_braces = force_braces && !matches!(body[0], Stmt::Return(..));
         if was_braceless && force_braces {
             let saved_out = self.out.len();
             let saved_col = self.col;

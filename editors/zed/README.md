@@ -59,10 +59,12 @@ editors/zed/install.sh
 
 ## How the extension finds the server
 
-The extension resolves `jet` from the editor's `$PATH` (for example, from
-`nix develop` or `nix profile install .#jet`). It does not execute a binary
-from the opened worktree; build the compiler and put the trusted binary on
-`$PATH` before opening the project.
+The extension requests the exact approved command `jet self lsp`. Zed's
+worktree-trust gate must allow the language server before Zed starts it;
+restricted worktrees do not start this process. The extension does not call
+`Worktree::which`, read an executable path from the worktree, or execute a
+worktree-provided `jet` binary. Build the compiler and put the trusted `jet`
+executable on the editor's environment `PATH` before opening a trusted project.
 
 `jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 Rebuild with `cargo build` and reload Zed to pick up server changes.

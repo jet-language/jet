@@ -235,23 +235,24 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     && expr_in_subset(&c.args[0].expr, cx, locals);
             }
             // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
-            // `checked(e)` (D-NUMOPS1). The AST `emit_call` (Expression.rs ~L1756) claims
-            // them when the name is one of the three AND not shadowed by a user fn
-            // (`!cx.sigs`); the sole argument is one integer `Expr::Binary` (`+`/`-`/`*`/`/`),
-            // lowered to `(ls).{name}_{add|sub|mul|div}(rs)` with PLAIN operands (no trap).
-            // Sema validated the shape. The operands must be in-subset; `checked` yields
-            // `?T`, the others `T`. Handled by a bespoke `TExprKind::OverflowOpt` — return
-            // early here so the generic-call arg machinery below doesn't also claim it.
+            // `checked(e)` (D-NUMOPS1), plus the sema-only checked-policy wrapper. The
+            // unshadowed call carries one integer `Expr::Binary` and lowers to the
+            // corresponding `TExprKind::OverflowOpt`; the operands must be in-subset.
+            // `checked` yields `?T`, the others `T`. Return early so generic-call
+            // argument machinery does not claim this shared Prelude seam.
             if matches!(
                 c.name.as_str(),
-                Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+                Syntax::BUILTIN_WRAPPING
+                    | Syntax::BUILTIN_SATURATING
+                    | Syntax::BUILTIN_CHECKED
+                    | Syntax::INTERNAL_ARITHMETIC_CHECKED
             ) && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
             {
                 return matches!(
                     c.args.first().map(|a| &a.expr),
                     Some(Expr::Binary(
-                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div,
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow,
                         ..
                     ))
                 ) && c.args.len() == 1
@@ -564,8 +565,10 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     .core_qualified_rust_type_name(enum_name)
                     .unwrap_or(enum_name.as_str());
                 if !locals.contains(enum_name)
-                    && ((resolved_enum == "SMTPSecurity" && matches!(member.as_str(), "StartTls" | "TLS"))
-                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
+                    && ((resolved_enum == "SMTPSecurity"
+                        && matches!(member.as_str(), "StartTls" | "TLS"))
+                        || (resolved_enum == "RecipientPolicy"
+                            && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
                         || (resolved_enum == "SMTPAuth" && member == "None")
                         || (resolved_enum == "TLSTrust" && member == "System")
                         // Core net readiness/shutdown unit variants (Field form `NetReadyInterest.Write`).
@@ -919,7 +922,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a
-        // total sema fact (`None`/`Typed(fn)`), reproduced verbatim. The
+        // total sema fact (`None`/`Typed { .. }`), reproduced verbatim. The
         // inner fallible value and the lazy note must themselves be in-subset (a
         // user fallible fn call, a local, an `ok`/`err` literal, or a covered
         // string interpolation). A core/stdlib fallible call (e.g. `fs.read`)

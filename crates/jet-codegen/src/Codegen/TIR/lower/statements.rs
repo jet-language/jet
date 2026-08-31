@@ -15,6 +15,7 @@ use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
 use crate::Codegen::TIR::lower::lower_panic_stop;
 use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower::lower_string_view_init;
+use crate::Codegen::TIR::lower::lower_discarded_expr;
 use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_expr;
@@ -30,6 +31,7 @@ use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
@@ -1026,6 +1028,64 @@ struct LowerBlock<'a> {
     resume: Box<dyn FnOnce(LowerBlockResult) -> LowerTask<'a> + 'a>,
 }
 
+/// Return the direct byte source of a strict `String.from_bytes(local) ??
+/// panic(...)` binding. The source must stay a local place: the fused map
+/// helper borrows it, so evaluating an arbitrary expression here would change
+/// its lifetime or evaluation count.
+fn string_bytes_source(init: &TExpr) -> Option<TLocal> {
+    let TExprKind::OrFallback { value, fallback } = &init.kind else {
+        return None;
+    };
+    if !matches!(fallback, crate::Codegen::TIR::TOrFallback::Panic { .. }) {
+        return None;
+    }
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::StringFromBytes,
+        args,
+    } = &value.kind
+    else {
+        return None;
+    };
+    if !args.is_empty() {
+        return None;
+    }
+    match &recv.kind {
+        TExprKind::Local(local) => Some(local.clone()),
+        _ => None,
+    }
+}
+
+/// `Stmt::for_each_expr` deliberately omits a plain local assignment target.
+/// Include that target here so a fused binding is never removed before a later
+/// write that still needs the original local.
+fn source_stmt_uses_ident(stmt: &Stmt, name: &str) -> bool {
+    let mut used = false;
+    stmt.for_each_expr(|expr| {
+        if matches!(expr, Expr::Ident(candidate, _) if candidate == name) {
+            used = true;
+        }
+    });
+    if used {
+        return true;
+    }
+    matches!(
+        stmt,
+        Stmt::Assign {
+            target: LValue::Local { name: target, .. },
+            ..
+        } if target == name
+    )
+}
+
+fn string_bytes_binding_dead_after_next(stmts: &[Stmt], next_index: usize, name: &str) -> bool {
+    stmts
+        .get(next_index.saturating_add(1)..)
+        .unwrap_or_default()
+        .iter()
+        .all(|stmt| !source_stmt_uses_ident(stmt, name))
+}
+
 impl<'a> LowerBlock<'a> {
     fn new(
         stmts: &'a [Stmt],
@@ -1135,7 +1195,21 @@ impl<'a> LowerBlock<'a> {
         self.index += 1;
         let plan = lower_stmt_plan(stmt, self.cx, &mut self.env);
         if plan.bodies.is_empty() {
-            self.out.push((plan.finish)(Vec::new()));
+            let lowered = (plan.finish)(Vec::new());
+            // A word decoded solely for the immediately following map update
+            // need not allocate a temporary String. Lowering has the complete
+            // source sibling list here, so the AOT emitter can rely on this
+            // fact without guessing from a corpus name or loop shape.
+            if let TStmt::Let { name, init, .. } = &lowered {
+                if let Some(source) = string_bytes_source(init) {
+                    if string_bytes_binding_dead_after_next(&self.stmts, self.index, name) {
+                        if let Some((slot, _)) = self.env.locals.get_mut(name) {
+                            *slot = slot.clone().with_string_bytes_source(source);
+                        }
+                    }
+                }
+            }
+            self.out.push(lowered);
             return LowerTask::Block(self);
         }
         lower_body_chain(self, plan, Vec::new(), None)
@@ -1321,6 +1395,26 @@ fn mark_resource_bindings_mutable(stmts: &mut [TStmt], targets: &HashSet<String>
     }
 }
 
+fn annotate_return_todo(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
+    let Some(expected) = expected else {
+        return None;
+    };
+    let Expr::Todo { expected_type, .. } = expr else {
+        return None;
+    };
+    if expected_type
+        .as_deref()
+        .is_some_and(|name| name != "(unknown)")
+    {
+        return None;
+    }
+    let mut annotated = expr.clone();
+    if let Expr::Todo { expected_type, .. } = &mut annotated {
+        *expected_type = Some(expected.name());
+    }
+    Some(annotated)
+}
+
 /// Lower one checked value at a return boundary. Explicit returns and a
 /// value-expected block's final expression share this TIR path so special
 /// return handling cannot drift between the two spellings.
@@ -1335,8 +1429,18 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
     }
     in_own_frame(|| {
         let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
-        let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
+        let return_expr = normalized.as_ref().unwrap_or(e);
+        let annotated = annotate_return_todo(return_expr, env.ret_ty.as_ref());
+        let mut value = lower_owned_expr(annotated.as_ref().unwrap_or(return_expr), cx, env);
         if let Some(want) = &env.ret_ty {
+            // Sema erases the type head from an empty typed list literal.
+            // At a return boundary the success payload is the contextual
+            // element shape, not the internal Result/Option carrier.
+            let payload = match want {
+                Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+                other => other,
+            };
+            value = preserve_typed_list_shape(value, payload, cx);
             value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
         }
         TStmt::Return(Some(value))
@@ -2399,12 +2503,16 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 false,
                                 false,
                             );
-                            let init_ty =
-                                b.ty.as_ref()
-                                    .map(|ty| ty.without_user_tags().clone())
-                                    .unwrap_or(Type::Int);
+                            let init_ty = match &b.init {
+                                Expr::TupleLit(_, _, Some(ty @ Type::Tuple(_))) => ty.clone(),
+                                _ => {
+                                    b.ty.as_ref()
+                                        .map(|ty| ty.without_user_tags().clone())
+                                        .unwrap_or(Type::Int)
+                                }
+                            };
                             let init = TExpr {
-                                ty: init_ty,
+                                ty: init_ty.clone(),
                                 // A folded member value in an anonymous union has a
                                 // scalar `CtValue` (for example `Str`), but its runtime
                                 // carrier is the generated union enum. Do not let the
@@ -2414,30 +2522,28 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     b.ty.as_ref().map(Type::without_user_tags),
                                     Some(Type::Union(_))
                                 ))
-                                    .then(|| {
-                                        lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref())
-                                    })
-                                    .flatten()
-                                    .unwrap_or_else(|| {
-                                        b.ct.as_ref()
-                                            .map(|v| {
-                                                let value = b.ty.as_ref().map_or_else(
-                                                    || v.clone(),
-                                                    |ty| {
-                                                        bake_comptime_value_with_type(
-                                                            v,
-                                                            ty.without_user_tags(),
-                                                            cx,
-                                                        )
-                                                    },
-                                                );
-                                                TExprKind::CtLit(value)
-                                    })
-                                    .unwrap_or(TExprKind::DefaultLit)
-                                    }),
+                                .then(|| lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()))
+                                .flatten()
+                                .unwrap_or_else(|| {
+                                    b.ct.as_ref()
+                                        .map(|v| {
+                                            let value = b.ty.as_ref().map_or_else(
+                                                || v.clone(),
+                                                |ty| {
+                                                    bake_comptime_value_with_type(
+                                                        v,
+                                                        ty.without_user_tags(),
+                                                        cx,
+                                                    )
+                                                },
+                                            );
+                                            TExprKind::CtLit(value)
+                                        })
+                                        .unwrap_or(TExprKind::DefaultLit)
+                                }),
                             };
                             let slot = TLocal::user(&b.name);
-                            env.bind(&b.name, slot, b.ty.clone());
+                            env.bind(&b.name, slot, Some(init_ty.clone()));
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
                                 kw: "let",
@@ -2586,7 +2692,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // owner/range for the shared Prelude window setter. It must stay
                         // inferred; the source-facing ViewMut spelling is a sema type,
                         // not the generated Rust carrier.
-                        let ty = if allocator_carrier
+                        let ty = if matches!(&init.ty, Type::Tuple(_)) {
+                            // Sema records tuple bindings through their display spelling
+                            // (`Type::Named("(x: T, …)")`). TIR already carries the
+                            // structural `Type::Tuple`, which resident record layout and
+                            // interpolation require.
+                            init.ty.clone()
+                        } else if allocator_carrier
                             || spawn_carrier
                             || init.ty.is_compute_view_mut()
                         {
@@ -2743,6 +2855,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             false
                         };
                         let mut value_t = lower_expr(value, cx, env);
+                        if let Some(want) = env.ty_of(name) {
+                            // A typed empty list has no element type after sema
+                            // elaborates its head; assignment supplies the
+                            // destination shape.
+                            value_t = preserve_typed_list_shape(value_t, &want, cx);
+                        }
                         if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
                             // Keep every write to an indirect callback in the same
                             // canonical representation as its declaration. Otherwise
@@ -2795,6 +2913,21 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let base_t = lower_expr(base, cx, env);
                         let index_t = lower_expr(index, cx, env);
                         let value_t = lower_expr(value, cx, env);
+                        let target_ty = match &base_t.ty {
+                            Type::List(elem) | Type::FixedList { elem, .. } => {
+                                Some((**elem).clone())
+                            }
+                            Type::Map { value, .. } => Some((**value).clone()),
+                            Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
+                                Some(args[0].clone())
+                            }
+                            _ => None,
+                        };
+                        let value_t = if let Some(want) = target_ty.as_ref() {
+                            preserve_typed_list_shape(value_t, want, cx)
+                        } else {
+                            value_t
+                        };
                         if let IndexKind::User(type_name) = kind {
                             return in_own_frame(|| {
                                 ready_return!(TStmt::IndexHookAssign {
@@ -2902,6 +3035,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                             index_span.start,
                                         )
                                         .0;
+                                        let value_t = lower_expr(value, cx, env);
+                                        let value_t =
+                                            preserve_typed_list_shape(value_t, &field_ty, cx);
                                         ready_return!(TStmt::IndexFieldAssign(Box::new(
                                             TIndexFieldAssign {
                                                 base: collection_t,
@@ -2911,7 +3047,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                                 field: field.to_string(),
                                                 field_ty,
                                                 op: *op,
-                                                value: lower_expr(value, cx, env),
+                                                value: value_t,
                                                 clone_value,
                                                 line,
                                             }
@@ -2985,7 +3121,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 let field_ty =
                                     struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
                                 let place = TPlace::Expr(Box::new(TExpr {
-                                    ty: field_ty,
+                                    ty: field_ty.clone(),
                                     kind: TExprKind::PoolSlot {
                                         pool: Box::new(pool_t),
                                         id: Box::new(id_t),
@@ -3001,10 +3137,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 } else {
                                     false
                                 };
+                                let value_t = lower_expr(value, cx, env);
+                                let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
                                 ready_return!(TStmt::Assign {
                                     place,
                                     op: *op,
-                                    value: lower_expr(value, cx, env),
+                                    value: value_t,
                                     clone_value,
                                     line: crate::Diagnostics::span_line_col(&cx.src, op_span.start)
                                         .0 as u32,
@@ -3013,6 +3151,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                         let field_expr = Expr::Field(base.clone(), field.clone(), *span);
                         let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
+                        let field_ty = match &place {
+                            TPlace::Expr(expr) => expr.ty.clone(),
+                            TPlace::Local(local) => env.ty_of(&local.name).unwrap_or(Type::Int),
+                        };
                         // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
                         // ident on the RHS would move out of a shared reference (E0507, I2).
                         let clone_value = if let Expr::Ident(vname, _) = value {
@@ -3021,10 +3163,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         } else {
                             false
                         };
+                        let value_t = lower_expr(value, cx, env);
+                        let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
                         TStmt::Assign {
                             place,
                             op: *op,
-                            value: lower_expr(value, cx, env),
+                            value: value_t,
                             clone_value,
                             line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0
                                 as u32,
@@ -3090,6 +3234,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     }
                 })
             });
+        }
+        Stmt::Expr(e) if matches!(e.without_parens(), Expr::If { .. }) => {
+            return LowerStmtPlan::ready(lower_discarded_expr(e, cx, env));
         }
         Stmt::Expr(Expr::MethodCall {
             receiver, method, ..
@@ -3853,12 +4000,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // lower through the ordinary shared arithmetic nodes.
                 if name == Syntax::MARKER_ARITHMETIC {
                     let scoped = clone_env(env);
-                    return deferred_stmt(
-                        vec![LowerBody::scoped(body, scoped)],
-                        |mut lowered| {
-                            TStmt::Region(lowered.pop().expect("arithmetic body was deferred"))
-                        },
-                    );
+                    return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                        TStmt::Region(lowered.pop().expect("arithmetic body was deferred"))
+                    });
                 }
                 let kind = if name == Syntax::SCOPE_TEST_SETUP {
                     ScopeMemberKind::Setup

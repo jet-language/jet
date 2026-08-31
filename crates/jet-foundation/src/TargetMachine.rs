@@ -17,6 +17,21 @@ pub struct TargetMachine {
     pub linker: LinkerInput,
     pub allocator: AllocatorPolicy,
     pub panic: PanicPolicy,
+    /// D-FREESTAND-FACTS1=A: typed provider for device memory access.
+    pub mmio: MmioPolicy,
+    /// D-FREESTAND-TIME1=A: each time service is an independent fact.
+    pub wall_clock: ClockPolicy,
+    pub monotonic_clock: ClockPolicy,
+    pub zone_data: ClockPolicy,
+    pub sleep: ClockPolicy,
+    /// D-FREESTAND-FACTS1=A: cryptographic entropy is distinct from seeded Rng.
+    pub entropy: EntropyPolicy,
+    /// D-FREESTAND-SCHED1=A: target-selected task runtime.
+    pub scheduler: SchedulerPolicy,
+    /// D-FREESTAND-SINK1=B: typed byte input/output/report providers.
+    pub byte_sink: ByteSinkPolicy,
+    /// D-FREESTAND-START1=A: generated startup provider.
+    pub startup: StartupPolicy,
     pub audit: AuditPolicy,
 }
 
@@ -30,6 +45,15 @@ impl TargetMachine {
             linker: LinkerInput::HostedDefault,
             allocator: AllocatorPolicy::HostedDefault,
             panic: PanicPolicy::HostedDefault,
+            mmio: MmioPolicy::HostedDefault,
+            wall_clock: ClockPolicy::HostedDefault,
+            monotonic_clock: ClockPolicy::HostedDefault,
+            zone_data: ClockPolicy::HostedDefault,
+            sleep: ClockPolicy::HostedDefault,
+            entropy: EntropyPolicy::HostedDefault,
+            scheduler: SchedulerPolicy::HostedDefault,
+            byte_sink: ByteSinkPolicy::HostedDefault,
+            startup: StartupPolicy::HostedDefault,
             audit: AuditPolicy::default(),
         }
     }
@@ -43,6 +67,15 @@ impl TargetMachine {
             linker: LinkerInput::Generated,
             allocator: AllocatorPolicy::Unspecified,
             panic: PanicPolicy::Unspecified,
+            mmio: MmioPolicy::Unspecified,
+            wall_clock: ClockPolicy::Unspecified,
+            monotonic_clock: ClockPolicy::Unspecified,
+            zone_data: ClockPolicy::Unspecified,
+            sleep: ClockPolicy::Unspecified,
+            entropy: EntropyPolicy::Unspecified,
+            scheduler: SchedulerPolicy::Unspecified,
+            byte_sink: ByteSinkPolicy::Unspecified,
+            startup: StartupPolicy::Unspecified,
             audit: AuditPolicy::default(),
         }
     }
@@ -70,6 +103,7 @@ impl TargetMachine {
         validate_panic(self, &mut errors);
         validate_ram_budget(self, usage, &mut errors);
         validate_core_usage(self, usage, &mut errors);
+        validate_target_capabilities(self, usage, &mut errors);
         validate_mmio(self, usage, &mut errors);
 
         errors
@@ -102,6 +136,20 @@ impl TargetMachine {
         push_field(&mut out, "allocator", &self.allocator.audit_json(), false);
         push_field(&mut out, "panic", &self.panic.audit_json(), false);
         push_field(&mut out, "memory", &memory_json(&self.memory), false);
+        push_field(&mut out, "mmio_capability", &self.mmio.audit_json(), false);
+        push_field(&mut out, "time_wall", &self.wall_clock.audit_json(), false);
+        push_field(
+            &mut out,
+            "time_monotonic",
+            &self.monotonic_clock.audit_json(),
+            false,
+        );
+        push_field(&mut out, "time_zone_data", &self.zone_data.audit_json(), false);
+        push_field(&mut out, "time_sleep", &self.sleep.audit_json(), false);
+        push_field(&mut out, "entropy", &self.entropy.audit_json(), false);
+        push_field(&mut out, "scheduler", &self.scheduler.audit_json(), false);
+        push_field(&mut out, "byte_sink", &self.byte_sink.audit_json(), false);
+        push_field(&mut out, "startup", &self.startup.audit_json(), false);
         push_field(
             &mut out,
             "unavailable_core_apis",
@@ -338,6 +386,50 @@ impl TargetMachine {
         machine.linker = LinkerInput::Generated;
         machine.allocator = AllocatorPolicy::None;
         machine.panic = PanicPolicy::Abort;
+        machine.mmio = MmioPolicy::Provider {
+            provider: ProviderContract::new("board.sensor_v1.mmio", "sha256:board-sensor-v1-mmio"),
+        };
+        machine.wall_clock = ClockPolicy::None;
+        machine.monotonic_clock = ClockPolicy::Provider {
+            provider: ProviderContract::new(
+                "board.sensor_v1.systick",
+                "sha256:board-sensor-v1-systick",
+            ),
+        };
+        machine.zone_data = ClockPolicy::None;
+        machine.sleep = ClockPolicy::Provider {
+            provider: ProviderContract::new(
+                "board.sensor_v1.systick",
+                "sha256:board-sensor-v1-systick",
+            ),
+        };
+        machine.entropy = EntropyPolicy::None;
+        machine.scheduler = SchedulerPolicy::Cooperative {
+            provider: ProviderContract::new(
+                "board.sensor_v1.cooperative",
+                "sha256:board-sensor-v1-scheduler",
+            ),
+        };
+        machine.byte_sink = ByteSinkPolicy::Provider {
+            read: Some(ProviderContract::new(
+                "board.sensor_v1.uart_rx",
+                "sha256:board-sensor-v1-uart-rx",
+            )),
+            write: Some(ProviderContract::new(
+                "board.sensor_v1.uart_tx",
+                "sha256:board-sensor-v1-uart-tx",
+            )),
+            report: Some(ProviderContract::new(
+                "board.sensor_v1.report_uart",
+                "sha256:board-sensor-v1-report",
+            )),
+        };
+        machine.startup = StartupPolicy::Generated {
+            provider: ProviderContract::new(
+                "board.sensor_v1.startup",
+                "sha256:board-sensor-v1-startup",
+            ),
+        };
         machine
     }
 
@@ -370,6 +462,32 @@ impl TargetMachine {
         machine.linker = LinkerInput::Generated;
         machine.allocator = AllocatorPolicy::None;
         machine.panic = PanicPolicy::Abort;
+        machine.mmio = MmioPolicy::Provider {
+            provider: ProviderContract::new("board.virt_aarch64.mmio", "sha256:board-virt-mmio"),
+        };
+        machine.wall_clock = ClockPolicy::None;
+        machine.monotonic_clock = ClockPolicy::None;
+        machine.zone_data = ClockPolicy::None;
+        machine.sleep = ClockPolicy::None;
+        machine.entropy = EntropyPolicy::None;
+        machine.scheduler = SchedulerPolicy::None;
+        machine.byte_sink = ByteSinkPolicy::Provider {
+            read: None,
+            write: Some(ProviderContract::new(
+                "board.virt_aarch64.uart0",
+                "sha256:board-virt-uart0",
+            )),
+            report: Some(ProviderContract::new(
+                "board.virt_aarch64.uart0",
+                "sha256:board-virt-uart0",
+            )),
+        };
+        machine.startup = StartupPolicy::Generated {
+            provider: ProviderContract::new(
+                "board.virt_aarch64.startup",
+                "sha256:board-virt-startup",
+            ),
+        };
         machine
     }
 }
@@ -650,6 +768,327 @@ impl PanicPolicy {
         }
     }
 }
+/// D-FREESTAND-FACTS1=A: every selected target provider carries an explicit
+/// identity and digest. A target triple never supplies either value implicitly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderContract {
+    pub provider: String,
+    pub sha256: String,
+}
+
+impl ProviderContract {
+    pub fn new(provider: impl Into<String>, sha256: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            sha256: sha256.into(),
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.provider.trim().is_empty()
+            && self
+                .sha256
+                .strip_prefix("sha256:")
+                .is_some_and(|digest| !digest.trim().is_empty())
+    }
+
+    fn audit_json(&self) -> String {
+        format!(
+            "{{\"provider\":{},\"sha256\":{}}}",
+            json_str(&self.provider),
+            json_str(&self.sha256)
+        )
+    }
+}
+
+/// One independently selectable time provider. The four TargetMachine fields
+/// using this type are distinct facts: Time.Wall, Time.Monotonic,
+/// Time.ZoneData, and Time.Sleep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClockPolicy {
+    HostedDefault,
+    Unspecified,
+    None,
+    Provider { provider: ProviderContract },
+}
+
+impl Default for ClockPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl ClockPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Provider { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
+    fn provides(&self, hosted: bool) -> bool {
+        hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Provider { provider } => {
+                format!("{{\"kind\":\"provider\",\"contract\":{}}}", provider.audit_json())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntropyPolicy {
+    HostedDefault,
+    Unspecified,
+    None,
+    Provider { provider: ProviderContract },
+}
+
+impl Default for EntropyPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl EntropyPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Provider { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
+    fn provides(&self, hosted: bool) -> bool {
+        hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Provider { provider } => {
+                format!("{{\"kind\":\"provider\",\"contract\":{}}}", provider.audit_json())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchedulerPolicy {
+    HostedDefault,
+    Unspecified,
+    None,
+    Cooperative { provider: ProviderContract },
+    InterruptDriven { provider: ProviderContract },
+    BoardRuntime { provider: ProviderContract },
+}
+
+impl Default for SchedulerPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl SchedulerPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Cooperative { provider }
+            | Self::InterruptDriven { provider }
+            | Self::BoardRuntime { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
+    fn provides(&self, hosted: bool) -> bool {
+        hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Cooperative { provider } => {
+                format!("{{\"kind\":\"cooperative\",\"contract\":{}}}", provider.audit_json())
+            }
+            Self::InterruptDriven { provider } => format!(
+                "{{\"kind\":\"interrupt-driven\",\"contract\":{}}}",
+                provider.audit_json()
+            ),
+            Self::BoardRuntime { provider } => {
+                format!("{{\"kind\":\"board-runtime\",\"contract\":{}}}", provider.audit_json())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MmioPolicy {
+    HostedDefault,
+    Unspecified,
+    None,
+    Provider { provider: ProviderContract },
+}
+
+impl Default for MmioPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl MmioPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Provider { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
+    fn provides(&self, hosted: bool) -> bool {
+        hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Provider { provider } => {
+                format!("{{\"kind\":\"provider\",\"contract\":{}}}", provider.audit_json())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ByteSinkPolicy {
+    HostedDefault,
+    Unspecified,
+    None,
+    Provider {
+        read: Option<ProviderContract>,
+        write: Option<ProviderContract>,
+        report: Option<ProviderContract>,
+    },
+}
+
+impl Default for ByteSinkPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl ByteSinkPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provides_read(&self, hosted: bool) -> bool {
+        match self {
+            Self::HostedDefault => hosted,
+            Self::Provider { read, .. } => read.is_some(),
+            _ => false,
+        }
+    }
+
+    fn provides_write(&self, hosted: bool) -> bool {
+        match self {
+            Self::HostedDefault => hosted,
+            Self::Provider { write, .. } => write.is_some(),
+            _ => false,
+        }
+    }
+
+    fn provides_report(&self, hosted: bool) -> bool {
+        match self {
+            Self::HostedDefault => hosted,
+            Self::Provider { report, .. } => report.is_some(),
+            _ => false,
+        }
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Provider {
+                read,
+                write,
+                report,
+            } => format!(
+                "{{\"kind\":\"provider\",\"read\":{},\"write\":{},\"report\":{}}}",
+                optional_contract_json(read.as_ref()),
+                optional_contract_json(write.as_ref()),
+                optional_contract_json(report.as_ref())
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupPolicy {
+    HostedDefault,
+    Unspecified,
+    Generated { provider: ProviderContract },
+}
+
+impl Default for StartupPolicy {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl StartupPolicy {
+    fn is_declared(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Generated { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
+    fn provides(&self, hosted: bool) -> bool {
+        hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
+    }
+
+    fn audit_json(&self) -> String {
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::Generated { provider } => {
+                format!("{{\"kind\":\"generated\",\"contract\":{}}}", provider.audit_json())
+            }
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditPolicy {
@@ -666,6 +1105,40 @@ impl Default for AuditPolicy {
     }
 }
 
+/// One reachable Prelude requirement against the target fact plane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetCapability {
+    Mmio,
+    TimeWall,
+    TimeMonotonic,
+    TimeZoneData,
+    TimeSleep,
+    Entropy,
+    Scheduler,
+    IoRead,
+    IoWrite,
+    PanicReport,
+    Startup,
+}
+
+impl TargetCapability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mmio => "MMIO",
+            Self::TimeWall => "Time.Wall",
+            Self::TimeMonotonic => "Time.Monotonic",
+            Self::TimeZoneData => "Time.ZoneData",
+            Self::TimeSleep => "Time.Sleep",
+            Self::Entropy => "Rand.Entropy",
+            Self::Scheduler => "Scheduler",
+            Self::IoRead => "IO.Read",
+            Self::IoWrite => "IO.Write",
+            Self::PanicReport => "Panic.Report",
+            Self::Startup => "Startup",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetMachineUse {
     pub stack_bytes: u64,
@@ -673,6 +1146,7 @@ pub struct TargetMachineUse {
     pub heap_required: bool,
     pub core_apis: Vec<String>,
     pub mmio: Vec<MmioAccess>,
+    pub required_capabilities: Vec<TargetCapability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -725,6 +1199,17 @@ pub enum TargetMachineError {
     },
     HostedAllocatorRequiresOs,
     MissingPanicPolicy,
+    MissingTargetCapability {
+        capability: String,
+    },
+    HostedCapabilityRequiresOs {
+        capability: String,
+    },
+    InvalidProviderContract {
+        capability: String,
+        provider: String,
+        sha256: String,
+    },
     RamOverflow {
         used_bytes: u64,
         ram_bytes: u64,
@@ -909,6 +1394,194 @@ fn validate_core_usage(
                 available,
             });
         }
+    }
+}
+fn validate_target_capabilities(
+    machine: &TargetMachine,
+    usage: &TargetMachineUse,
+    errors: &mut Vec<TargetMachineError>,
+) {
+    validate_simple_capability(
+        machine,
+        TargetCapability::Mmio,
+        machine.mmio.is_declared(),
+        matches!(machine.mmio, MmioPolicy::HostedDefault),
+        machine.mmio.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::TimeWall,
+        machine.wall_clock.is_declared(),
+        matches!(machine.wall_clock, ClockPolicy::HostedDefault),
+        machine.wall_clock.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::TimeMonotonic,
+        machine.monotonic_clock.is_declared(),
+        matches!(machine.monotonic_clock, ClockPolicy::HostedDefault),
+        machine.monotonic_clock.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::TimeZoneData,
+        machine.zone_data.is_declared(),
+        matches!(machine.zone_data, ClockPolicy::HostedDefault),
+        machine.zone_data.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::TimeSleep,
+        machine.sleep.is_declared(),
+        matches!(machine.sleep, ClockPolicy::HostedDefault),
+        machine.sleep.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::Entropy,
+        machine.entropy.is_declared(),
+        matches!(machine.entropy, EntropyPolicy::HostedDefault),
+        machine.entropy.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::Scheduler,
+        machine.scheduler.is_declared(),
+        matches!(machine.scheduler, SchedulerPolicy::HostedDefault),
+        machine.scheduler.provider(),
+        errors,
+    );
+    validate_simple_capability(
+        machine,
+        TargetCapability::Startup,
+        machine.startup.is_declared(),
+        matches!(machine.startup, StartupPolicy::HostedDefault),
+        machine.startup.provider(),
+        errors,
+    );
+
+    match &machine.byte_sink {
+        ByteSinkPolicy::HostedDefault if machine.no_os => {
+            push_unique(
+                errors,
+                TargetMachineError::HostedCapabilityRequiresOs {
+                    capability: "IO.Read/IO.Write/Panic.Report".to_string(),
+                },
+            );
+        }
+        ByteSinkPolicy::Unspecified if machine.no_os => {
+            push_unique(
+                errors,
+                TargetMachineError::MissingTargetCapability {
+                    capability: "IO.Read/IO.Write/Panic.Report".to_string(),
+                },
+            );
+        }
+        ByteSinkPolicy::Provider {
+            read,
+            write,
+            report,
+        } => {
+            if let Some(provider) = read {
+                validate_provider_contract(TargetCapability::IoRead, provider, errors);
+            }
+            if let Some(provider) = write {
+                validate_provider_contract(TargetCapability::IoWrite, provider, errors);
+            }
+            if let Some(provider) = report {
+                validate_provider_contract(TargetCapability::PanicReport, provider, errors);
+            }
+        }
+        _ => {}
+    }
+    if machine.no_os
+        && matches!(machine.panic, PanicPolicy::Report { .. })
+        && !machine.byte_sink.provides_report(false)
+    {
+        push_unique(
+            errors,
+            TargetMachineError::MissingTargetCapability {
+                capability: TargetCapability::PanicReport.as_str().to_string(),
+            },
+        );
+    }
+
+    if !usage.mmio.is_empty() && !machine.provides_capability(TargetCapability::Mmio) {
+        push_unique(
+            errors,
+            TargetMachineError::MissingTargetCapability {
+                capability: TargetCapability::Mmio.as_str().to_string(),
+            },
+        );
+    }
+    for capability in &usage.required_capabilities {
+        if !machine.provides_capability(*capability) {
+            push_unique(
+                errors,
+                TargetMachineError::MissingTargetCapability {
+                    capability: capability.as_str().to_string(),
+                },
+            );
+        }
+    }
+}
+
+fn validate_simple_capability(
+    machine: &TargetMachine,
+    capability: TargetCapability,
+    declared: bool,
+    hosted_default: bool,
+    provider: Option<&ProviderContract>,
+    errors: &mut Vec<TargetMachineError>,
+) {
+    if machine.no_os {
+        if hosted_default {
+            push_unique(
+                errors,
+                TargetMachineError::HostedCapabilityRequiresOs {
+                    capability: capability.as_str().to_string(),
+                },
+            );
+        } else if !declared {
+            push_unique(
+                errors,
+                TargetMachineError::MissingTargetCapability {
+                    capability: capability.as_str().to_string(),
+                },
+            );
+        }
+    }
+    if let Some(provider) = provider {
+        validate_provider_contract(capability, provider, errors);
+    }
+}
+
+fn validate_provider_contract(
+    capability: TargetCapability,
+    provider: &ProviderContract,
+    errors: &mut Vec<TargetMachineError>,
+) {
+    if !provider.is_valid() {
+        push_unique(
+            errors,
+            TargetMachineError::InvalidProviderContract {
+                capability: capability.as_str().to_string(),
+                provider: provider.provider.clone(),
+                sha256: provider.sha256.clone(),
+            },
+        );
+    }
+}
+
+fn push_unique(errors: &mut Vec<TargetMachineError>, error: TargetMachineError) {
+    if !errors.contains(&error) {
+        errors.push(error);
     }
 }
 

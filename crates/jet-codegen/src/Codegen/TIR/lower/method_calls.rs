@@ -37,6 +37,8 @@ use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::module_call_target_return;
+use crate::Codegen::TIR::module_call_source_return_type_with_args;
+use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 
 fn unit_ratio_as_f64(value: &crate::AST::UnitRatio) -> f64 {
@@ -130,6 +132,7 @@ use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
 use crate::Codegen::TIR::pool_field_ty_hint;
 use crate::Codegen::TIR::preserve_source_arg_order;
+use crate::Codegen::TIR::render_lowered_lambda_body;
 use crate::Codegen::TIR::render_router_handler;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::resolve_builtin_op;
@@ -140,6 +143,7 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::source_arg_order;
 use crate::Codegen::TIR::spawn_body_result_ty;
+use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::TIR::unit_type;
@@ -462,16 +466,6 @@ fn rooted_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> 
         rooted: true,
         path: path.into(),
         generics,
-    }
-}
-
-/// A host static-call owner spelled without the crate root (a `std::` path or a
-/// prelude type the generated crate has already imported).
-fn host_owner(path: impl Into<String>) -> TStaticOwner {
-    TStaticOwner::Prelude {
-        rooted: false,
-        path: path.into(),
-        generics: Vec::new(),
     }
 }
 
@@ -1234,9 +1228,7 @@ fn lower_method_call_impl(
                                 rust_fn: mangle(&rust_fn).to_string(),
                             },
                             target_return: imported_module_call_target_return(
-                                cx,
-                                &alias,
-                                &root_name,
+                                cx, &alias, &root_name,
                             ),
                             type_args: type_args.to_vec(),
                             args: lowered_args,
@@ -1475,7 +1467,6 @@ fn lower_method_call_impl(
                         | "split_limit"
                         | "replace"
                         | "replace_first"
-                        | "replace_all"
                 )
             {
                 if let Expr::TypedLit {
@@ -1749,6 +1740,78 @@ fn lower_method_call_impl(
             _ => unit_type(),
         }
     }
+
+    /// D-CONC-ALLNAMED1=A: `task.all` carries its named shape in the existing
+    /// tuple carrier. Each tuple field is a `Task<T>` at the input and becomes
+    /// the corresponding `T` in the fallible output tuple.
+    fn taskgroup_result_type(tasks: &TExpr, all: bool) -> Type {
+        if all {
+            if let Type::Tuple(fields) = &tasks.ty {
+                return Type::Tuple(
+                    fields
+                        .iter()
+                        .map(|(name, task_ty)| {
+                            let result_ty = match task_ty.as_ref() {
+                                Type::Apply { name, args, .. }
+                                    if name == "Task" && args.len() == 1 =>
+                                {
+                                    args[0].clone()
+                                }
+                                other => (*other).clone(),
+                            };
+                            (name.clone(), Box::new(result_ty))
+                        })
+                        .collect(),
+                );
+            }
+        }
+        Type::List(Box::new(taskgroup_result_elem(tasks)))
+    }
+    /// Lower a named `task.all` carrier, then restore its authored field order.
+    /// Ordinary tuple literals stay canonical in `lower_expr`; only this
+    /// task-group boundary is allowed to reorder the already-lowered fields.
+    fn lower_taskgroup_all_carrier(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+        let mut tasks = crate::Codegen::TIR::lower_expr(expr, cx, env);
+        let Expr::TupleLit(lit_fields, _, _) = expr else {
+            return tasks;
+        };
+        let fields: &mut Vec<(String, TExpr)> = match &mut tasks.kind {
+            TExprKind::TupleLit { fields, .. } => fields,
+            _ => return tasks,
+        };
+        let field_count = fields.len();
+        let canonical_names = fields
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let mut lowered_by_name = std::collections::HashMap::with_capacity(field_count);
+        for (name, value) in fields.drain(..) {
+            lowered_by_name.insert(name, value);
+        }
+        let authored = lit_fields
+            .iter()
+            .filter_map(|(name, _)| {
+                let mangled = mangle(name).to_string();
+                lowered_by_name
+                    .remove(&mangled)
+                    .map(|value| (mangled, value))
+            })
+            .collect::<Vec<_>>();
+        if authored.len() == field_count && lowered_by_name.is_empty() {
+            fields.extend(authored);
+        } else {
+            let mut authored_by_name = authored
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>();
+            fields.extend(canonical_names.into_iter().filter_map(|name| {
+                authored_by_name
+                    .remove(&name)
+                    .or_else(|| lowered_by_name.remove(&name))
+                    .map(|value| (name, value))
+            }));
+        }
+        tasks
+    }
     let crypto_static = static_call_type_name_lower(receiver, env).and_then(|ty| {
         let helper = match (ty.as_str(), method) {
             ("Secret", "from_text") => "__secret_from_text",
@@ -1989,6 +2052,7 @@ fn lower_method_call_impl(
                 return in_own_frame(|| {
                     let body_ty = spawn_body_result_ty(lam, cx, env);
                     let site = jit_spawn_site(lam, cx, env);
+                    let label = spawn_label(lam, cx, env);
                     let spawn_closure = render_spawn_lambda(lam, cx, env);
                     let executable = Box::new(lower_lambda(lam, cx, env));
                     return TExpr {
@@ -2000,6 +2064,7 @@ fn lower_method_call_impl(
                             kind: TCoreClosureKind::Spawn {
                                 group: None,
                                 site,
+                                label,
                                 spawn_closure,
                                 executable,
                             },
@@ -2010,11 +2075,17 @@ fn lower_method_call_impl(
         }
         if args.len() == 1 {
             return in_own_frame(|| {
-                let tasks = lower_expr(&args[0].expr, cx, env);
+                let tasks = if method == Syntax::INTERNAL_TASK_ALL_METHOD {
+                    lower_taskgroup_all_carrier(&args[0].expr, cx, env)
+                } else {
+                    lower_expr(&args[0].expr, cx, env)
+                };
                 let elem = taskgroup_result_elem(&tasks);
+                let result_ty =
+                    taskgroup_result_type(&tasks, method == Syntax::INTERNAL_TASK_ALL_METHOD);
                 let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
                     Syntax::INTERNAL_TASK_ALL_METHOD => Type::Result {
-                        ok: Box::new(Type::List(Box::new(elem.clone()))),
+                        ok: Box::new(result_ty),
                         err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
                     },
                     _ => Type::Result {
@@ -2054,6 +2125,7 @@ fn lower_method_call_impl(
             return in_own_frame(|| {
                 let body_ty = spawn_body_result_ty(lam, cx, env);
                 let site = jit_spawn_site(lam, cx, env);
+                let label = spawn_label(lam, cx, env);
                 let spawn_closure = render_spawn_lambda(lam, cx, env);
                 let executable = Box::new(lower_lambda(lam, cx, env));
                 let group = lower_expr(receiver, cx, env);
@@ -2066,6 +2138,7 @@ fn lower_method_call_impl(
                         kind: TCoreClosureKind::Spawn {
                             group: Some(Box::new(group)),
                             site,
+                            label,
                             spawn_closure,
                             executable,
                         },
@@ -2081,11 +2154,11 @@ fn lower_method_call_impl(
         && args.len() == 1
     {
         return in_own_frame(|| {
-            let tasks = lower_expr(&args[0].expr, cx, env);
-            let elem = taskgroup_result_elem(&tasks);
+            let tasks = lower_taskgroup_all_carrier(&args[0].expr, cx, env);
+            let result_ty = taskgroup_result_type(&tasks, true);
             return TExpr {
                 ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                    ok: Box::new(Type::List(Box::new(elem))),
+                    ok: Box::new(result_ty),
                     err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
                 }),
                 kind: TExprKind::TaskGroupAll {
@@ -2155,7 +2228,11 @@ fn lower_method_call_impl(
                 // `Vec<Box<dyn FnOnce()>>`, so it must be a `move` closure boxed exactly
                 // once by the `TCoreClosureKind::OnCommit` emit (no double-box).
                 let tl = lower_lambda(lam, cx, env);
-                let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+                let inner = format!(
+                    "move |{}| {}",
+                    tl.params.join(", "),
+                    render_lowered_lambda_body(&tl)
+                );
                 let closure = if tl.prep.is_empty() {
                     inner
                 } else {
@@ -2186,7 +2263,11 @@ fn lower_method_call_impl(
         if let Some(crate::AST::Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             return in_own_frame(|| {
                 let tl = lower_lambda(lam, cx, env);
-                let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+                let inner = format!(
+                    "move |{}| {}",
+                    tl.params.join(", "),
+                    render_lowered_lambda_body(&tl)
+                );
                 let closure = if tl.prep.is_empty() {
                     inner
                 } else {
@@ -2288,9 +2369,17 @@ fn lower_method_call_impl(
             && is_json_variant(method)
         {
             return in_own_frame(|| {
-                let arg = args
-                    .first()
-                    .map(|a| Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone)));
+                let arg = args.first().map(|a| {
+                    let value = lower_expr(&a.expr, cx, env);
+                    let value = if method == "Array" {
+                        let payload =
+                            Type::List(Box::new(Type::Named(Syntax::TYPE_DATA.to_string())));
+                        preserve_typed_list_shape(value, &payload, cx)
+                    } else {
+                        value
+                    };
+                    Box::new((value, a.flags.implicit_clone))
+                });
                 return TExpr {
                     ty: Type::Named(Syntax::TYPE_DATA.to_string()),
                     kind: TExprKind::JSONLit {
@@ -2815,6 +2904,17 @@ fn lower_method_call_impl(
                             lower_core_arg(&module, method, index, &arg.expr, cx, env)
                         })
                         .collect();
+                    if module == "core.mem"
+                        && method == "address_of"
+                        && targs.first().is_some_and(|arg| {
+                            matches!(
+                                crate::Codegen::TIR::tir_address_lifetime(arg),
+                                crate::Codegen::TIR::TAddressLifetime::Stack
+                            )
+                        })
+                    {
+                        env.note_stack_address();
+                    }
                     let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                     let ty = in_own_frame(|| {
                         if module == "core.mem" {
@@ -2904,6 +3004,17 @@ fn lower_method_call_impl(
                             lower_core_arg(&submodule, method, index, &arg.expr, cx, env)
                         })
                         .collect();
+                    if submodule == "core.mem"
+                        && method == "address_of"
+                        && targs.first().is_some_and(|arg| {
+                            matches!(
+                                crate::Codegen::TIR::tir_address_lifetime(arg),
+                                crate::Codegen::TIR::TAddressLifetime::Stack
+                            )
+                        })
+                    {
+                        env.note_stack_address();
+                    }
                     let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                     let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
                         resolved_ret.cloned().unwrap_or_else(|| {
@@ -3042,14 +3153,18 @@ fn lower_method_call_impl(
                     return in_own_frame(|| {
                         let sig = cx.sigs.get(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
-                        let ret = call_return_type_with_args(cx, &mangled_key, type_args, &targs);
+                        let target_return =
+                            call_return_type_with_args(cx, &mangled_key, type_args, &targs);
+                        let ret = module_call_source_return_type_with_args(
+                            cx, &mangled_key, type_args, &targs,
+                        );
                         return TExpr {
-                            ty: ret.clone(),
+                            ty: ret,
                             kind: TExprKind::ModuleCall {
                                 form: TModuleCallForm::InlineMangled {
                                     mangled: mangled_key,
                                 },
-                                target_return: Some(ret),
+                                target_return: Some(target_return),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3085,9 +3200,7 @@ fn lower_method_call_impl(
                                     rust_fn: mangle(&real_fn).to_string(),
                                 },
                                 target_return: imported_module_call_target_return(
-                                    cx,
-                                    alias,
-                                    method,
+                                    cx, alias, method,
                                 ),
                                 type_args: type_args.to_vec(),
                                 args: targs,
@@ -3166,7 +3279,9 @@ fn lower_method_call_impl(
                                     rust_mod: mod_name,
                                     rust_fn: mangle(method).to_string(),
                                 },
-                                target_return: imported_module_call_target_return(cx, alias, method),
+                                target_return: imported_module_call_target_return(
+                                    cx, alias, method,
+                                ),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3257,14 +3372,18 @@ fn lower_method_call_impl(
                             .map(String::as_str);
                         let sig = cx.sigs.get(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
-                        let ret = call_return_type_with_args(cx, &mangled_key, type_args, &targs);
+                        let target_return =
+                            call_return_type_with_args(cx, &mangled_key, type_args, &targs);
+                        let ret = module_call_source_return_type_with_args(
+                            cx, &mangled_key, type_args, &targs,
+                        );
                         let lowered = TExpr {
-                            ty: ret.clone(),
+                            ty: ret,
                             kind: TExprKind::ModuleCall {
                                 form: TModuleCallForm::InlineMangled {
                                     mangled: mangled_key,
                                 },
-                                target_return: Some(ret),
+                                target_return: Some(target_return),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3309,8 +3428,7 @@ fn lower_method_call_impl(
                     || crate::Collections::builtin_needs_mut_receiver(
                         recv_mut_ty_hint.as_ref().unwrap_or(&Type::Int),
                         method,
-                    )
-                {
+                    ) {
                     lower_expr_as_mut_place(receiver, cx, env)
                 } else {
                     lower_expr(receiver, cx, env)
@@ -3780,7 +3898,7 @@ fn lower_method_call_impl(
                 _ => recv_t.ty.clone(),
             };
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            return TExpr {
+            let lowered = TExpr {
                 ty: result_ty,
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(recv_t),
@@ -3789,6 +3907,12 @@ fn lower_method_call_impl(
                     },
                     args: targs,
                 },
+            };
+            return match source_arg_order(args) {
+                Some(order) => {
+                    preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32)
+                }
+                None => lowered,
             };
         });
     }
@@ -3954,11 +4078,18 @@ fn lower_method_call_impl(
                 ) if !args.is_empty() && !(method == "header" && args.len() == 1) => {
                     Type::Named("HTTPRequest".to_string())
                 }
+                ("HTTPRequest", "json") if args.len() == 1 => {
+                    Type::Named("HTTPRequest".to_string())
+                }
                 ("HTTPRequest", "send") => Type::Result {
                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
                 ("HTTPRequest", "method" | "path") => Type::String,
+                ("HTTPRequest", "text") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
+                },
                 ("HTTPRequest", "body") => Type::Named("HTTPBody".to_string()),
                 ("HTTPRequest", "trailers") => Type::Result {
                     ok: Box::new(Type::Named("HTTPHeaders".to_string())),
@@ -3987,6 +4118,10 @@ fn lower_method_call_impl(
                     Type::Named("HTTPResponse".to_string())
                 }
                 ("HTTPResponse", "status") => Type::Int,
+                ("HTTPResponse", "text") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
+                },
                 ("HTTPResponse", "body") => Type::Named("HTTPBody".to_string()),
                 ("HTTPResponse", "header") => Type::Option(Box::new(Type::String)),
                 ("HTTPResponse", "cookies") => Type::List(Box::new(Type::String)),
@@ -4195,7 +4330,11 @@ fn lower_method_call_impl(
                         && i == 1
                     {
                         if let Expr::Lambda(lam) = &a.expr {
-                            let params = vec![Type::Named("HTTPRequest".to_string())];
+                            let params = if lam.params.is_empty() {
+                                Vec::new()
+                            } else {
+                                vec![Type::Named("HTTPRequest".to_string())]
+                            };
                             let ret = Type::Result {
                                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
                                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -4226,6 +4365,7 @@ fn lower_method_call_impl(
                     _
                 ) | ("HTTPRequest", "header", 1)
                     | ("HTTPRequest", "body", 0)
+                    | ("HTTPRequest", "text", 0 | 1)
                     | ("HTTPRequest", "json", 0)
                     | ("HTTPRequest", "trailers", 0)
                     | ("HTTPResponse", "header", 2)
@@ -4301,24 +4441,45 @@ fn lower_method_call_impl(
                 | ("Date" | "LocalDate", "iso_weekday")
                 | ("Date" | "LocalDate", "day_of_year")
                 | ("Date" | "LocalDate", "iso_week")
+                | ("Date" | "LocalDate", "iso_week_year")
                 | ("Date" | "LocalDate", "quarter_of_year")
                 | ("Date" | "LocalDate", "days_in_month") => Type::Int,
                 ("Date" | "LocalDate", "is_leap_year") => Type::Bool,
                 (
                     "Date" | "LocalDate",
-                    "add_days" | "add_months" | "add_period" | "truncate" | "replace",
+                    "add_days" | "add_months" | "add_period" | "subtract_period" | "truncate"
+                    | "replace",
                 ) => Type::Named("LocalDate".to_string()),
+                ("Date" | "LocalDate", "with") => Type::Result {
+                    ok: Box::new(Type::Named("LocalDate".to_string())),
+                    err: Box::new(Type::String),
+                },
                 ("Date" | "LocalDate", "to_string" | "format") => Type::String,
-                ("LocalTime", "hour" | "minute" | "second") => Type::Int,
-                ("LocalTime", "to_string") => Type::String,
+                ("Date" | "LocalDate", "format_checked") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("TextError".to_string())),
+                },
+                ("Date" | "LocalDate", "until" | "since") => Type::Named("Duration".to_string()),
                 (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant"
-                    | "ZonedDateTime",
+                    "LocalTime",
+                    "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond",
+                ) => Type::Int,
+                (
+                    "LocalTime",
+                    "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil",
+                ) => Type::Named("LocalTime".to_string()),
+                ("LocalTime", "until" | "since") => Type::Named("Duration".to_string()),
+                ("LocalTime", "to_string" | "format") => Type::String,
+                ("LocalTime", "format_checked") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("TextError".to_string())),
+                },
+                (
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
                     "equal",
                 ) => Type::Bool,
                 (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant"
-                    | "ZonedDateTime",
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
                     "compare",
                 ) => Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
                 ("DateTime", "hour")
@@ -4328,30 +4489,72 @@ fn lower_method_call_impl(
                 | ("DateTime", "microsecond")
                 | ("DateTime", "nanosecond")
                 | ("DateTime", "to_timestamp")
-                | ("DateTime", "to_unix_ms") => Type::Int,
+                | ("DateTime", "to_unix_ms")
+                | ("DateTime", "to_unix_s") => Type::Int,
+                ("DateTime", "to_unix_us" | "to_unix_ns") => Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(Type::Named("RangeError".to_string())),
+                },
                 ("DateTime", "date") => Type::Named("LocalDate".to_string()),
                 ("DateTime", "time") => Type::Named("LocalTime".to_string()),
                 (
                     "DateTime",
-                    "plus_duration" | "truncate" | "round" | "floor" | "ceil" | "replace",
+                    "plus_duration" | "subtract_duration" | "add_period" | "subtract_period"
+                    | "truncate" | "round" | "floor" | "ceil" | "replace",
                 ) => Type::Named("DateTime".to_string()),
-                ("DateTime", "difference") => Type::Named("Duration".to_string()),
+                ("DateTime", "with") => Type::Result {
+                    ok: Box::new(Type::Named("DateTime".to_string())),
+                    err: Box::new(Type::String),
+                },
+                ("DateTime", "difference" | "until" | "since") => {
+                    Type::Named("Duration".to_string())
+                }
                 ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
                 ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
+                ("DateTime", "format_checked") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("TextError".to_string())),
+                },
                 ("Instant", "elapsed_millis") => Type::Int,
                 ("Instant", "elapsed") => Type::Named("Duration".to_string()),
+                ("Period", "years" | "months" | "days" | "sign") => Type::Int,
+                ("Period", "is_zero") => Type::Bool,
+                ("Period", "abs" | "negated" | "add" | "sub") => Type::Named("Period".to_string()),
+                ("Period", "total_in") => Type::Float,
                 ("Period", "to_string") => Type::String,
                 ("Zone", "name") => Type::String,
+                ("Zone", "next_transition" | "previous_transition") => {
+                    Type::Option(Box::new(Type::Int))
+                }
+                ("Zone", "start_of_day") => Type::Named("ZonedDateTime".to_string()),
+                ("Zone", "hours_in_day") => Type::Int,
                 ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
                 ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
                 ("ZonedDateTime", "offset_seconds") => Type::Int,
                 ("ZonedDateTime", "is_dst") => Type::Bool,
                 ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
                 ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
-                ("ZonedDateTime", "add_duration" | "add_period") => {
+                (
+                    "ZonedDateTime",
+                    "add_duration" | "subtract_duration" | "add_period" | "subtract_period",
+                ) => Type::Named("ZonedDateTime".to_string()),
+                ("ZonedDateTime", "with_zone" | "start_of_day") => {
                     Type::Named("ZonedDateTime".to_string())
                 }
-                ("ZonedDateTime", "to_string" | "format") => Type::String,
+                ("ZonedDateTime", "with_time") => Type::Result {
+                    ok: Box::new(Type::Named("ZonedDateTime".to_string())),
+                    err: Box::new(Type::String),
+                },
+                ("ZonedDateTime", "until" | "since") => Type::Named("Duration".to_string()),
+                ("ZonedDateTime", "next_transition" | "previous_transition") => {
+                    Type::Option(Box::new(Type::Int))
+                }
+                ("ZonedDateTime", "hours_in_day") => Type::Int,
+                ("ZonedDateTime", "to_string" | "format" | "format_rfc9557") => Type::String,
+                ("ZonedDateTime", "format_checked") => Type::Result {
+                    ok: Box::new(Type::String),
+                    err: Box::new(Type::Named("TextError".to_string())),
+                },
                 _ => unit_type(),
             });
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -4998,13 +5201,42 @@ fn lower_method_call_impl(
                             .and_then(|all| all.get(index))
                             .or(callback_params.as_ref());
                         if let (Expr::Lambda(lam), Some(params)) = (&a.expr, params) {
-                            let tl = if method == "edit_disjoint" {
+                            let mut tl = if method == "edit_disjoint" {
                                 crate::Codegen::TIR::lower_lambda_expecting_value(
                                     lam, cx, env, params,
                                 )
                             } else {
                                 lower_lambda_expecting_host_borrow(lam, cx, env, params, false)
                             };
+                            // D-FAILURE-FOUNDATION1=A / #2266: sema records
+                            // propagation in the callback when a nested callee
+                            // needs the enclosing function's carrier. The
+                            // expression lowerer has already emitted its
+                            // success-side `Ok` wrapper, but its probe can only
+                            // see the unwrapped value type. Project that value
+                            // back onto the callback's Result return before the
+                            // closure op is resolved; otherwise `?` lands in a
+                            // raw-return Rust closure and rustc reports E0277.
+                            if lam.meta.fallible_propagation
+                                && !matches!(
+                                    tl.ret.as_ref(),
+                                    Some(Type::Result { .. }) | Some(Type::Option(_))
+                                )
+                            {
+                                let callback_ok = tl.ret.clone().unwrap_or_else(unit_type);
+                                if let Some(error) = env.ret_ty.as_ref().and_then(|ret| match ret {
+                                    Type::Result { err, .. } => Some(Type::Result {
+                                        ok: Box::new(callback_ok.clone()),
+                                        err: err.clone(),
+                                    }),
+                                    Type::Option(_) => {
+                                        Some(Type::Option(Box::new(callback_ok.clone())))
+                                    }
+                                    _ => None,
+                                }) {
+                                    tl.ret = Some(error);
+                                }
+                            }
                             return TExpr {
                                 ty: Type::Fn {
                                     params: params.clone(),
@@ -5112,8 +5344,8 @@ fn lower_method_call_impl(
                             host_kind,
                             dst_rust,
                             dst_spelling,
-                            line: crate::Diagnostics::span_line_col(&cx.src, method_span.start)
-                                .0 as u32,
+                            line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
+                                as u32,
                         },
                     },
                 };
@@ -5128,6 +5360,20 @@ fn lower_method_call_impl(
                         line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
                             as u32,
                     },
+                },
+            };
+        });
+    }
+
+    if recv_type.as_deref() == Some("Int") && method == "to_radix" && args.len() == 1 {
+        return in_own_frame(|| {
+            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+            return TExpr {
+                ty: resolved_ret.cloned().unwrap_or(Type::String),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    op: TBuiltinOp::IntToRadix { line },
+                    args: vec![lower_expr(&args[0].expr, cx, env)],
                 },
             };
         });
@@ -5153,8 +5399,8 @@ fn lower_method_call_impl(
                         let result_ty = resolved_ret.cloned().unwrap_or_else(|| {
                             builtin_result_ty(method, args.len(), Some(&recv_ty))
                         });
-                        let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
-                            as u32;
+                        let line =
+                            crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
                         return TExpr {
                             ty: result_ty,
                             kind: TExprKind::OverflowOpt {
@@ -5805,364 +6051,384 @@ fn lower_method_call_impl(
     if recv_type.is_none() {
         if let Some(type_name) = static_call_type_name_lower(receiver, env) {
             return in_own_frame(|| {
-            // D-TEXTHEAD-TYPE1=A: the source-facing constructors are ordinary
-            // inherent facades over the ordinary CheckedText implementation.
-            // Their Rust names stay bare; only actual Jet methods use the
-            // `__jet_` mangle.
-            if cx.string_distinct_has_trait_method(&type_name, "check")
-                && cx.string_distinct_has_trait_method(&type_name, "encode_hole")
-                && matches!(method, "from" | "encode_hole")
-            {
-                let lowered_args: Vec<_> = args
-                    .iter()
-                    .map(|argument| lower_one_call_arg(argument, None, env, cx))
-                    .collect();
-                let resolved_type_args = if method == "encode_hole" {
-                    let sig = cx
-                        .method_sigs
-                        .get(&(type_name.clone(), method.to_string()))
-                        .cloned()
-                        .unwrap_or_default();
-                    resolved_method_type_args(
-                        cx,
-                        &type_name,
-                        method,
-                        &sig,
-                        &[],
-                        &lowered_args,
-                        type_args,
-                        resolved_ret,
-                    )
-                } else {
-                    type_args.to_vec()
-                };
-                if !resolved_type_args.is_empty() {
-                    let owner = Type::Named(type_name.clone());
-                    cx.jit_method_calls.borrow_mut().insert(
-                        crate::Codegen::TIR::generic_method_instance_key(
-                            &owner,
+                // D-TEXTHEAD-TYPE1=A: the source-facing constructors are ordinary
+                // inherent facades over the ordinary CheckedText implementation.
+                // Their Rust names stay bare; only actual Jet methods use the
+                // `__jet_` mangle.
+                if cx.string_distinct_has_trait_method(&type_name, "check")
+                    && cx.string_distinct_has_trait_method(&type_name, "encode_hole")
+                    && matches!(method, "from" | "encode_hole")
+                {
+                    let lowered_args: Vec<_> = args
+                        .iter()
+                        .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                        .collect();
+                    let resolved_type_args = if method == "encode_hole" {
+                        let sig = cx
+                            .method_sigs
+                            .get(&(type_name.clone(), method.to_string()))
+                            .cloned()
+                            .unwrap_or_default();
+                        resolved_method_type_args(
+                            cx,
+                            &type_name,
                             method,
-                            &resolved_type_args,
-                        ),
-                        (owner, method.to_string(), resolved_type_args.clone()),
-                    );
-                }
-                return TExpr {
-                    ty: resolved_ret.cloned().unwrap_or_else(|| {
-                        if method == "from" {
-                            Type::Result {
-                                ok: Box::new(Type::Named(type_name.clone())),
-                                err: Box::new(Type::String),
+                            &sig,
+                            &[],
+                            &lowered_args,
+                            type_args,
+                            resolved_ret,
+                        )
+                    } else {
+                        type_args.to_vec()
+                    };
+                    if !resolved_type_args.is_empty() {
+                        let owner = Type::Named(type_name.clone());
+                        cx.jit_method_calls.borrow_mut().insert(
+                            crate::Codegen::TIR::generic_method_instance_key(
+                                &owner,
+                                method,
+                                &resolved_type_args,
+                            ),
+                            (owner, method.to_string(), resolved_type_args.clone()),
+                        );
+                    }
+                    return TExpr {
+                        ty: resolved_ret.cloned().unwrap_or_else(|| {
+                            if method == "from" {
+                                Type::Result {
+                                    ok: Box::new(Type::Named(type_name.clone())),
+                                    err: Box::new(Type::String),
+                                }
+                            } else {
+                                Type::String
                             }
-                        } else {
-                            Type::String
-                        }
-                    }),
-                    kind: TExprKind::StaticCall {
-                        owner: TStaticOwner::User(type_name.clone()),
-                        owner_type: Some(Type::Named(type_name)),
-                        method: TMethodRef::bare(method),
-                        type_args: resolved_type_args,
-                        args: lowered_args,
-                    },
-                };
-            }
-            // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
-            // so every engine receives the same named rights carrier.
-            if type_name == Syntax::TYPE_AUTHORITY && method == "workspace" && args.is_empty() {
-                return TExpr {
-                    ty: resolved_ret
-                        .cloned()
-                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-                    kind: TExprKind::StaticCall {
-                        owner: rooted_owner("JetAuthority"),
-                        owner_type: None,
-                        method: TMethodRef::bare("workspace"),
-                        type_args: Vec::new(),
-                        args: Vec::new(),
-                    },
-                };
-            }
-            if type_name == "Date" && method == "today" && args.is_empty() {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named("Date".to_string()),
-                        kind: TExprKind::CoreCall {
-                            module: "core.time".to_string(),
-                            method: "today".to_string(),
-                            args: Vec::new(),
-                            source_span: method_span,
-                            widen_to_vec: Vec::new(),
+                        }),
+                        kind: TExprKind::StaticCall {
+                            owner: TStaticOwner::User(type_name.clone()),
+                            owner_type: Some(Type::Named(type_name)),
+                            method: TMethodRef::bare(method),
+                            type_args: resolved_type_args,
+                            args: lowered_args,
                         },
                     };
-                });
-            }
-            if type_name == "Path"
-                && method == "home"
-                && args.is_empty()
-                && !cx.type_names.contains("Path")
-            {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named("Path".to_string()),
-                        kind: TExprKind::HandleMethod {
-                            recv: Box::new(TExpr {
-                                ty: unit_type(),
-                                kind: TExprKind::Unit,
-                            }),
-                            op: THandleOp::PathHome,
-                            args: Vec::new(),
-                        },
-                    };
-                });
-            }
-            // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
-            // one field/index boundary before applying `?`. Keep this as a TIR
-            // node so AOT, JIT, and interpreter use one implementation.
-            if type_name == "FieldError" && method == "under" && args.len() == 2 {
-                return in_own_frame(|| {
-                    let segment = lower_one_call_arg(&args[0], None, env, cx).value;
-                    let inner = lower_expr(&args[1].expr, cx, env);
-                    return TExpr {
-                        ty: resolved_ret.cloned().unwrap_or_else(|| inner.ty.clone()),
-                        kind: TExprKind::DecodeUnder {
-                            segment: Box::new(segment),
-                            inner: Box::new(inner),
-                        },
-                    };
-                });
-            }
-            if matches!(
-                type_name.as_str(),
-                "HTTPMethod"
-                    | "HTTPStatus"
-                    | "HTTPVersion"
-                    | "HTTPHeaderName"
-                    | "HTTPHeaderValue"
-                    | "HTTPHeaders"
-                    | "HTTPBody"
-            ) {
-                return in_own_frame(|| {
-                    let method_rust = match (type_name.as_str(), method, args.len()) {
-                        ("HTTPBody", "bytes", 1) => "from_bytes",
-                        ("HTTPBody", "text", 1) => "from_text",
-                        ("HTTPBody", "text", 2) => "from_text_with_mime",
-                        ("HTTPBody", "json", 1) => "from_json",
-                        ("HTTPBody", "form", 1) => "from_form",
-                        ("HTTPBody", "multipart", 1) => "from_multipart",
-                        ("HTTPBody", "reader", 1) => "from_reader",
-                        ("HTTPBody", "reader", 2) => "from_reader_with_length",
-                        _ => method,
-                    };
+                }
+                // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
+                // so every engine receives the same named rights carrier.
+                if type_name == Syntax::TYPE_AUTHORITY && method == "workspace" && args.is_empty() {
                     return TExpr {
                         ty: resolved_ret
                             .cloned()
-                            .unwrap_or_else(|| Type::Named(type_name.clone())),
+                            .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
                         kind: TExprKind::StaticCall {
-                            owner: rooted_owner(format!("Jet{type_name}")),
+                            owner: rooted_owner("JetAuthority"),
                             owner_type: None,
-                            method: TMethodRef::bare(method_rust),
+                            method: TMethodRef::bare("workspace"),
                             type_args: Vec::new(),
-                            args: args
-                                .iter()
-                                .map(|argument| lower_one_call_arg(argument, None, env, cx))
-                                .collect(),
+                            args: Vec::new(),
                         },
                     };
-                });
-            }
-            // D-STRPARSE1: text interpretation stays `Type.parse(text)`. Carry the
-            // text as the builtin receiver so the existing builtin TIR seam owns emit.
-            if let ("Int" | "Float", "parse", Some(arg)) =
-                (type_name.as_str(), method, args.first())
-            {
-                if args.len() == 1 {
+                }
+                if type_name == "Date" && method == "today" && args.is_empty() {
                     return in_own_frame(|| {
                         return TExpr {
-                            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                                ok: Box::new(if type_name == "Int" {
-                                    Type::Int
-                                } else {
-                                    Type::Float
+                            ty: Type::Named("Date".to_string()),
+                            kind: TExprKind::CoreCall {
+                                module: "core.time".to_string(),
+                                method: "today".to_string(),
+                                args: Vec::new(),
+                                source_span: method_span,
+                                widen_to_vec: Vec::new(),
+                            },
+                        };
+                    });
+                }
+                if type_name == "Path"
+                    && method == "home"
+                    && args.is_empty()
+                    && !cx.type_names.contains("Path")
+                {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named("Path".to_string()),
+                            kind: TExprKind::HandleMethod {
+                                recv: Box::new(TExpr {
+                                    ty: unit_type(),
+                                    kind: TExprKind::Unit,
                                 }),
-                                err: Box::new(Type::Named("ParseError".to_string())),
-                            }),
-                            kind: TExprKind::BuiltinMethod {
-                                recv: Box::new(lower_expr(&arg.expr, cx, env)),
-                                op: if type_name == "Int" {
-                                    TBuiltinOp::ParseInt
-                                } else {
-                                    TBuiltinOp::ParseFloat
-                                },
-                                args: vec![],
+                                op: THandleOp::PathHome,
+                                args: Vec::new(),
                             },
                         };
                     });
                 }
-            }
-            // D-BYTESDECODE1: UTF-8 decoding is a String static method, but
-            // its value argument is the builtin receiver so every engine uses
-            // the same Prelude-backed TIR operation.
-            if let ("String", method @ ("from_bytes" | "from_bytes_lossy"), Some(arg)) =
-                (type_name.as_str(), method, args.first())
-            {
-                if args.len() == 1 {
-                    let (op, ty) = if method == "from_bytes" {
-                        (
-                            TBuiltinOp::StringFromBytes,
-                            resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                                ok: Box::new(Type::String),
-                                err: Box::new(Type::Named(
-                                    crate::Syntax::TYPE_UTF8_ERROR.to_string(),
-                                )),
-                            }),
-                        )
-                    } else {
-                        (
-                            TBuiltinOp::StringFromBytesLossy,
-                            resolved_ret.cloned().unwrap_or(Type::String),
-                        )
-                    };
-                    return in_own_frame(|| TExpr {
-                        ty,
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(lower_expr(&arg.expr, cx, env)),
-                            op,
-                            args: vec![],
-                        },
-                    });
-                }
-            }
-            // D-SHAPE-CONVERT1=A: numeric conversions are static on the destination
-            // type. Reuse NumericMethod by treating the sole value argument as its
-            // input; only the source-level call direction changed.
-            if let (Some(target), Some(source_name), Some(arg)) = (
-                crate::AST::numeric_type_from_name(&type_name),
-                Syntax::numeric_conversion_source(method),
-                args.first(),
-            ) {
-                if args.len() == 1 {
+                // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
+                // one field/index boundary before applying `?`. Keep this as a TIR
+                // node so AOT, JIT, and interpreter use one implementation.
+                if type_name == "FieldError" && method == "under" && args.len() == 2 {
                     return in_own_frame(|| {
-                        let input = lower_expr(&arg.expr, cx, env);
-                        let op = resolve_numeric_conversion_op(&type_name, source_name)
-                            .expect("sema admitted a numeric destination conversion");
-                        let ty =
-                            crate::Collections::builtin_method_return(&target, method, 1, true)
-                                .flatten()
-                                .unwrap_or(target);
+                        let segment = lower_one_call_arg(&args[0], None, env, cx).value;
+                        let inner = lower_expr(&args[1].expr, cx, env);
                         return TExpr {
-                            ty,
-                            kind: TExprKind::NumericMethod {
-                                recv: Box::new(input),
-                                op,
+                            ty: resolved_ret.cloned().unwrap_or_else(|| inner.ty.clone()),
+                            kind: TExprKind::DecodeUnder {
+                                segment: Box::new(segment),
+                                inner: Box::new(inner),
                             },
                         };
                     });
                 }
-            }
-            if let (Some((base, _)), Some(source), Some(arg)) = (
-                cx.distinct_types.get(&type_name),
-                Syntax::numeric_conversion_source(method),
-                args.first(),
-            ) {
-                if args.len() == 1 {
+                if matches!(
+                    type_name.as_str(),
+                    "HTTPMethod"
+                        | "HTTPStatus"
+                        | "HTTPVersion"
+                        | "HTTPHeaderName"
+                        | "HTTPHeaderValue"
+                        | "HTTPHeaders"
+                        | "HTTPBody"
+                ) {
                     return in_own_frame(|| {
-                        let op = resolve_numeric_conversion_op(&base.name(), source)
-                            .expect("sema admitted a numeric distinct conversion");
-                        let range = cx.distinct_ranges.get(&type_name).copied();
+                        let method_rust = match (type_name.as_str(), method, args.len()) {
+                            ("HTTPBody", "bytes", 1) => "from_bytes",
+                            ("HTTPBody", "text", 1) => "from_text",
+                            ("HTTPBody", "text", 2) => "from_text_with_mime",
+                            ("HTTPBody", "json", 1) => "from_json",
+                            ("HTTPBody", "form", 1) => "from_form",
+                            ("HTTPBody", "multipart", 1) => "from_multipart",
+                            ("HTTPBody", "reader", 1) => "from_reader",
+                            ("HTTPBody", "reader", 2) => "from_reader_with_length",
+                            _ => method,
+                        };
                         return TExpr {
                             ty: resolved_ret
                                 .cloned()
                                 .unwrap_or_else(|| Type::Named(type_name.clone())),
-                            kind: TExprKind::DistinctConvert {
-                                name: type_name,
-                                arg: Box::new(lower_expr(&arg.expr, cx, env)),
-                                op,
-                                range,
-                                fallible: matches!(resolved_ret, Some(Type::Result { .. })),
-                            },
-                        };
-                    });
-                }
-            }
-            if let (Some((base, _)), Some(arg)) = (cx.distinct_types.get(&type_name), args.first())
-            {
-                if args.len() == 1
-                    && !base.is_numeric()
-                    && Syntax::conversion_method_for_source(&base.name()) == method
-                {
-                    return in_own_frame(|| {
-                        return TExpr {
-                            ty: Type::Named(type_name.clone()),
-                            kind: TExprKind::Call {
-                                name: type_name,
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_owner(format!("Jet{type_name}")),
+                                owner_type: None,
+                                method: TMethodRef::bare(method_rust),
                                 type_args: Vec::new(),
-                                args: vec![lower_one_call_arg(arg, None, env, cx)],
+                                args: args
+                                    .iter()
+                                    .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                                    .collect(),
                             },
                         };
                     });
                 }
-            }
-            if let (Some(destination), Some(arg)) = (cx.unit_facts.get(&type_name), args.first()) {
-                let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
-                let lowered = lower_expr(&arg.expr, cx, env);
-                let rounding = args.get(1).and_then(|mode| match &mode.expr {
-                    Expr::EnumLit {
-                        type_name,
-                        variant,
-                        args,
-                        ..
-                    } if type_name.is_empty() && args.is_empty() => {
-                        Syntax::unit_rounding_mode(variant)
-                    }
-                    _ => None,
-                });
-                let source = match &lowered.ty {
-                    Type::Named(name) => cx.unit_facts.get(name),
-                    _ => None,
-                }
-                .or_else(|| {
-                    let destination_scope = type_name.rsplit_once('.').map(|(scope, _)| scope);
-                    cx.unit_facts.iter().find_map(|(name, fact)| {
-                        let leaf = name.rsplit('.').next().unwrap_or(name);
-                        let source_scope = name.rsplit_once('.').map(|(scope, _)| scope);
-                        (source_scope == destination_scope
-                            && fact.family == destination.family
-                            && fact.kind == destination.kind
-                            && Syntax::conversion_method_for_source(leaf) == exact_method)
-                            .then_some(fact)
-                    })
-                });
-                if args.len() == 1 || (args.len() == 3 && rounding.is_some()) {
-                    if let Some(source) = source {
+                // D-STRPARSE1: text interpretation stays `Type.parse(text)`. Carry the
+                // text as the builtin receiver so the existing builtin TIR seam owns emit.
+                if let ("Int" | "Float", "parse", Some(arg)) =
+                    (type_name.as_str(), method, args.first())
+                {
+                    if args.len() == 1 {
                         return in_own_frame(|| {
-                            let scale = source
-                                .scale
-                                .div(&destination.scale)
-                                .expect("sema validated unit scale");
-                            let offset = source
-                                .offset
-                                .sub(&destination.offset)
-                                .and_then(|value| value.div(&destination.scale))
-                                .expect("sema validated unit offset");
-                            let measured_scale_uncertainty = |fact: &crate::Codegen::UnitFact| {
-                                let crate::AST::UnitScaleProvenance::Measured {
-                                    standard_uncertainty,
-                                    ..
-                                } = &fact.scale_provenance
-                                else {
-                                    return None;
-                                };
-                                let standard_uncertainty =
-                                    standard_uncertainty.parse::<f64>().ok()?;
-                                let scale = unit_ratio_as_f64(&fact.scale).abs();
-                                (scale.is_finite() && scale > 0.0)
-                                    .then_some(standard_uncertainty.abs() / scale)
+                            return TExpr {
+                                ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                                    ok: Box::new(if type_name == "Int" {
+                                        Type::Int
+                                    } else {
+                                        Type::Float
+                                    }),
+                                    err: Box::new(Type::Named("ParseError".to_string())),
+                                }),
+                                kind: TExprKind::BuiltinMethod {
+                                    recv: Box::new(lower_expr(&arg.expr, cx, env)),
+                                    op: if type_name == "Int" {
+                                        TBuiltinOp::ParseInt
+                                    } else {
+                                        TBuiltinOp::ParseFloat
+                                    },
+                                    args: vec![],
+                                },
                             };
-                            let source_relative = measured_scale_uncertainty(source);
-                            let destination_relative = measured_scale_uncertainty(destination);
-                            let relative_uncertainty =
-                                if source_relative.is_some() || destination_relative.is_some() {
+                        });
+                    }
+                }
+                if type_name == "Int" && method == "from_radix" && args.len() == 2 {
+                    return in_own_frame(|| {
+                        let line =
+                            crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+                        return TExpr {
+                            ty: resolved_ret.cloned().unwrap_or(Type::Int),
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(lower_expr(&args[0].expr, cx, env)),
+                                op: TBuiltinOp::IntFromRadix { line },
+                                args: vec![lower_expr(&args[1].expr, cx, env)],
+                            },
+                        };
+                    });
+                }
+
+                // D-BYTESDECODE1: UTF-8 decoding is a String static method, but
+                // its value argument is the builtin receiver so every engine uses
+                // the same Prelude-backed TIR operation.
+                if let ("String", method @ ("from_bytes" | "from_bytes_lossy"), Some(arg)) =
+                    (type_name.as_str(), method, args.first())
+                {
+                    if args.len() == 1 {
+                        let (op, ty) = if method == "from_bytes" {
+                            (
+                                TBuiltinOp::StringFromBytes,
+                                resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                                    ok: Box::new(Type::String),
+                                    err: Box::new(Type::Named(
+                                        crate::Syntax::TYPE_UTF8_ERROR.to_string(),
+                                    )),
+                                }),
+                            )
+                        } else {
+                            (
+                                TBuiltinOp::StringFromBytesLossy,
+                                resolved_ret.cloned().unwrap_or(Type::String),
+                            )
+                        };
+                        return in_own_frame(|| TExpr {
+                            ty,
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(lower_expr(&arg.expr, cx, env)),
+                                op,
+                                args: vec![],
+                            },
+                        });
+                    }
+                }
+                // D-SHAPE-CONVERT1=A: numeric conversions are static on the destination
+                // type. Reuse NumericMethod by treating the sole value argument as its
+                // input; only the source-level call direction changed.
+                if let (Some(target), Some(source_name), Some(arg)) = (
+                    crate::AST::numeric_type_from_name(&type_name),
+                    Syntax::numeric_conversion_source(method),
+                    args.first(),
+                ) {
+                    if args.len() == 1 {
+                        return in_own_frame(|| {
+                            let input = lower_expr(&arg.expr, cx, env);
+                            let op = resolve_numeric_conversion_op(&type_name, source_name)
+                                .expect("sema admitted a numeric destination conversion");
+                            let ty =
+                                crate::Collections::builtin_method_return(&target, method, 1, true)
+                                    .flatten()
+                                    .unwrap_or(target);
+                            return TExpr {
+                                ty,
+                                kind: TExprKind::NumericMethod {
+                                    recv: Box::new(input),
+                                    op,
+                                },
+                            };
+                        });
+                    }
+                }
+                if let (Some((base, _)), Some(source), Some(arg)) = (
+                    cx.distinct_types.get(&type_name),
+                    Syntax::numeric_conversion_source(method),
+                    args.first(),
+                ) {
+                    if args.len() == 1 {
+                        return in_own_frame(|| {
+                            let op = resolve_numeric_conversion_op(&base.name(), source)
+                                .expect("sema admitted a numeric distinct conversion");
+                            let range = cx.distinct_ranges.get(&type_name).copied();
+                            return TExpr {
+                                ty: resolved_ret
+                                    .cloned()
+                                    .unwrap_or_else(|| Type::Named(type_name.clone())),
+                                kind: TExprKind::DistinctConvert {
+                                    name: type_name,
+                                    arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                                    op,
+                                    range,
+                                    fallible: matches!(resolved_ret, Some(Type::Result { .. })),
+                                },
+                            };
+                        });
+                    }
+                }
+                if let (Some((base, _)), Some(arg)) =
+                    (cx.distinct_types.get(&type_name), args.first())
+                {
+                    if args.len() == 1
+                        && !base.is_numeric()
+                        && Syntax::conversion_method_for_source(&base.name()) == method
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::Call {
+                                    name: type_name,
+                                    type_args: Vec::new(),
+                                    args: vec![lower_one_call_arg(arg, None, env, cx)],
+                                },
+                            };
+                        });
+                    }
+                }
+                if let (Some(destination), Some(arg)) =
+                    (cx.unit_facts.get(&type_name), args.first())
+                {
+                    let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
+                    let lowered = lower_expr(&arg.expr, cx, env);
+                    let rounding = args.get(1).and_then(|mode| match &mode.expr {
+                        Expr::EnumLit {
+                            type_name,
+                            variant,
+                            args,
+                            ..
+                        } if type_name.is_empty() && args.is_empty() => {
+                            Syntax::unit_rounding_mode(variant)
+                        }
+                        _ => None,
+                    });
+                    let source = match &lowered.ty {
+                        Type::Named(name) => cx.unit_facts.get(name),
+                        _ => None,
+                    }
+                    .or_else(|| {
+                        let destination_scope = type_name.rsplit_once('.').map(|(scope, _)| scope);
+                        cx.unit_facts.iter().find_map(|(name, fact)| {
+                            let leaf = name.rsplit('.').next().unwrap_or(name);
+                            let source_scope = name.rsplit_once('.').map(|(scope, _)| scope);
+                            (source_scope == destination_scope
+                                && fact.family == destination.family
+                                && fact.kind == destination.kind
+                                && Syntax::conversion_method_for_source(leaf) == exact_method)
+                                .then_some(fact)
+                        })
+                    });
+                    if args.len() == 1 || (args.len() == 3 && rounding.is_some()) {
+                        if let Some(source) = source {
+                            return in_own_frame(|| {
+                                let scale = source
+                                    .scale
+                                    .div(&destination.scale)
+                                    .expect("sema validated unit scale");
+                                let offset = source
+                                    .offset
+                                    .sub(&destination.offset)
+                                    .and_then(|value| value.div(&destination.scale))
+                                    .expect("sema validated unit offset");
+                                let measured_scale_uncertainty =
+                                    |fact: &crate::Codegen::UnitFact| {
+                                        let crate::AST::UnitScaleProvenance::Measured {
+                                            standard_uncertainty,
+                                            ..
+                                        } = &fact.scale_provenance
+                                        else {
+                                            return None;
+                                        };
+                                        let standard_uncertainty =
+                                            standard_uncertainty.parse::<f64>().ok()?;
+                                        let scale = unit_ratio_as_f64(&fact.scale).abs();
+                                        (scale.is_finite() && scale > 0.0)
+                                            .then_some(standard_uncertainty.abs() / scale)
+                                    };
+                                let source_relative = measured_scale_uncertainty(source);
+                                let destination_relative = measured_scale_uncertainty(destination);
+                                let relative_uncertainty = if source_relative.is_some()
+                                    || destination_relative.is_some()
+                                {
                                     Some(
                                         source_relative
                                             .unwrap_or(0.0)
@@ -6171,862 +6437,871 @@ fn lower_method_call_impl(
                                 } else {
                                     None
                                 };
-                            let fallible = matches!(resolved_ret, Some(Type::Result { .. }));
-                            let rounding = rounding
-                                .map(|mode| (mode, Box::new(lower_expr(&args[2].expr, cx, env))));
-                            return TExpr {
-                                ty: resolved_ret.cloned().unwrap_or_else(|| {
-                                    if fallible {
-                                        Type::Result {
-                                            ok: Box::new(Type::Float),
-                                            err: Box::new(Type::String),
+                                let fallible = matches!(resolved_ret, Some(Type::Result { .. }));
+                                let rounding = rounding.map(|mode| {
+                                    (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
+                                });
+                                return TExpr {
+                                    ty: resolved_ret.cloned().unwrap_or_else(|| {
+                                        if fallible {
+                                            Type::Result {
+                                                ok: Box::new(Type::Float),
+                                                err: Box::new(Type::String),
+                                            }
+                                        } else {
+                                            Type::Float
                                         }
-                                    } else {
-                                        Type::Float
+                                    }),
+                                    kind: TExprKind::UnitConvert {
+                                        destination: type_name,
+                                        arg: Box::new(lowered),
+                                        scale,
+                                        offset,
+                                        rounding,
+                                        fallible,
+                                        relative_uncertainty,
+                                        file: cx.file.clone(),
+                                        line: crate::Diagnostics::span_line_col(
+                                            &cx.src,
+                                            method_span.start,
+                                        )
+                                        .0 as u32,
+                                    },
+                                };
+                            });
+                        }
+                    }
+                }
+                // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
+                // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
+                // `Path` itself (a type-name ident) has no value.
+                if type_name == "Path"
+                    && method == "from"
+                    && args.len() == 1
+                    && !cx.type_names.contains("Path")
+                {
+                    return in_own_frame(|| {
+                        let str_arg = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Named("Path".to_string()),
+                            kind: TExprKind::HandleMethod {
+                                recv: Box::new(str_arg),
+                                op: THandleOp::PathFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-SHIFT1 (c7shift): `Reader.over(bytes)` → `jet_reader_over(&(bytes_arg))`.
+                // Same "arg becomes the recv slot" shape as `Path.from` above.
+                if type_name == "Reader"
+                    && method == "over"
+                    && args.len() == 1
+                    && !cx.type_names.contains("Reader")
+                {
+                    return in_own_frame(|| {
+                        let bytes_arg = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Named("Reader".to_string()),
+                            kind: TExprKind::HandleMethod {
+                                recv: Box::new(bytes_arg),
+                                op: THandleOp::ReaderOver,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-SHIFT1: `Cursor.over(s)` → `jet_cursor_over(&(s_arg))`.
+                if type_name == "Cursor"
+                    && method == "over"
+                    && args.len() == 1
+                    && !cx.type_names.contains("Cursor")
+                {
+                    return in_own_frame(|| {
+                        let s_arg = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Named("Cursor".to_string()),
+                            kind: TExprKind::HandleMethod {
+                                recv: Box::new(s_arg),
+                                op: THandleOp::CursorOver,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
+                // lower to the same core call shape as `use core.perf as perf`.
+                if type_name == "Perf" && !cx.type_names.contains("Perf") {
+                    return in_own_frame(|| {
+                        let targs: Vec<TExpr> =
+                            args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                        let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
+                        return TExpr {
+                            ty: core_call_return_ty("core.perf", method),
+                            kind: TExprKind::CoreCall {
+                                module: "core.perf".to_string(),
+                                method: method.to_string(),
+                                args: targs,
+                                source_span: method_span,
+                                widen_to_vec,
+                            },
+                        };
+                    });
+                }
+                // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
+                // Lower the list arg as the recv of a SetFrom BuiltinMethod.
+                if type_name == "Set" && method == "from" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let list_arg = lower_expr(&args[0].expr, cx, env);
+                        let elem_ty = match &list_arg.ty {
+                            Type::List(inner) => *inner.clone(),
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: "Set".to_string(),
+                                args: vec![elem_ty],
+                            },
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(list_arg),
+                                op: TBuiltinOp::SetFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // #1478: `Set.new()` → empty HashSet with elem type from sema.
+                if type_name == "Set" && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: "Set".to_string(),
+                                args: vec![elem_ty.clone()],
+                            },
+                            kind: TExprKind::StaticCall {
+                                owner: host_generic_owner(
+                                    "std::collections::HashSet",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-ALLOCFAIL1=A: `List.try_new()` and `.try_with_capacity(n)` use
+                // the ordinary BuiltinMethod carrier; the inert Unit receiver keeps
+                // static lowering inside the existing TIR seam.
+                if type_name == Syntax::TYPE_LIST
+                    && !cx.type_names.contains(Syntax::TYPE_LIST)
+                    && matches!(method, "try_new" | "try_with_capacity")
+                    && ((method == "try_new" && args.is_empty())
+                        || (method == "try_with_capacity" && args.len() == 1))
+                {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Result { ok, .. }) => match ok.as_ref() {
+                                Type::List(inner) => (**inner).clone(),
+                                _ => Type::Int,
+                            },
+                            _ => Type::Int,
+                        };
+                        let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                            ok: Box::new(Type::List(Box::new(elem_ty.clone()))),
+                            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+                        });
+                        let value_args = if method == "try_with_capacity" {
+                            vec![lower_expr(&args[0].expr, cx, env)]
+                        } else {
+                            Vec::new()
+                        };
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(TExpr {
+                                    ty: unit_type(),
+                                    kind: TExprKind::Unit,
+                                }),
+                                op: if method == "try_new" {
+                                    TBuiltinOp::ListTryNew
+                                } else {
+                                    TBuiltinOp::ListTryWithCapacity
+                                },
+                                args: value_args,
+                            },
+                        };
+                    });
+                }
+                // #1477: `Map.new()` → empty JetMap; `Map.from_keys(keys, default)`.
+                if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let (key, value) = match resolved_ret {
+                            Some(Type::Map { key, value, .. }) => {
+                                ((**key).clone(), (**value).clone())
+                            }
+                            _ => (Type::Int, Type::Int),
+                        };
+                        return TExpr {
+                            ty: Type::Map {
+                                key: Box::new(key),
+                                key_span: None,
+                                value: Box::new(value),
+                            },
+                            kind: TExprKind::MapLit(Vec::new()),
+                        };
+                    });
+                }
+                if type_name == Syntax::TYPE_MAP && method == "from_keys" && args.len() == 2 {
+                    return in_own_frame(|| {
+                        let keys = lower_expr(&args[0].expr, cx, env);
+                        let default = lower_expr(&args[1].expr, cx, env);
+                        let (key, value) = match resolved_ret {
+                            Some(Type::Map { key, value, .. }) => {
+                                ((**key).clone(), (**value).clone())
+                            }
+                            _ => (
+                                match &keys.ty {
+                                    Type::List(inner) => *inner.clone(),
+                                    _ => Type::Int,
+                                },
+                                default.ty.clone(),
+                            ),
+                        };
+                        return TExpr {
+                            ty: Type::Map {
+                                key: Box::new(key),
+                                key_span: None,
+                                value: Box::new(value),
+                            },
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(keys),
+                                op: TBuiltinOp::MapFromKeys,
+                                args: vec![default],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let list_arg = lower_expr(&args[0].expr, cx, env);
+                        let elem_ty = match &list_arg.ty {
+                            Type::List(inner) => *inner.clone(),
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_RANK.to_string(),
+                                args: vec![elem_ty],
+                            },
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(list_arg),
+                                op: TBuiltinOp::SortedSetFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_RANK && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_RANK.to_string(),
+                                args: vec![elem_ty.clone()],
+                            },
+                            kind: TExprKind::StaticCall {
+                                owner: host_generic_owner(
+                                    "std::collections::BTreeSet",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
+                    && method == "from"
+                    && args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        let list_arg = lower_expr(&args[0].expr, cx, env);
+                        let elem_ty = match &list_arg.ty {
+                            Type::List(inner) => *inner.clone(),
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                                args: vec![elem_ty],
+                            },
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(list_arg),
+                                op: TBuiltinOp::PriorityQueueFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
+                    && method == "new"
+                    && args.is_empty()
+                {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                                args: vec![elem_ty.clone()],
+                            },
+                            kind: TExprKind::StaticCall {
+                                owner: host_generic_owner(
+                                    "std::collections::BinaryHeap",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let cap_arg = lower_expr(&args[0].expr, cx, env);
+                        let (key_ty, value_ty) = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if targs.len() >= 2 => {
+                                (targs[0].clone(), targs[1].clone())
+                            }
+                            _ => (Type::String, Type::Int),
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_LRU.to_string(),
+                                args: vec![key_ty, value_ty],
+                            },
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_owner("JetCache"),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![TCallArg {
+                                    value: cap_arg,
+                                    template_items: None,
+                                    borrow: false,
+                                    mut_borrow: false,
+                                    clone: false,
+                                    arc_clone: false,
+                                    fn_coerce: None,
+                                    widen_to_vec: false,
+                                    widen_to_union: None,
+                                    box_as_trait: None,
+                                }],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_BITS && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named(crate::Syntax::TYPE_BITS.to_string()),
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_owner("JetBitSet"),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_owner("JetByteBuffer"),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_BYTES
+                    && method == "with_capacity"
+                    && args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        let n = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(n),
+                                op: TBuiltinOp::ByteBufferWithCapacity,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                if type_name == crate::Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let bytes_arg = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(bytes_arg),
+                                op: TBuiltinOp::ByteBufferFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
+                if type_name == crate::Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let list_arg = lower_expr(&args[0].expr, cx, env);
+                        let elem_ty = match &list_arg.ty {
+                            Type::List(inner) => *inner.clone(),
+                            _ => Type::Int,
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: crate::Syntax::TYPE_QUEUE.to_string(),
+                                args: vec![elem_ty],
+                            },
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(list_arg),
+                                op: TBuiltinOp::DequeFrom,
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-COLLBREADTH1=A: `Queue.new()` → empty VecDeque with elem type from sema.
+                // The element type comes from `resolved_ret` (sema filled it from the annotation).
+                if type_name == crate::Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        let deque_ty = Type::Apply {
+                            name: crate::Syntax::TYPE_QUEUE.to_string(),
+                            args: vec![elem_ty.clone()],
+                        };
+                        return TExpr {
+                            ty: deque_ty,
+                            kind: TExprKind::StaticCall {
+                                owner: host_generic_owner(
+                                    "std::collections::VecDeque",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-TAG1: `Tally.new()` → empty HashMap with elem type from sema.
+                if type_name == crate::Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        let bag_ty = Type::Apply {
+                            name: crate::Syntax::TYPE_TALLY.to_string(),
+                            args: vec![elem_ty.clone()],
+                        };
+                        return TExpr {
+                            ty: bag_ty,
+                            kind: TExprKind::StaticCall {
+                                owner: host_generic_owner(
+                                    "std::collections::HashMap",
+                                    vec![TPreludeArg::Jet(elem_ty), TPreludeArg::HostUsize],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` → an empty `JetPool<T>`.
+                // The element type comes from `resolved_ret` (sema filled it from the
+                // call-site turbofish or the binding's annotation).
+                if type_name == "Pool" && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
+                                targs[0].clone()
+                            }
+                            _ => Type::Int,
+                        };
+                        let pool_ty = Type::Apply {
+                            name: "Pool".to_string(),
+                            args: vec![elem_ty.clone()],
+                        };
+                        return TExpr {
+                            ty: pool_ty,
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_generic_owner(
+                                    "jet_std::JetPool",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![],
+                            },
+                        };
+                    });
+                }
+                // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` → a `JetShared<T>`
+                // wrapping `x`; `T` is `x`'s own lowered type (no turbofish, no
+                // annotation needed — the argument alone fixes it).
+                if type_name == "Shared" && method == "new" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let arg_t = lower_expr(&args[0].expr, cx, env);
+                        let elem_ty = arg_t.ty.clone();
+                        return TExpr {
+                            ty: Type::Shared(Box::new(elem_ty.clone())),
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_generic_owner(
+                                    "jet_std::JetShared",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![TCallArg {
+                                    value: arg_t,
+                                    template_items: None,
+                                    borrow: false,
+                                    mut_borrow: false,
+                                    clone: false,
+                                    arc_clone: false,
+                                    fn_coerce: None,
+                                    widen_to_vec: false,
+                                    widen_to_union: None,
+                                    box_as_trait: None,
+                                }],
+                            },
+                        };
+                    });
+                }
+                if type_name == Syntax::TYPE_CONDITION && method == "new" && args.is_empty() {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named(Syntax::TYPE_CONDITION.to_string()),
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_owner("jet_std::JetCondition"),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: Vec::new(),
+                            },
+                        };
+                    });
+                }
+                if type_name == "Cell" && method == "new" && args.len() == 1 {
+                    return in_own_frame(|| {
+                        let value = lower_expr(&args[0].expr, cx, env);
+                        let cell_ty = resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
+                            name: "Cell".to_string(),
+                            args: vec![value.ty.clone()],
+                        });
+                        let elem_ty = match &cell_ty {
+                            Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                            _ => value.ty.clone(),
+                        };
+                        return TExpr {
+                            ty: cell_ty,
+                            kind: TExprKind::StaticCall {
+                                owner: rooted_generic_owner(
+                                    "jet_std::JetCell",
+                                    vec![TPreludeArg::Jet(elem_ty)],
+                                ),
+                                owner_type: None,
+                                method: TMethodRef::bare("new"),
+                                type_args: Vec::new(),
+                                args: vec![TCallArg {
+                                    value,
+                                    template_items: None,
+                                    borrow: false,
+                                    mut_borrow: false,
+                                    clone: false,
+                                    arc_clone: false,
+                                    fn_coerce: None,
+                                    widen_to_vec: false,
+                                    widen_to_union: None,
+                                    box_as_trait: None,
+                                }],
+                            },
+                        };
+                    });
+                }
+                if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
+                    return in_own_frame(|| {
+                        let value = lower_expr(&args[0].expr, cx, env);
+                        let duration = lower_expr(&args[1].expr, cx, env);
+                        let clock = lower_expr(&args[2].expr, cx, env);
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { name, args })
+                                if name == "ExpiringSecret" && !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => value.ty.clone(),
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: "ExpiringSecret".to_string(),
+                                args: vec![elem_ty.clone()],
+                            },
+                            kind: TExprKind::HostCall(Box::new(THostCall::ExpiringSecretNew {
+                                value: Box::new(value),
+                                duration: Box::new(duration),
+                                clock: Box::new(clock),
+                                elem: elem_ty,
+                            })),
+                        };
+                    });
+                }
+                if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
+                    return in_own_frame(|| {
+                        let value = lower_expr(&args[0].expr, cx, env);
+                        let duration = lower_expr(&args[1].expr, cx, env);
+                        let clock = lower_expr(&args[2].expr, cx, env);
+                        let elem_ty = match resolved_ret {
+                            Some(Type::Apply { name, args })
+                                if name == Syntax::EXPIRING_VALUE_TYPE && !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => value.ty.clone(),
+                        };
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
+                                args: vec![elem_ty],
+                            },
+                            kind: TExprKind::HostCall(Box::new(THostCall::ExpiringValueNew {
+                                value: Box::new(value),
+                                duration: Box::new(duration),
+                                clock: Box::new(clock),
+                            })),
+                        };
+                    });
+                }
+                // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when
+                // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
+                // `resolved_ret` (the arg-dependent return type, same mechanism the
+                // polymorphic core specials use — see the AST `MethodCall.resolved_ret` doc).
+                if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
+                    return in_own_frame(|| {
+                        let a_ty = match tir_recv_jet_ty(&args[1].expr, env) {
+                            Some(Type::Option(inner)) => (*inner).clone(),
+                            _ => Type::Int,
+                        };
+                        let b_ty = match tir_recv_jet_ty(&args[2].expr, env) {
+                            Some(Type::Option(inner)) => (*inner).clone(),
+                            _ => Type::Int,
+                        };
+                        // c142: a bare `f` callable is invoked only by the shared Prelude's
+                        // present branch, not stored — but rustc
+                        // still needs its param types written out whenever the body resolves a
+                        // trait method on a param (e.g. interpolation's `.jet_display()`), the same reason
+                        // `lower_one_call_arg` annotates a lambda flowing into a fn-typed
+                        // parameter. Reuse that mechanism with `a`/`b`'s payload types as the
+                        // expected params.
+                        let ret_ty = match resolved_ret {
+                            Some(Type::Option(inner)) => (**inner).clone(),
+                            _ => Type::Int,
+                        };
+                        let f_t = in_own_frame(|| match &args[0].expr {
+                            Expr::Lambda(lam) => super::take_scheduled_expr(&args[0].expr, cx)
+                                .unwrap_or_else(|| {
+                                    let tl = lower_lambda_expecting(
+                                        lam,
+                                        cx,
+                                        env,
+                                        Some(&[a_ty.clone(), b_ty.clone()]),
+                                    );
+                                    TExpr {
+                                        ty: Type::Fn {
+                                            params: vec![a_ty.clone(), b_ty.clone()],
+                                            ret: Some(Box::new(ret_ty.clone())),
+                                            effect_bound: None,
+                                            return_view_provenance: None,
+                                            param_contract: None,
+                                            call_metadata: None,
+                                        },
+                                        kind: TExprKind::Lambda(Box::new(tl)),
                                     }
                                 }),
-                                kind: TExprKind::UnitConvert {
-                                    destination: type_name,
-                                    arg: Box::new(lowered),
-                                    scale,
-                                    offset,
-                                    rounding,
-                                    fallible,
-                                    relative_uncertainty,
-                                    file: cx.file.clone(),
-                                    line: crate::Diagnostics::span_line_col(
-                                        &cx.src,
-                                        method_span.start,
-                                    )
-                                    .0 as u32,
+                            _ => lower_expr(&args[0].expr, cx, env),
+                        });
+                        let a_t = lower_expr(&args[1].expr, cx, env);
+                        let b_t = lower_expr(&args[2].expr, cx, env);
+                        return TExpr {
+                            ty: Type::Option(Box::new(ret_ty)),
+                            kind: TExprKind::OptionLift2 {
+                                f: Box::new(f_t),
+                                a: Box::new(a_t),
+                                b: Box::new(b_t),
+                            },
+                        };
+                    });
+                }
+                // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
+                // free function `{root}jet_math_<T>_<method>(args)`.
+                if crate::Sema::is_math_type(&type_name) && !cx.type_names.contains(&type_name) {
+                    if let Some(ret) =
+                        crate::Sema::math_static_return(&type_name, method, args.len())
+                    {
+                        return in_own_frame(|| {
+                            let bridge = crate::Sema::math_static_arg_ty(&type_name, method);
+                            let targs: Vec<TExpr> = args
+                                .iter()
+                                .map(|a| {
+                                    let mut t = lower_expr(&a.expr, cx, env);
+                                    // D-FIXARR1 bridge: a `[..]` literal arg to `from_array` lowered
+                                    // as a growable list; re-tag it to the `[T#N]` fixed array so emit
+                                    // produces `[e1, …]` (a Rust stack array), not `vec![…]`.
+                                    if let Some(fl @ Type::FixedList { .. }) = &bridge {
+                                        if matches!(t.ty, Type::List(_))
+                                            && matches!(t.kind, TExprKind::ListLit(_))
+                                        {
+                                            t.ty = fl.clone();
+                                        }
+                                    }
+                                    t
+                                })
+                                .collect();
+                            return TExpr {
+                                ty: ret,
+                                kind: TExprKind::MathBuiltin {
+                                    type_name: type_name.clone(),
+                                    func: method.to_string(),
+                                    args: targs,
                                 },
                             };
                         });
                     }
                 }
-            }
-            // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
-            // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
-            // `Path` itself (a type-name ident) has no value.
-            if type_name == "Path"
-                && method == "from"
-                && args.len() == 1
-                && !cx.type_names.contains("Path")
-            {
-                return in_own_frame(|| {
-                    let str_arg = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Named("Path".to_string()),
-                        kind: TExprKind::HandleMethod {
-                            recv: Box::new(str_arg),
-                            op: THandleOp::PathFrom,
-                            args: vec![],
-                        },
-                    };
+                // A module-qualified receiver (`mymod.Thing.new()`) registers its
+                // methods under the bare leaf, so the leaf is the right key there.
+                // But D-PROTO1/D-PROTO2 declare `Payment.Client` — the dot is part
+                // of the type's own name, and `register_method` keyed its surface by
+                // that full spelling. Stripping unconditionally missed both
+                // `method_sigs` and `method_rets`, so `instantiate_method_ret` fell
+                // through to `unit_type()` and every dotted-handle static call was
+                // stamped `Unit`. Engines that need an ABI then read the wrong
+                // carrier: the resident tier stored `Payment.Client.client()` in an
+                // i8 slot and refused the next `^handle` argument, which wants the
+                // i64 handle. Ask the one method table which spelling it knows.
+                let dotted_key = (type_name.clone(), method.to_string());
+                let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
+                    || cx.method_rets.contains_key(&dotted_key)
+                {
+                    type_name.as_str()
+                } else {
+                    type_name
+                        .rsplit_once('.')
+                        .map_or(type_name.as_str(), |(_, leaf)| leaf)
+                };
+                let sig = cx
+                    .method_sigs
+                    .get(&(lookup_type_name.to_string(), method.to_string()))
+                    .cloned()
+                    .unwrap_or_default();
+                let sig = instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
+                    instantiate_method_sig(cx, &type_name, method, &sig, owner_type_args, type_args)
                 });
-            }
-            // D-SHIFT1 (c7shift): `Reader.over(bytes)` → `jet_reader_over(&(bytes_arg))`.
-            // Same "arg becomes the recv slot" shape as `Path.from` above.
-            if type_name == "Reader"
-                && method == "over"
-                && args.len() == 1
-                && !cx.type_names.contains("Reader")
-            {
-                return in_own_frame(|| {
-                    let bytes_arg = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Named("Reader".to_string()),
-                        kind: TExprKind::HandleMethod {
-                            recv: Box::new(bytes_arg),
-                            op: THandleOp::ReaderOver,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-SHIFT1: `Cursor.over(s)` → `jet_cursor_over(&(s_arg))`.
-            if type_name == "Cursor"
-                && method == "over"
-                && args.len() == 1
-                && !cx.type_names.contains("Cursor")
-            {
-                return in_own_frame(|| {
-                    let s_arg = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Named("Cursor".to_string()),
-                        kind: TExprKind::HandleMethod {
-                            recv: Box::new(s_arg),
-                            op: THandleOp::CursorOver,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
-            // lower to the same core call shape as `use core.perf as perf`.
-            if type_name == "Perf" && !cx.type_names.contains("Perf") {
-                return in_own_frame(|| {
-                    let targs: Vec<TExpr> =
-                        args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-                    let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
-                    return TExpr {
-                        ty: core_call_return_ty("core.perf", method),
-                        kind: TExprKind::CoreCall {
-                            module: "core.perf".to_string(),
-                            method: method.to_string(),
-                            args: targs,
-                            source_span: method_span,
-                            widen_to_vec,
-                        },
-                    };
-                });
-            }
-            // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
-            // Lower the list arg as the recv of a SetFrom BuiltinMethod.
-            if type_name == "Set" && method == "from" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let list_arg = lower_expr(&args[0].expr, cx, env);
-                    let elem_ty = match &list_arg.ty {
-                        Type::List(inner) => *inner.clone(),
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: "Set".to_string(),
-                            args: vec![elem_ty],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(list_arg),
-                            op: TBuiltinOp::SetFrom,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // #1478: `Set.new()` → empty HashSet with elem type from sema.
-            if type_name == "Set" && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: "Set".to_string(),
-                            args: vec![elem_ty.clone()],
-                        },
-                        kind: TExprKind::StaticCall {
-                            owner: host_generic_owner(
-                                "std::collections::HashSet",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-ALLOCFAIL1=A: `List.try_new()` and `.try_with_capacity(n)` use
-            // the ordinary BuiltinMethod carrier; the inert Unit receiver keeps
-            // static lowering inside the existing TIR seam.
-            if type_name == Syntax::TYPE_LIST
-                && !cx.type_names.contains(Syntax::TYPE_LIST)
-                && matches!(method, "try_new" | "try_with_capacity")
-                && ((method == "try_new" && args.is_empty())
-                    || (method == "try_with_capacity" && args.len() == 1))
-            {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Result { ok, .. }) => match ok.as_ref() {
-                            Type::List(inner) => (**inner).clone(),
-                            _ => Type::Int,
-                        },
-                        _ => Type::Int,
-                    };
-                    let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                        ok: Box::new(Type::List(Box::new(elem_ty.clone()))),
-                        err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-                    });
-                    let value_args = if method == "try_with_capacity" {
-                        vec![lower_expr(&args[0].expr, cx, env)]
-                    } else {
-                        Vec::new()
-                    };
-                    return TExpr {
-                        ty,
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(TExpr {
-                                ty: unit_type(),
-                                kind: TExprKind::Unit,
-                            }),
-                            op: if method == "try_new" {
-                                TBuiltinOp::ListTryNew
-                            } else {
-                                TBuiltinOp::ListTryWithCapacity
-                            },
-                            args: value_args,
-                        },
-                    };
-                });
-            }
-            // #1477: `Map.new()` → empty JetMap; `Map.from_keys(keys, default)`.
-            if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let (key, value) = match resolved_ret {
-                        Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
-                        _ => (Type::Int, Type::Int),
-                    };
-                    return TExpr {
-                        ty: Type::Map {
-                            key: Box::new(key),
-                            key_span: None,
-                            value: Box::new(value),
-                        },
-                        kind: TExprKind::MapLit(Vec::new()),
-                    };
-                });
-            }
-            if type_name == Syntax::TYPE_MAP && method == "from_keys" && args.len() == 2 {
-                return in_own_frame(|| {
-                    let keys = lower_expr(&args[0].expr, cx, env);
-                    let default = lower_expr(&args[1].expr, cx, env);
-                    let (key, value) = match resolved_ret {
-                        Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
-                        _ => (
-                            match &keys.ty {
-                                Type::List(inner) => *inner.clone(),
-                                _ => Type::Int,
-                            },
-                            default.ty.clone(),
-                        ),
-                    };
-                    return TExpr {
-                        ty: Type::Map {
-                            key: Box::new(key),
-                            key_span: None,
-                            value: Box::new(value),
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(keys),
-                            op: TBuiltinOp::MapFromKeys,
-                            args: vec![default],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let list_arg = lower_expr(&args[0].expr, cx, env);
-                    let elem_ty = match &list_arg.ty {
-                        Type::List(inner) => *inner.clone(),
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_RANK.to_string(),
-                            args: vec![elem_ty],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(list_arg),
-                            op: TBuiltinOp::SortedSetFrom,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_RANK && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_RANK.to_string(),
-                            args: vec![elem_ty.clone()],
-                        },
-                        kind: TExprKind::StaticCall {
-                            owner: host_generic_owner(
-                                "std::collections::BTreeSet",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
-                && method == "from"
-                && args.len() == 1
-            {
-                return in_own_frame(|| {
-                    let list_arg = lower_expr(&args[0].expr, cx, env);
-                    let elem_ty = match &list_arg.ty {
-                        Type::List(inner) => *inner.clone(),
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
-                            args: vec![elem_ty],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(list_arg),
-                            op: TBuiltinOp::PriorityQueueFrom,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE && method == "new" && args.is_empty()
-            {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
-                            args: vec![elem_ty.clone()],
-                        },
-                        kind: TExprKind::StaticCall {
-                            owner: host_generic_owner(
-                                "std::collections::BinaryHeap",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let cap_arg = lower_expr(&args[0].expr, cx, env);
-                    let (key_ty, value_ty) = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if targs.len() >= 2 => {
-                            (targs[0].clone(), targs[1].clone())
-                        }
-                        _ => (Type::String, Type::Int),
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_LRU.to_string(),
-                            args: vec![key_ty, value_ty],
-                        },
-                        kind: TExprKind::StaticCall {
-                            owner: host_owner("JetCache"),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![TCallArg {
-                                value: cap_arg,
-                                template_items: None,
-                                borrow: false,
-                                mut_borrow: false,
-                                clone: false,
-                                arc_clone: false,
-                                fn_coerce: None,
-                                widen_to_vec: false,
-                                widen_to_union: None,
-                                box_as_trait: None,
-                            }],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_BITS && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named(crate::Syntax::TYPE_BITS.to_string()),
-                        kind: TExprKind::StaticCall {
-                            owner: host_owner("JetBitSet"),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-                        kind: TExprKind::StaticCall {
-                            owner: host_owner("JetByteBuffer"),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_BYTES
-                && method == "with_capacity"
-                && args.len() == 1
-            {
-                return in_own_frame(|| {
-                    let n = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(n),
-                            op: TBuiltinOp::ByteBufferWithCapacity,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if type_name == crate::Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let bytes_arg = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(bytes_arg),
-                            op: TBuiltinOp::ByteBufferFrom,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
-            if type_name == crate::Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let list_arg = lower_expr(&args[0].expr, cx, env);
-                    let elem_ty = match &list_arg.ty {
-                        Type::List(inner) => *inner.clone(),
-                        _ => Type::Int,
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: crate::Syntax::TYPE_QUEUE.to_string(),
-                            args: vec![elem_ty],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(list_arg),
-                            op: TBuiltinOp::DequeFrom,
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-COLLBREADTH1=A: `Queue.new()` → empty VecDeque with elem type from sema.
-            // The element type comes from `resolved_ret` (sema filled it from the annotation).
-            if type_name == crate::Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    let deque_ty = Type::Apply {
-                        name: crate::Syntax::TYPE_QUEUE.to_string(),
-                        args: vec![elem_ty.clone()],
-                    };
-                    return TExpr {
-                        ty: deque_ty,
-                        kind: TExprKind::StaticCall {
-                            owner: host_generic_owner(
-                                "std::collections::VecDeque",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-TAG1: `Tally.new()` → empty HashMap with elem type from sema.
-            if type_name == crate::Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    let bag_ty = Type::Apply {
-                        name: crate::Syntax::TYPE_TALLY.to_string(),
-                        args: vec![elem_ty.clone()],
-                    };
-                    return TExpr {
-                        ty: bag_ty,
-                        kind: TExprKind::StaticCall {
-                            owner: host_generic_owner(
-                                "std::collections::HashMap",
-                                vec![TPreludeArg::Jet(elem_ty), TPreludeArg::HostUsize],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` → an empty `JetPool<T>`.
-            // The element type comes from `resolved_ret` (sema filled it from the
-            // call-site turbofish or the binding's annotation).
-            if type_name == "Pool" && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-                            targs[0].clone()
-                        }
-                        _ => Type::Int,
-                    };
-                    let pool_ty = Type::Apply {
-                        name: "Pool".to_string(),
-                        args: vec![elem_ty.clone()],
-                    };
-                    return TExpr {
-                        ty: pool_ty,
-                        kind: TExprKind::StaticCall {
-                            owner: rooted_generic_owner(
-                                "jet_std::JetPool",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` → a `JetShared<T>`
-            // wrapping `x`; `T` is `x`'s own lowered type (no turbofish, no
-            // annotation needed — the argument alone fixes it).
-            if type_name == "Shared" && method == "new" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let arg_t = lower_expr(&args[0].expr, cx, env);
-                    let elem_ty = arg_t.ty.clone();
-                    return TExpr {
-                        ty: Type::Shared(Box::new(elem_ty.clone())),
-                        kind: TExprKind::StaticCall {
-                            owner: rooted_generic_owner(
-                                "jet_std::JetShared",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![TCallArg {
-                                value: arg_t,
-                                template_items: None,
-                                borrow: false,
-                                mut_borrow: false,
-                                clone: false,
-                                arc_clone: false,
-                                fn_coerce: None,
-                                widen_to_vec: false,
-                                widen_to_union: None,
-                                box_as_trait: None,
-                            }],
-                        },
-                    };
-                });
-            }
-            if type_name == Syntax::TYPE_CONDITION && method == "new" && args.is_empty() {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named(Syntax::TYPE_CONDITION.to_string()),
-                        kind: TExprKind::StaticCall {
-                            owner: rooted_owner("jet_std::JetCondition"),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: Vec::new(),
-                        },
-                    };
-                });
-            }
-            if type_name == "Cell" && method == "new" && args.len() == 1 {
-                return in_own_frame(|| {
-                    let value = lower_expr(&args[0].expr, cx, env);
-                    let cell_ty = resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
-                        name: "Cell".to_string(),
-                        args: vec![value.ty.clone()],
-                    });
-                    let elem_ty = match &cell_ty {
-                        Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-                        _ => value.ty.clone(),
-                    };
-                    return TExpr {
-                        ty: cell_ty,
-                        kind: TExprKind::StaticCall {
-                            owner: rooted_generic_owner(
-                                "jet_std::JetCell",
-                                vec![TPreludeArg::Jet(elem_ty)],
-                            ),
-                            owner_type: None,
-                            method: TMethodRef::bare("new"),
-                            type_args: Vec::new(),
-                            args: vec![TCallArg {
-                                value,
-                                template_items: None,
-                                borrow: false,
-                                mut_borrow: false,
-                                clone: false,
-                                arc_clone: false,
-                                fn_coerce: None,
-                                widen_to_vec: false,
-                                widen_to_union: None,
-                                box_as_trait: None,
-                            }],
-                        },
-                    };
-                });
-            }
-            if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
-                return in_own_frame(|| {
-                    let value = lower_expr(&args[0].expr, cx, env);
-                    let duration = lower_expr(&args[1].expr, cx, env);
-                    let clock = lower_expr(&args[2].expr, cx, env);
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { name, args })
-                            if name == "ExpiringSecret" && !args.is_empty() =>
-                        {
-                            args[0].clone()
-                        }
-                        _ => value.ty.clone(),
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: "ExpiringSecret".to_string(),
-                            args: vec![elem_ty.clone()],
-                        },
-                        kind: TExprKind::HostCall(Box::new(THostCall::ExpiringSecretNew {
-                            value: Box::new(value),
-                            duration: Box::new(duration),
-                            clock: Box::new(clock),
-                            elem: elem_ty,
-                        })),
-                    };
-                });
-            }
-            if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
-                return in_own_frame(|| {
-                    let value = lower_expr(&args[0].expr, cx, env);
-                    let duration = lower_expr(&args[1].expr, cx, env);
-                    let clock = lower_expr(&args[2].expr, cx, env);
-                    let elem_ty = match resolved_ret {
-                        Some(Type::Apply { name, args })
-                            if name == Syntax::EXPIRING_VALUE_TYPE && !args.is_empty() =>
-                        {
-                            args[0].clone()
-                        }
-                        _ => value.ty.clone(),
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
-                            args: vec![elem_ty],
-                        },
-                        kind: TExprKind::HostCall(Box::new(THostCall::ExpiringValueNew {
-                            value: Box::new(value),
-                            duration: Box::new(duration),
-                            clock: Box::new(clock),
-                        })),
-                    };
-                });
-            }
-            // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when
-            // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
-            // `resolved_ret` (the arg-dependent return type, same mechanism the
-            // polymorphic core specials use — see the AST `MethodCall.resolved_ret` doc).
-            if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
-                return in_own_frame(|| {
-                    let a_ty = match tir_recv_jet_ty(&args[1].expr, env) {
-                        Some(Type::Option(inner)) => (*inner).clone(),
-                        _ => Type::Int,
-                    };
-                    let b_ty = match tir_recv_jet_ty(&args[2].expr, env) {
-                        Some(Type::Option(inner)) => (*inner).clone(),
-                        _ => Type::Int,
-                    };
-                    // c142: a bare `f` callable is invoked only by the shared Prelude's
-                    // present branch, not stored — but rustc
-                    // still needs its param types written out whenever the body resolves a
-                    // trait method on a param (e.g. interpolation's `.jet_display()`), the same reason
-                    // `lower_one_call_arg` annotates a lambda flowing into a fn-typed
-                    // parameter. Reuse that mechanism with `a`/`b`'s payload types as the
-                    // expected params.
-                    let ret_ty = match resolved_ret {
-                        Some(Type::Option(inner)) => (**inner).clone(),
-                        _ => Type::Int,
-                    };
-                    let f_t = in_own_frame(|| match &args[0].expr {
-                        Expr::Lambda(lam) => super::take_scheduled_expr(&args[0].expr, cx)
-                            .unwrap_or_else(|| {
-                                let tl = lower_lambda_expecting(
-                                    lam,
-                                    cx,
-                                    env,
-                                    Some(&[a_ty.clone(), b_ty.clone()]),
-                                );
-                                TExpr {
-                                    ty: Type::Fn {
-                                        params: vec![a_ty.clone(), b_ty.clone()],
-                                        ret: Some(Box::new(ret_ty.clone())),
-                                        effect_bound: None,
-                                        return_view_provenance: None,
-                                        param_contract: None,
-                                        call_metadata: None,
-                                    },
-                                    kind: TExprKind::Lambda(Box::new(tl)),
-                                }
-                            }),
-                        _ => lower_expr(&args[0].expr, cx, env),
-                    });
-                    let a_t = lower_expr(&args[1].expr, cx, env);
-                    let b_t = lower_expr(&args[2].expr, cx, env);
-                    return TExpr {
-                        ty: Type::Option(Box::new(ret_ty)),
-                        kind: TExprKind::OptionLift2 {
-                            f: Box::new(f_t),
-                            a: Box::new(a_t),
-                            b: Box::new(b_t),
-                        },
-                    };
-                });
-            }
-            // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
-            // free function `{root}jet_math_<T>_<method>(args)`.
-            if crate::Sema::is_math_type(&type_name) && !cx.type_names.contains(&type_name) {
-                if let Some(ret) = crate::Sema::math_static_return(&type_name, method, args.len()) {
-                    return in_own_frame(|| {
-                        let bridge = crate::Sema::math_static_arg_ty(&type_name, method);
-                        let targs: Vec<TExpr> = args
-                            .iter()
-                            .map(|a| {
-                                let mut t = lower_expr(&a.expr, cx, env);
-                                // D-FIXARR1 bridge: a `[..]` literal arg to `from_array` lowered
-                                // as a growable list; re-tag it to the `[T#N]` fixed array so emit
-                                // produces `[e1, …]` (a Rust stack array), not `vec![…]`.
-                                if let Some(fl @ Type::FixedList { .. }) = &bridge {
-                                    if matches!(t.ty, Type::List(_))
-                                        && matches!(t.kind, TExprKind::ListLit(_))
-                                    {
-                                        t.ty = fl.clone();
-                                    }
-                                }
-                                t
-                            })
-                            .collect();
-                        return TExpr {
-                            ty: ret,
-                            kind: TExprKind::MathBuiltin {
-                                type_name: type_name.clone(),
-                                func: method.to_string(),
-                                args: targs,
-                            },
-                        };
-                    });
-                }
-            }
-            // A module-qualified receiver (`mymod.Thing.new()`) registers its
-            // methods under the bare leaf, so the leaf is the right key there.
-            // But D-PROTO1/D-PROTO2 declare `Payment.Client` — the dot is part
-            // of the type's own name, and `register_method` keyed its surface by
-            // that full spelling. Stripping unconditionally missed both
-            // `method_sigs` and `method_rets`, so `instantiate_method_ret` fell
-            // through to `unit_type()` and every dotted-handle static call was
-            // stamped `Unit`. Engines that need an ABI then read the wrong
-            // carrier: the resident tier stored `Payment.Client.client()` in an
-            // i8 slot and refused the next `^handle` argument, which wants the
-            // i64 handle. Ask the one method table which spelling it knows.
-            let dotted_key = (type_name.clone(), method.to_string());
-            let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
-                || cx.method_rets.contains_key(&dotted_key)
-            {
-                type_name.as_str()
-            } else {
-                type_name
-                    .rsplit_once('.')
-                    .map_or(type_name.as_str(), |(_, leaf)| leaf)
-            };
-            let sig = cx
-                .method_sigs
-                .get(&(lookup_type_name.to_string(), method.to_string()))
-                .cloned()
-                .unwrap_or_default();
-            let sig = instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
-                instantiate_method_sig(cx, &type_name, method, &sig, owner_type_args, type_args)
-            });
-            let targs = lower_method_args(args, &sig, env, cx);
-            let resolved_type_args = resolved_method_type_args(
-                cx,
-                lookup_type_name,
-                method,
-                &sig,
-                owner_type_args,
-                &targs,
-                type_args,
-                resolved_ret,
-            );
-            let ret_ty = instantiate_method_ret(
-                cx,
-                lookup_type_name,
-                method,
-                owner_type_args,
-                &resolved_type_args,
-                resolved_ret,
-            )
-            .map(|ty| resolve_self_ty(&ty, &type_name))
-            .unwrap_or_else(unit_type);
-            let owner_type = if owner_type_args.is_empty() {
-                Type::Named(type_name.clone())
-            } else {
-                Type::Apply {
-                    name: type_name.clone(),
-                    args: owner_type_args.to_vec(),
-                }
-            };
-            if matches!(&owner_type, Type::Apply { .. }) || !resolved_type_args.is_empty() {
-                cx.jit_method_calls.borrow_mut().insert(
-                    crate::Codegen::TIR::generic_method_instance_key(
-                        &owner_type,
-                        method,
-                        &resolved_type_args,
-                    ),
-                    (
-                        owner_type.clone(),
-                        method.to_string(),
-                        resolved_type_args.clone(),
-                    ),
+                let targs = lower_method_args(args, &sig, env, cx);
+                let resolved_type_args = resolved_method_type_args(
+                    cx,
+                    lookup_type_name,
+                    method,
+                    &sig,
+                    owner_type_args,
+                    &targs,
+                    type_args,
+                    resolved_ret,
                 );
-            }
-            return TExpr {
-                ty: ret_ty,
-                kind: TExprKind::StaticCall {
-                    owner: TStaticOwner::User(type_name.clone()),
-                    owner_type: Some(owner_type),
-                    method: TMethodRef::inherent(method),
-                    type_args: resolved_type_args,
-                    args: targs,
-                },
-            };
+                let ret_ty = instantiate_method_ret(
+                    cx,
+                    lookup_type_name,
+                    method,
+                    owner_type_args,
+                    &resolved_type_args,
+                    resolved_ret,
+                )
+                .map(|ty| resolve_self_ty(&ty, &type_name))
+                .unwrap_or_else(unit_type);
+                let owner_type = if owner_type_args.is_empty() {
+                    Type::Named(type_name.clone())
+                } else {
+                    Type::Apply {
+                        name: type_name.clone(),
+                        args: owner_type_args.to_vec(),
+                    }
+                };
+                if matches!(&owner_type, Type::Apply { .. }) || !resolved_type_args.is_empty() {
+                    cx.jit_method_calls.borrow_mut().insert(
+                        crate::Codegen::TIR::generic_method_instance_key(
+                            &owner_type,
+                            method,
+                            &resolved_type_args,
+                        ),
+                        (
+                            owner_type.clone(),
+                            method.to_string(),
+                            resolved_type_args.clone(),
+                        ),
+                    );
+                }
+                return TExpr {
+                    ty: ret_ty,
+                    kind: TExprKind::StaticCall {
+                        owner: TStaticOwner::User(type_name.clone()),
+                        owner_type: Some(owner_type),
+                        method: TMethodRef::inherent(method),
+                        type_args: resolved_type_args,
+                        args: targs,
+                    },
+                };
             });
         }
     }

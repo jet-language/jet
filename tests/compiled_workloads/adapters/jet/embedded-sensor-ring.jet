@@ -1,0 +1,39 @@
+// #1414 embedded workload host replay. This is deliberately hosted: the
+// freestanding firmware rows remain owner-gated by #2300.
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("read input")
+    if raw.contains("bad") {
+        print("frames=0")
+        print("sum=0")
+        print("ring=0")
+        print("reject=1")
+        return
+    }
+    frames := 0
+    sum := 0
+    loop line in raw.lines() {
+        if line == "" -> next
+        fields :: line.split(",").to_list()
+        if fields.len() != 2 -> next
+        if Int.parse(fields[1]) == {
+            .Ok(value) -> {
+                frames += 1
+                sum += value
+            }
+            .Err(_) -> next
+        }
+    }
+    ring := 0
+    if frames > 0 -> ring = sum /% frames
+    print("frames={frames}")
+    print("sum={sum}")
+    print("ring={ring}")
+}

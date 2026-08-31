@@ -16,6 +16,8 @@
 //! in `cmd_enter` is exercised without depending on engine-binary discovery.
 
 use std::fs;
+#[cfg(unix)]
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 mod common;
@@ -114,6 +116,109 @@ fn export_outside_any_env_is_silent() {
         "no env.jet in the tree must emit nothing:\n{}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+#[test]
+fn export_does_not_emit_untrusted_typed_environment_shell_code() {
+    let project = Scratch::new("typed-env-hook-trust");
+    let home = Scratch::new("typed-env-hook-trust-home");
+    let marker = project.path.join("envhook-pwned");
+    fs::write(
+        project.path.join("env.jet"),
+        r#"module env.dev {
+    presets: {
+        default: { variables: [String:String]{ "PROMPT_COMMAND": "printf injected > envhook-pwned" } }
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = export_cmd(&project.path)
+        .args(["enter", "export", "bash"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    #[cfg(unix)]
+    {
+        let mut shell = Command::new("bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "source /dev/stdin; if [ -n \"${PROMPT_COMMAND:-}\" ]; then eval \"$PROMPT_COMMAND\"; fi",
+            ])
+            .current_dir(&project.path)
+            .env_clear()
+            .env("HOME", &home.path)
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        shell
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&out.stdout)
+            .unwrap();
+        let shell_out = shell.wait_with_output().unwrap();
+        assert!(
+            shell_out.status.success(),
+            "the shell harness rejected the generated script: {}",
+            String::from_utf8_lossy(&shell_out.stderr)
+        );
+    }
+    assert!(!marker.exists(), "untrusted shell payload executed");
+    assert!(
+        out.stdout.is_empty(),
+        "an untrusted typed environment must not emit shell code:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn export_rejects_shell_syntax_in_environment_names() {
+    for (name, body, marker) in [
+        (
+            "var-name",
+            r#"module env.dev {
+    presets: {
+        default: { variables: [String:String]{ "BAD; touch envhook-var-pwned": "value" } }
+    }
+}
+"#,
+            "envhook-var-pwned",
+        ),
+        (
+            "unset-name",
+            r#"module env.dev {
+    unset: ["BAD; touch envhook-unset-pwned"]
+}
+"#,
+            "envhook-unset-pwned",
+        ),
+    ] {
+        let project = Scratch::new(name);
+        fs::write(project.path.join("env.jet"), body).unwrap();
+        let out = export_cmd(&project.path)
+            .args(["enter", "export", "bash"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "hostile {name} must be rejected");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("not a valid environment name"),
+            "missing name validation diagnostic for {name}:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!project.path.join(marker).exists());
+    }
 }
 
 #[test]

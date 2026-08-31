@@ -1,0 +1,54 @@
+{
+  "schema": "jet.cold-agent.adapters.v1",
+  "required_families": ["openai", "anthropic"],
+  "adapters": [
+    {
+      "id": "openai",
+      "family": "openai",
+      "transport_env": "JET_COLD_AGENT_OPENAI_TRANSPORT",
+      "default_transport": "command",
+      "api": {
+        "protocol": "openai-chat",
+        "endpoint_env": "JET_COLD_AGENT_OPENAI_ENDPOINT",
+        "api_key_env": "JET_COLD_AGENT_OPENAI_API_KEY",
+        "model_env": "JET_COLD_AGENT_OPENAI_MODEL"
+      },
+      "command": {
+        "command_env": "JET_COLD_AGENT_OPENAI_COMMAND",
+        "default_argv": [
+          "omp",
+          "--model",
+          "openai-codex/gpt-5.6-luna",
+          "--no-tools",
+          "--no-skills",
+          "--no-rules",
+          "--no-extensions",
+          "--print"
+        ],
+        "input": "prompt-argument",
+        "documentation": "Built-in OMP command transport; no OpenAI API key is read. The harness appends the complete prompt as the final argv item and reads Jet source from stdout. Set JET_COLD_AGENT_OPENAI_COMMAND to a JSON argv array with an OpenAI model to select another built-in OMP model."
+      }
+    },
+    {
+      "id": "anthropic",
+      "family": "anthropic",
+      "transport_env": "JET_COLD_AGENT_ANTHROPIC_TRANSPORT",
+      "default_transport": "command",
+      "command": {
+        "command_env": "JET_COLD_AGENT_ANTHROPIC_COMMAND",
+        "default_argv": [
+          "omp",
+          "--model",
+          "opus",
+          "--no-tools",
+          "--no-skills",
+          "--no-rules",
+          "--no-extensions",
+          "--print"
+        ],
+        "input": "prompt-argument",
+        "documentation": "Built-in OMP command transport; no Anthropic API key is read. The harness appends the complete prompt as the final argv item and reads Jet source from stdout. Set JET_COLD_AGENT_ANTHROPIC_COMMAND to a JSON argv array with --model opus or --model sonnet to select the built-in OMP model."
+      }
+    }
+  ]
+}

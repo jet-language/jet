@@ -29,6 +29,7 @@ pub use jet_sema::{Diagnostics, Lexer, Parser, Policy, Sema, Syntax, TargetMachi
 
 pub mod AdaBind;
 pub mod Authority;
+pub(crate) mod Bindgen;
 pub mod CBind;
 pub mod CFFI;
 pub mod CobolBind;
@@ -73,6 +74,7 @@ pub use jet_foundation::JSON;
 pub mod LintPolicy;
 pub mod Lock;
 pub mod Manifest;
+pub mod MCP;
 // Card #367 slice 4: `Merge` (§6 structural merge, pure/std-only) sunk from
 // `jetpack` — `ModuleEval` (jet-env-model, L2) and both realizers need it, so
 // it belongs at the plan-model's foundation, not inside one engine crate.

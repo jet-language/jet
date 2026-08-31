@@ -172,8 +172,10 @@ pub(crate) fn open_canvas_browser(url: &str) {
         }
         #[cfg(target_os = "windows")]
         {
-            let mut command = Command::new("cmd");
-            command.args(["/C", "start", "", url]);
+            // Pass the URL directly to Explorer. `cmd /C start` would make
+            // URL metacharacters part of a command string.
+            let mut command = Command::new("explorer.exe");
+            command.arg(url);
             command
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -215,6 +217,7 @@ fn print_canvas_hint(file: &str, mode: OutputMode, printed: &mut bool) {
 /// `notify` crate).
 pub(crate) fn run_dev(
     file: &str,
+    entry_fn: Option<&str>,
     try_anyway: bool,
     policy: WatchPolicy,
     gates: jet::Policy::GateSet,
@@ -234,6 +237,7 @@ pub(crate) fn run_dev(
     jet_jit::with_program_args(&runtime_args, || {
         run_dev_inner(
             file,
+            entry_fn,
             try_anyway,
             policy,
             gates,
@@ -247,6 +251,32 @@ pub(crate) fn run_dev(
             canvas_options,
         );
     });
+}
+
+fn run_dev_iteration_with_entry(
+    file: &str,
+    entry_fn: Option<&str>,
+    program_args: &[&String],
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> jet::Interpreter::RunWithLints {
+    let args = program_args
+        .iter()
+        .map(|arg| arg.as_str())
+        .collect::<Vec<_>>();
+    jet::Interpreter::dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
+        file,
+        &args,
+        try_anyway,
+        use_interpreter,
+        gates,
+        profile,
+        setting_overrides,
+        entry_fn,
+    )
 }
 
 fn detect_static_output_root(file: &str) -> Option<PathBuf> {
@@ -296,6 +326,7 @@ fn start_static_output_host(file: &str) -> Option<jet_devserver::WebHost::WebHos
 
 fn run_dev_inner(
     file: &str,
+    entry_fn: Option<&str>,
     try_anyway: bool,
     policy: WatchPolicy,
     gates: jet::Policy::GateSet,
@@ -322,7 +353,8 @@ fn run_dev_inner(
                 crate::emit_cli_diagnostic_with_fix(
                     "E2105",
                     message,
-                    "close the existing Canvas session or choose another `--canvas-port`".to_string(),
+                    "close the existing Canvas session or choose another `--canvas-port`"
+                        .to_string(),
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -350,8 +382,10 @@ fn run_dev_inner(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
+        let run = run_dev_iteration_with_entry(
             file,
+            entry_fn,
+            program_args,
             try_anyway,
             use_interpreter,
             gates,
@@ -376,10 +410,27 @@ fn run_dev_inner(
         println!("watching {} … (Ctrl-C to stop)", file);
     }
 
+    // Open the watcher before the first run. The running callable owns stdout,
+    // so a caller can edit the file as soon as its first line appears; opening
+    // the session afterward would sample that edit as the baseline and lose
+    // the invalidation.
+    let mut watch = match jet_devserver::WatchSession::open(path) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
     let mut prev_bundle = render_dev_iteration(
         file,
+        entry_fn,
+        program_args,
         try_anyway,
         gates,
         mode,
@@ -408,17 +459,6 @@ fn run_dev_inner(
     } else if static_host.is_none() && prev_bundle.is_some() {
         print_canvas_hint(file, mode, &mut canvas_hint_printed);
     }
-    // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
-    let mut watch = match jet_devserver::WatchSession::open(path) {
-        Ok(watch) => watch,
-        Err(diagnostic) => {
-            eprint!(
-                "{}",
-                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
     // D-SCHEDULE1 (card #505): due `#Job #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = JobClock::new();
@@ -442,11 +482,16 @@ fn run_dev_inner(
             }
             match action {
                 DevSessionAction::Rerun => {
+                    let _source_transaction = canvas_host
+                        .as_ref()
+                        .map(|host| host.lock_source_transaction());
                     if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_building();
                     }
                     prev_bundle = render_dev_iteration(
                         file,
+                        entry_fn,
+                        program_args,
                         try_anyway,
                         gates,
                         mode,
@@ -473,6 +518,9 @@ fn run_dev_inner(
                     }
                 }
                 DevSessionAction::RestartFresh => {
+                    let _source_transaction = canvas_host
+                        .as_ref()
+                        .map(|host| host.lock_source_transaction());
                     if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_building();
                     }
@@ -498,6 +546,8 @@ fn run_dev_inner(
                     };
                     prev_bundle = render_dev_iteration(
                         file,
+                        entry_fn,
+                        program_args,
                         try_anyway,
                         gates,
                         mode,
@@ -553,11 +603,16 @@ fn run_dev_inner(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
+            let _source_transaction = canvas_host
+                .as_ref()
+                .map(|host| host.lock_source_transaction());
             if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                 host.mark_building();
             }
             let next = render_dev_change(
                 file,
+                entry_fn,
+                program_args,
                 try_anyway,
                 policy,
                 prev_bundle.as_ref(),
@@ -754,6 +809,8 @@ fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSc
 /// next diff.
 fn render_dev_change(
     file: &str,
+    entry_fn: Option<&str>,
+    program_args: &[&String],
     try_anyway: bool,
     policy: WatchPolicy,
     prev: Option<&jet::AST::ProgramBundle>,
@@ -764,7 +821,7 @@ fn render_dev_change(
     setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::AST::ProgramBundle> {
     // Load+check the new bundle so we can both diff its type surface and run it.
-    let new_bundle = match jet::Loader::load_entry(file) {
+    let mut new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             if let Err(diags) =
                 jet::Driver::seed_build_facts(&mut b, profile, false, setting_overrides)
@@ -774,21 +831,6 @@ fn render_dev_change(
                 report_problems(mode, file, &src, &diags);
                 return None;
             }
-            let diags = jet::Sema::check_bundle_gates(&mut b, jet::Sema::CompileMode::Run, gates);
-            let errs: Vec<_> = diags
-                .iter()
-                .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-                .cloned()
-                .collect();
-            if !errs.is_empty() {
-                let src = fs::read_to_string(file).unwrap_or_default();
-                println!("\n— {} changed —", file);
-                report_problems(mode, file, &src, &errs);
-                // Keep the previous bundle as the swap baseline; the bad edit
-                // never became the running version.
-                return None;
-            }
-            render_dev_lints(file, mode, &diags);
             b
         }
         Err(diags) => {
@@ -799,7 +841,11 @@ fn render_dev_change(
         }
     };
 
-    // Decide whether this save uses the swap path.
+    if let Some(entry_fn) = entry_fn {
+        jet::Driver::swap_entry_point(&mut new_bundle, entry_fn);
+    }
+
+    // Decide whether this save uses the swap path for the selected callable.
     let resident = match policy {
         WatchPolicy::Swap => true,
         WatchPolicy::Restart => false,
@@ -808,6 +854,22 @@ fn render_dev_change(
             jet::Interpreter::detect_dev_mode(&new_bundle) == jet::Interpreter::DevMode::Resident
         }
     };
+
+    let diags = jet::Sema::check_bundle_gates(&mut new_bundle, jet::Sema::CompileMode::Run, gates);
+    let errs: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .cloned()
+        .collect();
+    if !errs.is_empty() {
+        let src = fs::read_to_string(file).unwrap_or_default();
+        println!("\n— {} changed —", file);
+        report_problems(mode, file, &src, &errs);
+        // Keep the previous bundle as the swap baseline; the bad edit
+        // never became the running version.
+        return None;
+    }
+    render_dev_lints(file, mode, &diags);
 
     if resident {
         // The hot-reload unit is the entry module (D-HOTSWAP1).
@@ -871,8 +933,10 @@ fn render_dev_change(
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
+        let run = run_dev_iteration_with_entry(
             file,
+            entry_fn,
+            program_args,
             try_anyway,
             use_interpreter,
             gates,
@@ -977,6 +1041,8 @@ pub(crate) fn run_repl(
 /// `jet dev`.
 fn render_dev_iteration(
     file: &str,
+    entry_fn: Option<&str>,
+    program_args: &[&String],
     try_anyway: bool,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
@@ -985,8 +1051,10 @@ fn render_dev_iteration(
     setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
+    let run = run_dev_iteration_with_entry(
         file,
+        entry_fn,
+        program_args,
         try_anyway,
         use_interpreter,
         gates,
@@ -1007,6 +1075,9 @@ fn render_dev_iteration(
                     report_problems(mode, file, &source, &diags);
                     None
                 } else {
+                    if let Some(entry_fn) = entry_fn {
+                        jet::Driver::swap_entry_point(&mut bundle, entry_fn);
+                    }
                     Some(bundle)
                 }
             }
@@ -2291,13 +2362,142 @@ pub(crate) fn run_explain(
         }
     }
 }
+/// `jet explain --cost <file>` — print the typed TIR cost projection.  This
+/// deliberately reports both semantic remainders and optimizer-proven
+/// removals; the latter are evidence for why no lint is emitted.
+pub(crate) fn run_explain_cost(
+    file: Option<&str>,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) {
+    let Some(file) = file else {
+        eprintln!(
+            "usage: {} explain --cost <file.{}>",
+            jet::Syntax::BINARY_NAME,
+            jet::Syntax::FILE_EXT
+        );
+        exit(ExitCodes::USAGE);
+    };
+    let src = match fs::read_to_string(file) {
+        Ok(src) => src,
+        Err(_) => {
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let projection = match crate::CmdInspect::check_projection_for_effects(
+        Path::new(file),
+        profile,
+        setting_overrides,
+    ) {
+        Ok(projection) => projection,
+        Err(diagnostics) => {
+            let errors: Vec<_> = diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
+                })
+                .cloned()
+                .collect();
+            if !errors.is_empty() {
+                report_problems(mode, file, &src, &errors);
+                exit(ExitCodes::USER_ERROR);
+            }
+            crate::cli_error!("E2104", "cost projection could not check `{}`", file);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
+        Ok(report) => report,
+        Err(error) => exit_cost_projection_error(file, &error),
+    };
+    if mode.json {
+        let rows: Vec<String> = report
+            .sites
+            .iter()
+            .map(|site| {
+                let line = source_line(&src, site.span);
+                format!(
+                    "{{\"function\":{},\"line\":{},\"kind\":{},\"state\":{},\"loop_depth\":{},\"tier\":\"{}\"}}",
+                    json_string(&site.function),
+                    line,
+                    json_string(site.kind.label()),
+                    json_string(cost_state_label(site.state)),
+                    site.loop_depth,
+                    COST_TIER,
+                )
+            })
+            .collect();
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "explain.cost",
+                &format!(
+                    ",\"file\":{},\"sites\":[{}]",
+                    json_string(file),
+                    rows.join(",")
+                ),
+            )
+        );
+        return;
+    }
+    if report.sites.is_empty() {
+        println!("cost: `{}` has no typed cost sites", file);
+        return;
+    }
+    for site in report.sites {
+        println!(
+            "{}:{} fn {} — {} — {} (loop depth {}; tier={})",
+            file,
+            source_line(&src, site.span),
+            site.function,
+            site.kind.label(),
+            cost_state_label(site.state),
+            site.loop_depth,
+            COST_TIER,
+        );
+    }
+}
+
+const COST_TIER: &str = "shared-tir";
+
+pub(crate) fn exit_cost_projection_error(
+    file: &str,
+    error: &jet::Codegen::TIR::TCostReportError,
+) -> ! {
+    crate::cli_error!(
+        "E2104",
+        "cost projection for `{}` failed: {}",
+        file,
+        error.message()
+    );
+    exit(ExitCodes::USER_ERROR);
+}
+
+fn source_line(source: &str, span: jet::Diagnostics::Span) -> usize {
+    source
+        .get(..span.start.min(source.len()))
+        .map_or(1, |prefix| {
+            prefix.bytes().filter(|byte| *byte == b'\n').count() + 1
+        })
+}
+
+fn cost_state_label(state: jet::Codegen::TIR::TCostState) -> &'static str {
+    match state {
+        jet::Codegen::TIR::TCostState::SemanticRemainder => "semantic remainder",
+        jet::Codegen::TIR::TCostState::OptimizerRemoved => "optimizer-proven removed",
+    }
+}
 
 fn explain_source_file(fact_file: Option<&str>) -> PathBuf {
     fact_file
         .map(PathBuf::from)
         .or_else(|| {
             let cwd = std::env::current_dir().ok()?;
-            crate::resolve_bare_entry("run", &cwd, None)
+            crate::resolve_bare_entry("run", &cwd, None).map(|entry| entry.path)
         })
         .unwrap_or_else(|| {
             crate::cli_error!(
@@ -2748,6 +2948,32 @@ pub(crate) fn run_bind(args: &[&String]) {
     // compiler can detect stale caches on the next build (hash invalidation).
     // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
+    let project_root = std::env::current_dir().unwrap_or_else(|error| {
+        bind_e3208(
+            format!("Could not publish C binding provenance for `{header}`."),
+            format!("the project root could not be resolved ({error})."),
+            "rerun the bind command from the project root".to_string(),
+        )
+    });
+    let header_path = std::fs::canonicalize(header).unwrap_or_else(|error| {
+        bind_e3208(
+            format!("Could not publish C binding provenance for `{header}`."),
+            format!("the header path could not be resolved ({error})."),
+            "check the header path and rerun `jet inspect bind`".to_string(),
+        )
+    });
+    if let Err(error) = jet::CFFI::write_c_binding_provenance(
+        &project_root,
+        &lib,
+        &header_path,
+        std::path::Path::new(&out_path),
+    ) {
+        bind_e3208(
+            format!("Could not publish C binding provenance for `{header}`."),
+            format!("{error}."),
+            "check the project and local library paths, then rerun `jet inspect bind`".to_string(),
+        );
+    }
 
     if !quiet {
         println!(
@@ -3107,6 +3333,7 @@ fn run_cpp_bind(args: &[&String]) {
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
+        .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| std::path::Path::new("."));
     let canonicalize = |path: std::path::PathBuf| {
         std::fs::canonicalize(&path).unwrap_or_else(|error| {
@@ -4480,7 +4707,7 @@ fn run_com_bind(args: &[&String]) {
     if !cfg!(target_os = "windows") {
         eprintln!("Error [E3260]: `com.*` needs a Windows host.");
         eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");
-        eprintln!(" Fix: Run `jet inspect bind com` and build the COM module on a Windows host.");
+        eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");
         eprintln!("More: jet-lang.dev/e/E3260");
         exit(ExitCodes::USER_ERROR)
     }
@@ -4498,7 +4725,6 @@ fn run_com_bind(args: &[&String]) {
     let mut minor = None;
     let mut lcid = 0u32;
     let mut pkg = None;
-    let mut out = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -4526,8 +4752,12 @@ fn run_com_bind(args: &[&String]) {
                 i += 2
             }
             "-o" | "--out" => {
-                out = args.get(i + 1).map(|v| v.to_string());
-                i += 2
+                crate::cli_error!(
+                    "E2102",
+                    "`inspect bind com` writes the checked binding to `.jet/bindings/com`; custom output paths are not supported"
+                );
+                usage();
+                exit(ExitCodes::USAGE)
             }
             value if !value.starts_with('-') && file.is_none() => {
                 file = Some(value.to_string());
@@ -4565,24 +4795,25 @@ fn run_com_bind(args: &[&String]) {
             lcid,
         }
     };
-    let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::COM_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
-    });
+    let out_path = format!(
+        ".jet/bindings/{}/{}.{}",
+        jet::Syntax::COM_MODULE_ROOT,
+        lib,
+        jet::Syntax::FILE_EXT
+    );
     let cache = std::path::Path::new(&out_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
     let result =
         jet::ComBind::bind(&input, &lib, cache).unwrap_or_else(|e| com_bind_error(&e.to_string()));
-    if let Err(e) = std::fs::write(&out_path, &result.source) {
-        com_bind_error(&format!("the generated cache could not be written ({e})"))
-    }
-    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
-        com_bind_error(&format!("the provenance could not be written ({e})"))
+    let provenance_path = cache.join(format!("{lib}.provenance"));
+    if let Err(e) = publish_com_binding_artifacts(
+        Path::new(&out_path),
+        &result.source,
+        &provenance_path,
+        &result.provenance,
+    ) {
+        com_bind_error(&e)
     }
     println!(
         "bound {} typed COM member{} → {out_path}",
@@ -4592,6 +4823,145 @@ fn run_com_bind(args: &[&String]) {
 }
 fn com_bind_error(why: &str) -> ! {
     bind_e3208("Could not generate COM bindings.".to_string(),format!("{why}."),"select a registered or file-backed type library with IDispatch metadata and rerun on Windows.".to_string())
+}
+
+/// Publish generated source and provenance as one recoverable pair. A failed
+/// write must leave either the previous pair or no pair, never a source whose
+/// ABI record describes different bytes.
+fn publish_com_binding_artifacts(
+    source_path: &Path,
+    source: &str,
+    provenance_path: &Path,
+    provenance: &str,
+) -> Result<(), String> {
+    if source_path == provenance_path {
+        return Err("generated COM source and provenance paths must differ".into());
+    }
+    let suffix = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("could not create COM output transaction: {error}"))?
+            .as_nanos()
+    );
+    let source_stage = source_path.with_file_name(format!(
+        ".{}..com-stage-{suffix}",
+        source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "generated COM source has no valid file name".to_string())?
+    ));
+    let provenance_stage = provenance_path.with_file_name(format!(
+        ".{}..com-stage-{suffix}",
+        provenance_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "generated COM provenance has no valid file name".to_string())?
+    ));
+    let source_backup = source_path.with_file_name(format!(
+        ".{}..com-previous-{suffix}",
+        source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "generated COM source has no valid file name".to_string())?
+    ));
+    let provenance_backup = provenance_path.with_file_name(format!(
+        ".{}..com-previous-{suffix}",
+        provenance_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "generated COM provenance has no valid file name".to_string())?
+    ));
+    let cleanup_staged = || {
+        let _ = fs::remove_file(&source_stage);
+        let _ = fs::remove_file(&provenance_stage);
+    };
+    let cleanup_backups = || {
+        let _ = fs::remove_file(&source_backup);
+        let _ = fs::remove_file(&provenance_backup);
+    };
+    if let Err(error) = fs::write(&source_stage, source) {
+        cleanup_staged();
+        return Err(format!(
+            "the generated COM cache could not be staged ({error})"
+        ));
+    }
+    if let Err(error) = fs::write(&provenance_stage, provenance) {
+        cleanup_staged();
+        return Err(format!("the COM provenance could not be staged ({error})"));
+    }
+    let had_source = match fs::symlink_metadata(source_path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if let Err(error) = fs::rename(source_path, &source_backup) {
+                cleanup_staged();
+                return Err(format!(
+                    "could not stage the previous COM cache ({error})"
+                ));
+            }
+            true
+        }
+        Ok(_) => {
+            cleanup_staged();
+            return Err("the generated COM cache path is not a regular file".into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            cleanup_staged();
+            return Err(format!("could not inspect the generated COM cache ({error})"));
+        }
+    };
+    let had_provenance = match fs::symlink_metadata(provenance_path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if let Err(error) = fs::rename(provenance_path, &provenance_backup) {
+                if had_source {
+                    let _ = fs::rename(&source_backup, source_path);
+                }
+                cleanup_staged();
+                return Err(format!("could not stage the previous COM provenance ({error})"));
+            }
+            true
+        }
+        Ok(_) => {
+            if had_source {
+                let _ = fs::rename(&source_backup, source_path);
+            }
+            cleanup_staged();
+            return Err("the generated COM provenance path is not a regular file".into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            if had_source {
+                let _ = fs::rename(&source_backup, source_path);
+            }
+            cleanup_staged();
+            return Err(format!("could not inspect the generated COM provenance ({error})"));
+        }
+    };
+    if let Err(error) = fs::rename(&source_stage, source_path) {
+        if had_source {
+            let _ = fs::rename(&source_backup, source_path);
+        }
+        if had_provenance {
+            let _ = fs::rename(&provenance_backup, provenance_path);
+        }
+        cleanup_staged();
+        return Err(format!("could not publish the generated COM cache ({error})"));
+    }
+    if let Err(error) = fs::rename(&provenance_stage, provenance_path) {
+        let _ = fs::remove_file(source_path);
+        if had_source {
+            let _ = fs::rename(&source_backup, source_path);
+        }
+        if had_provenance {
+            let _ = fs::rename(&provenance_backup, provenance_path);
+        }
+        cleanup_staged();
+        return Err(format!("could not publish the COM provenance ({error})"));
+    }
+    cleanup_staged();
+    cleanup_backups();
+    Ok(())
 }
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
@@ -5396,6 +5766,153 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode) {
         }
     }
 }
+/// Project the shared cost diagnostics consumed by `jet check` and
+/// `jet lint --cost`. Sema owns view-copy diagnostics; typed TIR owns the
+/// remaining cost kinds. Optimizer-proven removals stay in `jet explain --cost`
+/// only.
+pub(crate) fn cost_diagnostics(
+    bundle: &jet::AST::ProgramBundle,
+    sema_diagnostics: &[jet::Diagnostics::Diagnostic],
+) -> Result<Vec<jet::Diagnostics::Diagnostic>, jet::Codegen::TIR::TCostReportError> {
+    let report = jet::Codegen::TIR::cost_report(bundle)?;
+    Ok(cost_diagnostics_from_report(&report, sema_diagnostics))
+}
+
+fn cost_diagnostics_from_report(
+    report: &jet::Codegen::TIR::TCostReport,
+    sema_diagnostics: &[jet::Diagnostics::Diagnostic],
+) -> Vec<jet::Diagnostics::Diagnostic> {
+    let mut diagnostics = sema_diagnostics
+        .iter()
+        .filter(|diagnostic| is_cost_diagnostic(diagnostic))
+        .cloned()
+        .collect::<Vec<_>>();
+    diagnostics.extend(
+        report
+            .sites
+            .iter()
+            .filter(|site| {
+                site.loop_depth > 0
+                    && matches!(site.state, jet::Codegen::TIR::TCostState::SemanticRemainder)
+                    && !matches!(site.kind, jet::Codegen::TIR::TCostKind::ViewMaterialization)
+            })
+            .map(|site| {
+                jet::Diagnostics::Diagnostic::from_row(
+                    "L2510",
+                    &[
+                        ("operation", site.kind.operation()),
+                        ("fix", site.kind.fix()),
+                    ],
+                    Some(site.span),
+                )
+            }),
+    );
+    dedup_cost_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+fn is_cost_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) -> bool {
+    diagnostic.code == "L2510"
+}
+
+fn same_cost_diagnostic(
+    left: &jet::Diagnostics::Diagnostic,
+    right: &jet::Diagnostics::Diagnostic,
+) -> bool {
+    left.code == right.code
+        && left.severity == right.severity
+        && left.span == right.span
+        && left.what == right.what
+        && left.why == right.why
+        && left.fix == right.fix
+}
+
+fn dedup_cost_diagnostics(diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>) {
+    let mut seen = Vec::new();
+    diagnostics.retain(|diagnostic| {
+        if !is_cost_diagnostic(diagnostic) {
+            return true;
+        }
+        if seen
+            .iter()
+            .any(|previous| same_cost_diagnostic(previous, diagnostic))
+        {
+            false
+        } else {
+            seen.push(diagnostic.clone());
+            true
+        }
+    });
+}
+
+pub(crate) fn merge_cost_diagnostics(
+    bundle: &jet::AST::ProgramBundle,
+    diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>,
+) -> Result<(), jet::Codegen::TIR::TCostReportError> {
+    dedup_cost_diagnostics(diagnostics);
+    let cost_diagnostics = cost_diagnostics(bundle, diagnostics)?;
+    for diagnostic in cost_diagnostics {
+        if !diagnostics
+            .iter()
+            .any(|existing| same_cost_diagnostic(existing, &diagnostic))
+        {
+            diagnostics.push(diagnostic);
+        }
+    }
+    Ok(())
+}
+
+/// `jet lint --cost <file>` — surface semantic costs that remain on a hot
+/// loop.  The report is opt-in and fails only when a typed cost site exists.
+pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let projection = match crate::CmdInspect::check_projection_for_effects(
+        Path::new(file),
+        "dev",
+        &BTreeMap::new(),
+    ) {
+        Ok(projection) => projection,
+        Err(diagnostics) => {
+            report_problems(mode, file, &src, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
+        Ok(lints) => lints,
+        Err(error) => exit_cost_projection_error(file, &error),
+    };
+    if lints.is_empty() {
+        if mode.json {
+            let machine_file = crate::machine_report_path_for_process(file);
+            print!("{}", jet::render_all_json(&machine_file, &src, &[]));
+        } else {
+            println!("ok: `{}` has no hidden dynamic costs in loops", file);
+        }
+        return;
+    }
+    if mode.json {
+        let machine_file = crate::machine_report_path_for_process(file);
+        eprint!("{}", jet::render_all_json(&machine_file, &src, &lints));
+    } else {
+        eprint!(
+            "{}",
+            jet::render_all_colored(file, &src, &lints, mode.color_stderr())
+        );
+        let n = lints.len();
+        eprintln!(
+            "\n{} hidden dynamic cost warning{} found",
+            n,
+            if n == 1 { "" } else { "s" }
+        );
+    }
+    exit(ExitCodes::USER_ERROR);
+}
 
 /// D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y <file>` — the opt-in
 /// surface for accessibility lints (E2930 unlabeled control, E2931 duplicate
@@ -5588,6 +6105,7 @@ pub(crate) fn collect_measure_evidence(
     build(
         file,
         &rust_code,
+        None,
         bin.clone(),
         BuildProfile::Release,
         ffi_link.as_ref(),
@@ -5916,6 +6434,7 @@ pub(crate) fn collect_scene_evidence(
     build(
         file,
         &compiled.rust,
+        None,
         bin.clone(),
         BuildProfile::Release,
         compiled.ffi.as_ref(),

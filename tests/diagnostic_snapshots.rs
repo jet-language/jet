@@ -32,6 +32,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 mod common;
@@ -121,7 +122,7 @@ fn ui_snapshots() {
     let mut entries: Vec<(PathBuf, String)> = Vec::new();
     for e in fs::read_dir(&dir).unwrap().flatten() {
         let path = e.path();
-        if path.extension().and_then(|x| x.to_str()) == Some(ext) {
+        if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some(ext) {
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             if !name.contains(".fixed.") {
                 entries.push((path, format!("tests/ui/{}", name)));
@@ -235,6 +236,10 @@ fn ui_snapshots() {
         // Runtime/interpreter diagnostics still use the same exact snapshot
         // product contract as front-end diagnostics.
         let dev_interpreter = src.lines().any(|l| l.trim() == "// @dev_interpreter");
+        // D-RTFAIL1: this one fixture deliberately crosses the prepared FFI
+        // bridge in the interpreter. Native FFI remains an explicit boundary
+        // for every other interpreter snapshot.
+        let runtime_ffi = src.lines().any(|l| l.trim() == "// @runtime_ffi");
         // D-CANCELMODEL1: parent-control cancellation is produced by a live
         // task wait, so this fixture renders the shared Prelude diagnostic at
         // the representative wait expression without inventing user syntax.
@@ -403,6 +408,7 @@ fn ui_snapshots() {
             let stamp = jetpack::JetLib::JetLibStamp {
                 compiler_version: "0.0.1-old".to_string(),
                 declared_effects: Default::default(),
+                ..Default::default()
             };
             let diagnostic = jetpack::JetLib::check_compiler_identity(&stamp)
                 .expect_err("mismatched compiler identity must be refused before mapping");
@@ -461,7 +467,7 @@ fn ui_snapshots() {
             );
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if dev_interpreter {
-            match jet::Interpreter::dev_iteration(&file_arg, false, true) {
+            match jet::Interpreter::dev_iteration(&file_arg, runtime_ffi, true) {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }
@@ -984,7 +990,7 @@ fn lint_snapshots() {
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(ext))
+        .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some(ext))
         .collect();
     entries.sort();
 
@@ -1180,5 +1186,71 @@ fn should_update(update: &UpdateSelector, shown_path: &str) -> bool {
         UpdateSelector::None => false,
         UpdateSelector::All => true,
         UpdateSelector::One(selector) => shown_path.contains(selector),
+    }
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_diagnostic_fixtures() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("fixture")
+        .expect("diagnostic fixture corpus semantic policy");
+}
+
+#[test]
+fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
+    let cases: &[(&str, &[&str], &str)] = &[
+        ("process_args_view", &["L0515"], ".args()"),
+        ("message_text", &["L0516", "L0516", "L0516"], ".text()"),
+        ("redundant_fixed_cleanup", &["L0518"], ""),
+        ("unit_scalar_rewrap", &["L0519"], " * "),
+        ("path_containment_string_prefix", &["L0517"], "is_within"),
+        ("complete_ascii_case_ladder", &["L0521"], "to_ascii_"),
+        ("walk_files_filter", &["L0522"], "walk_files"),
+    ];
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (name, expected_codes, edit_fragment) in cases {
+        let path = root.join("tests/ui_lint").join(format!("{name}.jet"));
+        let source = fs::read_to_string(&path).expect("semantic guidance fixture");
+        let output = jet::compile_with_path(&source, &path.to_string_lossy())
+            .unwrap_or_else(|diagnostics| panic!("{name} must compile: {diagnostics:?}"));
+        let selected = output
+            .lints
+            .iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.code.as_str(),
+                    "L0515"
+                        | "L0516"
+                        | "L0517"
+                        | "L0518"
+                        | "L0519"
+                        | "L0521"
+                        | "L0522"
+                )
+            })
+            .collect::<Vec<_>>();
+        let actual_codes = selected
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(actual_codes, *expected_codes, "selected lints changed for {name}");
+        let mut sites = HashSet::new();
+        for diagnostic in &selected {
+            let span = diagnostic
+                .span
+                .unwrap_or_else(|| panic!("{name} selected lint has no semantic site"));
+            assert!(
+                sites.insert((diagnostic.code.as_str(), span)),
+                "{name} emitted duplicate selected lint at {span:?}"
+            );
+        }
+        assert!(
+            selected.iter().all(|diagnostic| diagnostic
+                .edit
+                .as_ref()
+                .is_some_and(|edit| edit.new_text.contains(*edit_fragment))),
+            "{name} selected lint lost its mechanical edit"
+        );
     }
 }

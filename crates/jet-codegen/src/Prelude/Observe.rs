@@ -22,7 +22,6 @@ fn jet_observe_drain_after_exit() {
         drain();
     }
 }
-
 #[derive(Clone)]
 struct JetObserveTask {
     parent: usize,
@@ -65,6 +64,11 @@ struct JetObserveEvent {
 
 const JET_OBSERVE_EVENT_LIMIT: usize = 256;
 const JET_OBSERVE_TASK_LIMIT: usize = 4096;
+// Keep the process-exit diagnostic bounded even when every registered task is
+// parked. The registry limit bounds cardinality; this limit bounds rendered
+// bytes so a pathological task forest cannot exhaust the exit path.
+const JET_OBSERVE_EXIT_REPORT_BYTES: usize = 64 * 1024;
+const JET_OBSERVE_EXIT_REPORT_MARKER_BYTES: usize = 128;
 
 struct JetObserveRegistry {
     next_task: std::sync::atomic::AtomicUsize,
@@ -168,8 +172,8 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
     channels.truncate(4096);
 
     let task_json = tasks.iter().map(|(id, task)| format!(
-        "{{\"id\":{id},\"parent\":{},\"state\":\"{}\",\"wait\":\"{}\",\"deadline_ms\":{},\"cancelled\":{}}}",
-        task.parent, task.state, jet_observe_escape(&task.wait),
+        "{{\"id\":{id},\"parent\":{},\"label\":\"{}\",\"spawn_site\":{},\"state\":\"{}\",\"wait\":\"{}\",\"deadline_ms\":{},\"cancelled\":{}}}",
+        task.parent, jet_observe_escape(&task.label), task.spawn_site, task.state, jet_observe_escape(&task.wait),
         task.deadline_ms.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string()),
         task.cancelled
     )).collect::<Vec<_>>().join(",");
@@ -228,9 +232,9 @@ pub fn jet_observe_task_register(observe_id: &std::sync::atomic::AtomicUsize) ->
     jet_observe_task_register_at(observe_id, 0)
 }
 
-/// Register one bounded task identity. The compiler's existing spawn-site
-/// index is the stable cross-tier label; no second user-facing spawn syntax is
-/// needed to carry it through AOT, JIT, and the evaluator.
+/// Register one bounded task identity. The compiler-assigned spawn-site index
+/// supplies a stable fallback label; a caller with a source name may replace
+/// it with `jet_observe_task_set_label` before the child starts.
 pub fn jet_observe_task_register_at(
     observe_id: &std::sync::atomic::AtomicUsize,
     spawn_site: usize,
@@ -290,9 +294,23 @@ fn jet_observe_task_register_at_with_control_weak(
     id
 }
 
-/// Stable text for a task failure. The compiler-assigned spawn-site label is
-/// the user-visible identity; the registry id stays internal because helper
-/// tasks can consume ids in a tier-dependent order.
+/// Attach the optional source label to a registered task. The registry stores
+/// only a bounded string, and rendering escapes it before it crosses the
+/// diagnostic or JSON boundary.
+pub fn jet_observe_task_set_label(id: usize, label: &str) {
+    if id == 0 || label.trim().is_empty() {
+        return;
+    }
+    let Some(registry) = jet_observe_registry() else {
+        return;
+    };
+    if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+        task.label = label.chars().take(160).collect();
+    }
+}
+
+/// Stable text for a task failure. A source label, when present, is paired
+/// with the compiler spawn site so repeated tasks remain distinguishable.
 pub fn jet_observe_task_identity(id: usize) -> String {
     let Some(registry) = jet_observe_registry() else {
         return format!("task #{id}");
@@ -300,7 +318,11 @@ pub fn jet_observe_task_identity(id: usize) -> String {
     let Some(task) = registry.tasks.lock().unwrap().get(&id).cloned() else {
         return format!("task #{id}");
     };
-    format!("{} (spawn site {})", task.label, task.spawn_site)
+    format!(
+        "{} (spawn site {})",
+        jet_observe_escape(&task.label),
+        task.spawn_site
+    )
 }
 
 pub fn jet_observe_task_failure_message(id: usize, reason: String) -> String {
@@ -461,17 +483,35 @@ pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
     }
 
     let mut details = String::new();
+    let mut omitted = 0usize;
     for (_, task) in parked {
-        details.push_str(&format!(
+        let entry = format!(
             "\n  {} (spawn site {})\n    state: {}\n    wait target: {}",
-            task.label,
+            jet_observe_escape(&task.label),
             task.spawn_site,
             task.state,
-            if task.wait.is_empty() { "unknown" } else { &task.wait },
-        ));
+            if task.wait.is_empty() {
+                "unknown".to_string()
+            } else {
+                jet_observe_escape(&task.wait)
+            },
+        );
+        if details.len().saturating_add(entry.len())
+            > JET_OBSERVE_EXIT_REPORT_BYTES
+                .saturating_sub(JET_OBSERVE_EXIT_REPORT_MARKER_BYTES)
+        {
+            omitted = omitted.saturating_add(1);
+        } else {
+            details.push_str(&entry);
+        }
+    }
+    if omitted > 0 {
+        let marker = format!("\n  ... {omitted} more parked task(s) omitted by the report limit ...");
+        if details.len().saturating_add(marker.len()) <= JET_OBSERVE_EXIT_REPORT_BYTES {
+            details.push_str(&marker);
+        }
     }
     jet_observe_cancel_live_tasks(&registry);
-    jet_observe_drain_after_exit();
     Some(jet_render_runtime_stop(
         "E3013", "", 0, "", "", 1, 1, &details, "",
     ))

@@ -1,0 +1,17 @@
+Error [E2404]: `?` can't turn the `Err` from `inferred` into `TargetErr` here
+  --> tests/ui/e2404_failure_contracts.jet:35:5
+    |
+ 35 |     inferred()
+    |     ^^^^^^^^
+ Why: `inferred` is defined at `e2404_failure_contracts.jet:13:4` with effective failure contract `implicit default !Err`; the caller's `explicit !TargetErr` contract has no route from `Err` to `TargetErr`
+ Fix: Declare the caller with `Err` as its failure domain, or add `impl Err -> TargetErr { … }`; otherwise handle `inferred` locally with `??`
+More: jet-lang.dev/e/E2404
+
+Error [E2404]: `?` can't turn the `OtherErr` from `other` into `TargetErr` here
+  --> tests/ui/e2404_failure_contracts.jet:40:5
+    |
+ 40 |     other()
+    |     ^^^^^
+ Why: `other` is defined at `e2404_failure_contracts.jet:30:4` with effective failure contract `explicit !OtherErr`; the caller's `explicit !TargetErr` contract has no route from `OtherErr` to `TargetErr`
+ Fix: Declare the caller with `OtherErr` as its failure domain, or add `impl OtherErr -> TargetErr { … }`; otherwise handle `other` locally with `??`
+More: jet-lang.dev/e/E2404

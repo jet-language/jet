@@ -1,15 +1,11 @@
-// E2-M9: jet.csv — parse and clean a CSV table.
+// E2-M9: jet.csv — parse a delimited table with physical row metadata.
 use core.encoding.csv as csv
 
-// D-FAIL-CONV1: csv.parse fails as String; name the rail instead of a default Err.
-fn run() !String {
+fn run() {
     raw :: "name,score,grade\nAlice,95,A\nBob,\"82\",B\nCarol,71,C"
-    rows :: csv.parse(raw)
+    rows :: csv.rows(raw, header: true, skip_blank: true) ?? panic("csv parse failed")
     loop row in rows {
-        name :: row[0]
-        score :: row[1]
-        print("{name}: {score}")
+        fields :: row.fields
+        print("{row.line}: {fields[0]}: {fields[1]}")
     }
-    rebuilt :: csv.to_string(rows)
-    print(rebuilt.len() > 0)
 }

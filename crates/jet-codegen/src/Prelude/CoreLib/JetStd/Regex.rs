@@ -250,6 +250,8 @@ impl JetRegexMatch {
         self.group(idx as i64)
     }
 
+    /// Match spans use String character indices, not UTF-8 byte offsets, so
+    /// they compose directly with Jet String indexing.
     pub fn start(&self) -> i64 {
         self.group_start(0).unwrap_or(-1)
     }
@@ -416,17 +418,14 @@ impl JetRegex {
         );
         out
     }
-
+    /// Replace every non-overlapping match from left to right.
     pub fn replace(&self, text: &str, repl: &str) -> String {
         self.replace_impl(text, |m| expand_regex_replacement(repl, m), true)
     }
 
+    /// Replace at most the first non-overlapping match.
     pub fn replace_first(&self, text: &str, repl: &str) -> String {
         self.replace_impl(text, |m| expand_regex_replacement(repl, m), false)
-    }
-
-    pub fn replace_all(&self, text: &str, repl: &str) -> String {
-        self.replace_impl(text, |m| expand_regex_replacement(repl, m), true)
     }
 
     pub fn replace_all_with<F>(&self, text: &str, f: F) -> String
@@ -476,6 +475,9 @@ impl JetRegex {
                     }
                     let (start, end) = run.span;
                     out.push(text[pos..start].to_string());
+                    // Advance at every match boundary. For a zero-width
+                    // delimiter `end == start`, so the next boundary emits
+                    // exactly the intervening character(s) once.
                     pos = end;
                     splits += 1;
                     true
@@ -649,16 +651,16 @@ pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
     pattern.matches(text)
 }
 
-pub fn jet_regex_replace(pattern: &JetRegex, repl: &str, text: &str) -> String {
+pub fn jet_regex_replace(
+    pattern: &JetRegex,
+    repl: &str,
+    text: &str,
+) -> String {
     pattern.replace(text, repl)
 }
 
 pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &str, text: &str) -> String {
     pattern.replace_first(text, repl)
-}
-
-pub fn jet_regex_replace_all(pattern: &JetRegex, repl: &str, text: &str) -> String {
-    pattern.replace_all(text, repl)
 }
 
 pub fn jet_regex_split(pattern: &JetRegex, text: &str) -> Vec<String> {

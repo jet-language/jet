@@ -1,0 +1,14 @@
+// core-conformance: core.files.set_mode
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-set-mode")
+    path :: Path.from(root).join("fixture.txt")
+    files.write(path, "fixture") ?? panic("seed")
+    changed :: files.set_mode(path, 0o600)
+    print(changed)
+    result :: files.stat(path) ?? panic("stat")
+    print(result.mode & 0o777 == 0o600)
+    files.remove_all(root) ?? panic("cleanup")
+}

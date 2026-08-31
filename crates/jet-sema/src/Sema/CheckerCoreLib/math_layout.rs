@@ -431,9 +431,6 @@ pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option
         BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_decimal_type_name(lt) => {
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
         }
-        BinOp::Div if same && is_decimal_type_name(lt) => {
-            Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
-        }
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
             if same && lt == crate::Syntax::TYPE_FRACTION =>
         {

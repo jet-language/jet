@@ -38,6 +38,7 @@ impl InterpreterBackend {
 /// one call inside it.
 impl JitBackend for InterpreterBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+        jet_jit::reset_one_shot_core_state();
         jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
     }
 

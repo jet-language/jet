@@ -54,7 +54,7 @@ struct PackageFact {
     provider: String
     channel: String
     declared_by: [String]
-    provider_facts: String
+    provider_facts: DataTree
 }
 
 struct FactEntry {
@@ -63,36 +63,44 @@ struct FactEntry {
     provenance: String
 }
 
-fn json_string(value: String) String !PlanError -> {
-    return json.to_string(DataTree.Text(~value))
-}
-
-fn json_strings(values: [String]) String !PlanError -> {
-    rendered := [String]{}
-    loop value in values {
-        rendered.push(json_string(~value))
-    }
-    return rendered.join(",")
-}
-
-fn json_manifest(value: manifest_model.Manifest) String !PlanError -> {
-    deps := [String]{}
+fn json_manifest(value: manifest_model.Manifest) DataTree !PlanError -> {
+    deps := [DataTree]{}
     loop dep in value.deps {
-        deps.push("{{\"name\":{json_string(~dep.name)},\"reference\":{json_string(~dep.reference)}}}")
+        deps.push(DataTree.Object([
+            "name": DataTree.Text(~dep.name),
+            "reference": DataTree.Text(~dep.reference)
+        ]))
     }
-    packages := [String]{}
+    packages := [DataTree]{}
     loop package in value.packages {
-        packages.push("{{\"name\":{json_string(~package.name)},\"kind\":{json_string(~package.kind)},\"entry\":{json_string(~package.entry)}}}")
+        packages.push(DataTree.Object([
+            "name": DataTree.Text(~package.name),
+            "kind": DataTree.Text(~package.kind),
+            "entry": DataTree.Text(~package.entry)
+        ]))
     }
-    return "{{\"name\":{json_string(~value.name)},\"version\":{json_string(~value.version)},\"deps\":[{deps.join(",")}],\"packages\":[{packages.join(",")}]}}"
+    return DataTree.Object([
+        "name": DataTree.Text(~value.name),
+        "version": DataTree.Text(~value.version),
+        "deps": DataTree.Array(deps),
+        "packages": DataTree.Array(packages)
+    ])
 }
 
-fn json_lock(value: lock_model.LockFile) String !PlanError -> {
-    packages := [String]{}
+fn json_lock(value: lock_model.LockFile) DataTree !PlanError -> {
+    packages := [DataTree]{}
     loop package in value.packages {
-        packages.push("{{\"name\":{json_string(~package.name)},\"version\":{json_string(~package.version)},\"reference\":{json_string(~package.reference)},\"output_hash\":{json_string(~package.output_hash)}}}")
+        packages.push(DataTree.Object([
+            "name": DataTree.Text(~package.name),
+            "version": DataTree.Text(~package.version),
+            "reference": DataTree.Text(~package.reference),
+            "output_hash": DataTree.Text(~package.output_hash)
+        ]))
     }
-    return "{{\"version\":{value.version},\"packages\":[{packages.join(",")}]}}"
+    return DataTree.Object([
+        "version": DataTree.Int(value.version),
+        "packages": DataTree.Array(packages)
+    ])
 }
 
 fn valid_name(name: String) Bool !PlanError -> {
@@ -117,34 +125,10 @@ fn valid_name(name: String) Bool !PlanError -> {
     return true
 }
 
-fn same_strings(left: [String], right: [String]) Bool !PlanError -> {
-    if left.len() != right.len() {
-        return false
-    }
-    loop (index, value) in left {
-        if value != right[index] {
-            return false
-        }
-    }
-    return true
-}
-
-fn same_map(left: [String:String], right: [String:String]) Bool !PlanError -> {
-    if left.len() != right.len() {
-        return false
-    }
-    loop (key, value) in left {
-        if !right.has_key(key) || right[key] != value {
-            return false
-        }
-    }
-    return true
-}
-
 fn same_profile(left: Profile, right: Profile) Bool !PlanError -> {
-    return same_strings(left.extends, right.extends)
-        && same_strings(left.packages, right.packages)
-        && same_map(left.collisions, right.collisions)
+    return left.extends == right.extends
+        && left.packages == right.packages
+        && left.collisions.equal(right.collisions)
 }
 
 fn brace_delta(line: String) Int !PlanError -> {
@@ -812,7 +796,7 @@ fn provider_for_source(source: String) String !PlanError -> {
     if source == "path" || source.starts_with("/") || source.starts_with(".") {
         return "core"
     }
-    return source
+    return ~source
 }
 
 fn external_provider(provider: String) Bool !PlanError -> {
@@ -827,21 +811,33 @@ fn fact_entry(key: String, value: String, provenance: String) FactEntry !PlanErr
     return FactEntry{key: key, value: value, provenance: provenance}
 }
 
-fn facts_json(entries: [FactEntry]) String !PlanError -> {
+fn facts_json(entries: [FactEntry]) DataTree !PlanError -> {
     sorted := entries.copy()
     sorted.sort_by((entry: FactEntry) -> entry.key)
-    rendered := [String]{}
+    fields := [String:DataTree]{}
     loop entry in sorted {
-        rendered.push("{json_string(~entry.key)}:{json_string(~entry.value)}")
+        fields[entry.key] = DataTree.Text(~entry.value)
     }
-    return rendered.join(",")
+    return DataTree.Object(fields)
 }
 
-fn selector_json(selector: Selector) String !PlanError -> {
-    return "{{\"raw\":{json_string(~selector.raw)},\"version\":{json_string(~selector.version)},\"revision\":{json_string(~selector.revision)},\"baseline\":{json_string(~selector.baseline)},\"features\":[{json_strings(~selector.features)}],\"digest\":{json_string(~selector.digest)},\"platform\":{json_string(~selector.platform)}}}"
+fn selector_json(selector: Selector) DataTree !PlanError -> {
+    features := [DataTree]{}
+    loop feature in selector.features {
+        features.push(DataTree.Text(~feature))
+    }
+    return DataTree.Object([
+        "raw": DataTree.Text(~selector.raw),
+        "version": DataTree.Text(~selector.version),
+        "revision": DataTree.Text(~selector.revision),
+        "baseline": DataTree.Text(~selector.baseline),
+        "features": DataTree.Array(features),
+        "digest": DataTree.Text(~selector.digest),
+        "platform": DataTree.Text(~selector.platform)
+    ])
 }
 
-fn provider_facts_json(raw: String, target: String, source: String, provider: String, profile: String, provenance: String, selector: Selector) String !PlanError -> {
+fn provider_facts_json(raw: String, target: String, source: String, provider: String, profile: String, provenance: String, selector: Selector) DataTree !PlanError -> {
     facts := [FactEntry]{
         fact_entry("provider.name", ~provider, "ref"),
         fact_entry("provider.target", ~target, "ref"),
@@ -857,14 +853,28 @@ fn provider_facts_json(raw: String, target: String, source: String, provider: St
     if selector.raw != "" {
         facts.push(fact_entry("provider.selector", ~selector.raw, "ref"))
     }
-    fact_values := facts_json(~facts)
     provenance_entries := facts.copy()
     provenance_entries.sort_by((entry: FactEntry) -> entry.key)
-    provenance_values := [String]{}
+    provenance_facts := [FactEntry]{}
     loop entry in provenance_entries {
-        provenance_values.push("{json_string(~entry.key)}:{json_string(~entry.provenance)}")
+        provenance_facts.push(fact_entry(~entry.key, ~entry.provenance, ~entry.provenance))
     }
-    return "{{\"schema\":\"jet-provider-facts-v1\",\"provider\":{json_string(~provider)},\"reference\":{json_string(~raw)},\"target\":{json_string(~target)},\"selector\":{selector_json(~selector)},\"resolved_source\":{json_string(~source)},\"profile\":{json_string(~profile)},\"profile_provenance\":{json_string(~provenance)},\"facts\":{{{fact_values}}},\"provenance\":{{{provenance_values.join(",")}}},\"native_format\":\"\",\"native_document\":\"\",\"losses\":[],\"conflicts\":[]}}"
+    return DataTree.Object([
+        "schema": DataTree.Text("jet-provider-facts-v1"),
+        "provider": DataTree.Text(~provider),
+        "reference": DataTree.Text(~raw),
+        "target": DataTree.Text(~target),
+        "selector": selector_json(~selector),
+        "resolved_source": DataTree.Text(~source),
+        "profile": DataTree.Text(~profile),
+        "profile_provenance": DataTree.Text(~provenance),
+        "facts": facts_json(~facts),
+        "provenance": facts_json(~provenance_facts),
+        "native_format": DataTree.Text(""),
+        "native_document": DataTree.Text(""),
+        "losses": DataTree.Array([DataTree]{}),
+        "conflicts": DataTree.Array([DataTree]{})
+    ])
 }
 
 fn make_package_fact(seed: PackageSeed, profile: String) PackageFact !PlanError -> {
@@ -887,41 +897,54 @@ fn make_package_fact(seed: PackageSeed, profile: String) PackageFact !PlanError 
     })
 }
 
-fn json_collisions(collisions: [String:String]) String !PlanError -> {
+fn json_collisions(collisions: [String:String]) DataTree !PlanError -> {
     keys := collisions.keys().to_list()
     keys.sort()
-    rendered := [String]{}
+    fields := [String:DataTree]{}
     loop key in keys {
         value :: collisions[key]
-        rendered.push("{json_string(~key)}:{json_string(~value)}")
+        fields[key] = DataTree.Text(~value)
     }
-    return rendered.join(",")
+    return DataTree.Object(fields)
 }
 
-fn json_package(package: PackageFact) String !PlanError -> {
-    upstream := "null"
+fn json_package(package: PackageFact) DataTree !PlanError -> {
+    upstream := DataTree.Null
     if package.upstream != "" {
-        upstream = json_string(~package.upstream)
+        upstream = DataTree.Text(~package.upstream)
     }
-    channel := "null"
+    channel := DataTree.Null
     if package.channel != "" {
-        channel = json_string(~package.channel)
+        channel = DataTree.Text(~package.channel)
     }
-    return "{{\"raw\":{json_string(~package.raw)},\"target\":{json_string(~package.target)},\"source\":{json_string(~package.source)},\"upstream\":{upstream},\"provider\":{json_string(~package.provider)},\"channel\":{channel},\"declared_by\":[{json_strings(~package.declared_by)}],\"provider_facts\":{package.provider_facts}}}"
+    declared_by := [DataTree]{}
+    loop owner in package.declared_by {
+        declared_by.push(DataTree.Text(~owner))
+    }
+    return DataTree.Object([
+        "raw": DataTree.Text(~package.raw),
+        "target": DataTree.Text(~package.target),
+        "source": DataTree.Text(~package.source),
+        "upstream": upstream,
+        "provider": DataTree.Text(~package.provider),
+        "channel": channel,
+        "declared_by": DataTree.Array(declared_by),
+        "provider_facts": package.provider_facts
+    ])
 }
 
 fn framed(key: String, value: String) String !PlanError -> {
     return "{key}\t{value.bytes().len()}\t{value}\n"
 }
 
-fn provider_fact_map(packages: [PackageFact]) String !PlanError -> {
+fn provider_fact_map(packages: [PackageFact]) DataTree !PlanError -> {
     sorted := packages.copy()
     sorted.sort_by((package: PackageFact) -> package.raw)
-    rendered := [String]{}
+    fields := [String:DataTree]{}
     loop package in sorted {
-        rendered.push("{json_string(~package.raw)}:{package.provider_facts}")
+        fields[package.raw] = package.provider_facts
     }
-    return rendered.join(",")
+    return DataTree.Object(fields)
 }
 
 pub fn render(project_root: String, name: String) String !PlanError -> {
@@ -961,12 +984,14 @@ pub fn render(project_root: String, name: String) String !PlanError -> {
     }
     manifest_wire :: json_manifest(~manifest_data)
     lock_wire :: json_lock(~lock_data)
+    manifest_text :: json.to_string(~manifest_wire)
+    lock_text :: json.to_string(~lock_wire)
 
     canonical := "jet-package-profile-plan-v1\n"
     canonical += framed("name", ~selected_name)
     canonical += framed("selected", ~selected_name)
-    canonical += framed("manifest", ~manifest_wire)
-    canonical += framed("lock", ~lock_wire)
+    canonical += framed("manifest", ~manifest_text)
+    canonical += framed("lock", ~lock_text)
     loop applied in resolved.applied {
         canonical += framed("applied", ~applied)
     }
@@ -991,7 +1016,7 @@ pub fn render(project_root: String, name: String) String !PlanError -> {
         loop owner in package.declared_by {
             canonical += framed("package.declared_by", ~owner)
         }
-        facts_digest := "sha256-{crypto.sha256(package.provider_facts.bytes()).hex()}"
+        facts_digest := "sha256-{crypto.sha256(json.to_string(~package.provider_facts).bytes()).hex()}"
         canonical += framed("package.provider_facts", ~facts_digest)
     }
     collision_keys := resolved.collisions.keys().to_list()
@@ -1002,5 +1027,28 @@ pub fn render(project_root: String, name: String) String !PlanError -> {
         canonical += framed("collision.provider", ~provider)
     }
     fingerprint := "sha256-{crypto.sha256(canonical.bytes()).hex()}"
-    return "{{\"name\":{json_string(~selected_name)},\"fingerprint\":{json_string(~fingerprint)},\"selected_profiles\":[{json_string(~selected_name)}],\"applied\":[{json_strings(~resolved.applied)}],\"sources\":[{json_strings(~resolved.sources)}],\"packages\":[{packages.map((package: PackageFact) -> json_package(~package)).join(",")}],\"collisions\":{{{json_collisions(~resolved.collisions)}}},\"provider_facts\":{{{provider_fact_map(~packages)}}},\"manifest\":{manifest_wire},\"lock\":{lock_wire}}}"
+    package_values := [DataTree]{}
+    loop package in packages {
+        package_values.push(json_package(~package))
+    }
+    applied_values := [DataTree]{}
+    loop applied in resolved.applied {
+        applied_values.push(DataTree.Text(~applied))
+    }
+    source_values := [DataTree]{}
+    loop source_name in resolved.sources {
+        source_values.push(DataTree.Text(~source_name))
+    }
+    return json.to_string(DataTree.Object([
+        "name": DataTree.Text(~selected_name),
+        "fingerprint": DataTree.Text(~fingerprint),
+        "selected_profiles": DataTree.Array([DataTree.Text(~selected_name)]),
+        "applied": DataTree.Array(applied_values),
+        "sources": DataTree.Array(source_values),
+        "packages": DataTree.Array(package_values),
+        "collisions": json_collisions(~resolved.collisions),
+        "provider_facts": provider_fact_map(~packages),
+        "manifest": manifest_wire,
+        "lock": lock_wire
+    ]))
 }

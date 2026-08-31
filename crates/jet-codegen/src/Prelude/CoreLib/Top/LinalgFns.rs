@@ -2,8 +2,10 @@
 // Constructors (`_new`), statics (`splat`/`from_array`), instance methods, lane
 // reads, and reductions. Codegen names these `jet_math_<Type>_<fn>` and always
 // passes the receiver as `&recv` (value types — every op returns a fresh value).
-// Fixed arrays plus aggressive inlining give native AOT LLVM a vectorizable
-// shape while keeping the same safe Prelude semantics on every tier.
+// Fixed arrays plus aggressive inlining give portable AOT LLVM a vectorizable
+// shape. Host-native F64x4 uses the private AVX carrier from the shared
+// Prelude; reductions still marshal through its scalar left-to-right fold so
+// every tier keeps the same result.
 
 macro_rules! jet_simd_lane_fns {
     (
@@ -96,15 +98,94 @@ jet_simd_lane_fns!(
     jet_math_F32x8_reduce_min, jet_math_F32x8_reduce_max,
     jet_math_F32x8_reduce_avg, f32, 8, a, b, c, d, e, f, g, h
 );
-jet_simd_lane_fns!(
-    F64x4,
-    jet_math_F64x4_new, jet_math_F64x4_splat, jet_math_F64x4_from_array,
-    jet_math_F64x4_to_array, jet_math_F64x4_lane, jet_math_F64x4_sum,
-    jet_math_F64x4_product, jet_math_F64x4_min, jet_math_F64x4_max,
-    jet_math_F64x4_reduce_add, jet_math_F64x4_reduce_mul,
-    jet_math_F64x4_reduce_min, jet_math_F64x4_reduce_max,
-    jet_math_F64x4_reduce_avg, f64, 4, a, b, c, d
-);
+#[inline(always)]
+fn jet_math_F64x4_new(a: f64, b: f64, c: f64, d: f64) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_new_native([a, b, c, d]))
+}
+#[inline(always)]
+fn jet_math_F64x4_splat(x: f64) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_splat_native(x))
+}
+#[inline(always)]
+fn jet_math_F64x4_from_array(a: [f64; 4]) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_new_native(a))
+}
+#[inline(always)]
+fn jet_math_F64x4_to_array(v: &jet_std::F64x4) -> [f64; 4] {
+    crate::jet_simd_f64x4_to_array_native(v.0)
+}
+#[inline(always)]
+fn jet_math_F64x4_lane(v: &jet_std::F64x4, i: i64, file: &str, line: u32) -> f64 {
+    let index = match crate::jet_simd_lane_index(i, "F64x4", 4) {
+        Ok(index) => index,
+        Err(message) => jet_panic(file, line, &message),
+    };
+    crate::jet_simd_f64x4_lane_native(v.0, index)
+}
+
+#[inline(always)]
+fn jet_math_F64x4_lane_const<const INDEX: usize>(v: &jet_std::F64x4) -> f64 {
+    crate::jet_simd_f64x4_lane_const_native::<INDEX>(v.0)
+}
+
+#[inline(always)]
+fn jet_math_F64x4_gather_lane<const INDEX: usize>(
+    first: &jet_std::F64x4,
+    second: &jet_std::F64x4,
+    third: &jet_std::F64x4,
+    fourth: &jet_std::F64x4,
+) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_gather_lane_native::<INDEX>(
+        first.0, second.0, third.0, fourth.0,
+    ))
+}
+
+#[inline(always)]
+fn jet_math_F64x4_sqrt(v: &jet_std::F64x4) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_sqrt_native_carrier(v.0))
+}
+
+#[inline(always)]
+fn jet_math_F64x4_sum(v: &jet_std::F64x4) -> f64 {
+    let values = jet_math_F64x4_to_array(v);
+    crate::jet_simd_sum_array(&values)
+}
+#[inline(always)]
+fn jet_math_F64x4_product(v: &jet_std::F64x4) -> f64 {
+    let values = jet_math_F64x4_to_array(v);
+    crate::jet_simd_product_array(&values)
+}
+#[inline(always)]
+fn jet_math_F64x4_min(v: &jet_std::F64x4) -> f64 {
+    let values = jet_math_F64x4_to_array(v);
+    crate::jet_simd_min_array(&values)
+}
+#[inline(always)]
+fn jet_math_F64x4_max(v: &jet_std::F64x4) -> f64 {
+    let values = jet_math_F64x4_to_array(v);
+    crate::jet_simd_max_array(&values)
+}
+#[inline(always)]
+fn jet_math_F64x4_reduce_add(v: &jet_std::F64x4) -> f64 {
+    jet_math_F64x4_sum(v)
+}
+#[inline(always)]
+fn jet_math_F64x4_reduce_mul(v: &jet_std::F64x4) -> f64 {
+    jet_math_F64x4_product(v)
+}
+#[inline(always)]
+fn jet_math_F64x4_reduce_min(v: &jet_std::F64x4) -> f64 {
+    jet_math_F64x4_min(v)
+}
+#[inline(always)]
+fn jet_math_F64x4_reduce_max(v: &jet_std::F64x4) -> f64 {
+    jet_math_F64x4_max(v)
+}
+#[inline(always)]
+fn jet_math_F64x4_reduce_avg(v: &jet_std::F64x4) -> f64 {
+    let values = jet_math_F64x4_to_array(v);
+    crate::jet_simd_avg_array(&values)
+}
 
 jet_simd_lane_fns!(I8x16, jet_math_I8x16_new, jet_math_I8x16_splat, jet_math_I8x16_from_array, jet_math_I8x16_to_array, jet_math_I8x16_lane, jet_math_I8x16_sum, jet_math_I8x16_product, jet_math_I8x16_min, jet_math_I8x16_max, jet_math_I8x16_reduce_add, jet_math_I8x16_reduce_mul, jet_math_I8x16_reduce_min, jet_math_I8x16_reduce_max, jet_math_I8x16_reduce_avg, i8, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
 jet_simd_lane_fns!(I16x8, jet_math_I16x8_new, jet_math_I16x8_splat, jet_math_I16x8_from_array, jet_math_I16x8_to_array, jet_math_I16x8_lane, jet_math_I16x8_sum, jet_math_I16x8_product, jet_math_I16x8_min, jet_math_I16x8_max, jet_math_I16x8_reduce_add, jet_math_I16x8_reduce_mul, jet_math_I16x8_reduce_min, jet_math_I16x8_reduce_max, jet_math_I16x8_reduce_avg, i16, 8, a,b,c,d,e,f,g,h);

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jet-lang.dev/adoption/schemas/air-gap-fixture-v1.json",
+  "title": "Jet adoption air-gap fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "fixture_version", "purpose", "evidence_class", "network", "trust", "releases", "revocations", "scenarios"],
+  "properties": {
+    "schema": { "const": "jet.adoption.air-gap-fixture/v1" },
+    "fixture_version": { "$ref": "#/$defs/version" },
+    "purpose": { "type": "string", "minLength": 1 },
+    "evidence_class": { "const": "fixture-only" },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "attempted_connections"],
+      "properties": {
+        "mode": { "const": "denied" },
+        "attempted_connections": { "const": 0 }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_kind", "key_id", "public_key", "revoked_builders"],
+      "properties": {
+        "root_kind": { "const": "fixture-public-key" },
+        "key_id": { "type": "string", "minLength": 1 },
+        "public_key": { "type": "string", "minLength": 1 },
+        "revoked_builders": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "releases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "version", "builder", "state", "object", "sha256", "bytes", "signature"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+          "builder": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "minLength": 1 },
+          "object": { "type": "string", "minLength": 1 },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "signature": { "const": "fixture-only" }
+        }
+      }
+    },
+    "revocations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "sequence", "reason"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "const": "builder" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "operation", "from", "to", "network", "expected", "reason"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "operation": { "enum": ["install", "update", "revoke"] },
+          "from": { "type": ["string", "null"] },
+          "to": { "type": "string", "minLength": 1 },
+          "network": { "const": "denied" },
+          "expected": { "enum": ["allow", "deny"] },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

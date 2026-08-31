@@ -94,7 +94,7 @@ that row. They are not alternate homes.
    marshal the same row or Prelude report (I3, I9). They do not re-encode the
    rule, defaults, policy, error meaning, or report words.
 7. Run the focused snapshot test without update mode, review the diff, then use
-   the blessing procedure in `.claude/skills/verify/SKILL.md`. Re-run without
+   the blessing procedure in `.agents/skills/verify/SKILL.md`. Re-run without
    update mode. Add `jet explain` coverage and regenerate
    `docs/reference/errors/` from the typed rows when the code is part of that
    generated representative set. Run both coverage directions: every emitted
@@ -327,8 +327,8 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
-| E0120 | sema  | non-cloneable or explicitly-protected read value used in an owning destination |
-| E0121 | sema  | value used after it was given away        |
+| E0120 | sema  | non-cloneable or explicitly-protected read value used in an owning destination; a suggested `~` edit is shown when the ownership copy is not provably safe |
+| E0121 | sema  | value used after it was given away; the consuming callee, move site, and first invalid reuse are retained as provenance |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
@@ -552,7 +552,15 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | L0509 | jet | reserved auto-derive policy name on the shared deny surface (D-ONCE-AUTODERIVE1) |
 | L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0512 | sema | nested subject shorthand needs an explicit binding (D-SUBJECT-COHERE1=A) |
+| L0514 | sema | adjacent categorical guards can be one ordered subject table (D-BRANCH-LINT1) |
+| L0515 | sema | direct `process.argv().skip(1)` repeats the process argument view (D-STDLIB-SMALL1) |
+| L0516 | sema | default HTTP body text limit is passed through a lower-level body call (D-HTTP-TEXT1=A) |
+| L0517 | sema | typed normalized `Path` is checked with a string prefix (D-PATH-CONTAINMENT1=A) |
+| L0518 | sema | plain `Fixed(n)` output has an immediately removed grouping cleanup (D-FMT-PLAIN1=A) |
+| L0519 | sema | manual unit unwrap/scale/rewrap hides a direct scalar operation (D-UNIT-SCALAR1=A) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
+| L0521 | sema | complete ASCII case ladder repeats a direct case conversion (D-ASCII-CASE1=A) |
+| L0522 | sema | direct `fs.walk` loop filters directories by hand (D-FS-WALK-FILES1=A) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | L0619 | jet   | package boundary rule matches no import edge (D-STRUCT-EDGE1) |
 | L1141 | sema  | autodiff transform result called inline; bind the derivative before calling it (D-COMPUTE-GRAD1=E) |
@@ -639,8 +647,9 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E3011 | runtime | a `#Todo` goal was reached at runtime |
 | E3012 | runtime | call depth exceeded Jet's safe runtime limit |
 | E3013 | runtime | a task remained parked at the process exit boundary (D-OBSERVE-TASK1) |
+| E3014 | runtime | a foreign function failed across a runtime boundary with Jet source location, function name, and source-line context (D-FAIL-BREACH1) |
 | R0801 | runtime | a raw access used an address outside the allocation provenance tracked by its active `#Unsafe` gate (D-MEM-SENTRY1) |
-| R0802 | runtime | a raw access used storage after the allocator quarantined and poisoned it (D-MEM-SENTRY1) |
+| R0802 | runtime | a raw access used storage after its allocator release or owning Jet frame exit (D-MEM-SENTRY1) |
 | R0803 | runtime | a raw access used an address with an alignment the allocation cannot satisfy (D-MEM-SENTRY1) |
 | E3101 | sema  | low-level memory operation used outside an `#Unsafe("…")` block (D-LL1/D-UNSAFE2) |
 | E3102 | sema  | low-level memory vocabulary used without `use core.mem` (D-LL1/D-UNSAFE2) |
@@ -730,7 +739,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public API signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and API freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
-| E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1) |
+| E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-FMT-PLAIN1/D-QUANTITY-PRINT1) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
 | E0917 | sema  | `#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
@@ -844,6 +853,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `Group` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* |
 | E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
+| E1117 | parse | `task.all` mixes named and positional branches (D-CONC-ALLNAMED1=A) |
 | E1130 | sema/parse | *retired by D-CONC-CROSS1; kernel proof crossings use E1102 and duplicate markers use E0003* |
 | L1101 | sema  | Bound `Task` value dropped without discharge  |
 | W0410 | sema  | `core.math.random.bytes` output used in a crypto context — `core.math.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
@@ -913,7 +923,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
 | E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
 | E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
-| E1341 | jet   | a selected `Library` output requests an invalid target, binding, or export shape (D-LIB-EXPORT1=C) |
+| E1341 | jet   | a selected `Library` output or loadable artifact requests an invalid target, binding, ABI, or export shape (D-LIB-EXPORT1=C, D-EMBED1=E) |
 | E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1352 | jetpack | an explicitly updated source is pinned and cannot move (D-CHANNEL-AUTO1) |
 | E1354 | jetpack | a retired Jetpack store spelling was used |
@@ -994,7 +1004,6 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | L2201 | jet   | public API item has no documentation (D-JETDOC1) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
 | E2702 | sema  | compiler-known crypto API misuse at the boundary (E2-M9, D-CRYPTO-DIAG1) |
-| L2701 | sema  | advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9) |
 | E2903 | sema  | performance-budget declaration, typed value, unit, direction, comparison, or applicability is invalid (D-PERFBUDGET-OUTPUT1) |
 | E2904 | sema  | two performance budgets overlap on one effective key (D-PERFBUDGET-OUTPUT1) |
 | E2905 | sema  | performance-budget scope, target, profile, or provider cannot resolve uniquely (D-PERFBUDGET-OUTPUT1) |
@@ -1281,6 +1290,7 @@ CLI.
 | E1114 | `freeze` cannot snapshot `{ty}`: {reason} | A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it. | use `^` to give the owned value to the task, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value |
 | E1115 | `Shared.new(…)` is the retired shared-cell constructor. | D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page. | Write `shared <value>` instead of `Shared.new(<value>)`. |
 | E1116 | `Shared.{method}(…)` is the retired closure form for shared access. | D-CONC-SHARE1=A made a shared value read and write like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step. The closure per touch proved nothing the compiler did not already know. | Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`. |
+| E1117 | `task.all` branches must all be named or all positional. | D-CONC-ALLNAMED1=A gives named results stable record fields and keeps positional results as ordered lists; mixing the two shapes would make the result type ambiguous. | Use `task.all { first: work(), second: other() }`, or remove every branch label. |
 
 ### E1130 — retired safe-kernel proof code (D-CONC-CROSS1)
 
@@ -1335,7 +1345,7 @@ block reserved for M6.
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
 | E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} -> Err`. | Add `impl {err} -> Err { … }` before this function, or change the return type to `T {err}!`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
-| E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
+| E2404 | `` `?` can't turn a `{Source}` from `{callee}` into a `{Target}` here ``. | The callee's definition span and effective failure contract are shown with the caller contract, so a missing conversion rail is actionable rather than an unexplained type mismatch. | Declare the caller with `{Source}`, add `impl {Source} -> {Target} { … }`, or handle `{callee}` locally with `??`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source. | Define one of these types locally, or convert the foreign source into `Err`. |
 | E2407 | `#Rename(...)` needs a string literal. | The wire key a `#Codable` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#Rename("wire_name")`. |
@@ -1348,8 +1358,15 @@ block reserved for M6.
 | E2414 | A field's `{…}` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-DEFAULT-SHAPE1=B). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int{8080}`, `env: String{"prod"}`, or `ports: [Int]{[80, 443]}`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | E2416 | `env.decode` could not build the typed config; the error names the source environment variable and field path. | Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted (D-CONFIG-ENV1). | Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record. |
+| E2421 | Public fallible function `{function}` exposes non-public failure carrier member `{member}`. | A public function's effective failure contract is part of its API, so every named carrier type and field must be publicly reachable. | Make `{member}` public, or keep `{function}` non-public. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
+| L0515 | The direct `process.argv().skip(1)` projection repeats the process argument view. | `process.args()` owns the program argument view after `argv[0]`, so the boundary stays in one Core API. | Replace `process.argv().skip(1)` with `process.args()`. |
+| L0516 | The default HTTP body text limit is passed through a lower-level body call. | `Request.text()` and `response.text()` already use the same default cap as `body().text(limit)`. | Replace `body().text(default_limit)` with `text()`. |
+| L0517 | A typed normalized `Path` is checked with a string prefix. | `Path.is_within()` owns separator-aware lexical containment; converting both paths to strings repeats that policy. | Replace the string comparison with `Path.is_within()`. |
+| L0518 | Plain `Fixed(n)` output immediately removes grouping separators. | `Fixed(n)` is machine-plain; deleting this cleanup preserves the same text. | Delete `.replace(",", "")` from the `Fixed(n)` projection. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) String { … } }`, or use `{value:Debug}` for debug output. |
+| L0521 | A complete ASCII case ladder repeats a direct case conversion. | All 26 constant ASCII branches inspect the same value and only change its case. | Replace the complete ladder with `value.to_ascii_lower()` or `value.to_ascii_upper()`. |
+| L0522 | A direct `fs.walk` loop filters directories by hand. | `fs.walk_files()` already returns only file entries; the direct API keeps this control flow and intent together. | Replace `fs.walk` with `fs.walk_files`. |
 
 ## Streaming I/O diagnostics (E2-M7, D-IO1..3)
 
@@ -1438,7 +1455,6 @@ a public `FileCryptoError` variant. Handled errors are ordinary values.
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | this checked text type rejected its body | A library's `CheckedText.check` function rejected the complete literal body (D-TEXTHEAD-TYPE1=A). | Fix the body so it satisfies the type's declared text grammar. |
 | E2714 | A user derive is written `derive T.{Trait}`. | The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired. | Write `derive T.{Trait} { … }`. |
-| L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
 ## Networking and services diagnostics (E2-M10, D-NET1–3)
 
@@ -1475,6 +1491,7 @@ Quality workflows: doctests, snapshot testing, `todo` typed goals, measured clai
 | E2940 | required proof evidence is unavailable | The `complete_required` policy needs `{producer}`, but `{reason}`. | Perform the producer-specific action named by `jet prove`, then run the same command again. |
 | E2941 | unknown proof lens `{value}` | `jet prove` accepts `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`. | Use one exact value, for example `jet prove TARGET --lens tests`. |
 | E2950 | solver found a counterexample to `{obligation}` | The assignment satisfies every assumption but makes the claim false. | Change the function or claim so every admitted input satisfies the postcondition. |
+| E2960 | package team policy `{rule}` rejects `{subject}` at `{path}` | Package policy gives `{path}` an explicit ceiling, so this source use or dependency is outside the team's declared boundary. | Change the source or update `{rule}` in `package.jet`. |
 | E3620 | replay schema version is incompatible | The `.jetproof-replay` schema major/minor is unsupported by this `jet prove`. | Recapture with a compatible toolchain, or upgrade Jet. |
 | E3621 | replay semantic identity does not match | Source, toolchain, or adapter identity in the artifact does not match the current target. | Recapture against this exact revision. |
 | E3622 | replay artifact is corrupt | Magic, header, frame hash, or footer verification failed. | Pass an intact `.jetproof-replay` path. |
@@ -1619,8 +1636,9 @@ safe-locals policy.
 | E3011 | `#Todo at {file}:{line} — expected {type}`. | This code is deliberately incomplete and reached a running program. | Implement this code before running the program. |
 | E3012 | `stack overflow in {fn}` | The call stack kept growing without reaching a safe return. | End the recursion or make progress toward a base case. |
 | E3013 | `Parked tasks remain at process exit: {msg}` | The scheduler reached process exit while one or more tasks were blocked on a wait target. | Join each task or make its wait reachable before process exit. |
+| E3014 | `foreign function failed: {msg}` | The foreign implementation or its ABI boundary rejected the call, so Jet stopped instead of fabricating a result. | Fix the foreign function or handle its documented failure before calling it again. |
 | R0801 | `raw {operation} outside {gate}'s storage`. | The pointer is outside the allocation provenance tracked by the active `#Unsafe` gate. Sentry evidence is a runtime witness; it never replaces a required static unsafe obligation. | Bound the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
-| R0802 | `use of freed storage in {gate}`. | The allocation was quarantined and poisoned before this raw operation. | Do not use the pointer after release, and satisfy obligation `{obligation}`. |
+| R0802 | `use of storage after its lifetime ended in {gate}`. | The storage was released or its owning Jet frame expired before this raw operation. | Do not use the pointer after release or frame exit, and satisfy obligation `{obligation}`. |
 | R0803 | `misaligned raw {operation} in {gate}`. | The pointer alignment does not satisfy the tracked allocation provenance. | Align the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
 
 ## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
@@ -1739,6 +1757,14 @@ signature.
 | L0509 | auto-derive refusal is a named package policy entry | `auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning. | write `policy: { lints: { deny: [auto_derive] } }` in `package.jet` |
 | L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | L0512 | nested subject shorthand needs an explicit binding (D-SUBJECT-COHERE1=A) | implicit subjects become hard to track when shorthand scopes nest | rewrite the inner shorthand with a named binding such as `(item) -> item.member` |
+| L0514 | Adjacent categorical guards over `{subject}` can be one ordered subject table | Exclusive guards repeat one stable subject; an ordered table keeps the categories together | Rewrite as `if {subject} == { … }` and group aliases with `|`; see `examples/suites/dispatch.jet` |
+| L0515 | direct `process.argv().skip(1)` repeats the process argument view | `process.args()` owns the program argument view after `argv[0]`, so the boundary stays in one Core API | replace `process.argv().skip(1)` with `process.args()` |
+| L0516 | default HTTP body text limit is passed through a lower-level body call | `Request.text()` and `response.text()` already use the same default cap as `body().text(limit)` | replace `body().text(default_limit)` with `text()` |
+| L0517 | typed normalized `Path` is checked with a string prefix | `Path.is_within()` owns separator-aware lexical containment; converting both paths to strings repeats that policy | replace the string comparison with `Path.is_within()` |
+| L0518 | plain `Fixed(n)` output has an immediately removed grouping cleanup | `Fixed(n)` is machine-plain, so the cleanup changes no text | delete `.replace(",", "")` |
+| L0519 | manual unit unwrap/scale/rewrap hides a direct scalar operation | the same linear unit can apply a scalar without crossing a helper or policy boundary | use `unit * scalar`, `scalar * unit`, or `unit / scalar` |
+| L0521 | complete ASCII case ladder repeats a direct case conversion | all 26 constant ASCII branches inspect the same value and only change its case | replace the complete ladder with `value.to_ascii_lower()` or `value.to_ascii_upper()` |
+| L0522 | direct `fs.walk` loop filters directories by hand | `fs.walk_files()` already returns only file entries; the direct API keeps this control flow and intent together | replace `fs.walk` with `fs.walk_files` |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item) in xs` — or `loop i in xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
@@ -2018,7 +2044,7 @@ These are produced by the `jet` driver itself, not by checking a `.jet`
 file, so they have no source span. They use the same what/why/fix voice
 and use the exit class stated below. E2101/E2102 carry a "did you mean" when a known
 command/flag is within edit distance 2. Their golden transcripts live in
-`tests/cli/` (blessed using `.claude/skills/verify/SKILL.md`).
+`tests/cli/` (blessed using `.agents/skills/verify/SKILL.md`).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -2160,7 +2186,7 @@ failure keeps its What, Why, and Fix lines and ends with
 | E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `after`, `before_start`, `sockets`, `restart`, `watch`), or remove it. |
 | E1338 | This loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{host_version}`. | A `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped, never linked with stale layout assumptions. | Rebuild the library with the loading program's Jet version, or install a matching Jet toolchain. |
 | E1339 | Library `{name}` declares the `{effect}` effect, which this load site doesn't grant. | A loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped. Compiler identity is verified first, so this check only runs against an artifact already proven to come from this compiler. | Widen the grant at the load site to include `{effect}`, or remove the effect from the library. |
-| E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
+| E1341 | This `Library` output or loadable artifact requests an invalid target, binding, ABI, or export shape. | D-LIB-EXPORT1=C and D-EMBED1=E use closed, checked native projections: a Library emits only the checked static/shared, C-header, and named binding surfaces, and a loadable artifact must carry the exact native target, ABI, and top-level `pub fn` export table. Unknown combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; for a loadable artifact, rebuild it with the matching compiler and export surface. |
 | E1352 | Source `{name}` is pinned and cannot be updated. | D-CHANNEL-AUTO1 keeps a declaration with no channel marker pinned forever; an update command must not move its lock or rewrite its manifest. | Declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement. |
 | E1354 | `{what}` | Store commands are grouped under `hangar`; project commands stay at the top level. | `{fix}` |
 | E1355 | this project declares `{environment}`; you are not inside it | Jet acts on code only; it never enters or realizes a project environment, so it acquires nothing. | `jetpack env -- jet {verb}` |
@@ -2300,6 +2326,12 @@ report in the same batch whose explicit chain names this report, including
 transitive dependents. A consumer can rank root reports by this count without
 walking or guessing the graph.
 
+Compile-time reports may carry a `cause` chain when a poisoned binding, failure
+conversion, or other dependency is known at the checker seam. The bundle sorts
+roots before dependent reports, prunes repeated conversion-domain sites to one
+root, and keeps unrelated diagnostics. Fixing the root therefore removes its
+dependent reports instead of leaving stale cascades in CLI, JSON, or LSP output.
+
 Command status and ledger objects can keep their command schemas. Any report
 inside them uses `jet.report/v1`. No consumer of the shared renderer retains
 its legacy diagnostic envelope.
@@ -2349,11 +2381,11 @@ diagnostic.
 | `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
 
-### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1)
+### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-FMT-PLAIN1/D-QUANTITY-PRINT1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Pad(n[, "fill"])`, `:PadLeft(n[, "fill"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Hex(2)}`, `{value:Pad(2, " ")}`, `{value:PadLeft(2, " ")}`, `{value:Sci(2)}`, `{value:Percent(2)}`, `{value:Bin}`, `{value:Oct}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
+| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Grouped(n)`, `:Hex(n)`, `:Pad(n[, "fill"])`, `:PadLeft(n[, "fill"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Hex(2)}`, `{value:Pad(2, " ")}`, `{value:PadLeft(2, " ")}`, `{value:Sci(2)}`, `{value:Percent(2)}`, `{value:Bin}`, `{value:Oct}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 

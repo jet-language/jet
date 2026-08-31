@@ -16,6 +16,34 @@ fn imported_inline_member_name(target: &ModuleState, name: &str) -> Option<Strin
 }
 
 impl<'a> Checker<'a> {
+    /// Resolve a dotted call through any number of imported file modules.
+    ///
+    /// Synthetic entry wrappers retain the complete source qualification, so
+    /// the final callable may be behind several module-alias edges. Return the
+    /// root alias for reference tracking, the module that owns the callable,
+    /// and the final member name for the ordinary imported-call checker.
+    pub(crate) fn resolve_import_call_path(
+        &self,
+        name: &str,
+    ) -> Option<(String, usize, String)> {
+        let mut segments = name.split('.');
+        let alias = segments.next()?.to_string();
+        let mut module_idx = *self.imports.get(&alias)?;
+        let mut member = segments.next()?;
+        loop {
+            let Some(next) = segments.next() else {
+                return Some((alias, module_idx, member.to_string()));
+            };
+            module_idx = self
+                .modules?
+                .get(module_idx)?
+                .imports
+                .get(member)
+                .copied()?;
+            member = next;
+        }
+    }
+
     /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
     /// The function was registered as `__jet_{alias}__{method}` in `self.funcs`.
     pub(crate) fn infer_code_module_call(
@@ -208,7 +236,7 @@ impl<'a> Checker<'a> {
             if type_params.is_empty() {
                 self.diags.push(Diagnostic::error(
                     "E0119",
-                    format!("{alias}.{item} is not generic"),
+                    format!("`{alias}.{item}` is not generic"),
                     "only functions declared with type parameters accept call-site type arguments"
                         .to_string(),
                     format!("call {alias}.{item}(...) without type arguments"),
@@ -218,7 +246,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!(
-                        "{alias}.{item} expects {} type argument{}, got {}",
+                        "`{alias}.{item}` expects {} type argument{}, got {}",
                         type_params.len(),
                         if type_params.len() == 1 { "" } else { "s" },
                         type_args.len()
@@ -474,7 +502,7 @@ impl<'a> Checker<'a> {
                 if type_params.is_empty() {
                     self.diags.push(Diagnostic::error(
                             "E0119",
-                            format!("{name} is not generic"),
+                            format!("`{name}` is not generic"),
                             "only functions declared with type parameters accept call-site type arguments"
                                 .to_string(),
                             format!("call {name}(...) without type arguments"),
@@ -484,7 +512,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!(
-                            "{name} expects {} type argument{}, got {}",
+                            "`{name}` expects {} type argument{}, got {}",
                             type_params.len(),
                             if type_params.len() == 1 { "" } else { "s" },
                             type_args.len()
@@ -719,7 +747,7 @@ impl<'a> Checker<'a> {
                     match (pconv, arg.convention) {
                         (AccessConvention::Move, AccessConvention::Move) => {
                             if !pty.is_scalar() {
-                                self.mark_moved(n.clone(), *nspan);
+                                self.mark_moved_by(n.clone(), *nspan, name);
                             }
                         }
                         (AccessConvention::Move, AccessConvention::Read) => {

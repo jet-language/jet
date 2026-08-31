@@ -1,19 +1,10 @@
-Error [E0112]: `invoke` wants fn(Int) -[IO]> for argument 2, but this is fn(n: Int) !Err
+Error [E0112]: `invoke` wants fn(Int) -[IO]> for argument 2, but this is fn(Int)
   --> tests/ui/effect_via_unknown_param.jet:7:22
     |
   7 | fn run() { invoke(5, show) }
     |                      ^^^^
- Why: every argument must match its parameter's type
- Fix: use fn(Int) -[IO]> here
-More: jet-lang.dev/e/E0112
-
-Error [E0112]: `invoke` wants fn(Int) -[IO]> for argument 2, but this is fn(n: Int) !Err
-  --> tests/ui/effect_via_unknown_param.jet:7:22
-    |
-  7 | fn run() { invoke(5, show) }
-    |                      ^^^^
- Why: every argument must match its parameter's type
- Fix: use fn(Int) -[IO]> here
+ Why: Every argument must match its parameter's type
+ Fix: Use fn(Int) -[IO]> here
 More: jet-lang.dev/e/E0112
 
 Error [E0748]: `-[via missing]>` on `invoke` names no such parameter
@@ -22,5 +13,5 @@ Error [E0748]: `-[via missing]>` on `invoke` names no such parameter
   3 | fn invoke(n: Int, act: fn(Int) -[IO]>) -[via missing]> { act(n) }
     |                                              ^^^^^^^
  Why: `-[via f]>` publishes the effects of a callback parameter `f`; `invoke` has no parameter called `missing`
- Fix: name one of `invoke`'s callback parameters after `via`
+ Fix: Name one of `invoke`'s callback parameters after `via`
 More: jet-lang.dev/e/E0748

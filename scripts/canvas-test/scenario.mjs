@@ -1791,6 +1791,12 @@ export const scenarios = {
     const secondSession = second.session || second.canvas?.session;
     if (!secondSession || secondSession.clients < 2) throw new Error(`second client did not join resident session: ${JSON.stringify(second)}`);
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    await sleep(220);
+    const renewed = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=browser-two", { cache: "no-store" }).then((r) => r.json())`);
+    const renewedSession = renewed.session || renewed.canvas?.session;
+    if (!renewedSession || renewedSession.id !== state.id || renewedSession.clients < 2) {
+      throw new Error(`Canvas lease did not survive an idle interval: ${JSON.stringify(renewed)}`);
+    }
     const projectPayload = project.canvas || project;
     if (!Array.isArray(projectPayload.outputs)) throw new Error("project output launcher field missing");
     await ctx.screenshot("resident-session-workbench");
@@ -1848,8 +1854,8 @@ export const scenarios = {
       ["canvas.command:run", ["jet", "run", "run.jet"]],
       ["canvas.command:check", ["jet", "check", "run.jet"]],
       ["canvas.command:test", ["jet", "test", "run.jet"]],
-      ["canvas.command:dev", ["jet", "dev", "run.jet", "--target=web"]],
-      ["canvas.command:service.start", ["jetpack", "services", "up"]],
+      ["canvas.command:build", ["jet", "build", "run.jet"]],
+      ["canvas.command:service.start", ["jet", "services", "up"]],
     ]) {
       if (JSON.stringify(commandMap.get(id)?.command) !== JSON.stringify(command)
         || commandMap.get(id)?.available !== true) {
@@ -2088,14 +2094,16 @@ export const scenarios = {
     const commands = Object.fromEntries((actions.actions || [])
       .filter((action) => action.kind === "canvas.command")
       .map((action) => [action.action_id, action]));
-    for (const actionId of ["canvas.command:run", "canvas.command:check", "canvas.command:dev"]) {
-      if (!commands[actionId] || commands[actionId].command?.[0] !== "jet") {
+    for (const [actionId, command] of [
+      ["canvas.command:run", ["jet", "run", "run.jet"]],
+      ["canvas.command:check", ["jet", "check", "run.jet"]],
+      ["canvas.command:test", ["jet", "test", "run.jet"]],
+      ["canvas.command:build", ["jet", "build", "run.jet"]],
+      ["canvas.command:service.start", ["jet", "services", "up"]],
+    ]) {
+      if (!commands[actionId]?.available || JSON.stringify(commands[actionId].command) !== JSON.stringify(command)) {
         throw new Error(`CLI command surface missing ${actionId}: ${JSON.stringify(commands[actionId])}`);
       }
-    }
-    if (!commands["canvas.command:service.start"]?.available
-      || JSON.stringify(commands["canvas.command:service.start"].command) !== JSON.stringify(["jetpack", "services", "up"])) {
-      throw new Error(`service command surface missing: ${JSON.stringify(commands["canvas.command:service.start"])}`);
     }
 
     for (const [target] of requiredOutputs) {

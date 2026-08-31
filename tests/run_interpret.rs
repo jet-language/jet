@@ -80,11 +80,11 @@ fn run_interpret_rejects_release_profile() {
     assert!(stderr.contains("--interpret"), "{stderr}");
 }
 
-/// Card #2250 / I9: one invocation argv must survive every native execution
-/// adapter. The first item is the tier's program identity, so the observable
-/// comparison covers the forwarded program arguments while the same source
-/// proves flags, filenames, Unicode, an empty value, and a bare -- survive
-/// the CLI split unchanged.
+/// Card #2250 / I9: one invocation argv and its user-argument projection must
+/// survive every native execution adapter. The first item is the tier's
+/// program identity, so the observable comparison covers the forwarded
+/// program arguments while the same source proves flags, filenames, Unicode,
+/// an empty value, and a bare -- survive the CLI split unchanged.
 #[test]
 fn argv_agrees_on_every_native_tier() {
     let dir = std::env::temp_dir().join(format!(
@@ -100,7 +100,7 @@ fn argv_agrees_on_every_native_tier() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use core.process as process\n\nfn run() {\n    args :: process.argv()\n    print(args.len())\n    loop arg in args.skip(1) {\n        print(\"<{arg}>\")\n    }\n}\n",
+        "use core.process as process\n\nfn run() {\n    args :: process.argv()\n    user_args :: process.args()\n    print(args.len())\n    print(user_args.len())\n    loop arg in user_args {\n        print(\"<{arg}>\")\n    }\n}\n",
     )
     .unwrap();
 
@@ -179,7 +179,7 @@ fn argv_agrees_on_every_native_tier() {
     ] {
         assert_eq!(output, default, "{label} argv output diverged");
     }
-    let expected = "7\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<-->\n";
+    let expected = "7\n6\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<-->\n";
     assert_eq!(
         default.as_slice(),
         expected.as_bytes(),

@@ -3180,7 +3180,9 @@ fn repl_core_fmt_dispatch() {
     let inputs = &[
         "use core.text.fmt as fmt",
         "fmt.number(1234567)",
-        "fmt.decimal(3.14159, 2)",
+        "fmt.decimal(Float{3.14159}, 2)",
+        "fmt.decimal(Float{1234.5678}, 2)",
+        "fmt.grouped(Float{1234.5678}, 2)",
         "fmt.percent(0.4567, 1)",
         "fmt.bytes(1500000)",
         "fmt.duration(93784000)",
@@ -3198,6 +3200,8 @@ fn repl_core_fmt_dispatch() {
     );
     assert!(out.contains("\"1,234,567\" : String"), "got: {out}");
     assert!(out.contains("\"3.14\" : String"), "got: {out}");
+    assert!(out.contains("\"1234.57\" : String"), "got: {out}");
+    assert!(out.contains("\"1,234.57\" : String"), "got: {out}");
     assert!(out.contains("\"45.7%\" : String"), "got: {out}");
     assert!(out.contains("\"1.5 MB\" : String"), "got: {out}");
     assert!(out.contains("\"1d 2h 3m\" : String"), "got: {out}");

@@ -407,6 +407,7 @@ pub struct Session {{
     value: Int
 }}
 
+#Error
 pub enum OctaveError {{
     NotRunning
     Timeout
@@ -418,22 +419,29 @@ pub enum OctaveError {{
     Limit
 }}
 
-impl Session.Close {{
-    fn close(^self) {{ abi.close(self.value) }}
-}}
-
-pub fn close(session: ^Session) -[FFI.Octave]> {{ abi.close(session.value) }}
-
-pub fn open() Session !OctaveError -[FFI.Octave]> {{
-    handle :: abi.open()
-    if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
-    return Ok(Session{{ value: handle }})
-}}
-
-pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
-
 "#
     ));
+    out.push_str(&crate::Bindgen::render_decode_response(
+        "OctaveError",
+        crate::Bindgen::DecoderProtocol::StandardEnvelope,
+    ));
+    out.push_str(
+        r#"impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
+
+pub fn open() Session !OctaveError -[FFI.Octave]> {
+    handle :: abi.open()
+    if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
+    return Ok(Session{ value: handle })
+}
+
+pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
+
+"#,
+    );
     for function in functions {
         out.push_str(&format!(
             r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) Tensor !OctaveError -[FFI.Octave, GPU]> {{
@@ -452,15 +460,7 @@ pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
     ]))
     raw :: abi.{function}(session.value, request, deadline_ms)
     code :: abi.take_error()
-    if code == 1 -> return Err(OctaveError.NotRunning)
-    if code == 2 -> return Err(OctaveError.Timeout)
-    if code == 3 -> return Err(OctaveError.Cancelled)
-    if code == 5 -> return Err(OctaveError.Limit)
-    if code != 0 -> return Err(OctaveError.Protocol)
-    response :: json.parse(raw) ?? return Err(OctaveError.Protocol)
-    succeeded :: (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded -> return Err(OctaveError.CommandFailed)
-    value :: response.field("value") ?? return Err(OctaveError.Protocol)
+    value :: decode_response(raw, code)
     shape_tree :: value.field("shape") ?? return Err(OctaveError.Protocol)
     if shape_tree == .Array(shape_values) {{
         if shape_values.len() != 2 -> return Err(OctaveError.Shape)
@@ -487,6 +487,11 @@ pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
         ));
     }
     out
+}
+
+#[cfg(test)]
+pub(crate) fn render_probe() -> String {
+    render_jet("registry", &["transform".into()])
 }
 
 fn tool_path(tool: &str) -> Option<PathBuf> {
@@ -597,6 +602,7 @@ fn reserved(value: &str) -> bool {
             | "take_error"
             | "cancel"
             | "close"
+            | "decode_response"
             | "abi"
             | "compute"
             | "json"
@@ -641,6 +647,15 @@ mod tests {
         assert!(source.contains("-[FFI.Octave, GPU]> {"));
         assert!(!source.contains("TensorWire"));
         assert!(!source.contains("=>") && !source.contains("Session.{"));
+    }
+    #[test]
+    fn renders_one_response_decoder_before_tensor_shape_checks() {
+        let source = super::render_jet("matrix", &["scale".into()]);
+        assert_eq!(source.matches("fn decode_response(").count(), 1);
+        assert_eq!(source.matches("response.field(\"ok\")").count(), 1);
+        assert!(source.contains("raw :: abi.scale("));
+        assert!(source.contains("decode_response(raw, code)"));
+        assert!(source.contains("shape_tree :: value.field(\"shape\")"));
     }
 
     #[test]

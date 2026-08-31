@@ -254,7 +254,9 @@ fn safe_relative_path(raw: &str, label: &str) -> Result<std::path::PathBuf, Over
         || path.components().any(|component| {
             matches!(
                 component,
-                std::path::Component::ParentDir | std::path::Component::RootDir
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
             )
         })
     {

@@ -960,6 +960,89 @@ fn environment_image_rejects_project_escape_layer_path() {
     assert!(report.contains("\"rejected\""), "projection: {report}");
 }
 
+#[cfg(unix)]
+#[test]
+fn environment_image_rejects_symlinked_extra_file() {
+    use std::os::unix::fs::symlink;
+
+    let project = Scratch::new("environment-image-symlink-file");
+    let root = Scratch::new("environment-image-symlink-root");
+    let outside = Scratch::new("environment-image-symlink-outside");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"secret.bin\"] }\n",
+    )
+    .unwrap();
+    fs::write(outside.path.join("secret.bin"), b"must not be read\n").unwrap();
+    symlink(
+        outside.path.join("secret.bin"),
+        project.path.join("secret.bin"),
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "symlinked image file must fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("not a symlink") || stderr.contains("symlink"),
+        "stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path.join("secret.bin")).unwrap(),
+        "must not be read\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn environment_image_rejects_hardlinked_extra_file() {
+    let project = Scratch::new("environment-image-hardlink-file");
+    let root = Scratch::new("environment-image-hardlink-root");
+    let outside = Scratch::new("environment-image-hardlink-outside");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"secret.bin\"] }\n",
+    )
+    .unwrap();
+    fs::write(outside.path.join("secret.bin"), b"must not be read\n").unwrap();
+    fs::hard_link(
+        outside.path.join("secret.bin"),
+        project.path.join("secret.bin"),
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "hardlinked image file must fail: {stderr}"
+    );
+    assert!(stderr.contains("hard link"), "stderr: {stderr}");
+    assert_eq!(
+        fs::read_to_string(outside.path.join("secret.bin")).unwrap(),
+        "must not be read\n"
+    );
+}
+
 #[test]
 fn environment_image_rejects_unredactable_cloud_secret() {
     let project = Scratch::new("environment-cloud-secret-loss");

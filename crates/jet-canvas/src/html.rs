@@ -150,7 +150,10 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .panel details > :not(summary) { margin-top: 8px; }
 .graph-list, .search-results, .project-list, .variable-list { display: grid; gap: 6px; }
 #project-panel details > #project-rail { max-height: min(26vh, 250px); overflow: auto; padding-right: 3px; scrollbar-width: thin; }
-#output-panel details > #output-list { max-height: min(18vh, 170px); overflow: auto; padding-right: 3px; scrollbar-width: thin; }
+#output-panel details .selection-group > #output-list, #output-panel details .selection-group > #target-list { max-height: min(18vh, 170px); overflow: auto; padding-right: 3px; scrollbar-width: thin; }
+.selection-group { display: grid; gap: 5px; }
+.selection-group + .selection-group { padding-top: 8px; border-top: 1px solid #22364d; }
+.selection-group-head { display: flex; align-items: center; justify-content: space-between; color: #7895b8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
 .project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
 .project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .07em; }
 .library-panel { gap: 8px; }
@@ -549,8 +552,9 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
           <section id="output-panel" class="component-tree-section" data-canvas-panel="output" hidden>
             <details open>
-              <summary><span>Outputs</span><span id="output-count" class="count">0</span></summary>
-              <div id="output-list" class="project-list" aria-label="Project Outputs"></div>
+              <summary><span>Outputs</span></summary>
+              <div class="selection-group"><div class="selection-group-head"><span>Outputs</span><span id="output-count" class="count">0</span></div><div id="output-list" class="project-list" role="listbox" aria-label="Project Outputs"></div></div>
+              <div class="selection-group"><div class="selection-group-head"><span>Targets</span><span id="target-count" class="count">0</span></div><div id="target-list" class="project-list" role="listbox" aria-label="Project Targets"></div></div>
             </details>
           </section>
           <section id="servers-panel" class="component-tree-section" data-canvas-panel="servers">

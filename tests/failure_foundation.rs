@@ -125,6 +125,15 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
 }
 
 #[test]
+fn direct_struct_error_match_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree(
+        "direct_struct_error_match",
+        include_str!("../examples/features/errors/direct_struct_error_match.jet"),
+        "ok: 7\nerr: empty input\n",
+    );
+}
+
+#[test]
 fn optional_success_result_fallback_agrees_across_execution_tiers() {
     tir_support::assert_tiers_agree_with_application_policy(
         "optional_success_result_fallback",
@@ -203,7 +212,9 @@ fn run() {}
         let diagnostics = jet::compile_with_path(source, "failure_never.jet")
             .expect_err("!Never must reject a reachable failure");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E2404"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E2404"),
             "{case}: expected E2404, got {diagnostics:?}"
         );
     }

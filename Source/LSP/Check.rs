@@ -120,15 +120,20 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
 pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
     diagnostics
         .into_iter()
-        .filter_map(|d| {
-            d.edit.clone().zip(d.applicability).zip(d.safety).map(
-                |((edit, applicability), safety)| Fix {
-                    title: d.fix.clone(),
+        .flat_map(|d| {
+            let (Some(applicability), Some(safety)) = (d.applicability, d.safety) else {
+                return Vec::new();
+            };
+            let title = d.fix.clone();
+            d.all_edits()
+                .into_iter()
+                .map(|edit| Fix {
+                    title: title.clone(),
                     edit,
                     applicability,
                     safety,
-                },
-            )
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }

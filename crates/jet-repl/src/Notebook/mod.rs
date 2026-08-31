@@ -19,3 +19,15 @@ pub use trust::{
     trust_store_path, ActiveRequest, MimeBundle, RenderDecision, TrustGrant, TrustStore,
     POLICY_VERSION,
 };
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn browser_client_consumes_only_fragment_authentication() {
+        let client = include_str!("client.html");
+        assert!(client.contains("location.hash"));
+        assert!(!client.contains("location.search"));
+        assert!(client.contains("'Authorization':`Bearer ${token}`"));
+        assert!(client.contains("history.replaceState"));
+    }
+}

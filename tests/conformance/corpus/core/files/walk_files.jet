@@ -1,0 +1,13 @@
+// core-conformance: core.files.walk_files
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-walk-files")
+    path :: Path.from(root).join("fixture.txt")
+    writer :: files.create(path) ?? panic("create")
+    writer.write_line("fixture") ?? panic("write")
+    writer.flush() ?? panic("flush")
+    result :: files.walk_files(root) ?? panic("walk")
+    print(result.len())
+}

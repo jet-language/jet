@@ -193,16 +193,26 @@ fn entry_dir(key: &str) -> PathBuf {
 pub fn try_warm_run(
     entry: &Path,
     program_args: &[&str],
+    selected_entry: Option<&str>,
 ) -> Option<jet_foundation::JitBackend::RunOutcome> {
     let key = run_cache_key(entry, program_args);
     let dir = entry_dir(&key);
     let artifact_path = dir.join("module.bin");
     let bytes = fs::read(&artifact_path).ok()?;
-    // Install program argv exactly like the cold path (#1254): without it,
-    // `core.process.argv()` in a warm run falls back to the raw CLI argv.
-    let mut argv = Vec::with_capacity(program_args.len() + 1);
-    argv.push(entry.to_string_lossy().into_owned());
-    argv.extend(program_args.iter().map(|arg| (*arg).to_string()));
+    // Install argv exactly like the cold path (#1254). A named-job artifact
+    // already has that job as its entry point, so argv[0] names the selection
+    // and the selector token is not repeated as a user argument.
+    let runtime_args = if selected_entry.is_some() {
+        &program_args[1..]
+    } else {
+        program_args
+    };
+    let mut argv = Vec::with_capacity(runtime_args.len() + 1);
+    argv.push(selected_entry.map_or_else(
+        || entry.to_string_lossy().into_owned(),
+        |name| format!("{} {name}", entry.to_string_lossy()),
+    ));
+    argv.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
     match jet_jit::with_program_args(&argv, || jet_jit::run_cached_module(&bytes)) {
         Ok(outcome) => {
             CACHE_HIT.fetch_add(1, Ordering::Relaxed);

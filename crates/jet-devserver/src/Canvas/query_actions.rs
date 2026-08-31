@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::FixEngine;
@@ -18,7 +17,7 @@ use super::project_transactions::{
     project_revision_after_changes, rel_path, validate_project_rename_overlay,
 };
 use super::schema_api::{ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION};
-use super::source_model::source_revision;
+use super::source_model::{read_source_without_symlinks, source_revision};
 use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
 
 const PROJECT_QUERY_RESULT_LIMIT: usize = 200;
@@ -580,7 +579,7 @@ fn open_project_query_context(
         if !project.parts.should_index(&path) {
             continue;
         }
-        let source = fs::read_to_string(&path).map_err(|error| {
+        let source = read_source_without_symlinks(&path).map_err(|error| {
             query_error(
                 "stale",
                 &format!("Canvas project source moved or unreadable: {error}"),
@@ -2021,28 +2020,14 @@ fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
             None,
             authority,
         ),
-        canvas_command_action_json(
-            "dev",
-            "Run dev server",
-            &["jet", "dev", source, "--target=web"],
-            "dev_server",
-            &[
-                "canvas.command:dev",
-                "canvas.service:dev_server",
-                authority.grant.as_str(),
-            ],
-            true,
-            None,
-            authority,
-        ),
     ];
-    let services_available = !env_project_json(&authority.project_root)
+    let services_available = env_project_json(&authority.project_root)
         .services
-        .is_empty();
+        .contains("\"enable\":true");
     actions.push(canvas_command_action_json(
         "service.start",
         "Start service",
-        &["jetpack", "services", "up"],
+        &["jet", "services", "up"],
         "service_process",
         &["canvas.service:start", "canvas.env:service"],
         services_available,
@@ -2097,7 +2082,7 @@ pub(super) struct CanvasAuthority {
     pub(super) package_id: String,
     pub(super) version: String,
     pub(super) touched_file: String,
-    project_root: PathBuf,
+    pub(super) project_root: PathBuf,
 }
 
 pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {

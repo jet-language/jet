@@ -213,6 +213,10 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        // A public fallible signature is an API boundary. Validate its error
+        // carrier before checking the body so the public contract teaches the
+        // required visibility change at the declaration that owns it.
+        self.validate_public_failure_carrier(f);
         for param in &f.type_params {
             self.warn_soft_public_declared_type(
                 &Type::TraitObject(param.bounds.clone()),
@@ -520,12 +524,13 @@ impl<'a> Checker<'a> {
                 .first()
                 .and_then(crate::AST::ArithmeticMode::from_expr)
             {
-                self.arithmetic_policy_stack.push(crate::AST::ArithmeticPolicyFact {
-                    mode,
-                    scope_span: marker.span,
-                    operation_span: marker.span,
-                    operation: None,
-                });
+                self.arithmetic_policy_stack
+                    .push(crate::AST::ArithmeticPolicyFact {
+                        mode,
+                        scope_span: marker.span,
+                        operation_span: marker.span,
+                        operation: None,
+                    });
             }
         }
         let is_generator =
@@ -543,7 +548,8 @@ impl<'a> Checker<'a> {
         } else {
             self.check_block(&mut f.body, false);
         }
-        self.arithmetic_policy_stack.truncate(arithmetic_policy_depth);
+        self.arithmetic_policy_stack
+            .truncate(arithmetic_policy_depth);
         self.in_unsafe = prev_unsafe;
         // D-LINT-UNUSED1: all local and parameter references are known after
         // the body pass, including references in nested scopes and defaults.
@@ -1252,9 +1258,21 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 /// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
 /// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
-    let f = from.replace('.', "_");
-    let t = to.replace('.', "_");
+    let f = error_conv_name_part(from);
+    let t = error_conv_name_part(to);
     jet_foundation::Names::mangle(&format!("errconv_{f}_to_{t}"))
+}
+
+fn error_conv_name_part(name: &str) -> String {
+    if name.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return name.to_string();
+    }
+
+    let mut encoded = String::with_capacity(name.len() * 2);
+    for byte in name.bytes() {
+        encoded.push_str(&format!("{byte:02x}"));
+    }
+    format!("__{}_{}", name.len(), encoded)
 }
 
 pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {

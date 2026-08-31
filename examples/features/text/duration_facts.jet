@@ -1,27 +1,25 @@
-// D-SHAPE-DURATION1=A / D-TYPE2-TIME1=A: a runtime number becomes a checked
-// Duration through the TYPE-owned unit constructor. There is no module-side
-// spelling (`core.time` exposes clock and calendar items, not duration
-// constructors — `Syntax::DURATION_CONSTRUCTORS`), so the second construction
-// below reads the same way as the first.
+// D-SHAPE-DURATION1=A / D-TYPE2-TIME1=A: fixed values use exact duration
+// literals. Runtime values still use the TYPE-owned unit constructor, whose
+// checked result is exercised by the range probe below.
 fn run() {
-    exact :: Duration.seconds(2) ?? return Err("duration")
-    fine :: Duration.microseconds(400) ?? return Err("duration")
-    nano :: Duration.nanoseconds(250) ?? return Err("duration")
-    exact_ms :: exact.in(.Milliseconds) ?? return Err("duration read")
+    exact :: 2s
+    fine :: 400us
+    nano :: 250ns
+    exact_ms :: exact.in(.Milliseconds)
     print(exact_ms)
-    fine_ns :: fine.in(.Nanoseconds) ?? return Err("duration read")
+    fine_ns :: fine.in(.Nanoseconds)
     print(fine_ns)
-    nano_ns :: nano.in(.Nanoseconds) ?? return Err("duration read")
+    nano_ns :: nano.in(.Nanoseconds)
     print(nano_ns)
     print(exact.total_seconds())
     print(exact.is_zero())
-    zero :: Duration.milliseconds(0) ?? return Err("zero")
+    zero :: 0ms
     print(zero.is_zero())
-    from_nanos :: Duration.nanoseconds(1_000_000) ?? return Err("duration")
-    from_nanos_ms :: from_nanos.in(.Milliseconds) ?? return Err("duration read")
+    from_nanos :: 1_000_000ns
+    from_nanos_ms :: from_nanos.in(.Milliseconds)
     print(from_nanos_ms)
     if Duration.hours(9223372036854775807) == .Err(_) -> print("range")
     via_literal :: 1ms
-    literal_ms :: via_literal.in(.Milliseconds) ?? return Err("duration read")
+    literal_ms :: via_literal.in(.Milliseconds)
     print(literal_ms)
 }

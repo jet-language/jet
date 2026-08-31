@@ -265,6 +265,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Duration", "is_zero", 0) => THandleOp::DurationIsZero,
         ("Duration", "total_seconds", 0) => THandleOp::DurationTotalSeconds,
         ("Duration", "difference", 1) => THandleOp::DurationDifference,
+        ("Duration", "abs", 0) => THandleOp::DurationAbs,
+        ("Duration", "negated", 0) => THandleOp::DurationNegated,
+        ("Duration", "sign", 0) => THandleOp::DurationSign,
+        ("Duration", "total_in", 1) => THandleOp::DurationTotalIn,
+        ("Duration", "round", 1..=3) => THandleOp::DurationRound,
         ("Decimal", "add" | "sub" | "mul" | "equal", 1) => THandleOp::PreciseMethod {
             type_name: "Decimal".to_string(),
             method: method.to_string(),
@@ -383,6 +388,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("DataTree", "text", 0) => THandleOp::DataTreeText,
         ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
         ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
+        ("DataTree", "to_text", 0) => THandleOp::DataTreeToText,
+        ("DataTree", "equal_unordered", 1) => THandleOp::DataTreeEqualUnordered,
         // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
@@ -390,6 +397,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
+            THandleOp::JSONEqualUnordered
+        }
         (
             "Url",
             "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
@@ -438,16 +449,14 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             kind: "Regex".to_string(),
             method: method.to_string(),
         },
-        (
-            "Regex",
-            "replace" | "replace_first" | "replace_all" | "replace_all_with" | "split_limit",
-            2,
-        ) => {
-            THandleOp::RegexMethod {
-                kind: "Regex".to_string(),
-                method: method.to_string(),
-            }
-        }
+        ("Regex", "replace" | "replace_first", 2) => THandleOp::RegexMethod {
+            kind: "Regex".to_string(),
+            method: method.to_string(),
+        },
+        ("Regex", "replace_all_with" | "split_limit", 2) => THandleOp::RegexMethod {
+            kind: "Regex".to_string(),
+            method: method.to_string(),
+        },
         ("Match", "start" | "end" | "named_captures", 0) => THandleOp::RegexMethod {
             kind: "Match".to_string(),
             method: method.to_string(),
@@ -463,6 +472,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "extension", 0) => THandleOp::PathExtension,
         ("Path", "stem", 0) => THandleOp::PathStem,
         ("Path", "normalize", 0) => THandleOp::PathNormalize,
+        ("Path", "is_within", 1) => THandleOp::PathIsWithin,
         ("Path", "to_string", 0) => THandleOp::PathToString,
         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
         ("Path", "walk", 0) => THandleOp::PathWalk,
@@ -592,7 +602,10 @@ pub(crate) fn handle_method_return_ty(
     }
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
-    let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
+    let ret = crate::Codegen::is_json_type_name(handle)
+        .then(|| crate::Sema::datatree_method_return(method, nargs).map(Some))
+        .flatten()
+        .or_else(|| crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::encoding_handle_method_return(handle, method, nargs))
         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
@@ -687,13 +700,7 @@ pub(crate) fn handle_method_return_ty(
                 "Match".to_string(),
             ))))),
             ("Regex", "find", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("Regex", "find_all" | "split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
-            ("Regex", "matches", 1) => {
-                Some(Some(Type::List(Box::new(Type::Named("Match".to_string())))))
-            }
-            ("Regex", "replace" | "replace_first" | "replace_all" | "replace_all_with", 2) => {
-                Some(Some(Type::String))
-            }
+            ("Regex", "replace" | "replace_first", 2) => Some(Some(Type::String)),
             ("Regex", "split_limit", 2) => Some(Some(Type::List(Box::new(Type::String)))),
             ("Match", "group" | "name", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
             ("Match", "start" | "end", 0) => Some(Some(Type::Int)),
@@ -810,7 +817,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             }
         }
         ("core.encoding.json", "to_string" | "to_string_pretty") => return Type::String,
-        ("core.text.fmt", "decimal") => return Type::String,
+        ("core.text.fmt", "decimal" | "grouped") => return Type::String,
         // D-TYPE2-UNCERT1=A: internal canonical measurement constructor route.
         ("core.units", "from") => {
             return Type::Apply {

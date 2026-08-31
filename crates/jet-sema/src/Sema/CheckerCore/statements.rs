@@ -38,15 +38,16 @@ fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
         "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
-        "CSVReader" => Some(Type::List(Box::new(Type::String))),
+        "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }
 }
 
 fn stream_element_type(ty: Option<&Type>) -> Option<Type> {
     match ty {
-        Some(Type::Apply { name, args })
-            if name == Syntax::TYPE_STREAM && args.len() == 1 => Some(args[0].clone()),
+        Some(Type::Apply { name, args }) if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+            Some(args[0].clone())
+        }
         _ => None,
     }
 }
@@ -428,6 +429,7 @@ impl<'a> Checker<'a> {
         let diagnostics_start = self.diags.len();
         let allows_start = self.statement_lint_allows.len();
         self.check_stmt_inner(stmt);
+        self.emit_stdlib_lints_for_stmt(stmt);
         let allows = self.statement_lint_allows.split_off(allows_start);
         if !allows.is_empty() {
             let retained = self.diags.split_off(diagnostics_start);
@@ -464,12 +466,8 @@ impl<'a> Checker<'a> {
         // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
         // only ever ends the stream early — bare `return;` is fine, `return
         // value;` is E0806 (a generator body yields, it doesn't return a value).
-        if stream_element_type(
-            return_type
-                .as_ref()
-                .or(self.declared_return_type.as_ref()),
-        )
-        .is_some()
+        if stream_element_type(return_type.as_ref().or(self.declared_return_type.as_ref()))
+            .is_some()
         {
             if let Some(e) = expr {
                 self.infer(e);
@@ -498,22 +496,27 @@ impl<'a> Checker<'a> {
                     let inner = std::mem::replace(e, Expr::Absent(span));
                     *e = Expr::Ok(Box::new(inner), span);
                 }
+                let return_value_type = match &rt {
+                    Type::Result { ok, .. } => ok.as_ref(),
+                    _ => &rt,
+                };
                 let string_view_return = matches!(
-                    &rt,
+                    return_value_type,
                     Type::Apply { name, args }
                         if name == "View"
                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
                 );
-                // D-SHAPE-PLACE1=A: a bare maximal place is a read
-                // window. At a named `View<T>` return boundary, make
-                // that local acquisition explicit in the AST before
-                // inference; E2305 then checks today's provenance gate.
+                // D-SHAPE-PLACE1=A: a bare maximal place is a read window at
+                // a named `View<T>` return boundary. Keep the source
+                // acquisition explicit before inference so the returned type
+                // remains a view instead of being materialized as a list.
                 let bare_place_return = {
                     let transparent = e.without_parens();
-                    matches!(&rt, Type::Apply { name, .. } if name == "View")
+                    matches!(return_value_type, Type::Apply { name, .. } if name == "View")
                         && !string_view_return
                         && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
-                        && self.place_from_expr(transparent).is_some()
+                        && (self.place_from_expr(transparent).is_some()
+                            || matches!(transparent, Expr::Slice { .. }))
                 };
                 if bare_place_return {
                     let span = e.span();
@@ -551,38 +554,28 @@ impl<'a> Checker<'a> {
                 }
                 // D-ALLOC2 / E0631: capture the returned name BEFORE inferring.
                 // An arena view carries an allocator-view type, so returning it
-                // where the declared type is the payload rewrites `e` through a
-                // deref coercion and it stops being an `Ident`. The escape check
-                // below then silently missed every arena view that escaped.
+                // where the declared type is the payload rewrites `e` through
+                // a deref coercion and it stops being an `Ident`.
                 let returned_ident = match &*e {
                     Expr::Ident(name, span) => Some((name.clone(), *span)),
                     _ => None,
                 };
                 let mut et = self.infer(e);
-                        // D-FAILURE-FOUNDATION1=A: the public return contract
-                        // is the shared Result carrier, but source authors
-                        // return its success payload directly. Preserve an
-                        // already-carried result (calls, `Ok`, `Err`, and
-                        // explicit propagation); lift every matching payload
-                        // through the existing `Ok` constructor.
-                        if let (Type::Result { ok, .. }, Some(actual)) = (&rt, et.as_ref()) {
-                            let payload_matches = actual == ok.as_ref()
-                                || matches!(ok.as_ref(), Type::Union(members) if members.iter().any(|member| member == actual))
-                                || actual.numeric_widening_to(ok).is_some();
-                            if payload_matches && !matches!(actual, Type::Result { .. }) {
-                                let value_span = e.span();
-                                let value = std::mem::replace(e, Expr::Absent(value_span));
-                                *e = Expr::Ok(Box::new(value), value_span);
-                                self.expected_type = Some(rt.clone());
-                                // The payload was already inferred against the
-                                // carrier's success type above. The `Ok` node is
-                                // compiler-generated, so re-inferring it would
-                                // spend one extra source-nesting level at the
-                                // published boundary.
-                                et = Some(rt.clone());
-                            }
-                        }
-                        self.report_lending_view_escape(e, "be returned");
+                let payload_matches = if let (Type::Result { ok, .. }, Some(actual)) =
+                    (&rt, et.as_ref())
+                {
+                    !matches!(actual, Type::Result { .. })
+                        && (actual == ok.as_ref()
+                            || matches!(ok.as_ref(), Type::Union(members) if members.iter().any(|member| member == actual))
+                            || actual.numeric_widening_to(ok).is_some()
+                            // String-backed `View<str>` values keep `String` as
+                            // their semantic type; the view boundary is a
+                            // representation contract, not a second carrier.
+                            || (string_view_return && matches!(actual, Type::String)))
+                } else {
+                    false
+                };
+                self.report_lending_view_escape(e, "be returned");
                 self.allow_string_view_read = saved_string_view_read;
                 self.expected_type = saved_expected;
                 if let Some(source) = et.as_ref() {
@@ -592,32 +585,27 @@ impl<'a> Checker<'a> {
                         et = Some(rt.clone());
                     }
                 }
-                // #1164: direct `View`/`ViewMut` returns use the
-                // dedicated path below. Aggregates that contain view
-                // fields need the walk. Non-view returns must not
-                // re-check string-view idents as view escapes — the
-                // E2307 "needs owned String" path already teaches.
+                // #1164: direct `View`/`ViewMut` returns use the dedicated
+                // path below. Aggregates that contain view fields need the
+                // walk. Non-view returns must not re-check string-view idents
+                // as view escapes.
                 let direct_view_return = matches!(
-                    &rt,
+                    return_value_type,
                     Type::Apply { name, .. }
                         if matches!(name.as_str(), "View" | "ViewMut")
                 );
                 if !direct_view_return && self.type_contains_view_boundary(&rt) {
                     self.check_aggregate_view_return(e);
                 }
-                // D-ALLOC2: E0631 — returning an arena `view` would let
-                // it outlive the arena (the arena drops at scope end).
+                // D-ALLOC2: E0631 — returning an arena `view` would let it
+                // outlive the arena (the arena drops at scope end).
                 if let Some((n, nspan)) = &returned_ident {
                     if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
                         self.report_view_escape(n, "be returned", *nspan);
                     }
                 }
                 // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
-                // list is local to this function would outlive it. Two
-                // shapes: an already-bound view name (`return window`),
-                // and a fresh range place made right in the
-                // `return` (`return incidents[0..2]`) — the latter
-                // needs `view_call_source` directly.
+                // list is local to this function would outlive it.
                 if string_view_return {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_string_view(n) {
@@ -639,8 +627,10 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                } else if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut"))
-                {
+                } else if matches!(
+                    return_value_type,
+                    Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")
+                ) {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_list_view(n) {
                             self.check_named_view_binding_return(n, *nspan);
@@ -662,18 +652,27 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                // D-MEM-COPYSEM1: default owning returns have already
-                // become `Expr::Copy` in `self.infer(e)`. Declared
-                // view returns still use the boundary checks above;
-                // an explicit-copy policy leaves the original read
-                // in place so its registered E2307 refusal remains.
-                // Returning a borrowed parameter would move out of a
-                // borrow in the generated Rust (I2) — require a copy.
+                // D-MEM-COPYSEM1: default owning returns have already become
+                // `Expr::Copy` in `self.infer(e)`. Declared view returns still
+                // use the boundary checks above; explicit-copy policy keeps
+                // the original read so its E2307 refusal remains.
+                // Returning a borrowed parameter would move out of a borrow
+                // in the generated Rust (I2) — require a copy.
                 self.reject_borrowed_param_subplace(
                     e,
                     et.as_ref(),
                     "be returned as an owned value",
                 );
+                // The source success value is checked for ownership and view
+                // provenance before this carrier lift. Otherwise `Ok(...)`
+                // would hide the original place from both checks.
+                if payload_matches {
+                    let value_span = e.span();
+                    let value = std::mem::replace(e, Expr::Absent(value_span));
+                    *e = Expr::Ok(Box::new(value), value_span);
+                    self.expected_type = Some(rt.clone());
+                    et = Some(rt.clone());
+                }
                 if et
                     .as_ref()
                     .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
@@ -686,7 +685,13 @@ impl<'a> Checker<'a> {
                         Some(e.span()),
                     ));
                 }
-                if let Expr::Ident(n, nspan) = &*e {
+                let ownership_ident = match &*e {
+                    Expr::Ident(name, span) => Some((name.as_str(), *span)),
+                    _ => returned_ident
+                        .as_ref()
+                        .map(|(name, span)| (name.as_str(), *span)),
+                };
+                if let Some((n, nspan)) = ownership_ident {
                     if let Some(info) = self.lookup(n) {
                         if !info.ty.is_scalar()
                             && !matches!(
@@ -702,28 +707,34 @@ impl<'a> Checker<'a> {
                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
                             )
                         {
-                            let display_type = self.display_type(&info.ty).name();
-                            self.diags.push(Diagnostic::error(
-                                            "E0120",
-                                            format!(
-                                                "`{}` was not moved here, so it cannot be returned as-is",
-                                                n
-                                            ),
-                                            "this function has read access only and does not own the value"
-                                                .to_string(),
-                                            format!(
-                                                "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
-                                                 There's no borrow-return in v1 — to share the value without a full \
-                                                 copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
-                                                 once a real program needs shared ownership",
-                                                Syntax::SIGIL_COPY,
-                                                n,
-                                                n,
-                                                Syntax::SIGIL_MOVE,
-                                                display_type
-                                            ),
-                                            Some(*nspan),
-                                        ));
+                            let source_ty = info.ty.clone();
+                            let display_type = self.display_type(&source_ty).name();
+                            let diagnostic = Diagnostic::error(
+                                "E0120",
+                                format!(
+                                    "`{}` was not moved here, so it cannot be returned as-is",
+                                    n
+                                ),
+                                "this function has read access only and does not own the value"
+                                    .to_string(),
+                                format!(
+                                    "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
+                                     There's no borrow-return in v1 — to share the value without a full \
+                                     copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
+                                     once a real program needs shared ownership",
+                                    Syntax::SIGIL_COPY,
+                                    n,
+                                    n,
+                                    Syntax::SIGIL_MOVE,
+                                    display_type
+                                ),
+                                Some(nspan),
+                            );
+                            self.diags.push(self.with_ownership_copy_edit(
+                                diagnostic,
+                                nspan,
+                                Some(&source_ty),
+                            ));
                         }
                     }
                 }
@@ -746,9 +757,8 @@ impl<'a> Checker<'a> {
                         &rt,
                         Type::Union(members) if members.iter().any(|m| m == &et)
                     );
-                    // D-APILABEL1=A: every return contract uses
-                    // shared assignability, including qualified
-                    // nominal types.
+                    // D-APILABEL1=A: every return contract uses shared
+                    // assignability, including qualified nominal types.
                     let reported = self.check_type_assignable(&rt, &et, e.span());
                     if et != rt
                         && !reported
@@ -1093,16 +1103,22 @@ impl<'a> Checker<'a> {
                                 )
                         });
                         if borrowed {
-                            self.diags.push(Diagnostic::error(
-                                    "E0120",
-                                    format!(
-                                        "`{name}` was not moved here, so it cannot replace an owned value"
-                                    ),
-                                    "this function has read access only and does not own the value"
-                                        .to_string(),
-                                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
-                                    Some(*span),
-                                ));
+                            let source_ty = self.lookup(name).map(|info| info.ty.clone());
+                            let diagnostic = Diagnostic::error(
+                                "E0120",
+                                format!(
+                                    "`{name}` was not moved here, so it cannot replace an owned value"
+                                ),
+                                "this function has read access only and does not own the value"
+                                    .to_string(),
+                                format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                                Some(*span),
+                            );
+                            self.diags.push(self.with_ownership_copy_edit(
+                                diagnostic,
+                                *span,
+                                source_ty.as_ref(),
+                            ));
                         }
                     }
                 }
@@ -1118,7 +1134,7 @@ impl<'a> Checker<'a> {
                                     "E0420",
                                     format!("`{}` may be read before it is given a value", name),
                                     format!(
-                                        "`{}+=` reads `{}` first, but it was declared with `Type.{{ uninit }}` and has no value yet",
+                                        "`{}+=` reads `{}` first, but it was declared with `Type{{ uninit }}` and has no value yet",
                                         name, name
                                     ),
                                     format!("give `{}` a value with `{} = …` before updating it", name, name),
@@ -1813,7 +1829,7 @@ impl<'a> Checker<'a> {
                 } = expr
                 {
                     if method == Syntax::METHOD_DROP {
-                        let recv_ty = self.infer_fallible_stmt(receiver);
+                        let recv_ty = self.infer_without_auto_propagation(receiver);
                         // Validate reason argument — must be a non-empty string literal.
                         match args.first() {
                             Some(a) => match &a.expr {
@@ -1895,12 +1911,7 @@ impl<'a> Checker<'a> {
                                 Some(expr.span()),
                             ));
                     } else if !self.suppress_must_use {
-                        self.check_ignored_must_use(
-                            expr,
-                            &ty,
-                            expr.span(),
-                            must_use_call_target,
-                        );
+                        self.check_ignored_must_use(expr, &ty, expr.span(), must_use_call_target);
                     }
                     // An implicit fallible `Unit` call carries its success
                     // value in `Result<Unit, E>`. L0508 is about dropping
@@ -1909,7 +1920,13 @@ impl<'a> Checker<'a> {
                         Type::Result { ok, .. } => ok.as_ref(),
                         _ => &ty,
                     };
-                    if self.arrow_loop_body && !self.is_unit_type(arrow_body_value_type) {
+                    if self.arrow_loop_body
+                        && !matches!(
+                            arrow_body_value_type,
+                            Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE
+                        )
+                        && !self.is_unit_type(arrow_body_value_type)
+                    {
                         self.diags.push(Diagnostic::lint(
                                 "L0508",
                                 "this arrow loop body computes a value and drops it".to_string(),
@@ -2054,7 +2071,7 @@ impl<'a> Checker<'a> {
                             .lookup(&name)
                             .is_some_and(|info| self.type_is_single_use(&info.ty));
                         if carries_duty {
-                            self.mark_moved(name, span);
+                            self.mark_moved_by(name, span, ".loop()");
                         }
                     }
                 }
@@ -2075,7 +2092,6 @@ impl<'a> Checker<'a> {
                 label,
                 auto_vectorization,
             } => {
-                let auto_vectorization_kind = kind.clone();
                 let memory_multiplier = self.memory_control_multiplier;
                 let loop_multiplier = memory_multiplier.and_then(|outer| {
                     statically_bounded_for_iterations(kind)
@@ -2184,14 +2200,7 @@ impl<'a> Checker<'a> {
                             self.check_stmt(s);
                         }
                         self.arrow_loop_body = previous_arrow_loop_body;
-                        *auto_vectorization = self.prove_auto_vectorization_loop(
-                            &auto_vectorization_kind,
-                            var,
-                            body,
-                            &before_auto_direct,
-                            &before_auto_edges,
-                            before_auto_maximal,
-                        );
+
                         // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
                         // with this loop's index name (the provable 0..len trap).
                         if !*exclusive {
@@ -2214,6 +2223,14 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
+                        *auto_vectorization = self.prove_auto_vectorization_loop(
+                            kind,
+                            var,
+                            body,
+                            &before_auto_direct,
+                            &before_auto_edges,
+                            before_auto_maximal,
+                        );
                         self.pop_scope();
                         self.loop_depth -= 1;
                     }
@@ -2292,16 +2309,21 @@ impl<'a> Checker<'a> {
                                 if matches!(place, Expr::Ident(..)) {
                                     self.consume_builtin_receiver(place, "loop");
                                 } else {
-                                    self.diags.push(Diagnostic::error(
-                                            "E0120",
-                                            "this loop can't take a stream or iterator out of a field or index"
-                                                .to_string(),
-                                            "each step pulls from the source itself, so the loop must take a whole value this scope owns"
-                                                .to_string(),
-                                            "bind it into a local this scope owns first (`src := …`), then write `loop x in src { … }`"
-                                                .to_string(),
-                                            Some(collection.span()),
-                                        ));
+                                    let diagnostic = Diagnostic::error(
+                                        "E0120",
+                                        "this loop can't take a stream or iterator out of a field or index"
+                                            .to_string(),
+                                        "each step pulls from the source itself, so the loop must take a whole value this scope owns"
+                                            .to_string(),
+                                        "bind it into a local this scope owns first (`src := …`), then write `loop x in src { … }`"
+                                            .to_string(),
+                                        Some(collection.span()),
+                                    );
+                                    self.diags.push(self.with_ownership_copy_edit(
+                                        diagnostic,
+                                        collection.span(),
+                                        coll_ty.as_ref(),
+                                    ));
                                 }
                             }
                         }
@@ -2525,7 +2547,7 @@ impl<'a> Checker<'a> {
                         // record a move it never made.
                         if consumes_collection && owns_collection {
                             if let Some(name) = borrowed {
-                                self.mark_moved(name, collection.span());
+                                self.mark_moved_by(name, collection.span(), ".loop()");
                             }
                         }
                     }

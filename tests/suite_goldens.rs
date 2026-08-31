@@ -3,6 +3,8 @@
 //! The feature corpus keeps its existing discovery and acceptance path. This
 //! focused test gives the additive suite the same executable-output contract.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -29,7 +31,7 @@ fn user_story_suite_matches_expected_output() {
         })
         .collect::<Vec<_>>();
     programs.sort();
-    assert_eq!(programs.len(), 3, "the suite must keep three user stories");
+    assert_eq!(programs.len(), 8, "the suite must keep eight user stories");
 
     let cache = std::env::temp_dir().join(format!(
         "jet-user-story-golden-{}",
@@ -68,4 +70,12 @@ fn user_story_suite_matches_expected_output() {
             program.display()
         );
     }
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_suite_goldens() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("suite")
+        .expect("suite corpus semantic policy");
 }

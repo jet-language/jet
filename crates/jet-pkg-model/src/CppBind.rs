@@ -207,7 +207,10 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         options,
         &clang_version,
         &archiver_version,
-    );
+        &archive,
+        &cache.join(format!("{}.link", options.lib)),
+    )
+    .map_err(BindError::Source)?;
     let bound = surface
         .classes
         .iter()
@@ -425,6 +428,11 @@ fn binding_identity(
         }
         identity.field("template.jet_name", template.jet_name.as_bytes());
     }
+    crate::ForeignBridge::add_local_archive_inputs(
+        &mut identity,
+        &options.library_dirs,
+        &options.libraries,
+    );
     identity.finish()
 }
 
@@ -940,50 +948,92 @@ fn render_provenance(
     options: &BindOptions,
     clang_version: &[u8],
     archiver_version: &[u8],
-) -> String {
-    let mut value = format!(
-        "schema={SCHEMA}\nidentity_schema={}\nidentity={digest}\nsha256={digest}\ndescriptor={}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
-        crate::ForeignBridge::IDENTITY_SCHEMA,
-        cpp_descriptor_stamp(),
-        header.display(),
-        options.target,
-        options.clang.display(),
-        options.archiver.display(),
-        surface.classes.len(),
-        surface.functions.len()
-    );
-    value.push_str(&format!(
-        "clang_version={}\narchiver_version={}\n",
-        String::from_utf8_lossy(clang_version)
+    archive: &Path,
+    link: &Path,
+) -> Result<String, String> {
+    let link = link
+        .canonicalize()
+        .map_err(|error| format!("could not resolve C++ link provenance: {error}"))?;
+    let version = |bytes: &[u8]| {
+        String::from_utf8_lossy(bytes)
             .lines()
-            .collect::<Vec<_>>()
-            .join(" | "),
-        String::from_utf8_lossy(archiver_version)
-            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
             .collect::<Vec<_>>()
             .join(" | ")
-    ));
+    };
+    let mut fields = vec![
+        ("language", "cpp".to_string()),
+        ("abi", format!("jet_cpp_{}", options.lib)),
+        ("transport", "clang-cxx-shim".to_string()),
+        ("binder-schema", SCHEMA.to_string()),
+        ("descriptor", cpp_descriptor_stamp()),
+        ("source", header.to_string_lossy().into_owned()),
+        ("source-sha256", crate::ForeignBridge::sha_file(header)?),
+        ("link", link.to_string_lossy().into_owned()),
+        ("link-sha256", crate::ForeignBridge::sha_file(&link)?),
+        ("target", options.target.clone()),
+        ("clang", options.clang.display().to_string()),
+        ("archiver", options.archiver.display().to_string()),
+        ("clang-version", version(clang_version)),
+        ("archiver-version", version(archiver_version)),
+        ("classes", surface.classes.len().to_string()),
+        ("functions", surface.functions.len().to_string()),
+    ];
     for namespace in &options.namespaces {
-        value.push_str(&format!("namespace={namespace}\n"));
+        fields.push(("namespace", namespace.clone()));
     }
     for dir in &options.include_dirs {
-        value.push_str(&format!("include={}\n", dir.display()));
+        fields.push(("include", dir.display().to_string()));
     }
     for dir in &options.library_dirs {
-        value.push_str(&format!("library_search={}\n", dir.display()));
+        fields.push(("library-search", dir.display().to_string()));
     }
     for library in &options.libraries {
-        value.push_str(&format!("library={library}\n"));
+        fields.push(("library", library.clone()));
     }
     for template in &options.templates {
-        value.push_str(&format!(
-            "template={}<{}> as {}\n",
-            template.qualified_name,
-            template.cpp_args.join(","),
-            template.jet_name
+        fields.push((
+            "template",
+            format!(
+                "{}<{}> as {}",
+                template.qualified_name,
+                template.cpp_args.join(","),
+                template.jet_name
+            ),
         ));
     }
-    value
+    for input in crate::ForeignBridge::local_archive_inputs(
+        &options.library_dirs,
+        &options.libraries,
+    ) {
+        fields.push(("linked-library", input.library));
+        fields.push((
+            "linked-archive",
+            input.path.to_string_lossy().into_owned(),
+        ));
+        fields.push((
+            "linked-archive-sha256",
+            input
+                .bytes
+                .as_deref()
+                .map(crate::SHA256::sha256_hex)
+                .unwrap_or_else(|| "missing".into()),
+        ));
+    }
+    let field_refs: Vec<(&str, &str)> = fields
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect();
+    let artifacts = vec![(
+        archive
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        crate::ForeignBridge::sha_file(archive)?,
+    )];
+    crate::ForeignBridge::render_provenance(digest, &field_refs, &artifacts)
 }
 
 fn render_jet(lib: &str, surface: &Surface) -> String {

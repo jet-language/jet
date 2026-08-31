@@ -17,8 +17,8 @@ use super::Features::{
     compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
     compute_refactor_actions, compute_references, compute_rename,
     encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
-    format_inlay_hints, semantic_symbol_at, semantic_symbol_at_span,
-    semantic_symbol_metadata_json, RefactorAction,
+    format_inlay_hints, semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json,
+    RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -312,6 +312,13 @@ fn append_log_line(path: &std::path::Path, line: &str) -> io::Result<()> {
         // Linux O_NOFOLLOW: refuse a symlink substituted after the metadata
         // check and before open.
         options.custom_flags(0o400000);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open the reparse point itself if a link is substituted after the
+        // metadata check; writing it must fail instead of following its target.
+        options.custom_flags(0x0020_0000);
     }
     let mut file = options.open(path)?;
     writeln!(file, "{line}")
@@ -1533,6 +1540,16 @@ fn document_symbol_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let checked = server.check_with_bundle(doc);
+    // SymbolDB stores Loader display paths; LSP documents carry absolute paths.
+    // Resolve the requested bundle module before filtering its definitions.
+    let document_path = normalize_path(&doc.path);
+    let target_module_display = checked.bundle.as_ref().and_then(|bundle| {
+        bundle
+            .modules
+            .iter()
+            .find(|module| normalize_path_buf(&module.path) == document_path)
+            .map(|module| module.display.clone())
+    });
     let db = match checked.bundle {
         Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
@@ -1541,7 +1558,12 @@ fn document_symbol_response(
     let mut defs = db
         .defs
         .iter()
-        .filter(|def| def.module_path == doc.path)
+        .filter(|def| {
+            target_module_display
+                .as_deref()
+                .map(|display| def.module_path == display)
+                .unwrap_or_else(|| def.module_path == doc.path)
+        })
         .filter_map(|def| document_symbol_kind(&def.kind).map(|kind| (def, kind)))
         .collect::<Vec<_>>();
     defs.sort_by_key(|(def, _)| def.def_span.start);
@@ -1993,11 +2015,10 @@ fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -
     let db = match checked.bundle {
         Some(b) => {
             let mut db = build_symbol_db(&b, &checked.facts);
-            if let Some(package) = jet_semindex::package_facts_for_entry(
-                std::path::Path::new(&doc.path),
-            )
-            .ok()
-            .flatten()
+            if let Some(package) =
+                jet_semindex::package_facts_for_entry(std::path::Path::new(&doc.path))
+                    .ok()
+                    .flatten()
             {
                 db.attach_package_facts(package);
             }
@@ -4006,10 +4027,7 @@ mod project_part_tests {
     fn lsp_log_writer_rejects_symlink_destination() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-log-symlink-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jet-lsp-log-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let outside = root.join("outside.log");

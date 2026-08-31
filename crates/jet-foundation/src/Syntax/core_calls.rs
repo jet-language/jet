@@ -51,12 +51,21 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "time",
                 "local_time",
                 "parse_time",
+                "new",
+                "parse",
+                "from_timestamp",
                 "period",
                 "period_days",
                 "period_months",
                 "period_years",
                 "parse_rfc3339",
                 "from_unix_ms",
+                "from_unix_seconds",
+                "from_unix_microseconds",
+                "from_unix_nanoseconds",
+                "parse_iso_week_date",
+                "from_iso_week",
+                "parse_zoned",
                 "datetime",
                 "zone",
                 "utc",
@@ -441,9 +450,16 @@ impl CoreCallInterpreterRoute {
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.task", "timeout"),
     ("core.files", "rename"),
+    ("core.files", "fsync"),
+    ("core.files", "symlink"),
     ("core.files", "walk"),
     ("core.files", "walk_parallel"),
+    ("core.files", "walk_files"),
     ("core.files", "glob"),
+    ("core.files", "canonicalize"),
+    ("core.files", "absolute"),
+    ("core.files", "stat"),
+    ("core.files", "set_mode"),
     ("core.files", "open"),
     ("core.files", "create"),
     ("core.files", "append"),
@@ -461,10 +477,13 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.sys", "get"),
     ("core.sys", "set"),
     ("core.sys", "home_dir"),
+    ("core.sys", "family"),
     ("core.process", "workspace"),
     ("core.process", "run"),
     ("core.process", "cmd"),
     ("core.process", "pipeline"),
+    ("core.process", "argv"),
+    ("core.process", "args"),
     ("core.plugin", "load"),
     ("core.mod", "load"),
     ("core.math", "from_bits"),
@@ -481,6 +500,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.math.random", "weighted_pick"),
     ("core.math.random", "sample"),
     ("core.crypto.random", "bytes"),
+    ("core.crypto", "hmac_sha256"),
     ("core.time", "now"),
     ("core.time", "sleep"),
     ("core.time", "start"),
@@ -534,6 +554,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "udp_recv_from"),
     ("core.net", "udp_send_bytes_to"),
     ("core.net", "udp_receive"),
+    ("core.net.ws", "connect"),
+    ("core.net.ws", "upgrade"),
     ("core.db", "transaction"),
     ("core.db", "migrate"),
     ("app", "live_get"),
@@ -764,9 +786,7 @@ impl CoreCallRecord {
         self.pure_route = route;
         self.interpreter_route = CoreCallInterpreterRoute::Pure(route);
         if !matches!(route, CoreCallPureRoute::None) {
-            self.coverage = self
-                .coverage
-                .with_projection(CoreCallCoverage::INTERPRETER);
+            self.coverage = self.coverage.with_projection(CoreCallCoverage::INTERPRETER);
         }
         self
     }
@@ -774,9 +794,7 @@ impl CoreCallRecord {
     pub const fn with_interpreter_route(mut self, route: CoreCallInterpreterRoute) -> Self {
         self.interpreter_route = route;
         if route.is_executable() {
-            self.coverage = self
-                .coverage
-                .with_projection(CoreCallCoverage::INTERPRETER);
+            self.coverage = self.coverage.with_projection(CoreCallCoverage::INTERPRETER);
         }
         self
     }
@@ -840,8 +858,8 @@ impl CoreCallRecord {
             (
                 "core.files",
                 "read" | "read_bytes" | "exists" | "is_dir" | "remove" | "remove_dir"
-                | "remove_all" | "list_dir" | "create_dir" | "create_dir_all" | "stat"
-                | "canonicalize" | "absolute" | "walk" | "walk_parallel" | "glob" | "fsync"
+                | "remove_all" | "list_dir" | "create_dir" | "create_dir_all" | "stat" | "set_mode"
+                | "canonicalize" | "absolute" | "walk" | "walk_parallel" | "walk_files" | "glob" | "fsync"
                 | "lock" | "open" | "create" | "append",
             ) => &[true],
             ("core.files", "write" | "write_bytes" | "append_all" | "write_atomic") => &[true],
@@ -1102,7 +1120,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_fs_symlink",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "read_link",
@@ -1117,27 +1136,46 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true, true],
     ),
-    CoreCallRecord::new("core.files", "stat", "jet_std_fs_stat", true, &[true]),
+    CoreCallRecord::new("core.files", "stat", "jet_std_fs_stat", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.files",
+        "set_mode",
+        "jet_std_fs_set_mode",
+        true,
+        &[true, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "canonicalize",
         "jet_std_fs_canonicalize",
         true,
         &[true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "absolute",
         "jet_std_fs_absolute",
         true,
         &[true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "walk_parallel",
         "jet_std_fs_walk_parallel",
+        true,
+        &[true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.files",
+        "walk_files",
+        "jet_std_fs_walk_files",
         true,
         &[true],
     )
@@ -1158,7 +1196,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true, false, true],
     ),
-    CoreCallRecord::new("core.files", "fsync", "jet_std_fs_fsync", true, &[true]),
+    CoreCallRecord::new("core.files", "fsync", "jet_std_fs_fsync", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "write_atomic",
@@ -1283,7 +1322,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new("core.sys", "home_dir", "jet_std_env_home_dir", true, &[]),
     CoreCallRecord::new("core.sys", "name", "jet_std_os_name", true, &[]),
-    CoreCallRecord::new("core.sys", "family", "jet_std_os_family", true, &[]),
+    CoreCallRecord::new("core.sys", "family", "jet_std_os_family", true, &[])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "arch", "jet_std_os_arch", true, &[]),
     CoreCallRecord::new("core.sys", "cpu_count", "jet_std_os_cpu_count", true, &[]),
     CoreCallRecord::new("core.sys", "temp_dir", "jet_std_os_temp_dir", true, &[]),
@@ -1429,6 +1469,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[true],
     ),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]),
+    CoreCallRecord::new("core.process", "args", "jet_std_io_process_args", true, &[]),
     // D-AUTHORITY-NAME1=A: the plugin loader carries the same named value as
     // process.run and is emitted through its typed FFI boundary.
     CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true])
@@ -1504,11 +1545,23 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "sqrt", "jet_std_math_sqrt", true, &[false])
         .with_pure_route(CoreCallPureRoute::Math)
         .without_direct_aot(),
-    CoreCallRecord::new("core.math", "to_bits", "jet_std_math_to_bits", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "from_bits", "jet_std_math_from_bits", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Math)
-        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.math",
+        "to_bits",
+        "jet_std_math_to_bits",
+        true,
+        &[false],
+    )
+    .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new(
+        "core.math",
+        "from_bits",
+        "jet_std_math_from_bits",
+        true,
+        &[false],
+    )
+    .with_pure_route(CoreCallPureRoute::Math)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math", "isqrt", "jet_std_math_isqrt", true, &[false]),
     CoreCallRecord::new(
         "core.math",
@@ -1700,6 +1753,30 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[false],
     )
     .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new(
+        "core.time",
+        "from_unix_seconds",
+        "JetDateTime::from_unix_seconds",
+        false,
+        &[false],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new(
+        "core.time",
+        "from_unix_microseconds",
+        "JetDateTime::from_unix_microseconds",
+        false,
+        &[false],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new(
+        "core.time",
+        "from_unix_nanoseconds",
+        "JetDateTime::from_unix_nanoseconds",
+        false,
+        &[false],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "today", "jet_time_today", true, &[]).without_direct_aot(), // AOT keeps the typed ambient clock read.
     CoreCallRecord::new(
         "core.time",
@@ -1710,6 +1787,30 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     )
     .with_pure_route(CoreCallPureRoute::Time)
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.time",
+        "parse_iso_week_date",
+        "JetDate::parse_iso_week_date",
+        true,
+        &[true],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new(
+        "core.time",
+        "from_iso_week",
+        "jet_time_from_iso_week",
+        true,
+        &[false, false, false],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new(
+        "core.time",
+        "parse_zoned",
+        "jet_time_parse_zoned",
+        true,
+        &[true],
+    )
+    .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new(
         "core.time",
         "datetime",
@@ -1793,7 +1894,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "zoned_local",
         "jet_time_zoned_local",
         true,
-        &[true, true, true],
+        &[true, true, true, true],
     )
     .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "clock", "jet_std_clock_new", true, &[false]), // D-DET1: deterministic injected Clock capability constructor.
@@ -1830,7 +1931,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "parse",
         "jet_ring_csv_parse",
         true,
-        &[true],
+        &[true, true, false, false],
+    ),
+    CoreCallRecord::new(
+        "core.encoding.csv",
+        "rows",
+        "jet_ring_csv_rows",
+        true,
+        &[true, true, false, false],
     ),
     CoreCallRecord::new("core.data", "count", "jet_data_count", true, &[true]),
     CoreCallRecord::new("core.compute", "zeros", "jet_compute_zeros", true, &[true]), // D-COMPUTE1=D (#443): Tensor CPU oracle — one Prelude symbol per call.
@@ -2388,18 +2496,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new(
         "core.text.fmt",
-        "hex",
-        "jet_fmt_hex",
+        "grouped",
+        "jet_fmt_grouped",
         true,
         &[false, false],
     ),
-    CoreCallRecord::new(
-        "core.text.fmt",
-        "sci",
-        "jet_fmt_sci",
-        true,
-        &[false, false],
-    ),
+    CoreCallRecord::new("core.text.fmt", "hex", "jet_fmt_hex", true, &[false, false]),
+    CoreCallRecord::new("core.text.fmt", "sci", "jet_fmt_sci", true, &[false, false]),
     CoreCallRecord::new(
         "core.text.fmt",
         "percent",
@@ -2985,13 +3088,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[true],
     ), // E2-M12 D-OBS3: trace context for structured log records.
     CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true]), // D-LOGFMT1=A: explicit log format override.
-    CoreCallRecord::new(
-        "core.crypto",
-        "sha256_bytes",
-        "jet_ring_crypto_sha256_bytes",
-        true,
-        &[true],
-    ),
     CoreCallRecord::new("core.crypto", "sha1", "jet_crypto_sha1_hex", true, &[true]),
     CoreCallRecord::new(
         "core.crypto",
@@ -3034,6 +3130,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_crypto_sha3_512_hex",
         true,
         &[true],
+    ),
+    CoreCallRecord::new(
+        "core.crypto",
+        "hmac_sha256",
+        "jet_crypto_hmac_sha256",
+        true,
+        &[true, true],
     ),
     CoreCallRecord::new(
         "core.crypto",
@@ -3651,13 +3754,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "core.regex",
         "replace_first",
         "jet_std::jet_regex_replace_first",
-        true,
-        &[true, true, true],
-    ),
-    CoreCallRecord::new(
-        "core.regex",
-        "replace_all",
-        "jet_std::jet_regex_replace_all",
         true,
         &[true, true, true],
     ),
@@ -4398,6 +4494,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Date", "LocalDate"], "iso_weekday", &[]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "day_of_year", &[]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "iso_week", &[]),
+    CoreCallRecord::receiver(&["Date", "LocalDate"], "iso_week_year", &[]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "quarter_of_year", &[]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "days_in_month", &[]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "is_leap_year", &[]),
@@ -4406,14 +4503,43 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Date", "LocalDate"], "add_months", &[false]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "diff_days", &[false]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "add_period", &[false]),
+    CoreCallRecord::receiver(&["Date", "LocalDate"], "subtract_period", &[false]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "truncate", &[true]),
     CoreCallRecord::receiver(&["Date", "LocalDate"], "format", &[true]),
+    CoreCallRecord::receiver(&["Date", "LocalDate"], "format_checked", &[true]),
+    CoreCallRecord::receiver(
+        &["Date", "LocalDate"],
+        "until",
+        &[false, true, true, true, false],
+    ),
+    CoreCallRecord::receiver(
+        &["Date", "LocalDate"],
+        "since",
+        &[false, true, true, true, false],
+    ),
+    CoreCallRecord::receiver(&["Date", "LocalDate"], "with", &[false, false, false, true]),
     CoreCallRecord::receiver(&["LocalTime"], "hour", &[]),
     CoreCallRecord::receiver(&["LocalTime"], "minute", &[]),
     CoreCallRecord::receiver(&["LocalTime"], "second", &[]),
+    CoreCallRecord::receiver(&["LocalTime"], "millisecond", &[]),
+    CoreCallRecord::receiver(&["LocalTime"], "microsecond", &[]),
+    CoreCallRecord::receiver(&["LocalTime"], "nanosecond", &[]),
+    CoreCallRecord::receiver(&["LocalTime"], "add_duration", &[false]),
+    CoreCallRecord::receiver(&["LocalTime"], "subtract_duration", &[false]),
+    CoreCallRecord::receiver(&["LocalTime"], "round", &[true, false, true]),
+    CoreCallRecord::receiver(&["LocalTime"], "truncate", &[true, false]),
+    CoreCallRecord::receiver(&["LocalTime"], "floor", &[true, false]),
+    CoreCallRecord::receiver(&["LocalTime"], "ceil", &[true, false]),
+    CoreCallRecord::receiver(&["LocalTime"], "until", &[false, true, true, true, false]),
+    CoreCallRecord::receiver(&["LocalTime"], "since", &[false, true, true, true, false]),
+    CoreCallRecord::receiver(&["LocalTime"], "format", &[true]),
+    CoreCallRecord::receiver(&["LocalTime"], "format_checked", &[true]),
     CoreCallRecord::receiver(&["LocalTime"], "to_string", &[]),
     CoreCallRecord::receiver(&["DateTime"], "to_timestamp", &[]),
     CoreCallRecord::receiver(&["DateTime"], "to_unix_ms", &[]),
+    CoreCallRecord::receiver(&["DateTime"], "to_unix_s", &[]),
+    CoreCallRecord::receiver(&["DateTime"], "to_unix_us", &[]),
+    CoreCallRecord::receiver(&["DateTime"], "to_unix_ns", &[]),
     CoreCallRecord::receiver(&["DateTime"], "to_string", &[]),
     CoreCallRecord::receiver(&["DateTime"], "date", &[]),
     CoreCallRecord::receiver(&["DateTime"], "time", &[]),
@@ -4425,21 +4551,36 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["DateTime"], "nanosecond", &[]),
     CoreCallRecord::receiver(&["DateTime"], "format_rfc3339", &[]),
     CoreCallRecord::receiver(&["DateTime"], "format", &[true]),
+    CoreCallRecord::receiver(&["DateTime"], "format_checked", &[true]),
     CoreCallRecord::receiver(&["DateTime"], "plus_duration", &[false]),
+    CoreCallRecord::receiver(&["DateTime"], "subtract_duration", &[false]),
+    CoreCallRecord::receiver(&["DateTime"], "add_period", &[false]),
+    CoreCallRecord::receiver(&["DateTime"], "subtract_period", &[false]),
     CoreCallRecord::receiver(&["DateTime"], "difference", &[false]),
-    CoreCallRecord::receiver(&["DateTime"], "truncate", &[true]),
-    CoreCallRecord::receiver(&["DateTime"], "round", &[true]),
-    CoreCallRecord::receiver(&["DateTime"], "floor", &[true]),
-    CoreCallRecord::receiver(&["DateTime"], "ceil", &[true]),
+    CoreCallRecord::receiver(&["DateTime"], "truncate", &[true, false]),
+    CoreCallRecord::receiver(&["DateTime"], "round", &[true, false, true]),
+    CoreCallRecord::receiver(&["DateTime"], "floor", &[true, false]),
+    CoreCallRecord::receiver(&["DateTime"], "ceil", &[true, false]),
+    CoreCallRecord::receiver(&["DateTime"], "until", &[false, true, true, true, false]),
+    CoreCallRecord::receiver(&["DateTime"], "since", &[false, true, true, true, false]),
     CoreCallRecord::receiver(
         &["DateTime"],
         "replace",
         &[false, false, false, false, false, false],
     ),
     CoreCallRecord::receiver(&["DateTime"], "in_zone", &[false]),
+    CoreCallRecord::receiver(
+        &["DateTime"],
+        "with",
+        &[false, false, false, false, false, false, true],
+    ),
     CoreCallRecord::receiver(&["Instant"], "elapsed_millis", &[]),
     CoreCallRecord::receiver(&["Instant"], "elapsed", &[]),
     CoreCallRecord::receiver(&["Zone"], "name", &[]),
+    CoreCallRecord::receiver(&["Zone"], "next_transition", &[false]),
+    CoreCallRecord::receiver(&["Zone"], "previous_transition", &[false]),
+    CoreCallRecord::receiver(&["Zone"], "start_of_day", &[false]),
+    CoreCallRecord::receiver(&["Zone"], "hours_in_day", &[false]),
     CoreCallRecord::receiver(&["Fraction"], "to_string", &[]),
     CoreCallRecord::receiver(&["Fraction"], "numerator", &[]),
     CoreCallRecord::receiver(&["Fraction"], "denominator", &[]),
@@ -4454,6 +4595,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Decimal"], "add", &[false]),
     CoreCallRecord::receiver(&["Decimal"], "sub", &[false]),
     CoreCallRecord::receiver(&["Decimal"], "mul", &[false]),
+    CoreCallRecord::receiver(&["Decimal"], "div", &[false]),
+    CoreCallRecord::receiver(&["Decimal"], "round", &[]),
+    CoreCallRecord::receiver(&["Decimal"], "floor", &[]),
+    CoreCallRecord::receiver(&["Decimal"], "ceil", &[]),
     CoreCallRecord::receiver(&["Decimal"], "equal", &[false]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "date", &[]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "time", &[]),
@@ -4464,8 +4609,38 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["ZonedDateTime"], "to_string", &[]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "format", &[true]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "add_duration", &[false]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "subtract_duration", &[false]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "add_period", &[false]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "subtract_period", &[false]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "with_time", &[true, true]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "with_zone", &[true]),
+    CoreCallRecord::receiver(
+        &["ZonedDateTime"],
+        "until",
+        &[false, true, true, true, false],
+    ),
+    CoreCallRecord::receiver(
+        &["ZonedDateTime"],
+        "since",
+        &[false, true, true, true, false],
+    ),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "next_transition", &[]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "previous_transition", &[]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "start_of_day", &[]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "hours_in_day", &[]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "format_rfc9557", &[]),
+    CoreCallRecord::receiver(&["ZonedDateTime"], "format_checked", &[true]),
     CoreCallRecord::receiver(&["Period"], "to_string", &[]),
+    CoreCallRecord::receiver(&["Period"], "years", &[]),
+    CoreCallRecord::receiver(&["Period"], "months", &[]),
+    CoreCallRecord::receiver(&["Period"], "days", &[]),
+    CoreCallRecord::receiver(&["Period"], "sign", &[]),
+    CoreCallRecord::receiver(&["Period"], "is_zero", &[]),
+    CoreCallRecord::receiver(&["Period"], "abs", &[]),
+    CoreCallRecord::receiver(&["Period"], "negated", &[]),
+    CoreCallRecord::receiver(&["Period"], "add", &[false]),
+    CoreCallRecord::receiver(&["Period"], "sub", &[false]),
+    CoreCallRecord::receiver(&["Period"], "total_in", &[true, true]),
     CoreCallRecord::receiver(&["Measurement"], "value", &[]),
     CoreCallRecord::receiver(&["Measurement"], "uncertainty", &[]),
     CoreCallRecord::receiver(&["Measurement"], "add", &[false]),

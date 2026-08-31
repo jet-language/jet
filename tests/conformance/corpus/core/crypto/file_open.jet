@@ -6,18 +6,18 @@ fn run() {
     source_text :: "/tmp/jet_core_crypto_file_open_source"
     sealed_text :: "/tmp/jet_core_crypto_file_open_sealed"
     opened_text :: "/tmp/jet_core_crypto_file_open_output"
-    if fs.exists(source_text) -> fs.remove(source_text) ?? return Err("cleanup")
-    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? return Err("cleanup")
-    if fs.exists(opened_text) -> fs.remove(opened_text) ?? return Err("cleanup")
+    if fs.exists(source_text) -> fs.remove(source_text) ?? panic("cleanup")
+    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? panic("cleanup")
+    if fs.exists(opened_text) -> fs.remove(opened_text) ?? panic("cleanup")
     source :: Path.from(source_text)
     sealed :: Path.from(sealed_text)
     opened :: Path.from(opened_text)
-    source.write_atomic([U8]{0x61, 0x62, 0x63}) ?? return Err("source")
-    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient")
-    crypto.file_seal([recipient.public_key()], source, sealed) ?? return Err("seal")
+    source.write_atomic([U8]{0x61, 0x62, 0x63}) ?? panic("source")
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    crypto.file_seal([recipient.public_key()], source, sealed) ?? panic("seal")
     result :: crypto.file_open(&recipient, sealed, opened)
     print(result == .Ok(()))
-    if fs.exists(source_text) -> fs.remove(source_text) ?? return Err("cleanup")
-    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? return Err("cleanup")
-    if fs.exists(opened_text) -> fs.remove(opened_text) ?? return Err("cleanup")
+    if fs.exists(source_text) -> fs.remove(source_text) ?? panic("cleanup")
+    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? panic("cleanup")
+    if fs.exists(opened_text) -> fs.remove(opened_text) ?? panic("cleanup")
 }

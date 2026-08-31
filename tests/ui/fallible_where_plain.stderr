@@ -1,26 +1,17 @@
-Error [E2417]: explicit failure domain ``E`` is not an Error type
+Error [E2417]: Explicit failure domain ``E`` is not an Error type
   --> tests/ui/fallible_where_plain.jet:5:17
     |
   5 | fn might_fail() Int !E -> Ok(1)
     |                 ^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can't convert `E` into `Err` — no declared conversion exists
   --> tests/ui/fallible_where_plain.jet:9:22
     |
   9 | fn run() { needs_int(might_fail()) }
     |                      ^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E -> Err`
- Fix: add `impl E -> Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
-
-Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
-  --> tests/ui/fallible_where_plain.jet:9:22
-    |
-  9 | fn run() { needs_int(might_fail()) }
-    |                      ^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E -> Err`
- Fix: add `impl E -> Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `E` can reach `Err` only through `impl E -> Err`
+ Fix: Handle this call locally with `??`, add `impl E -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

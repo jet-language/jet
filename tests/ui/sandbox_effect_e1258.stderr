@@ -1,7 +1,14 @@
-Error [E1258]: a sandbox can't use any effect
- Why: this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: Env. Sandboxes run with zero host authority; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in).
- Fix: remove the effectful call, or move it out of the sandbox into the host program that loads it
+  jet  Reading    main.jet
+  jet  Checking   program and build plan
+  jet  Generating native code
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> main.jet:3:25
+    |
+  3 | pub fn get_secret() Int {
+    |                         ^
+ Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` bare for a unit result.
+More: jet-lang.dev/e/E0080
 
 1 problem found
-run `jet explain E1258` to learn more
-More: jet-lang.dev/e/E1258
+run `jet explain E0080` to learn more

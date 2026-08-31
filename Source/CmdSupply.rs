@@ -149,7 +149,12 @@ fn fail_publish_checkout(checkout: &jet::Publish::PublishCheckout, report: impl 
 /// After the gate passes it pushes an index entry to the git registry (card c56):
 /// clone/pull the sparse index, append the version line, commit, push. Version
 /// immutability (D-VERSION1) is enforced here (E1234).
-pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
+pub(crate) fn run_publish(
+    force: bool,
+    no_sign: bool,
+    foreign_registry: Option<&str>,
+    mode: OutputMode,
+) {
     // #1659 criterion 3: `--quiet` suppresses this function's non-error
     // progress narration only — every gate, error, and mutation below still
     // runs and still exits non-zero on failure; `status!` never wraps
@@ -160,6 +165,42 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         &cwd,
         "error: no package.jet found — run `jet registry publish` inside a project",
     );
+
+    if let Some(value) = foreign_registry {
+        let registry = jet::Publish::ForeignPackage::ForeignRegistry::parse(value)
+            .unwrap_or_else(|error| {
+                crate::cli_error!("E2104", "{error}");
+                exit(ExitCodes::USAGE);
+            });
+        match jet::Publish::ForeignPackage::publish_foreign_package(
+            &root,
+            jet::Publish::ForeignPackage::ForeignPublishOptions { registry, no_sign },
+        ) {
+            Ok(report) => {
+                if mode.json {
+                    println!(
+                        "{{\"registry\":{},\"artifact\":{},\"digest\":{},\"releaseIdentity\":{},\"uploaded\":true}}",
+                        jet_foundation::JSON::quote(registry.as_str()),
+                        jet_foundation::JSON::quote(&report.artifact.to_string_lossy()),
+                        jet_foundation::JSON::quote(&report.artifact_digest),
+                        jet_foundation::JSON::quote(&report.release_identity),
+                    );
+                } else if !mode.quiet {
+                    println!(
+                        "published {} to {} ({})",
+                        report.artifact.display(),
+                        registry.as_str(),
+                        report.artifact_digest
+                    );
+                }
+                exit(ExitCodes::OK);
+            }
+            Err(error) => {
+                crate::cli_error!("E2105", "foreign publication failed: {error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {

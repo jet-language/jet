@@ -13,8 +13,8 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         0xc67178f2,
     ];
     const H0: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
-        0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let mut state = H0;
     let bit_len = (data.len() as u64) * 8;
@@ -43,7 +43,11 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ (!e & g);
-            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let temp1 = h
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
             let temp2 = s0.wrapping_add(maj);
@@ -94,6 +98,10 @@ fn jet_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     }
     outer.extend_from_slice(&jet_sha256_raw(&inner));
     jet_sha256_raw(&outer)
+}
+
+pub fn jet_crypto_hmac_sha256(key: &Vec<u8>, data: &Vec<u8>) -> Vec<u8> {
+    jet_hmac_sha256(key.as_slice(), data.as_slice()).to_vec()
 }
 
 fn jet_ct_eq(a: &[u8], b: &[u8]) -> bool {

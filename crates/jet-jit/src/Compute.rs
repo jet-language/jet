@@ -10,9 +10,9 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use crate::runtime_host::{bind_jit_callable_handle, jit_callable_parts, JitCallableSlot};
 use crate::JitRuntime;
 use crate::Marshal::{result_err_msg, result_ok};
+use crate::runtime_host::{JitCallableSlot, bind_jit_callable_handle, jit_callable_parts};
 
 #[allow(dead_code, unused_imports)]
 mod semantics {
@@ -917,6 +917,8 @@ pub(crate) struct ComputeState {
     sparse: Vec<Option<semantics::Sparse>>,
     vjp_states: Vec<Option<semantics::VjpState>>,
     curried_handles: Vec<i64>,
+    deferred_tensor_drop_depth: usize,
+    deferred_tensor_drops: Vec<i64>,
 }
 
 impl ComputeState {
@@ -926,6 +928,8 @@ impl ComputeState {
         self.streams.clear();
         self.sparse.clear();
         self.vjp_states.clear();
+        self.deferred_tensor_drop_depth = 0;
+        self.deferred_tensor_drops.clear();
         for handle in self.curried_handles.drain(..) {
             semantics::jet_compute_curried_drop(handle);
         }
@@ -981,6 +985,51 @@ fn slot_mut<'a>(runtime: &'a mut JitRuntime, handle: i64) -> Option<&'a mut Tens
     tensor_index(handle)
         .and_then(|index| runtime.compute.slots.get_mut(index))
         .and_then(Option::as_mut)
+}
+
+fn release_tensor(runtime: &mut JitRuntime, tensor: i64) {
+    let Some(index) = tensor_index(tensor) else {
+        return;
+    };
+    let released = runtime
+        .compute
+        .slots
+        .get_mut(index)
+        .and_then(Option::take)
+        .is_some();
+    if released {
+        runtime
+            .compute
+            .windows
+            .retain(|window| window.tensor != tensor);
+    }
+}
+
+// A resident transform callback runs ordinary lexical cleanup before returning
+// its Tensor handle. Defer those drops until the host has copied the callback
+// result into the shared Prelude representation, then release only its temps.
+fn begin_tensor_drop_deferral(runtime: &mut JitRuntime) -> usize {
+    let mark = runtime.compute.deferred_tensor_drops.len();
+    runtime.compute.deferred_tensor_drop_depth += 1;
+    mark
+}
+
+fn finish_tensor_drop_deferral(runtime: &mut JitRuntime, mark: usize, preserve: &[i64]) {
+    runtime.compute.deferred_tensor_drop_depth = runtime
+        .compute
+        .deferred_tensor_drop_depth
+        .checked_sub(1)
+        .expect("JIT compute drop deferral underflow");
+    while runtime.compute.deferred_tensor_drops.len() > mark {
+        let tensor = runtime
+            .compute
+            .deferred_tensor_drops
+            .pop()
+            .expect("deferred Tensor drop");
+        if !preserve.contains(&tensor) {
+            release_tensor(runtime, tensor);
+        }
+    }
 }
 
 fn trap(runtime: &mut JitRuntime, message: &str) -> i64 {
@@ -1284,7 +1333,7 @@ fn run_transform(
     {
         Some(values) => values,
         None => {
-            return transform_failure(runtime, "core.compute transform received an invalid Tensor")
+            return transform_failure(runtime, "core.compute transform received an invalid Tensor");
         }
     };
     let tangent_tensors = match tangent_handles
@@ -1297,7 +1346,7 @@ fn run_transform(
             return transform_failure(
                 runtime,
                 "core.compute.jvp received an invalid tangent Tensor",
-            )
+            );
         }
     };
     let (tape, traced) = semantics::trace_inputs(input_tensors);
@@ -1309,9 +1358,15 @@ fn run_transform(
         originals.push((*handle, slot.tensor.clone()));
         slot.tensor = traced_tensor.clone();
     }
+    let drop_mark = begin_tensor_drop_deferral(runtime);
     let output_handle = invoke_callable(callable, primal_handles);
-    let output_record = if output_handle != 0 && result_fields != 0 {
-        read_record_words(runtime, output_handle, result_fields)
+    let output_tensors = if output_handle != 0 && result_fields != 0 {
+        read_record_words(runtime, output_handle, result_fields).and_then(|fields| {
+            fields
+                .into_iter()
+                .map(|handle| slot(runtime, handle).map(|slot| slot.tensor.clone()))
+                .collect::<Option<Vec<_>>>()
+        })
     } else {
         None
     };
@@ -1325,6 +1380,7 @@ fn run_transform(
             slot.tensor = original;
         }
     }
+    finish_tensor_drop_deferral(runtime, drop_mark, primal_handles);
     if output_handle == 0 {
         return transform_failure(runtime, "core.compute transform function returned no value");
     }
@@ -1333,25 +1389,13 @@ fn run_transform(
         if method != "gradient" {
             return transform_failure(runtime, "core.compute transform requires a Tensor result");
         }
-        let Some(fields) = output_record else {
+        let Some(tensors) = output_tensors else {
             return transform_failure(runtime, "core.compute.gradient returned an invalid tuple");
         };
-        let states = match fields
-            .iter()
-            .map(|handle| {
-                slot(runtime, *handle)
-                    .map(|slot| semantics::vjp_begin(slot.tensor.clone(), tape.clone()))
-            })
-            .collect::<Option<Vec<_>>>()
-        {
-            Some(states) => states,
-            None => {
-                return transform_failure(
-                    runtime,
-                    "core.compute.gradient tuple field is not a Tensor",
-                )
-            }
-        };
+        let states = tensors
+            .into_iter()
+            .map(|tensor| semantics::vjp_begin(tensor, tape.clone()))
+            .collect::<Vec<_>>();
         let nested = match semantics::nested_gradient(&states, targets) {
             Ok(values) => values,
             Err(message) => return transform_failure(runtime, &message),
@@ -1425,40 +1469,47 @@ fn curried_base(
                 .map(|tensor| alloc_tensor(runtime, tensor))
                 .collect::<Vec<_>>();
             if handles.iter().any(|handle| *handle == 0) {
+                for handle in handles {
+                    release_tensor(runtime, handle);
+                }
                 return Some(Err(semantics::JetComputeError::Unsupported(
                     "core.compute transform received an invalid Tensor".to_string(),
                 )));
             }
+            let drop_mark = begin_tensor_drop_deferral(runtime);
             let output_handle = invoke_callable(callable, &handles);
-            if output_handle == 0 {
-                return Some(Err(semantics::JetComputeError::Unsupported(
+            let value = if output_handle == 0 {
+                Err(semantics::JetComputeError::Unsupported(
                     "core.compute transform function returned no value".to_string(),
-                )));
-            }
-            if result_fields == 0 {
-                let Some(value) = slot(runtime, output_handle).map(|slot| slot.tensor.clone())
-                else {
-                    return Some(Err(semantics::JetComputeError::Unsupported(
-                        "core.compute transform returned an invalid Tensor".to_string(),
-                    )));
-                };
-                return Some(Ok(semantics::JetComputeBaseResult::Tensor(value)));
-            }
-            let Some(fields) = read_record_words(runtime, output_handle, result_fields) else {
-                return Some(Err(semantics::JetComputeError::Unsupported(
-                    "core.compute.gradient returned an invalid tuple".to_string(),
-                )));
+                ))
+            } else if result_fields == 0 {
+                slot(runtime, output_handle)
+                    .map(|slot| semantics::JetComputeBaseResult::Tensor(slot.tensor.clone()))
+                    .ok_or_else(|| {
+                        semantics::JetComputeError::Unsupported(
+                            "core.compute transform returned an invalid Tensor".to_string(),
+                        )
+                    })
+            } else {
+                read_record_words(runtime, output_handle, result_fields)
+                    .and_then(|fields| {
+                        fields
+                            .into_iter()
+                            .map(|handle| slot(runtime, handle).map(|slot| slot.tensor.clone()))
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .map(semantics::JetComputeBaseResult::TensorTuple)
+                    .ok_or_else(|| {
+                        semantics::JetComputeError::Unsupported(
+                            "core.compute.gradient returned an invalid tuple".to_string(),
+                        )
+                    })
             };
-            let Some(values) = fields
-                .iter()
-                .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
-                .collect::<Option<Vec<_>>>()
-            else {
-                return Some(Err(semantics::JetComputeError::Unsupported(
-                    "core.compute.gradient tuple field is not a Tensor".to_string(),
-                )));
-            };
-            Some(Ok(semantics::JetComputeBaseResult::TensorTuple(values)))
+            finish_tensor_drop_deferral(runtime, drop_mark, &[]);
+            for handle in handles {
+                release_tensor(runtime, handle);
+            }
+            Some(value)
         });
         result.unwrap_or_else(|| {
             Err(semantics::JetComputeError::Unsupported(
@@ -1611,7 +1662,7 @@ fn jet_jit_compute_curried_grads(env: i64) -> i64 {
                 return transform_failure(
                     runtime,
                     "core.compute.vjp.grads returned the wrong result",
-                )
+                );
             }
             Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
         };
@@ -1760,7 +1811,7 @@ fn jet_jit_compute_curried_new(
                 return transform_failure(
                     runtime,
                     "core.compute transform function arity exceeds the resident ABI",
-                )
+                );
             }
         };
         bind_jit_callable_handle(runtime, fn_ptr, plan, true)
@@ -1769,20 +1820,10 @@ fn jet_jit_compute_curried_new(
 
 fn jet_jit_compute_drop_tensor(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
-        let Some(index) = tensor_index(tensor) else {
-            return 0;
-        };
-        let released = runtime
-            .compute
-            .slots
-            .get_mut(index)
-            .and_then(Option::take)
-            .is_some();
-        if released {
-            runtime
-                .compute
-                .windows
-                .retain(|window| window.tensor != tensor);
+        if runtime.compute.deferred_tensor_drop_depth != 0 {
+            runtime.compute.deferred_tensor_drops.push(tensor);
+        } else {
+            release_tensor(runtime, tensor);
         }
         0
     })
@@ -2365,7 +2406,9 @@ fn jet_jit_compute_set(tensor: i64, indices: i64, value: f64) -> i64 {
                         Err(message) => return result_err_msg(&message),
                     },
                     None => {
-                        return result_err_msg("core.compute.set received an invalid Tensor handle")
+                        return result_err_msg(
+                            "core.compute.set received an invalid Tensor handle",
+                        );
                     }
                 };
                 let Some(list) = slot(runtime, tensor).map(|slot| slot.list) else {
@@ -2451,7 +2494,7 @@ fn jet_jit_compute_copy(tensor: i64) -> i64 {
                 return trap(
                     runtime,
                     "core.compute.copy received an invalid Tensor handle",
-                )
+                );
             }
         };
         alloc_tensor(runtime, copied)
@@ -2466,7 +2509,7 @@ fn jet_jit_compute_clone(tensor: i64) -> i64 {
                 return trap(
                     runtime,
                     "core.compute.clone received an invalid Tensor handle",
-                )
+                );
             }
         };
         alloc_tensor(runtime, cloned)

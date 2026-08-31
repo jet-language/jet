@@ -148,7 +148,7 @@ pub(crate) fn contextual_literal(name: &str) -> Option<ContextualLiteral> {
     }
 }
 
-fn pattern_consumes_result_carrier(pattern: &Pattern) -> bool {
+pub(crate) fn pattern_consumes_result_carrier(pattern: &Pattern) -> bool {
     match pattern {
         Pattern::Ok { .. } | Pattern::Err { .. } => true,
         Pattern::Or(alts, _) => alts.iter().any(pattern_consumes_result_carrier),
@@ -164,7 +164,6 @@ fn pattern_consumes_result_carrier(pattern: &Pattern) -> bool {
         _ => false,
     }
 }
-
 pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &Type) {
     if let Pattern::Or(alts, _) = pattern {
         for alt in alts {
@@ -311,7 +310,7 @@ impl<'a> Checker<'a> {
         name: &str,
         span: Span,
         ty: Type,
-    ) -> Option<(String, Span)> {
+    ) -> Option<(String, crate::Sema::FlowFacts::MoveOrigin)> {
         let restore = if self.is_optional_flow_refine(name, &ty) {
             let moved_at = self.flow.moved.remove(name);
             self.declare_optional_flow_narrow(name, span, ty);
@@ -399,7 +398,7 @@ impl<'a> Checker<'a> {
                 self.require_bool(cond, "a condition");
                 HashMap::new()
             }
-            Expr::Binary(BinOp::And, l, r, _) => {
+            Expr::Binary(BinOp::And, l, r, span) => {
                 let left_bindings = self.check_condition_with_bindings(l);
                 self.push_scope();
                 let mut restore_moved = Vec::new();
@@ -415,6 +414,13 @@ impl<'a> Checker<'a> {
                 self.pop_scope();
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
+                }
+                // Subjectless guards are checked structurally here, so their
+                // outer `&&` never reaches `infer_binary`. Keep the typed
+                // normalized-Path containment guidance on this path too.
+                if let Some(edit) = self.path_containment_string_prefix_edit(l, r, *span) {
+                    self.diags
+                        .push(Diagnostic::from_row("L0517", &[], Some(*span)).with_edit(edit));
                 }
                 left_bindings.into_iter().for_each(|(k, v)| {
                     right_bindings.entry(k).or_insert(v);
@@ -783,11 +789,7 @@ impl<'a> Checker<'a> {
         }
         self.diags.truncate(diag_len);
         if !all_pattern {
-            self.report_refutable_pattern_without_else(
-                has_str_match_arm,
-                has_bin_match_arm,
-                span,
-            );
+            self.report_refutable_pattern_without_else(has_str_match_arm, has_bin_match_arm, span);
             return;
         }
         let mut covered = HashSet::new();
@@ -875,9 +877,6 @@ impl<'a> Checker<'a> {
         if preserve_result_carrier {
             self.failure_auto_depth -= 1;
         }
-        eprintln!(
-            "DEBUG direct dispatch subject={subject:?} type={subj_ty:?} preserve={preserve_result_carrier}"
-        );
         let subj_name = match &*subject {
             Expr::Ident(n, _) => Some(n.clone()),
             _ if !subjectless_guard && !matches!(&*subject, Expr::PatternTest { .. }) => {

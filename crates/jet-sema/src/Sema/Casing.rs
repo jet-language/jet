@@ -768,6 +768,7 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
         | Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
+        | Expr::Unit(..)
         | Expr::Ident(..)
         | Expr::UnitLit { .. }
         | Expr::Absent(_)

@@ -2735,15 +2735,14 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_marker_head() => {
                 let marker =
                     self.parse_registered_marker_at_site(crate::Policy::RuleSite::Statement)?;
-                let expression = self.expr()?;
-                let target = expression.span();
+                let statement = self.stmt()?;
+                let target = statement.span();
                 self.bind_rule_fact(
                     marker.name_span,
                     Some(target),
                     crate::Policy::RuleSite::Statement,
                 );
-                self.finish_stmt()?;
-                Ok(Stmt::Expr(expression))
+                Ok(statement)
             }
             TokKind::At => {
                 // D-LOOPLABEL3: recover retired `@name loop`.

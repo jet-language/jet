@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 
 use jet_driver::Diagnostics::{Diagnostic, Span, TextEdit};
@@ -11,7 +10,7 @@ use super::query_actions::canvas_authority_context;
 use super::edit_transaction::EDIT_SCHEMA_VERSION;
 use super::graph_projection::{GraphBuilder, NodeQueryRef, Projection};
 use super::schema_api::{ACTION_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION, QUERY_SCHEMA_VERSION};
-use super::source_model::source_revision;
+use super::source_model::{read_source_without_symlinks, source_revision};
 use super::validation_json::{json_str, span_json};
 
 pub(super) fn graph_id(module_display: &str, f: &AST::Func) -> String {
@@ -293,7 +292,7 @@ pub(super) fn edit(span: SourceSpan, text: &str) -> TextEdit {
 }
 
 pub(super) fn edit_ok(changed: bool, path: &Path) -> String {
-    let src = fs::read_to_string(path).unwrap_or_default();
+    let src = read_source_without_symlinks(path).unwrap_or_default();
     edit_ok_source(changed, &src)
 }
 

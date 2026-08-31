@@ -1,0 +1,31 @@
+// User story: a parser routes string keys without a chain of guard branches.
+//
+// Anti-pattern from the dogfood port: adjacent guards made one categorical
+// table look like unrelated validation:
+// `if key == "revision" -> return "revision"`
+// `if key == "path" -> return "path"`
+// Rule D-IF3/D-MATCHARM1: use one ordered subject table and group aliases
+// with `|`.
+fn field_kind(key: String) String -> {
+    if key == {
+        "revision" | "rev" -> "revision"
+        "path" | "root" -> "path"
+        "profile" | "flavor" -> "profile"
+        else -> "unknown"
+    }
+}
+
+fn command_kind(verb: String) String -> {
+    if verb == {
+        "list" | "ls" -> "list"
+        "show" | "get" -> "show"
+        else -> "unknown"
+    }
+}
+
+fn run() {
+    print(field_kind("rev"))
+    print(field_kind("root"))
+    print(command_kind("get"))
+    print(field_kind("other"))
+}

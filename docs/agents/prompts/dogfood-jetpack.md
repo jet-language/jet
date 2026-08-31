@@ -1,12 +1,14 @@
 # Prompt: port jetpack to Jet (dogfood scale canary, side by side)
 
-Copy-paste target: run this in a fresh thread. Read this whole file before acting. You ARE the implementer/orchestrator for this work — plan, dispatch Luna lanes, integrate, verify, and report per docs/agents/orchestration.md.
+**Status — owner pause, 2026-08-30:** do not resume parity, extension, or replacement work on the Jet port. The Rust jetpack is the sole active implementation until it is fully functional, reliable, and stable. Keep the existing Jet canary as captured evidence; do not maintain it in parallel. This pause does not reject eventual replacement. Resume only after an explicit owner instruction.
+
+Historical copy-paste target. Do not run this prompt while the owner pause is active. When reactivated, read the whole file before acting. You ARE the implementer/orchestrator for this work — plan, dispatch Luna lanes, integrate, verify, and report per docs/agents/orchestration.md.
 
 ## Mission
 
 Port jetpack — Jet's package/environment manager — to Jet itself, as a side-by-side twin of the shipped Rust implementation. This is ratified decision D-MEGAPROJ1 (card #2327, ratified 2026-08-28): one of two megaproject scale canaries, and an explicit down payment on e11 self-hosting (refs card #217 — compiler-shaped code, arenas, journals, stores). The program is the probe; every language friction, bug, missing stdlib verb, and slow tool you hit is a first-class deliverable, not an obstacle.
 
-**Non-replacement law (owner, verbatim intent): the shipped jetpack is NOT replaced.** The two versions run side by side so the owner can test and compare. You never edit `crates/jetpack*`, `crates/jet-pkg-model`, or any shipped toolchain path. The Jet port lives entirely in its own tree and its binary/entry is invoked distinctly (through `jet run dogfood/jetpack` or a clearly named output), never installed over the real one.
+**Canary isolation law (historical campaign constraint): the shipped jetpack was not replaced or edited during the dogfood campaign.** The two versions ran side by side so the owner could test and compare. The Jet port lived entirely in its own tree and used a distinct binary or entry. This was an isolation rule for the campaign, not an owner verdict against eventual replacement.
 
 ## Hard safety laws (violating any of these is stop-and-fix)
 

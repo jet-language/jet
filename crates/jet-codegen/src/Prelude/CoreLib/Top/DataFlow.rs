@@ -420,7 +420,13 @@ fn jet_data_csv_reader(
     limits: jet_std::DataLimits,
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
     jet_data_limits_validate(&limits)?;
-    let reader = jet_enc_csv_reader(input, limits.encoding.clone())
+    let reader = jet_enc_csv_reader(
+        input,
+        limits.encoding.clone(),
+        ",".to_string(),
+        false,
+        false,
+    )
         .map_err(|enc| jet_data_from_encoding("csv_reader", Err(JetAbsent), enc))?;
     Ok(jet_std::DataStream {
         inner: jet_std::DataStreamInner::CSV {
@@ -652,7 +658,7 @@ fn jet_data_stream_scan<T: __jet_Decode>(
         jet_std::DataStreamInner::CSV { reader, headers } => {
             if headers.is_none() {
                 match reader.next_record() {
-                    Ok(Some(header)) => *headers = Some(header),
+                    Ok(Some(header)) => *headers = Some(header.fields),
                     Ok(None) => {
                         stream.eof = true;
                         return Ok(None);
@@ -673,7 +679,11 @@ fn jet_data_stream_scan<T: __jet_Decode>(
                 }
                 Ok(Some(row)) => {
                     stream.row_index += 1;
-                    match jet_data_stream_decode_csv_row::<T>(&header, row, stream.row_index) {
+                    match jet_data_stream_decode_csv_row::<T>(
+                        &header,
+                        row.fields,
+                        stream.row_index,
+                    ) {
                         Ok(value) => Ok(Some(value)),
                         Err(error) => jet_data_stream_fail(stream, error),
                     }

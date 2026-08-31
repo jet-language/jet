@@ -1,8 +1,8 @@
 # Self-hosted optimizer: SSA backend fed by sema facts
 
-Status: design for card #2059. This document changes no code and does not
-ratify syntax. It records the eventual optimizer seam and the smaller
-Cranelift steps that can land before self-hosting.
+Status: design for card #2059, with the minimal TIR fact-channel seam landed by
+#2301. It does not ratify syntax. It records the eventual optimizer seam and
+the smaller Cranelift steps that can land before self-hosting.
 
 ## Decision in one page
 
@@ -38,9 +38,10 @@ operation or the conservative memory dependency.
 - I9 exception: none. An inline sequence is allowed only as a proven
   lowering of a Prelude operation. It cannot move policy, validation, default
   behavior, or error meaning into an engine.
-- Owner-gated contract: the frozen-TIR amendment described below must be
-  ratified before sema exports a general optimization-fact channel.
-- This card does not implement the channel, the SSA module, or a pass.
+- No separate IR: #2301 exposes the first five optimizer fact classes through
+  one borrowed TIR channel; it does not create a third semantic representation.
+- This document does not implement private SSA or an optimization pass. The
+  current channel is the contract seam that those later implementations consume.
 
 ## Current compiler boundary
 
@@ -83,7 +84,7 @@ seam, not necessarily missing from sema.
 | Contracts and checked outcomes | Sema checks contracts and preserves their selected disposition. TIR has explicit contract and contract-scope statements (crates/jet-codegen/src/Codegen/TIR/mod.rs:3110-3125). | Contract nodes, Try conversions, and explicit Prelude/Core calls retain the observable check and outcome path (crates/jet-codegen/src/Codegen/TIR/mod.rs:4290-4307, 4227-4254). | Remove a check only with a sema-backed proof that its failure edge is unreachable. Otherwise preserve the check, source location, and outcome. The optimizer must never turn an outcome into a host panic or a different error. |
 | Layout and storage representation | Struct layout is explicit for C and columnar forms (crates/jet-foundation/src/AST/items.rs:1584-1595). D-SOA1 defines #Layout(columnar) as struct-of-arrays with the same logical Vec API; C layout is the ABI boundary (docs/spec/syntax-decisions.md:2897-2902). | TIR Layout statements and the ForIn.columnar decision preserve selected layout behavior (crates/jet-codegen/src/Codegen/TIR/mod.rs:3401-3434, 3496-3510). | Permit field reorder and AoS-to-SoA only when physical layout is not observed. #Layout(c) is never transformed. The broad default physical-layout-unspecified rule is part of this design contract and must be recorded in the owning layout decision if it is not already recorded there. |
 
-### What sema already has, and what it does not yet export
+### What sema already has, and what TIR exports
 
 Sema has enough information to make the optimizer useful today, but the
 information is split among FlowFacts, effect summaries, AST metadata, and
@@ -96,8 +97,12 @@ once proven. The proof must cross the TIR seam with:
 - the proposition and its validity window;
 - the proof's conservative fallback.
 
-The missing artifact is therefore not another analysis that guesses at
-ownership. It is a read-only, source-linked fact channel produced by sema.
+#2301 supplies the first five classes through the borrowed `TFactChannel` view
+over existing typed TIR carriers. The view has no per-node allocation or side
+table. Its scope is intentionally small: type, integer bounds, exclusivity,
+purity, and comptime value. Broader source-linked rows remain a later
+extension of this same #668 contract, not a second fact schema. An absent field
+means "not proven", so the consumer keeps the checked Prelude operation.
 
 ## TIR today and the SSA conversion gap
 
@@ -227,27 +232,44 @@ non-applicable fact is normal and selects the conservative operation.
 
 R12 and #668 require one semantic-core TIR and exactly two
 feature-identical executable lenses (docs/spec/architecture.md:710-736;
-docs/spec/tir.md:1-11). The following is the minimum amendment needed to carry
-optimizer facts without introducing a third lens:
+docs/spec/tir.md:1-11). #2301 amends that contract with one typed channel for the
+first optimizer facts without introducing a third lens or a parallel IR:
 
-> Amend the frozen TIR contract so that sema may attach one source-linked
-> optimization-fact channel to each function, binding, place, call, loop,
-> allocation, and access site. A fact bundle may contain the resolved type,
-> range or bounds, effect and authority row, access and alias window, view
-> provenance, freeze and immutability state, comptime value, contract proof,
-> escape state, and layout facts. The target profile supplies target legality.
-> This channel is part of the executable TIR contract, is produced by sema, and
-> is consumed read-only by the
-> JIT and optimized AOT lens, and is erased before runtime. A missing fact
-> means "not proven"; consumers must preserve the checked Prelude operation.
-> SSA is a private derived implementation and is not a third semantic IR or
-> a parallel source of truth. Every TIR construct remains exhaustively
-> handled by AOT, JIT, and reference interpretation.
+> The frozen TIR contract exposes one read-only `TFactChannel` view. The view
+> carries sema-proven type, integer bounds, exclusivity, purity, and comptime
+> value facts from the existing TIR carriers: `TExpr.ty` and `CtLit`,
+> `TNumericOp::InlineRange`, `TCallArg` access flags, sema loop proofs, and
+> `TFunc.is_pure`. The view is compact and borrowed; it creates no per-node
+> heap allocation and no side-table schema. It is part of the executable TIR
+> contract, consumed read-only by JIT and optimized AOT lowering, and erased
+> before runtime. A missing fact means "not proven"; consumers preserve the
+> checked Prelude operation or conservative memory dependency.
+>
+> A private typed SSA form may be derived inside an optimized lens, but it is
+> not a third semantic IR, a third lens, or a source of semantic authority.
+> Every TIR construct remains exhaustively handled by AOT, JIT, and reference
+> interpretation. Any later fact class or TIR shape change must amend #668
+> rather than create a parallel optimizer representation.
 
-This amendment does not require a serialized schema, versioned interchange
-format, or compatibility reader. It is an in-memory contract between the
-existing sema and TIR seam. Any later TIR shape change must amend #668 rather
-than create a parallel optimizer representation.
+The channel deliberately projects facts already selected by sema; it does not
+re-run sema policy in codegen. `TFunc.is_pure == false` remains unknown rather
+than an inferred impurity, and an unproven range or access mode remains absent.
+This preserves conservative behavior while allowing each lens to consume the
+same proof.
+
+#### #2301 first-consumer map
+
+| Fact class | Sema/TIR producer | First existing consumer |
+| --- | --- | --- |
+| Type | `TExpr.ty`, typed locals and params | TIR scalar/literal emission reads `TExpr::fact_channel().ty` before selecting the machine spelling. |
+| Integer bounds | `Type::integer_range`, exact literals, `TNumericOp::InlineRange`, fixed-list proof | Numeric inline-range emission reads `TFactChannel::integer_bounds`; the fixed-list proof keeps the direct getter path. |
+| Exclusivity | `AccessConvention` lowered into `TCallArg.borrow`/`mut_borrow` and `Borrow` | `emit_tir_call_args` reads the channel to apply the already-selected shared or exclusive wrapper. |
+| Purity | `Func.is_pure` and `AutoVectorizationFacts.effect_free_body` | Native auto-vectorization emission accepts a loop proof only when the channel reports `Pure`; unknown remains scalar. |
+| Comptime value | sema `Binding.ct`/`LocalInfo.constant_value` lowered to `CtLit` | `emit_tir_expr` reads `TFactChannel::comptime_value` for typed constant serialization. |
+
+This map is the implementation boundary for #2301. Future GVN, LICM, SCCP,
+alias, and SSA consumers extend the same channel; they do not define another
+fact lookup or another semantic representation.
 
 ### SSA data model
 
@@ -357,16 +379,17 @@ sequence. They are not a second pass pipeline that can disagree with sema.
 
 ### Land in the Cranelift JIT now
 
-These steps use facts already present in TIR. They improve TIR-to-Cranelift
-lowering without waiting for self-hosting or changing the semantic contract.
+These steps consume the #2301 channel through TIR. They improve
+TIR-to-Cranelift lowering without waiting for self-hosting or changing the
+semantic contract.
 
 | Slice | Use existing evidence | Boundary |
 | --- | --- | --- |
 | Mechanical CFG and local SSA conversion inside LowerCtx | TStmt control-flow shape, typed TLocal, existing Cranelift block parameters, and resolved TExpr types. | Private JIT implementation only. Do not add a second semantic IR or change TIR meaning. |
-| Typed scalar lowering | TExpr.ty, literal widths, TNumericOp, is_scalar, and existing fixed-width TIR decisions. Keep direct CLIF values for fixed-width scalars and a proven small exact-Int fast path. | Overflow, exact-Int spill, diagnostics, and policy remain the Prelude contract. The fallback calls the same semantic operation. |
-| Bounds and length reuse | IndexKind::FixedListProof, InlineRange, fixed-list metadata, and loop structure. Hoist a stable length and use proven fixed getters where the TIR proof covers the access. | No generic interval inference in the JIT. If the TIR proof does not cover the access, retain the checked getter and E3010 path. |
-| Ownership-aware wrapper reduction | TCallArg clone/borrow/widen/trait decisions, Borrow, Clone, ExplicitCopy, SplitViews, and EditDisjoint. | Remove only redundant carrier work proven by TIR. Do not infer no-escape or delete a required value-semantic clone. |
-| Direct calls and small pure inlining | Resolved function/method identity, TFunc inline/pure fields, and current effect nodes. | Unknown, foreign, Shared, Pool, task, transaction, and unsafe paths stay opaque. |
+| Typed scalar lowering | `TFactChannel.ty`, literal widths, `TNumericOp`, `is_scalar`, and existing fixed-width TIR decisions. Keep direct CLIF values for fixed-width scalars and a proven small exact-Int fast path. | Overflow, exact-Int spill, diagnostics, and policy remain the Prelude contract. The fallback calls the same semantic operation. |
+| Bounds and length reuse | `TFactChannel.integer_bounds`, `IndexKind::FixedListProof`, `InlineRange`, fixed-list metadata, and loop structure. Hoist a stable length and use proven fixed getters where the TIR proof covers the access. | No generic interval inference in the JIT. If the TIR proof does not cover the access, retain the checked getter and E3010 path. |
+| Ownership-aware wrapper reduction | `TFactChannel.exclusivity` plus TCallArg clone/borrow/widen/trait decisions, Borrow, Clone, ExplicitCopy, SplitViews, and EditDisjoint. | Remove only redundant carrier work proven by TIR. Do not infer no-escape or delete a required value-semantic clone. |
+| Direct calls and small pure inlining | `TFactChannel.purity`, resolved function/method identity, TFunc inline/pure fields, and current effect nodes. | Unknown, foreign, Shared, Pool, task, transaction, and unsafe paths stay opaque. |
 | Portable lane lowering | Existing D-SIMD1/2 lane forms, D-SIMD3's AOT-default policy, and #Scalar. | Lower already-selected lane forms through one Prelude-backed lane family and preserve left-to-right reduction semantics. Full loop vectorization remains the self-hosted slice; no JIT-only vector syntax or policy. |
 | Evidence counters | Count host calls for scalar arithmetic/indexing, runtime tag checks, allocations, clones, deopts, vector width, and bounds checks in the benchmark corpus. | Counters validate the design; they do not authorize a semantic shortcut. Do not add a jit_gaps parking entry. |
 
@@ -377,11 +400,12 @@ remaining a thin TIR lens.
 
 ### Wait for the self-hosted optimizer
 
-These steps need the #668 amendment and a sema-to-optimizer implementation.
+These later steps extend the #2301 channel with source-linked program-point
+facts and consume the same #668 contract.
 
 | Slice | Required fact or implementation | Result |
 | --- | --- | --- |
-| General fact export | Per-site type, interval, loop induction, access window, alias class, effect/authority row, freeze, comptime, contract, escape, and layout facts. | No rediscovery of ownership, purity, or bounds in a backend. |
+| General fact export | Extend the one channel with per-site type, interval, loop induction, access window, alias class, effect/authority row, freeze, comptime, contract, escape, and layout facts. | No rediscovery of ownership, purity, or bounds in a backend. |
 | Private typed SSA module | Function/block/value IDs, block arguments, memory SSA, cleanup edges, semantic operations, and source origins. | One deep optimizer implementation shared by the optimized AOT lens and any JIT prepass that adopts it; TIR remains the contract. |
 | Full pass pipeline | Inline, SROA, GVN, LICM, vectorize, and target-aware lowering, with SCCP, alias, escape, bounds, and DCE support. | AOT kernels can reach or exceed the generated Rust/LLVM code-quality baseline while retaining Jet facts directly. |
 | Ownership-aware layout optimization | Physical-layout-unspecified default, field reorder, scalar replacement, AoS-to-SoA, D-SOA1 columnar, and C-layout fences. | Hardware-friendly storage without changing logical Jet types or ABI-observable data. |
@@ -495,10 +519,11 @@ only when it is a semantics-preserving lowering of the Prelude operation.
 
 ## Follow-up and proof obligations
 
-After owner ratification of the #668 amendment and the default layout
-statement, implementation work should split into these bounded cards:
-
-1. Export the source-linked fact channel from sema into frozen TIR.
+With the #2301 amendment in place, implementation work splits into these
+bounded cards:
+0. #2301: expose the first five fact classes through one borrowed TIR channel
+   and wire their first consumers.
+1. Extend that source-linked fact channel from sema into frozen TIR.
 2. Build the structured-TIR-to-SSA conversion and memory model.
 3. Land Cranelift typed lowering, direct scalar paths, and proven bounds
    reuse.

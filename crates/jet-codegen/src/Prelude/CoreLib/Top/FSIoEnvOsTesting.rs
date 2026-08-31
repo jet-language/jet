@@ -1,25 +1,3 @@
-fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(to.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
-    }
-    #[cfg(windows)]
-    {
-        let meta = std::fs::metadata(from).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, from, e))?;
-        if meta.is_dir() {
-            std::os::windows::fs::symlink_dir(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
-        } else {
-            std::os::windows::fs::symlink_file(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
-        }
-    }
-}
 fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
@@ -43,65 +21,20 @@ fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOErr
     std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
 }
 fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    let meta = std::fs::symlink_metadata(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
-    let ft = meta.file_type();
-    let modified_ms = meta.modified().ok().and_then(system_time_ms).unwrap_or(0);
-    let created_ms = meta.created().ok().and_then(system_time_ms).unwrap_or(0);
-    let kind = if ft.is_symlink() {
-        "symlink"
-    } else if ft.is_dir() {
-        "dir"
-    } else if ft.is_file() {
-        "file"
-    } else {
-        "other"
-    };
-    Ok(jet_std::Stat {
-        size: meta.len() as i64,
-        modified_ms,
-        created_ms,
-        readonly: meta.permissions().readonly(),
-        is_file: ft.is_file(),
-        is_dir: ft.is_dir(),
-        is_symlink: ft.is_symlink(),
-        kind: kind.to_string(),
+    jet_fs_stat(path).map(|stat| jet_std::Stat {
+        size: stat.size,
+        modified_ms: stat.modified_ms,
+        created_ms: stat.created_ms,
+        readonly: stat.readonly,
+        is_file: stat.is_file,
+        is_dir: stat.is_dir,
+        is_symlink: stat.is_symlink,
+        kind: stat.kind,
+        mode: stat.mode,
     })
 }
-fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
-    t.duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_millis() as i64)
-}
-fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    std::fs::canonicalize(path)
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Resolve, path, e))
-}
-fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
-    let p = std::path::Path::new(path);
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))?
-            .join(p)
-    };
-    Ok(abs.to_string_lossy().to_string())
-}
+
+
 fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
@@ -110,44 +43,26 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IO
             "fault injected: FS.Read",
         ));
     }
-    let root = std::path::PathBuf::from(path);
-    let mut out = Vec::new();
-    fn walk_dir(
-        root: &std::path::Path,
-        dir: &std::path::Path,
-        depth: i64,
-        out: &mut Vec<jet_std::WalkEntry>,
-        shown: &str,
-    ) -> Result<(), jet_std::IOError> {
-        let mut entries = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))? {
-            entries.push(entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?);
-        }
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            let p = entry.path();
-            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            let relative = p
-                .strip_prefix(root)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .to_string();
-            out.push(jet_std::WalkEntry {
-                path: p.to_string_lossy().to_string(),
-                relative,
-                is_dir,
-                depth,
-            });
-            if is_dir {
-                walk_dir(root, &p, depth + 1, out, shown)?;
-            }
-        }
-        Ok(())
-    }
-    walk_dir(&root, &root, 0, &mut out, path)?;
+    let mut out = jet_fs_walk_parallel(
+        path,
+        path,
+        |path, relative, is_dir, depth| jet_std::WalkEntry {
+            path,
+            relative,
+            is_dir,
+            depth,
+        },
+        |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+    )?;
+    out.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(out)
 }
+
 fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    jet_std_fs_walk(path)
+}
+
+fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -155,7 +70,7 @@ fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, je
             "fault injected: FS.Read",
         ));
     }
-    let mut out = jet_fs_walk_parallel(
+    let mut out = jet_fs_walk_files_parallel(
         path,
         path,
         |path, relative, is_dir, depth| jet_std::WalkEntry {
@@ -178,11 +93,14 @@ fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, j
             "fault injected: FS.Read",
         ));
     }
-    let mut f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     f.seek(SeekFrom::Start(offset.max(0) as u64))
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     let mut buf = vec![0u8; len.max(0) as usize];
-    let n = f.read(&mut buf).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    let n = f
+        .read(&mut buf)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     buf.truncate(n);
     Ok(buf)
 }
@@ -206,21 +124,8 @@ fn jet_std_fs_write_at(
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     f.seek(SeekFrom::Start(offset.max(0) as u64))
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
-    f.write_all(bytes).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
-}
-fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Flush,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    std::fs::OpenOptions::new()
-        .read(true)
-        .open(path)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Flush, path, e))
+    f.write_all(bytes)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_write_atomic(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
@@ -241,7 +146,8 @@ fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOE
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir(&path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
+    std::fs::create_dir(&path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
     Ok(jet_std::TempDir {
         path,
         cleanup: std::rc::Rc::new(()),
@@ -313,6 +219,10 @@ fn jet_watcher_set() -> jet_std::WatchSet {
 
 fn jet_std_io_args() -> Vec<String> {
     std::env::args().collect()
+}
+
+fn jet_std_io_process_args() -> Vec<String> {
+    jet_process_args_view(jet_std_io_args())
 }
 // #1480: jet_std_io_input moved to IoLineStream.rs so the JIT host can
 // `include!` the same Prelude source (I9); still in scope here via the
@@ -459,7 +369,11 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
             }
             Ok(Some(line))
         }
-        Err(e) => Err(jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e)),
+        Err(e) => Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            e,
+        )),
     }
 }
 
@@ -482,7 +396,11 @@ fn jet_std_io_binwrite(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IO
 struct JetStdout;
 struct JetStderr;
 
-fn jet_stdio_error(operation: jet_std::IOOperation, resource: &str, e: std::io::Error) -> jet_std::IOError {
+fn jet_stdio_error(
+    operation: jet_std::IOOperation,
+    resource: &str,
+    e: std::io::Error,
+) -> jet_std::IOError {
     jet_std::IOError::other(operation, Some(resource.to_string()), e)
 }
 
@@ -515,7 +433,10 @@ fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(),
     jet_term_write_stdout(&text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stdout_write_bytes(
+    _s: &mut JetStdout,
+    bytes: &Vec<u8>,
+) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -563,7 +484,10 @@ fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(),
     jet_term_write_stderr(&text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stderr_write_bytes(
+    _s: &mut JetStderr,
+    bytes: &Vec<u8>,
+) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -726,12 +650,7 @@ fn jet_std_io_progress_list<T: 'static>(
     format: &String,
 ) -> JetIter<T> {
     let total = xs.len();
-    jet_std_io_progress_iter_with_total(
-        jet_iter_from_vec(xs),
-        description,
-        format,
-        Some(total),
-    )
+    jet_std_io_progress_iter_with_total(jet_iter_from_vec(xs), description, format, Some(total))
 }
 
 fn jet_std_io_progress_emit(text: &str) -> Result<(), jet_std::IOError> {
@@ -867,7 +786,9 @@ fn jet_std_env_decode<T: __jet_Decode>(
     // this call only marshals the logical environment snapshot to Strings.
     let process = jet_std_env_snapshot_raw()
         .into_iter()
-        .filter_map(|(name, value)| Some((name.to_str()?.to_string(), value.to_str()?.to_string())));
+        .filter_map(|(name, value)| {
+            Some((name.to_str()?.to_string(), value.to_str()?.to_string()))
+        });
     let entries = jet_env_config_entries(prefix, dotenv.as_deref(), allow, process)
         .map_err(|reason| jet_std::FieldError::one(format!("E2416: {reason}")))?;
 
@@ -877,18 +798,17 @@ fn jet_std_env_decode<T: __jet_Decode>(
         origins.push((entry.name, entry.segments.join(".")));
         jet_env_insert_tree(&mut tree, &entry.segments, entry.value);
     }
-    T::jet_decode(&tree)
-        .map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|mut error| {
-                    let path = error.path.clone();
-                    let reason = std::mem::take(&mut error.reason);
-                    error.reason = jet_env_config_error_reason(&path, &reason, &origins);
-                    error
-                })
-                .collect()
-        })
+    T::jet_decode(&tree).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|mut error| {
+                let path = error.path.clone();
+                let reason = std::mem::take(&mut error.reason);
+                error.reason = jet_env_config_error_reason(&path, &reason, &origins);
+                error
+            })
+            .collect()
+    })
 }
 
 fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value: String) {
@@ -909,10 +829,9 @@ fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value:
         }
         return;
     }
-    if let Some((_, child)) = pairs
-        .iter_mut()
-        .find(|(name, child)| name.eq_ignore_ascii_case(segment) && matches!(child, jet_std::DataTree::Object(_)))
-    {
+    if let Some((_, child)) = pairs.iter_mut().find(|(name, child)| {
+        name.eq_ignore_ascii_case(segment) && matches!(child, jet_std::DataTree::Object(_))
+    }) {
         jet_env_insert_tree(child, &segments[1..], value);
     } else {
         let mut child = jet_std::DataTree::Object(Vec::new());
@@ -984,12 +903,12 @@ fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
         .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
 }
 fn jet_std_env_home_dir() -> Option<String> {
-    jet_std_env_get(&"HOME".to_string())
-        .or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
+    jet_std_env_get(&"HOME".to_string()).or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
 }
 
 fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
-    std::env::set_current_dir(path).map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
+    std::env::set_current_dir(path)
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
 }
 
 /// The AOT adapter for the one signal mechanism (#2027). It owns only what a
@@ -1039,12 +958,12 @@ mod jet_os_interrupt {
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
                         super::jet_interrupt_dispatch(&handlers, |handler| {
-                            if let Err(payload) = std::panic::catch_unwind(
-                                std::panic::AssertUnwindSafe(|| {
+                            if let Err(payload) =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                     let _boundary = PanicBoundary::enter();
                                     handler();
-                                }),
-                            ) {
+                                }))
+                            {
                                 // The tail is named here, not in
                                 // `Prelude/Core.rs`: this module ships only
                                 // with the Core kernel, which always ships
@@ -1069,11 +988,7 @@ mod jet_os_interrupt {
 
     pub fn on_interrupt(handler: Arc<dyn Fn() + Send + Sync + 'static>) {
         let tx = dispatcher().unwrap_or_else(|message| {
-            super::jet_panic(
-                "<core.sys>",
-                0,
-                &super::jet_interrupt_core_error(&message),
-            )
+            super::jet_panic("<core.sys>", 0, &super::jet_interrupt_core_error(&message))
         });
         let (ready_tx, ready_rx) = mpsc::sync_channel(0);
         tx.send(Command::Register(handler, ready_tx))
@@ -1086,17 +1001,13 @@ mod jet_os_interrupt {
                     ),
                 )
             });
-        ready_rx
-            .recv()
-            .unwrap_or_else(|_| {
-                super::jet_panic(
-                    "<core.sys>",
-                    0,
-                    &super::jet_interrupt_core_error(
-                        super::jet_interrupt_dispatcher_stopped_error(),
-                    ),
-                )
-            });
+        ready_rx.recv().unwrap_or_else(|_| {
+            super::jet_panic(
+                "<core.sys>",
+                0,
+                &super::jet_interrupt_core_error(super::jet_interrupt_dispatcher_stopped_error()),
+            )
+        });
     }
 }
 
@@ -1105,7 +1016,8 @@ fn jet_std_os_on_interrupt(handler: std::sync::Arc<dyn Fn() + Send + Sync + 'sta
 }
 
 fn jet_testing_snap(name: &String, actual: &String) -> bool {
-    let path = std::path::Path::new("__snapshots__").join(format!("{}.snap", sanitize_test_name(name)));
+    let path =
+        std::path::Path::new("__snapshots__").join(format!("{}.snap", sanitize_test_name(name)));
     let update = std::env::var("JET_UPDATE_SNAPSHOTS").ok().as_deref() == Some("1");
     if update || !path.is_file() {
         if let Some(parent) = path.parent() {
@@ -1113,7 +1025,9 @@ fn jet_testing_snap(name: &String, actual: &String) -> bool {
         }
         return std::fs::write(&path, actual).is_ok();
     }
-    std::fs::read_to_string(path).map(|s| s == *actual).unwrap_or(false)
+    std::fs::read_to_string(path)
+        .map(|s| s == *actual)
+        .unwrap_or(false)
 }
 
 fn jet_testing_temp_dir(prefix: &String) -> String {
@@ -1123,7 +1037,9 @@ fn jet_testing_temp_dir(prefix: &String) -> String {
 fn jet_testing_corpus(path: &String) -> Vec<String> {
     let mut entries = Vec::new();
     if let Ok(read) = std::fs::read_dir(path) {
-        let mut paths = read.filter_map(|e| e.ok().map(|e| e.path())).collect::<Vec<_>>();
+        let mut paths = read
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect::<Vec<_>>();
         paths.sort();
         for p in paths {
             if p.is_file() {
@@ -1165,10 +1081,8 @@ fn jet_std_process_run_with_authority(
     cmd: &Vec<String>,
     authority: &JetAuthority,
 ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    let spec = jet_process_spec_under_wire(
-        jet_std_process_cmd(cmd),
-        &jet_authority_to_wire(authority),
-    );
+    let spec =
+        jet_process_spec_under_wire(jet_std_process_cmd(cmd), &jet_authority_to_wire(authority));
     jet_process_spec_run(&spec)
 }
 fn jet_std_process_spec_under(

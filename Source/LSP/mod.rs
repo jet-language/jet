@@ -16,7 +16,8 @@ mod SymbolDB;
 // Public entry points (preserve `jet::LSP::<item>` paths).
 pub use Check::{
     apply_all, apply_edit, build_graph_json, check_document, check_document_with_bundle,
-    collect_fixes, measure_bench, run_bench, run_doctor, safe_fixes, BenchReport, Fix,
+    collect_fixes, fixes_from_diagnostics, measure_bench, run_bench, run_doctor, safe_fixes,
+    BenchReport, Fix,
 };
 pub use Position::{byte_offset_to_lsp, lsp_pos_to_offset, LspPos};
 pub use Server::run_stdio;
@@ -212,23 +213,18 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (tokens, _) = crate::Lexer::lex(src);
-        let expected = "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)";
+        let expected =
+            "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)";
         let name_offset = src.find("Needs(value").expect("marker declaration") + 1;
-        let hover = compute_hover(&db, &tokens, src, project.entry(), name_offset)
-            .expect("marker hover");
+        let hover =
+            compute_hover(&db, &tokens, src, project.entry(), name_offset).expect("marker hover");
         assert!(hover.contains(expected), "{hover}");
         let completion_offset = src.rfind("    \n").expect("completion line") + 4;
-        let completion = compute_completions(
-            &db,
-            src,
-            completion_offset,
-            project.entry(),
-            None,
-            None,
-        )
-        .into_iter()
-        .find(|item| item.label == "Needs")
-        .expect("marker completion");
+        let completion =
+            compute_completions(&db, src, completion_offset, project.entry(), None, None)
+                .into_iter()
+                .find(|item| item.label == "Needs")
+                .expect("marker completion");
         assert_eq!(completion.detail.as_deref(), Some(expected));
     }
 
@@ -580,14 +576,8 @@ fn run() {}
             .find('+')
             .map(|offset| operation.operation_span.start + offset)
             .expect("arithmetic operator");
-        let hover = compute_hover(
-            &db,
-            &tokens,
-            src,
-            project.entry(),
-            operator_offset,
-        )
-        .expect("arithmetic operation hover");
+        let hover = compute_hover(&db, &tokens, src, project.entry(), operator_offset)
+            .expect("arithmetic operation hover");
         assert!(hover.contains("fixed-width add: .Wrapping"), "{hover}");
         assert!(
             hover.contains(&format!(
@@ -741,6 +731,44 @@ fn run() {
     }
 
     #[test]
+    fn failure_contract_hover_teaches_default_and_explicit_routes() {
+        let src = "#Error\nenum Problem { Bad }\nfn default_helper() Int { return 1 }\nfn explicit_helper() Int !Problem -> { return Ok(1) }\nfn run() {}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(diagnostics.is_empty(), "contract fixture should check: {diagnostics:#?}");
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, _) = crate::Lexer::lex(src);
+
+        let default_offset = src.find("default_helper").expect("default helper") + 2;
+        let default_hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            default_offset,
+        )
+        .expect("default helper hover");
+        assert!(
+            default_hover.contains("failure: Int (implicit default !Err)"),
+            "{default_hover}"
+        );
+
+        let explicit_offset = src.find("explicit_helper").expect("explicit helper") + 2;
+        let explicit_hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            explicit_offset,
+        )
+        .expect("explicit helper hover");
+        assert!(
+            explicit_hover.contains("failure: Int (explicit !Problem)"),
+            "{explicit_hover}"
+        );
+    }
+
+    #[test]
     fn checked_text_metadata_reaches_editor_symbol_surfaces() {
         let src = r#"
 #Error
@@ -771,7 +799,9 @@ fn run() {
             .symbols
             .lookup_qualified("Pattern")
             .expect("Pattern semantic symbol");
-        assert!(pattern.signature.contains("type Pattern :: distinct String"));
+        assert!(pattern
+            .signature
+            .contains("type Pattern :: distinct String"));
         assert!(pattern.signature.contains("implements CheckedText"));
 
         let (tokens, _) = crate::Lexer::lex(src);
@@ -784,17 +814,11 @@ fn run() {
         assert!(metadata.contains("encode_hole"));
 
         let completion_offset = src.rfind("    \n").expect("completion scope") + 4;
-        let completion = compute_completions(
-            &db,
-            src,
-            completion_offset,
-            project.entry(),
-            None,
-            None,
-        )
-        .into_iter()
-        .find(|item| item.label == "Pattern")
-        .expect("Pattern completion");
+        let completion =
+            compute_completions(&db, src, completion_offset, project.entry(), None, None)
+                .into_iter()
+                .find(|item| item.label == "Pattern")
+                .expect("Pattern completion");
         assert!(completion
             .detail
             .as_deref()

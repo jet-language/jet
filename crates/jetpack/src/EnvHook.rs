@@ -284,10 +284,7 @@ fn add_input_path(
         let target = std::fs::read_link(path)
             .map(|target| target.to_string_lossy().into_owned().into_bytes())
             .unwrap_or_default();
-        entries.push((
-            format!("{kind}:symlink:{relative}"),
-            target,
-        ));
+        entries.push((format!("{kind}:symlink:{relative}"), target));
         return;
     }
     if let Ok(real) = path.canonicalize() {
@@ -727,6 +724,33 @@ mod tests {
         assert_eq!(definition_fingerprint(&root, None), Some(first.clone()));
         std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
         assert_ne!(definition_fingerprint(&root, None), Some(first));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn definition_fingerprint_tracks_unified_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-lock-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join(Syntax::SOURCE_ROOT_DIR)).unwrap();
+        std::fs::write(
+            root.join(Syntax::ENV_FILE),
+            "module env.dev { packages: [] }\n",
+        )
+        .unwrap();
+        let before_lock = definition_fingerprint(&root, None).unwrap();
+        let lock = root.join(Syntax::UNIFIED_LOCK_FILE);
+        std::fs::write(&lock, "version = 1\n").unwrap();
+        let first_lock = definition_fingerprint(&root, None).unwrap();
+        std::fs::write(&lock, "version = 1\n\n[root]\ndependencies = []\n").unwrap();
+        let second_lock = definition_fingerprint(&root, None).unwrap();
+        assert_ne!(before_lock, first_lock);
+        assert_ne!(first_lock, second_lock);
         let _ = std::fs::remove_dir_all(root);
     }
 

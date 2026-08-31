@@ -21,6 +21,14 @@ const pick = {};              // decisionId -> tentative option key
 const $ = (s, r = document) => r.querySelector(s);
 const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild; };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const PHASE_LABELS = Object.freeze({
+  deciding: 'Deciding', planning: 'Planning', ready: 'Ready', building: 'Building',
+  verify: 'Review', done: 'Done', frozen: 'Frozen', triage: 'Planning',
+});
+const safePhase = (value) => Object.hasOwn(PHASE_LABELS, value) ? value : 'planning';
+const phaseLabel = (value) => PHASE_LABELS[safePhase(value)];
+const CRITERION_STATUSES = Object.freeze(new Set(['open', 'met', 'verified']));
+const safeCriterionStatus = (value) => CRITERION_STATUSES.has(value) ? value : 'open';
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   .split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 
@@ -203,23 +211,27 @@ async function refresh() {
 }
 
 // ---- derived --------------------------------------------------------------
-function closedMetadata() {
-  return S?.closed?.rev === S?.meta?.rev ? (S.closed.cards || []) : [];
-}
+const noticeCards = () => S?.notices?.cards || [];
 function cachedClosedCards() {
   return closedCache?.rev === S?.meta?.rev ? closedCache.cards : [];
 }
 function boardCards(showClosed = false) {
   return showClosed ? [...(S.cards || []), ...cachedClosedCards()] : (S.cards || []);
 }
+const boardMilestones = (showClosed = false) => showClosed && closedCache?.rev === S?.meta?.rev
+  ? (closedCache.milestones || S.milestones || [])
+  : (S?.milestones || []);
+const boardRadar = (showClosed = false) => showClosed && closedCache?.rev === S?.meta?.rev
+  ? (closedCache.radar || S.radar || [])
+  : (S?.radar || []);
 function allCards() {
   const byId = new Map((S.cards || []).map(c => [c.id, c]));
-  for (const c of closedMetadata()) if (!byId.has(c.id)) byId.set(c.id, c);
+  for (const c of noticeCards()) if (!byId.has(c.id)) byId.set(c.id, c);
   for (const c of cachedClosedCards()) byId.set(c.id, c);
   return [...byId.values()];
 }
 const cardById = (id) => allCards().find(c => c.id === id);
-const ticket = (c) => '#' + (c.num ?? '');
+const ticket = (c) => '#' + esc(c.num ?? '');
 const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
@@ -247,8 +259,8 @@ const verifyQueue = () => ownerVerifyQueue(S.cards);
 const queueNotices = () => {
   const { done, messages } = buildDoneMessageQueue({
     cursor: S.meta.completionCursor,
-    cards: [...(S.cards || []), ...closedMetadata()],
-    questions: [...(S.questions || []), ...(S.closed?.messages || [])],
+    cards: [...(S.cards || []), ...noticeCards()],
+    questions: [...(S.questions || []), ...(S.notices?.messages || [])],
   });
   return [
     ...messages.map(message => ({ ...message, type: 'message' })),
@@ -299,6 +311,7 @@ const VIEWS = [
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
   { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
+  { id: 'guidance', name: 'Guidance' },
 ];
 function docsFileCount() {
   if (!docsCache) return 0;
@@ -310,9 +323,11 @@ function renderChrome() {
   const tabs = $('#tabs');
   tabs.innerHTML = '';
   for (const v of VIEWS) {
-    const n = v.count();
-    const t = el(`<button class="tab" aria-current="${VIEW === v.id}">${v.name}
-        <span class="tab__n ${v.alert && n ? 'alert' : ''}">${n}</span></button>`);
+    const n = v.count?.();
+    const badge = v.count
+      ? `<span class="tab__n ${v.alert && n ? 'alert' : ''}">${esc(n)}</span>`
+      : '';
+    const t = el(`<button class="tab" aria-current="${VIEW === v.id}">${v.name}${badge}</button>`);
     t.addEventListener('click', () => go(v.id));
     tabs.appendChild(t);
   }
@@ -387,8 +402,8 @@ function doneMessageBlock() {
   }
   const { done, messages } = buildDoneMessageQueue({
     cursor,
-    cards: [...(S.cards || []), ...closedMetadata()],
-    questions: [...(S.questions || []), ...(S.closed?.messages || [])],
+    cards: [...(S.cards || []), ...noticeCards()],
+    questions: [...(S.questions || []), ...(S.notices?.messages || [])],
   });
   if (!done.length && !messages.length) return null;
   const node = el(renderDoneMessageQueue({ done, messages, since: cursor }));
@@ -408,7 +423,7 @@ function recentlyDecidedBlock() {
   if (!items.length) return null;
   const days = (S.config || {}).retireAfterDays ?? 3;
   return collapsible('now-recent', false,
-    `<span class="epoch__tag" style="color:var(--frost)">Recently decided</span><span class="epoch__name">reversible for ${days} days</span><span class="epoch__count">${items.length}</span>`,
+    `<span class="epoch__tag" style="color:var(--frost)">Recently decided</span><span class="epoch__name">reversible for ${esc(days)} days</span><span class="epoch__count">${items.length}</span>`,
     'epoch--off', (body) => {
       for (const r of items) {
         const c = cardById(r.cardId);
@@ -553,14 +568,15 @@ const milestoneTag = (m) => String(m.title || '').split('·')[0].trim() || m.id;
 function cardTile(c) {
   const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
   const ms = milestoneOf(c);
-  const node = el(`<button class="card ${c.lane.who === 'owner' ? 'needs-owner' : ''}" style="--stage:var(--s-${c.phase})">
+  const phase = safePhase(c.phase);
+  const node = el(`<button class="card ${c.lane.who === 'owner' ? 'needs-owner' : ''}" style="--stage:var(--s-${esc(phase)})">
       <div class="card__top">
-        ${c.workOrder != null ? `<span class="order">${c.workOrder}</span>` : ''}
+        ${c.workOrder != null ? `<span class="order">${esc(c.workOrder)}</span>` : ''}
         <span class="num">${ticket(c)}</span>
-        <span class="prio prio-${c.priority}">${c.priority}</span>
+        <span class="prio prio-${esc(c.priority)}">${esc(c.priority)}</span>
         ${ms ? `<span class="card__mile" title="${esc(ms.title)}">${esc(milestoneTag(ms))}</span>` : ''}
         <span class="card__kind">${esc(c.kind)}</span>
-        ${c.openQ ? `<span class="card__q">✎ ${c.openQ}</span>` : ''}
+        ${c.openQ ? `<span class="card__q">✎ ${esc(c.openQ)}</span>` : ''}
       </div>
       <h3 class="card__title">${esc(c.title)}</h3>
       <span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span>
@@ -604,7 +620,7 @@ async function loadClosedCards() {
     const r = await fetch('/api/closed');
     if (!r.ok) throw new Error(`closed cards request failed: ${r.status}`);
     const payload = await r.json();
-    if (S?.meta?.rev === rev && payload.rev === rev) closedCache = { rev, cards: payload.cards || [] };
+    if (S?.meta?.rev === rev && payload.rev === rev) closedCache = payload;
     return payload.cards || [];
   })().finally(() => { closedRequest = null; });
   return closedRequest;
@@ -621,7 +637,7 @@ let radarShowClosed = false;
 let radarMilestone = null;   // milestone id — drills the board down to one milestone
 let radarSort = { col: 'workflow', dir: 'asc' };
 
-const milestoneById = (id) => (S.milestones || []).find(m => m.id === id) || null;
+const milestoneById = (id) => boardMilestones(radarShowClosed).find(m => m.id === id) || null;
 // A milestone filter narrows to that milestone's cards; done cards stay
 // hidden unless Show closed is on — the filter bar still counts them.
 function radarMatches(c, needle) {
@@ -737,7 +753,7 @@ function renderRadarBody() {
   const needle = radarFilterText.trim().toLowerCase();
   const cardsMode = isOpen('radar-cards', false);
   const cards = boardCards(radarShowClosed);
-  const radar = boardEpochs(S.radar || [], S.epochs, cards, S.milestones, radarShowClosed);
+  const radar = boardEpochs(boardRadar(radarShowClosed), S.epochs, cards, boardMilestones(radarShowClosed), radarShowClosed);
 
   // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
   // on milestoneId already pins the epoch. Render one flat list, no sections —
@@ -884,7 +900,7 @@ function radarSparkline(days) {
   const bars = days.map(d => {
     const h = d.n ? Math.max(3, Math.round((d.n / max) * 22)) : 2;
     const cls = 'spark__bar' + (d.day === todayKey ? ' spark__bar--today' : '');
-    return `<i class="${cls}" style="height:${h}px" title="${esc(d.day)}: ${d.n} done"></i>`;
+    return `<i class="${cls}" style="height:${h}px" title="${esc(d.day)}: ${esc(d.n)} done"></i>`;
   }).join('');
   return el(`<div class="spark" aria-label="30-day burndown">${bars}</div>`);
 }
@@ -963,7 +979,7 @@ function opsRow(c) {
   prioSel.addEventListener('change', () => api('card/update', { id: c.id, priority: prioSel.value, by: 'owner' }));
   $('.ops__prio', tr).appendChild(prioSel);
 
-  const woIn = el(`<input data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—">`);
+  const woIn = el(`<input data-fld="workOrder" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—">`);
   woIn.addEventListener('click', (ev) => ev.stopPropagation());
   woIn.addEventListener('change', () => api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' }));
   $('.ops__wo', tr).appendChild(woIn);
@@ -978,8 +994,8 @@ const isFullCard = (card) => card && ['body', 'log', 'criteria', 'decisions', 'q
 async function showDetail(id) {
   openCard = id;
   const summary = cardById(id);
-  if (!summary) return closeDetail();
-  const key = `${S.meta.rev}:${summary.id}`;
+  const ref = summary?.id || id;
+  const key = `${S.meta.rev}:${ref}`;
   const cached = detailCache.get(key);
   if (cached) return renderDetail(cached);
   if (!isFullCard(summary)) {
@@ -987,7 +1003,7 @@ async function showDetail(id) {
     m.innerHTML = '<div class="modal__panel"><div class="modal__body"><p class="prose">Loading card…</p></div></div>';
     m.hidden = false; $('#scrim').hidden = false;
     try {
-      const r = await fetch(`/api/card?id=${encodeURIComponent(summary.id)}`);
+      const r = await fetch(`/api/card?id=${encodeURIComponent(ref)}`);
       if (!r.ok) throw new Error(`card request failed: ${r.status}`);
       const payload = await r.json();
       if (openCard !== id || S.meta.rev !== payload.rev) return;
@@ -1006,32 +1022,33 @@ function renderDetail(c) {
   openCard = c.id;
   const id = c.id;
   const m = $('#detail');
-  const phaseLabel = (S.phases.find(p => p.id === c.phase) || {}).label || c.phase;
+  const phase = safePhase(c.phase);
+  const phaseText = phaseLabel(phase);
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const acceptanceBallot = openAcceptanceBallot(c);
-  const waitingOnAgent = c.phase === 'verify' && c.needsAcceptance && !acceptanceBallot;
+  const waitingOnAgent = phase === 'verify' && c.needsAcceptance && !acceptanceBallot;
   // Owner CTA only for needsAcceptance visual/UX cards. Bare verify is agent work.
-  const cta = c.phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
-    : (c.phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : acceptanceBallot ? 'Accept — looks right' : 'Accept — looks right'}</button>` : '';
+  const cta = phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
+    : (phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : acceptanceBallot ? 'Accept — looks right' : 'Accept — looks right'}</button>` : '';
   m.innerHTML = `<div class="modal__panel">
     <div class="modal__bar">
-      ${c.workOrder != null ? `<span class="order">${c.workOrder}</span>` : ''}
+      ${c.workOrder != null ? `<span class="order">${esc(c.workOrder)}</span>` : ''}
       <span class="num" style="color:var(--ink)">${ticket(c)}</span>
-      <span class="prio prio-${c.priority}">${c.priority}</span>
-      <span class="card__kind">${esc(c.kind)} · ${esc(phaseLabel)}</span>
+      <span class="prio prio-${esc(c.priority)}">${esc(c.priority)}</span>
+      <span class="card__kind">${esc(c.kind)} · ${esc(phaseText)}</span>
       <span class="card__lane ${c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none'}"><span class="pip"></span>${esc(c.lane.label)}</span>
       <button class="modal__x" title="Close (Esc)">×</button></div>
     <div class="modal__body">
       <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title">${esc(c.title)}</h2>
       ${cta ? `<div class="modal__cta">${cta}</div>` : ''}
       <div class="fields">
-        <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${p.id}" ${p.id === c.phase ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${esc(p.id)}" ${p.id === phase ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Track</div>${sel('track', CFG().tracks || ['epoch', 'sidequest'], c.track)}</div>
-        <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${e.id}" ${e.id === c.epoch ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
-        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${x.id}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${esc(e.id)}" ${e.id === c.epoch ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${esc(x.id)}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
-        <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—"></div>
+        <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—"></div>
       </div>
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
@@ -1069,8 +1086,8 @@ function renderDetail(c) {
   if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
   for (const it of (c.criteria || [])) {
     cb.appendChild(el(`<div class="critrow">
-        <div class="critrow__head"><span class="critrow__n">#${it.n}</span>
-          <span class="critrow__badge critrow__badge--${it.status}">${esc(it.status)}</span></div>
+        <div class="critrow__head"><span class="critrow__n">#${esc(it.n)}</span>
+          <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span></div>
         <div class="critrow__text">${esc(it.text)}</div>
         ${it.evidence ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
@@ -1171,7 +1188,7 @@ function facetBody(d, fk) {
 // question state of a ballot: '' | 'open' (awaiting an answer) | 'answered'
 function qState(d) {
   const cardQuestions = (cardById(d.cardId) || {}).questions || [];
-  const qs = [...cardQuestions, ...(S.questions || []), ...(S.closed?.messages || [])]
+  const qs = [...cardQuestions, ...(S.questions || []), ...(S.notices?.messages || [])]
     .filter(q => q.cardId === d.cardId && q.decisionId === d.id);
   if (!qs.length) return '';
   return qs.some(q => q.status === 'open') ? 'open' : 'answered';
@@ -1238,7 +1255,7 @@ function renderFocus() {
     <div class="focusnav"><div class="focusnav__inner">
       <span class="focusnav__kbd"><b>1–9</b> pick · <b>←/→</b> move · <b>Enter</b> record · <b>Esc</b> close</span>
       <span class="focusnav__spacer"></span>
-      <button class="btn btn--red" id="f-record" ${pickedIds.length ? '' : 'disabled'}>${recordLabel(pickedIds)}</button>
+      <button class="btn btn--red" id="f-record" ${pickedIds.length ? '' : 'disabled'}>${esc(recordLabel(pickedIds))}</button>
     </div></div>`;
 
   const opts = $('#f-opts', f);
@@ -1535,6 +1552,98 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   });
 }
 
+// ---- Guidance tab: one owner-maintained source for agent behavior --------------
+let guidanceCache = null;
+let guidanceEditing = false;
+let guidanceDraft = null;
+
+async function loadGuidance() {
+  const r = await fetch('/api/guidance');
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || 'guidance fetch failed');
+  guidanceCache = j;
+}
+
+async function viewGuidance() {
+  const v = $('#view');
+  if (!guidanceCache) {
+    v.innerHTML = '<div class="viewhead"><h1 class="h1">Guidance</h1><span class="viewhead__sub">loading…</span></div>';
+    try { await loadGuidance(); }
+    catch (e) {
+      v.innerHTML = `<div class="empty"><div>Guidance load failed: ${esc(e.message)}</div></div>`;
+      return;
+    }
+  }
+
+  const body = guidanceDraft ?? guidanceCache.body ?? '';
+  const updated = String(guidanceCache.updated || '').slice(0, 19).replace('T', ' ');
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Guidance</h1>
+      <span class="viewhead__sub">the owner's source of truth for every agent and skill</span>
+    </div>
+    <section class="guidance">
+      <div class="guidance__seal">
+        <span>Owner maintained</span>
+        <b>Agents can read this file. Only the authenticated owner UI can change it.</b>
+      </div>
+      <div class="guidance__toolbar">
+        <span class="docs__meta">${esc(guidanceCache.path || '')} · ${esc(updated)}</span>
+        ${guidanceEditing
+          ? '<button class="btn btn--ghost" id="guidance-cancel">Cancel</button><button class="btn btn--red" id="guidance-save">Save</button>'
+          : '<button class="btn" id="guidance-edit">Edit guidance</button>'}
+      </div>
+      <textarea class="docs__edit guidance__edit" id="guidance-body" spellcheck="true" ${guidanceEditing ? '' : 'hidden'}></textarea>
+      <div class="guidance__read prose" id="guidance-read" ${guidanceEditing ? 'hidden' : ''}></div>
+    </section>`;
+
+  const textarea = $('#guidance-body');
+  textarea.value = body;
+  const reader = $('#guidance-read');
+  reader.innerHTML = splitBlocks(body).map(renderMarkdown).join('');
+
+  $('#guidance-edit')?.addEventListener('click', () => {
+    guidanceEditing = true;
+    guidanceDraft = guidanceCache.body || '';
+    viewGuidance();
+  });
+  $('#guidance-cancel')?.addEventListener('click', () => {
+    guidanceEditing = false;
+    guidanceDraft = null;
+    viewGuidance();
+  });
+  textarea.addEventListener('input', () => { guidanceDraft = textarea.value; });
+
+  const save = async () => {
+    const r = await fetch('/api/guidance/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: textarea.value }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) {
+      toast(j.message || 'guidance save failed', true);
+      return;
+    }
+    guidanceCache = j.result;
+    guidanceDraft = null;
+    guidanceEditing = false;
+    toast('guidance saved');
+    viewGuidance();
+  };
+  $('#guidance-save')?.addEventListener('click', save);
+  textarea.addEventListener('keydown', (ev) => {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 's') {
+      ev.preventDefault();
+      save();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      guidanceEditing = false;
+      guidanceDraft = null;
+      viewGuidance();
+    }
+  });
+}
+
+
 // ---- PAPERCUTS: append-only friction log, grouped by day --------------------
 let papercutFilter = 'open';   // 'open' | 'all'
 function viewPapercuts() {
@@ -1569,7 +1678,7 @@ function viewPapercuts() {
     const row = el(`<div class="idea"${resolved ? ' style="opacity:.5"' : ''}>
         <span class="num">${esc(time)}</span>
         <span class="chip">${esc(pc.by)}</span>
-        <span class="idea__t">${esc(pc.text)}${c ? ` <button class="chip" data-card title="open card">#${c.num}</button>` : ''}</span>
+        <span class="idea__t">${esc(pc.text)}${c ? ` <button class="chip" data-card title="open card">${ticket(c)}</button>` : ''}</span>
         ${resolved
           ? '<span class="critrow__badge critrow__badge--verified">resolved</span>'
           : '<button class="btn btn--ghost btn--sm" data-resolve>Resolve</button>'}
@@ -1581,7 +1690,7 @@ function viewPapercuts() {
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, guidance: viewGuidance, docs: viewDocs };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -1634,7 +1743,7 @@ function paletteItems(q) {
   for (const d of openGenericDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
   for (const c of allCards()) {
     if (c.phase === 'done' && q.length < 2) continue;
-    if (!q || hit('#' + c.num + ' ' + c.title)) items.push({ label: `card · #${c.num} ${c.title.slice(0, 60)} (${c.phase})`, act: () => showDetail(c.id) });
+    if (!q || hit('#' + c.num + ' ' + c.title)) items.push({ label: `card · #${c.num} ${c.title.slice(0, 60)} (${phaseLabel(c.phase)})`, act: () => showDetail(c.id) });
   }
   return items.slice(0, 12);
 }
@@ -1695,5 +1804,5 @@ loadDocsIndex().then(() => { if (S) renderChrome(); }).catch(() => {});
 // deep links: ?focus=<decisionId> opens focus mode, ?open=<cardId|#n> a card
 const qs = new URLSearchParams(location.search);
 if (qs.get('focus') && S) focusAll(qs.get('focus'));
-if (qs.get('open') && S) { const c = allCards().find(x => x.id === qs.get('open') || '#' + x.num === qs.get('open')); if (c) showDetail(c.id); }
+if (qs.get('open') && S) showDetail(qs.get('open'));
 if (qs.get('legend')) openLegend();

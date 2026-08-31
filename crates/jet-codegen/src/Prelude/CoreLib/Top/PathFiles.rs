@@ -58,6 +58,14 @@ fn jet_path_normalize(p: &JetPath) -> JetPath {
     jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
 }
 
+/// Lexical containment only. The receiver is the candidate and the argument
+/// is the containing path; no filesystem access or symlink resolution occurs.
+fn jet_path_is_within(path: &JetPath, base: &JetPath) -> bool {
+    let path = path.inner.to_string_lossy().into_owned();
+    let base = base.inner.to_string_lossy().into_owned();
+    jet_std_path_is_within(&path, &base)
+}
+
 static JET_ATOMIC_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 

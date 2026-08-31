@@ -2,6 +2,9 @@
 
 use std::process::Command;
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[test]
 fn compiled_workload_gate_self_check() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -19,4 +22,12 @@ fn compiled_workload_gate_self_check() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn semantic_corpus_policy_runs_with_compiled_workloads() {
+    common::corpus_policy::CorpusPolicy::load()
+        .expect("corpus manifest")
+        .check_gate("workload")
+        .expect("compiled workload corpus semantic policy");
 }

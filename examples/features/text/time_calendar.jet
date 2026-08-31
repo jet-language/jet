@@ -2,7 +2,7 @@ use core.time as time
 use core.time as date
 
 fn run() {
-    dt :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? return Err("bad rfc3339")
+    dt :: time.parse_rfc3339("2024-03-10T06:30:00Z")
     print(dt.format_rfc3339())
     print(dt.to_unix_ms())
     print(time.from_unix_ms(dt.to_unix_ms()).format("yyyy-MM-dd HH:mm:ss"))
@@ -15,15 +15,15 @@ fn run() {
     z :: time.zoned(dt, utc)
     print(z.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     print(z.offset_seconds())
-    span :: Duration.hours(2) ?? return Err("duration")
-    span_s :: span.in(.Seconds) ?? return Err("duration read")
+    span :: 2h
+    span_s :: span.in(.Seconds)
     print(span_s)
     inst :: time.instant()
     print(inst.elapsed_millis() >= 0)
 
     // Zoned arithmetic keeps the whole ZonedDateTime: `add_duration` moves the
     // instant and holds the zone, `add_period` moves the local wall clock.
-    day :: Duration.hours(24) ?? return Err("duration")
+    day :: 24h
     absolute :: z.add_duration(day)
     print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     print(absolute.offset_seconds())
@@ -35,9 +35,9 @@ fn run() {
     print(civil.zone().name())
     print(civil.to_datetime().format_rfc3339())
 
-    ny :: time.zone("America/New_York") ?? return Err("zone")
+    ny :: time.zone("America/New_York")
     start :: time.zoned_local(date.new(2024, 3, 9), time.time(20, 0, 0), ny)
-    eight :: Duration.hours(8) ?? return Err("duration")
+    eight :: 8h
     dst_duration :: start.add_duration(eight)
     print(dst_duration.to_string())
     print(dst_duration.format("yyyy-MM-dd HH:mm:ss VV XXX"))

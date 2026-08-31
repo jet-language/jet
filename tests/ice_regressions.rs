@@ -199,6 +199,68 @@ fn run() {
 }
 
 #[test]
+fn b8_value_if_fallible_arms_keep_one_value_type() {
+    assert_compiles(
+        "b8_value_if_bool_never",
+        r#"
+fn next(value: DataTree) Bool !Never -> { return true }
+fn value_if_bool_never(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Null -> false
+        else -> next(~value)
+    }
+}
+fn run() {
+    print(value_if_bool_never(DataTree.Null))
+}
+"#,
+    );
+    assert_compiles(
+        "b8_value_if_string_err",
+        r#"
+fn next(value: DataTree) String -> { return "next" }
+fn value_if_string_err(value: DataTree) String -> {
+    return if value == {
+        .Null -> "null"
+        else -> next(~value)
+    }
+}
+fn run() {
+    print(value_if_string_err(DataTree.Null))
+}
+"#,
+    );
+    assert_compiles(
+        "b8_value_if_list_err",
+        r#"
+fn next(value: DataTree) [String] -> { return [String]{} }
+fn value_if_list_err(value: DataTree) [String] -> {
+    empty := [String]{}
+    return if value == {
+        .Text(text) -> next(DataTree.Text(~text))
+        else -> empty
+    }
+}
+fn run() {
+    print(value_if_list_err(DataTree.Null))
+}
+"#,
+    );
+    assert_compiles(
+        "b8_value_if_comptime_method_fallback",
+        r#"
+fn command_action(argv: [Int]) Int !Never -> {
+    return argv.get(0) ?? 1
+}
+@action :: command_action([0])
+fn run() {
+    print(@action)
+}
+"#,
+    );
+}
+
+#[test]
 fn b6_generated_trait_protocol_returns_are_raw() {
     let dir = std::env::temp_dir().join(format!("jet_ice_b6_protocol_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

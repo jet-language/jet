@@ -30,6 +30,19 @@ fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) ->
         && row.effect().is_none()
 }
 
+fn csv_row_value(record: jet_foundation::CsvKernel::CsvRecord) -> CtValue {
+    CtValue::Struct {
+        type_name: "CSVRow".to_string(),
+        fields: vec![
+            (
+                "fields".to_string(),
+                CtValue::List(record.fields.into_iter().map(CtValue::Str).collect()),
+            ),
+            ("line".to_string(), CtValue::Int(record.line)),
+        ],
+    }
+}
+
 fn validate_interpreter_route(
     module: &str,
     method: &str,
@@ -283,6 +296,7 @@ mod sketch_kernel {
 
 mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
+    include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
@@ -769,6 +783,14 @@ pub fn apply_core_call_with_type(
             )),
             None => Ok(default),
         }
+    };
+    let csv_options = || -> Result<(String, bool, bool), Diagnostic> {
+        let delimiter = args
+            .get(1)
+            .map(|value| as_string(value, span).map(str::to_owned))
+            .transpose()?
+            .unwrap_or_else(|| ",".to_string());
+        Ok((delimiter, args_bool(2, false)?, args_bool(3, false)?))
     };
 
     match (module, method) {
@@ -1615,11 +1637,26 @@ pub fn apply_core_call_with_type(
         // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
         ("core.encoding.csv", "parse") => {
             let text = as_string(one(0)?, span)?;
-            match super::super::EncodingLite::csv_parse(text) {
+            let (delimiter, header, skip_blank) = csv_options()?;
+            match super::super::EncodingLite::csv_parse(text, &delimiter, header, skip_blank) {
                 Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
                     rows.into_iter()
-                        .map(|row| CtValue::List(row.into_iter().map(CtValue::Str).collect()))
+                        .map(|row| {
+                            CtValue::List(
+                                row.fields.into_iter().map(CtValue::Str).collect(),
+                            )
+                        })
                         .collect(),
+                )))),
+                Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e)))),
+            }
+        }
+        ("core.encoding.csv", "rows") => {
+            let text = as_string(one(0)?, span)?;
+            let (delimiter, header, skip_blank) = csv_options()?;
+            match super::super::EncodingLite::csv_parse(text, &delimiter, header, skip_blank) {
+                Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
+                    rows.into_iter().map(csv_row_value).collect(),
                 )))),
                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e)))),
             }
@@ -1861,9 +1898,8 @@ pub fn apply_core_call_with_type(
         ("core.regex", "matches") => regex_matches(args, span),
         ("core.regex", "split") => regex_split(args, span),
         ("core.regex", "split_limit") => regex_split_limit(args, span),
-        ("core.regex", "replace") => regex_replace(args, span, false),
-        ("core.regex", "replace_first") => regex_replace(args, span, true),
-        ("core.regex", "replace_all") => regex_replace(args, span, false),
+        ("core.regex", "replace") => regex_replace(args, span),
+        ("core.regex", "replace_first") => regex_replace_first(args, span),
         ("core.regex", "match") => regex_match(args, span),
         // --- core.math.random (ambient; seed for deterministic REPL transcripts) ---
         ("core.math.random", "seed") => {
@@ -2039,19 +2075,32 @@ pub fn apply_core_call_with_type(
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
         }
-        ("core.text.fmt", "decimal") => {
+        ("core.text.fmt", "decimal" | "grouped") => {
             let value = one(0)?;
             let precision = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
             };
             let formatted = match value {
+                CtValue::Float(value) if method == "grouped" => {
+                    fmt_kernel::jet_fmt_grouped(value.as_f64(), precision)
+                }
                 CtValue::Float(value) => fmt_kernel::jet_fmt_decimal(value.as_f64(), precision),
                 CtValue::Int(value) => {
-                    fmt_kernel::jet_fmt_decimal_int(&value.to_string(), precision)
+                    let value = value.to_string();
+                    if method == "grouped" {
+                        fmt_kernel::jet_fmt_grouped_int(&value, precision)
+                    } else {
+                        fmt_kernel::jet_fmt_decimal_int(&value, precision)
+                    }
                 }
                 CtValue::BigInt(value) => {
-                    fmt_kernel::jet_fmt_decimal_int(&value.to_string_rep(), precision)
+                    let value = value.to_string_rep();
+                    if method == "grouped" {
+                        fmt_kernel::jet_fmt_grouped_int(&value, precision)
+                    } else {
+                        fmt_kernel::jet_fmt_decimal_int(&value, precision)
+                    }
                 }
                 _ => return Err(unsupported("fmt.decimal expects a Float or Int", span)),
             };

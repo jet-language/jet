@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { buildManifest, sourceSnapshotFromContents } from "../scripts/agent/hardening-manifest.mjs";
 import {
   buildOracleCatalog,
+  NON_CALLABLE_EXCLUSION_REASON_BY_KIND,
+  REGRESSION_SEEDS,
   batchMutations,
   checkAllAdapters,
   compareTierObservations,
@@ -44,6 +47,41 @@ const MANIFEST = [
   },
 ];
 
+function manifestWithMissingCallable() {
+  const route = (stable_id) => ({ stable_id, route: "aot:fixture", seam: null, evidence: ["fixture:route"] });
+  return buildManifest({
+    surface: {
+      moduleCalls: ["core.test.covered", "core.test.missing"],
+      receivers: [{ type: "Widget", member: "read" }],
+      fields: [{ type: "Widget", field: "value" }],
+      types: ["core.test.Widget"],
+      routes: {
+        aot: [
+          route("module:core.test.covered"),
+          route("module:core.test.missing"),
+          route("receiver:Widget.read"),
+          route("field:Widget.value"),
+          route("type:core.test.Widget"),
+        ],
+        jet_run: [],
+        interpreter: [],
+      },
+      seeds: new Map([[
+        "module:core.test.covered",
+        { path: "fixture.jet", errors: [], sink: { type_aware: true, operation: "print" } },
+      ]]),
+      exclusions: new Map(),
+      snapshot: sourceSnapshotFromContents({ "fixture.rs": "one" }),
+      membershipSources: {
+        module_call: ["fixture.rs"],
+        receiver_method: ["fixture.rs"],
+        field: ["fixture.rs"],
+        nominal_type: ["fixture.rs"],
+      },
+    },
+  });
+}
+
 test("catalog derives one independent oracle row per public surface", () => {
   const catalog = buildOracleCatalog(MANIFEST, "sha256:manifest");
   assert.deepEqual(catalog.rows.map((row) => row.stable_id), [
@@ -53,7 +91,9 @@ test("catalog derives one independent oracle row per public surface", () => {
   ]);
   assert.equal(catalog.rows[1].tier_self_diff, true);
   assert.equal(catalog.rows[1].oracle.independence_class, "algebraic-law");
-  assert.equal(catalog.exclusions, 1);
+  assert.equal(catalog.exclusions, 2);
+  assert.equal(catalog.rows[2].status, "excluded");
+  assert.equal(catalog.rows[2].rejection.reason, "not-a-callable:receiver_method");
   assert.throws(
     () => buildOracleCatalog([MANIFEST[0], MANIFEST[0]], "sha256:manifest"),
     /duplicate surface stable_id/,
@@ -69,6 +109,28 @@ test("catalog derives one independent oracle row per public surface", () => {
     }], "sha256:manifest"),
     /not value-consuming/,
   );
+});
+
+test("catalog uses a closed exclusion vocabulary and preserves missing callables", () => {
+  assert.deepEqual(NON_CALLABLE_EXCLUSION_REASON_BY_KIND, {
+    receiver_method: "not-a-callable:receiver_method",
+    field: "not-a-callable:field",
+    nominal_type: "not-a-callable:nominal_type",
+  });
+  const catalog = buildOracleCatalog(manifestWithMissingCallable());
+  assert.equal(catalog.counts.covered, 1);
+  assert.equal(catalog.counts.excluded, 3);
+  assert.equal(catalog.counts.missing, 1);
+  assert.equal(catalog.counts.covered + catalog.counts.excluded, 4);
+  for (const [kind, reason] of Object.entries(NON_CALLABLE_EXCLUSION_REASON_BY_KIND)) {
+    const row = catalog.rows.find((candidate) => candidate.kind === kind);
+    assert.equal(row.status, "excluded");
+    assert.equal(row.rejection.reason, reason);
+    assert.equal(row.tier_self_diff, false);
+  }
+  const missing = catalog.rows.find((row) => row.stable_id === "module:core.test.missing");
+  assert.equal(missing.status, "missing");
+  assert.equal(missing.rejection.reason, "manifest row is missing");
 });
 
 test("mutations preserve typed source shape and observable sink", () => {
@@ -176,6 +238,9 @@ test("regression seam inversions produce P0 finding bundles", () => {
     "regression:release-emission",
     "regression:stdin-transport",
   ]);
+  const indexedPlace = REGRESSION_SEEDS.find((seed) => seed.stable_surface_id === "regression:indexed-place");
+  assert.match(indexedPlace.source, /outer\[0\]\.push\(9\)/);
+  assert.deepEqual(indexedPlace.expected_value, [[1, 2, 9], [3]]);
   assert.ok(findings.every((finding) => finding.classification === "P0"));
   assert.equal(serializeBundles(findings), serializeBundles([...findings].reverse()));
 });

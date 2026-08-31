@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "contract": {
+    "loc": "nonblank_noncomment_lines",
+    "token_metric": "source_tokens",
+    "token_definition": "nonempty_runs_split_by_unicode_whitespace",
+    "loc_ratio_max": 1.2,
+    "token_verdict": "jet_less_than_python",
+    "eligible_pair": "jet_and_python_sources"
+  },
+  "corpus": {
+    "entry_count": 19,
+    "python_pair_count": 17,
+    "matrix_cell_count": 24,
+    "allowed_uncovered_cells": ["embedded.data", "embedded.kernel"],
+    "entry_names": [
+      "binparse",
+      "bulkrename",
+      "concurrency-service",
+      "csvtransform",
+      "datasummary",
+      "http-client",
+      "http-service",
+      "logreport",
+      "nbody",
+      "parallel-grep",
+      "procpipe",
+      "regex-logscan",
+      "sieve",
+      "taskfile-cli",
+      "text-script",
+      "tzreport",
+      "web-app",
+      "web-widget",
+      "wordfreq"
+    ]
+  },
+  "report_contract": {
+    "id": "gauntlet-report-v1",
+    "scope": "full_matrix",
+    "required_jet_tiers": ["aot", "run"],
+    "optional_jet_tiers": ["dev"],
+    "tier_policy_by_mode": {
+      "batch": ["aot", "run", "dev"],
+      "batch-steps": ["aot", "run", "dev"],
+      "service": ["aot", "run", "dev"],
+      "web": ["aot", "run", "dev"],
+      "web-app": ["aot"]
+    },
+    "primary_metric_by_mode": {
+      "batch": "runtime_wall_seconds",
+      "batch-steps": "runtime_wall_seconds",
+      "service": "service_latency_ms_p50",
+      "web": "runtime_first_stdout_seconds",
+      "web-app": "runtime_first_stdout_seconds"
+    },
+    "ratio_verdicts": {"win": "<1", "parity": "<=1.05", "loss": ">1.05"},
+    "missing_metric_verdict": "unmeasured",
+    "output_verification": "byte_exact_utf8_or_declared_probe_sequence",
+    "loss_owner_required_for": "primary_metric_loss",
+    "axis_schemas": {
+      "live_reload": "gauntlet-axis-live-reload-v1",
+      "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1"
+    },
+    "axis_publication": "required_axes_complete_and_unblocked"
+  },
+  "axes": {
+    "live_reload": {
+      "status": "required",
+      "schema": "gauntlet-axis-live-reload-v1",
+      "metric": "reload_latency_ms",
+      "workload": "web-app",
+      "signal": {
+        "kind": "monotonic_http_counter",
+        "definition": "GET readiness path returns a numeric value greater than the value observed before the edit"
+      },
+      "budget": {
+        "sample_count": 3,
+        "startup_timeout_ms": 30000,
+        "reload_timeout_ms": 30000,
+        "poll_interval_ms": 20
+      },
+      "edit": {"from": "reload-before", "to": "reload-after"},
+      "phases": {
+        "cold": "first measured edit after a fresh process reaches readiness",
+        "warm": "measured edit after two unmeasured edits in the same fresh process"
+      },
+      "runners": [
+        {
+          "id": "jet-dev",
+          "tools": ["jet"],
+          "files": [
+            {"source": "gauntlet/axes/live-reload/jet/main.jet", "target": "main.jet"},
+            {"source": "gauntlet/axes/live-reload/jet/package.jet", "target": "package.jet"},
+            {"source": "gauntlet/axes/live-reload/jet/index.html", "target": "index.html"}
+          ],
+          "edit_file": "main.jet",
+          "command": ["jet", "dev", "--watch=on", "--target=web", "--port={port}", "main.jet"],
+          "readiness": {"path": "/__jet_dev_version", "status": 200},
+          "output": {"path": "/app.js", "status": 200}
+        },
+        {
+          "id": "vite",
+          "tools": ["vite", "node"],
+          "files": [
+            {"source": "gauntlet/axes/live-reload/js/index.html", "target": "index.html"},
+            {"source": "gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "gauntlet/axes/live-reload/js/vite.config.mjs", "target": "vite.config.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["vite", "--host", "127.0.0.1", "--port", "{port}", "--strictPort"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "bun",
+          "tools": ["bun"],
+          "files": [
+            {"source": "gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "gauntlet/axes/live-reload/js/server.mjs", "target": "server.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["bun", "--watch", "server.mjs", "--port", "{port}"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "nodemon",
+          "tools": ["nodemon", "node"],
+          "files": [
+            {"source": "gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "gauntlet/axes/live-reload/js/server.mjs", "target": "server.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["nodemon", "--quiet", "--watch", "client.mjs", "--exec", "node server.mjs --port {port}"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "entr+cc",
+          "tools": ["entr", "gcc"],
+          "files": [
+            {"source": "gauntlet/axes/live-reload/c/main.c", "target": "main.c"}
+          ],
+          "edit_file": "main.c",
+          "command": ["sh", "-c", "printf '%s\\n' main.c | entr -r sh -c 'gcc -O2 main.c -o main-c && exec ./main-c {port}'"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        }
+      ],
+      "fairness": ["same source edit", "same observable readiness signal", "fresh process per sample", "median cold and warm reload samples"]
+    },
+    "memory_safety_fuzz": {
+      "status": "required",
+      "schema": "gauntlet-axis-memory-safety-fuzz-v1",
+      "metric": "memory_safety_findings",
+      "corpus": {
+        "path": "fuzz-input.bin",
+        "generator": "xorshift32-v1",
+        "seed": 2272,
+        "case_count": 128,
+        "bytes_per_case": 64
+      },
+      "budget": {
+        "wall_timeout_ms": 30000,
+        "cpu_seconds": 10,
+        "memory_mb": 512
+      },
+      "oracle": {
+        "algorithm": "memory-safety-case-summary-v1",
+        "output": "cases {case_count} valid {valid} boundary {boundary} oob {oob} use_after_free {use_after_free} wrong_output {wrong_output} bytes {byte_count} checksum {u32_sum} semantic {semantic}\n"
+      },
+      "runners": [
+        {
+          "id": "jet-default",
+          "language": "jet",
+          "tools": ["jet"],
+          "files": [
+            {"source": "gauntlet/axes/memory-safety-fuzz/jet/main.jet", "target": "main.jet"},
+            {"source": "gauntlet/axes/memory-safety-fuzz/jet/package.jet", "target": "package.jet"}
+          ],
+          "run": ["jet", "run", "main.jet"],
+          "evidence": {"kind": "jet-runtime-diagnostic", "patterns": ["panic:", "runtime error:"]}
+        },
+        {
+          "id": "c",
+          "language": "c",
+          "tools": ["gcc"],
+          "files": [
+            {"source": "gauntlet/axes/memory-safety-fuzz/c/main.c", "target": "main.c"}
+          ],
+          "compile": ["gcc", "-O1", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "main.c", "-o", "main-c"],
+          "run": ["./main-c"],
+          "evidence": {"kind": "address-and-undefined-sanitizer", "patterns": ["ERROR: AddressSanitizer:", "UndefinedBehaviorSanitizer", "runtime error:"]}
+        },
+        {
+          "id": "zig",
+          "language": "zig",
+          "tools": ["zig"],
+          "files": [
+            {"source": "gauntlet/axes/memory-safety-fuzz/zig/main.zig", "target": "main.zig"}
+          ],
+          "compile": ["zig", "build-exe", "-O", "Debug", "main.zig", "-femit-bin=main-zig"],
+          "run": ["./main-zig"],
+          "evidence": {"kind": "zig-safety-runtime", "patterns": ["panic:", "integer overflow", "index out of bounds", "unreachable"]}
+        },
+        {
+          "id": "rust",
+          "language": "rust",
+          "tools": ["rustc"],
+          "files": [
+            {"source": "gauntlet/axes/memory-safety-fuzz/rust/main.rs", "target": "main.rs"}
+          ],
+          "compile": ["rustc", "-C", "debuginfo=1", "-C", "overflow-checks=yes", "main.rs", "-o", "main-rust"],
+          "run": ["./main-rust"],
+          "evidence": {"kind": "rust-checked-runtime", "patterns": ["panicked at", "index out of bounds", "attempt to"]}
+        }
+      ],
+      "fairness": ["same generated input file", "same timeout and resource budget", "sanitizer or equivalent finding evidence", "deduplicate each finding before close"]
+    }
+  },
+  "loss_owners": {
+    "binparse": 2253,
+    "nbody": 2261,
+    "sieve": 2254,
+    "wordfreq": 2254
+  },
+  "entries": [
+    { "name": "binparse", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "bulkrename", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "concurrency-service", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "csvtransform", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "datasummary", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "http-client", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "http-service", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "logreport", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "nbody", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "parallel-grep", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "procpipe", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "regex-logscan", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "sieve", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "taskfile-cli", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "text-script", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "tzreport", "jet": "jet/main.jet", "python": "python/main.py" },
+    { "name": "web-app", "jet": "jet/main.jet", "python": null },
+    { "name": "web-widget", "jet": "jet/main.jet", "python": null },
+    { "name": "wordfreq", "jet": "jet/main.jet", "python": "python/main.py" }
+  ]
+}

@@ -9,7 +9,8 @@ use crate::Syntax;
 use crate::AST::{Item, ProtocolDecl, ProtocolDirection, ProtocolMessage};
 
 /// Expand every `protocol` declaration in `items`, replacing each with its generated
-/// handle types and methods. Parse/lex failures are recorded in `diags`.
+/// handle types and methods. Parse/lex failures are reported at the protocol
+/// declaration through E0153 rather than exposing generated-source spans.
 pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     let mut i = 0;
     while i < items.len() {
@@ -22,7 +23,7 @@ pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic
         };
         items.remove(i);
         let fragment = generate_protocol_source(&decl);
-        match lex_parse_fragment(&fragment, diags) {
+        match lex_parse_fragment(&fragment) {
             Ok(parsed) => {
                 for item in parsed {
                     items.insert(i, item);
@@ -48,18 +49,14 @@ pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic
     }
 }
 
-fn lex_parse_fragment(src: &str, diags: &mut Vec<Diagnostic>) -> Result<Vec<Item>, ()> {
+fn lex_parse_fragment(src: &str) -> Result<Vec<Item>, ()> {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
-        diags.extend(lex_diags);
         return Err(());
     }
     match crate::Parser::parse(&toks) {
         Ok(prog) => Ok(prog.items),
-        Err(parse_diags) => {
-            diags.extend(parse_diags);
-            Err(())
-        }
+        Err(_) => Err(()),
     }
 }
 
@@ -82,7 +79,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {client} {{\n"));
     out.push_str(&format!(
-        "    #{}(_, S0) fn client() {client} {{\n        return {client}{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn client() {client} -> {{\n        return {client}{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -97,7 +94,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {server} {{\n"));
     out.push_str(&format!(
-        "    #{}(_, S0) fn server() {server} {{\n        return {server}{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn server() {server} -> {{\n        return {server}{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -136,7 +133,7 @@ fn append_send_method(
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {handle} !Err -> {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
@@ -161,7 +158,7 @@ fn append_recv_method(
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {handle} !Err -> {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     }
