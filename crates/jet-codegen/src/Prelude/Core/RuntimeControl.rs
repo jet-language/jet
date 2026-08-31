@@ -148,7 +148,21 @@ trait __jet_Serialize {
 
 impl JetShow for JetKey {
     fn jet_show(&self) -> String {
-        jet_key_show(self)
+        match self {
+            JetKey::Char(c) => format!("Char({:?})", c),
+            JetKey::Enter => "Enter".to_string(),
+            JetKey::Escape => "Escape".to_string(),
+            JetKey::Backspace => "Backspace".to_string(),
+            JetKey::Tab => "Tab".to_string(),
+            JetKey::Delete => "Delete".to_string(),
+            JetKey::Up => "Up".to_string(),
+            JetKey::Down => "Down".to_string(),
+            JetKey::Left => "Left".to_string(),
+            JetKey::Right => "Right".to_string(),
+            JetKey::F(n) => format!("F({})", n),
+            JetKey::Ctrl(c) => format!("Ctrl({:?})", c),
+            JetKey::Unknown => "Unknown".to_string(),
+        }
     }
 }
 

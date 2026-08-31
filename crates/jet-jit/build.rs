@@ -179,16 +179,6 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "XMLReason",
         ),
         (
-            "XMLCanonicalMode",
-            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
-            "XMLCanonicalMode",
-        ),
-        (
-            "XMLEntityPolicy",
-            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
-            "XMLEntityPolicy",
-        ),
-        (
             "DataEvent",
             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
             "DataEvent",
@@ -252,16 +242,6 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "TaskStatus",
             "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
             "JetTaskStatus",
-        ),
-        (
-            "ServiceDelivery",
-            "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
-            "JetServiceDelivery",
-        ),
-        (
-            "ServiceRestart",
-            "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
-            "JetServiceRestart",
         ),
         (
             "SMTPSecurity",

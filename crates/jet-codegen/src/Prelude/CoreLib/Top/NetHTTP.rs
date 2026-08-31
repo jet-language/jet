@@ -3037,19 +3037,6 @@ fn jet_net_dns_io_slice(deadline: std::time::Instant, name: &str) -> Result<std:
     Ok(jet_net_dns_remaining(deadline, name)?.min(std::time::Duration::from_millis(10)))
 }
 
-struct JetNetSchedulerBlockingWait;
-
-impl JetNetSchedulerBlockingWait {
-    fn enter() -> Self {
-        jet_scheduler_blocking_wait_enter();
-        Self
-    }
-}
-
-impl Drop for JetNetSchedulerBlockingWait {
-    fn drop(&mut self) { jet_scheduler_blocking_wait_leave(); }
-}
-
 fn jet_net_dns_tcp_exchange(
     server_addr: std::net::SocketAddr,
     request: &[u8],
@@ -3057,7 +3044,6 @@ fn jet_net_dns_tcp_exchange(
     name: &str,
 ) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
-    let _wait = JetNetSchedulerBlockingWait::enter();
     let mut stream = std::net::TcpStream::connect_timeout(
         &server_addr,
         jet_net_dns_remaining(deadline, name)?,
@@ -3137,20 +3123,17 @@ fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Res
     jet_net_dns_encode_name(&mut req, name)?;
     req.extend_from_slice(&qtype.to_be_bytes());
     req.extend_from_slice(&1u16.to_be_bytes());
+    socket
+        .send(&req)
+        .map_err(|e| format!("dns query send failed: {}", e))?;
     let mut packet = vec![0u8; 65535];
-    let n = {
-        let _wait = JetNetSchedulerBlockingWait::enter();
-        socket
-            .send(&req)
-            .map_err(|e| format!("dns query send failed: {}", e))?;
-        loop {
-            socket.set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
-                .map_err(|e| format!("dns timeout setup failed: {}", e))?;
-            match socket.recv(&mut packet) {
-                Ok(n) => break n,
-                Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
-                Err(error) => return Err(format!("dns query for `{}` failed: {}", name, error)),
-            }
+    let n = loop {
+        socket.set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+            .map_err(|e| format!("dns timeout setup failed: {}", e))?;
+        match socket.recv(&mut packet) {
+            Ok(n) => break n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
+            Err(error) => return Err(format!("dns query for `{}` failed: {}", name, error)),
         }
     };
     packet.truncate(n);

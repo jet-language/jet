@@ -473,36 +473,6 @@ fn jet_jit_event_emit(event: i64, payload: i64) -> i64 {
     })
 }
 
-fn jet_jit_event_listener_count(kind: i64, handle: i64) -> i64 {
-    with_rt(|rt| match kind {
-        0 => rt
-            .reactive
-            .events
-            .get(handle.saturating_sub(1) as usize)
-            .map(|event| event.listener_count())
-            .unwrap_or(0),
-        1 => rt
-            .reactive
-            .hooks
-            .get(handle.saturating_sub(1) as usize)
-            .map(|hook| hook.listener_count())
-            .unwrap_or(0),
-        2 => rt
-            .reactive
-            .decision_hooks
-            .get(handle.saturating_sub(1) as usize)
-            .map(|hook| hook.listener_count())
-            .unwrap_or(0),
-        3 => rt
-            .reactive
-            .async_events
-            .get((handle & !(1 << 62)).saturating_sub(1) as usize)
-            .map(|event| event.listeners.len() as i64)
-            .unwrap_or(0),
-        _ => 0,
-    })
-}
-
 fn jet_jit_event_trace_summary(trace: i64) -> i64 {
     with_rt(|rt| {
         let summary = rt
@@ -918,7 +888,6 @@ host_fns! {
     loadable_payload: "jet_jit_loadable_payload" => jet_jit_loadable_payload: unary;
     loadable_or_else: "jet_jit_loadable_or_else" => jet_jit_loadable_or_else: binary;
     event_scope: "jet_jit_event_scope" => jet_jit_event_scope: nullary;
-    event_listener_count: "jet_jit_event_listener_count" => jet_jit_event_listener_count: binary;
     event_new: "jet_jit_event_new" => jet_jit_event_new: nullary;
     event_on: "jet_jit_event_on" => jet_jit_event_on: event_on;
     event_once: "jet_jit_event_once" => jet_jit_event_once: event_on;

@@ -10,9 +10,7 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use crate::runtime_host::{
-    bind_jit_callable_handle, jit_callable_parts, jit_result_parts, JitCallableSlot,
-};
+use crate::runtime_host::{bind_jit_callable_handle, jit_callable_parts, JitCallableSlot};
 use crate::JitRuntime;
 use crate::Marshal::{result_err_msg, result_ok};
 
@@ -672,10 +670,6 @@ mod semantics {
         }
     }
 
-    pub(super) fn device_show(device: Device) -> String {
-        device.jet_show()
-    }
-
     pub(super) fn on_device(tensor: &Tensor, device: Device) -> Result<Tensor, String> {
         jet_compute_on_device(tensor, device).map_err(|error| error.jet_show())
     }
@@ -1104,7 +1098,7 @@ fn read_record_words(runtime: &JitRuntime, handle: i64, count: usize) -> Option<
 
 fn invoke_callable(slot: JitCallableSlot, args: &[i64]) -> i64 {
     // SAFETY: the callable binder records the Cranelift signature shape and
-    // this adapter only invokes i64-carrier functions after sema has proved
+    // this adapter only invokes Tensor-valued functions after sema has proved
     // their arity. The resident function-value ABI is C-compatible on the JIT
     // target, with the environment word prepended for captured values.
     unsafe {
@@ -1188,41 +1182,6 @@ fn invoke_callable(slot: JitCallableSlot, args: &[i64]) -> i64 {
             }
         }
     }
-}
-
-fn marshal_callable_result(
-    runtime: &mut JitRuntime,
-    slot: JitCallableSlot,
-    value: i64,
-) -> Option<i64> {
-    if !slot.returns_result {
-        return Some(value);
-    }
-
-    let Some((ok, payload)) = jit_result_parts(runtime, value) else {
-        runtime.set_host_fault("jit callable returned an invalid Result handle");
-        return None;
-    };
-    if ok {
-        return Some(payload as i64);
-    }
-
-    let Some(error_index) = usize::try_from(payload)
-        .ok()
-        .and_then(|handle| handle.checked_sub(1))
-    else {
-        runtime.set_host_fault("jit callable returned an invalid Err handle");
-        return None;
-    };
-    let Some(report) = runtime.errors.get(error_index).map(|error| {
-        jet_foundation::Outcome::jet_error_report(error).render()
-    })
-    else {
-        runtime.set_host_fault("jit callable returned an invalid Err handle");
-        return None;
-    };
-    runtime.set_rendered_runtime_stop(report, 1);
-    None
 }
 
 fn transform_failure(runtime: &mut JitRuntime, message: &str) -> i64 {
@@ -1350,15 +1309,7 @@ fn run_transform(
         originals.push((*handle, slot.tensor.clone()));
         slot.tensor = traced_tensor.clone();
     }
-    let raw_output_handle = invoke_callable(callable, primal_handles);
-    for (handle, original) in originals {
-        if let Some(slot) = slot_mut(runtime, handle) {
-            slot.tensor = original;
-        }
-    }
-    let Some(output_handle) = marshal_callable_result(runtime, callable, raw_output_handle) else {
-        return 0;
-    };
+    let output_handle = invoke_callable(callable, primal_handles);
     let output_record = if output_handle != 0 && result_fields != 0 {
         read_record_words(runtime, output_handle, result_fields)
     } else {
@@ -1369,6 +1320,11 @@ fn run_transform(
     } else {
         None
     };
+    for (handle, original) in originals {
+        if let Some(slot) = slot_mut(runtime, handle) {
+            slot.tensor = original;
+        }
+    }
     if output_handle == 0 {
         return transform_failure(runtime, "core.compute transform function returned no value");
     }
@@ -1473,13 +1429,7 @@ fn curried_base(
                     "core.compute transform received an invalid Tensor".to_string(),
                 )));
             }
-            let raw_output_handle = invoke_callable(callable, &handles);
-            let Some(output_handle) = marshal_callable_result(runtime, callable, raw_output_handle)
-            else {
-                return Some(Err(semantics::JetComputeError::Unsupported(
-                    "core.compute transform function returned no value".to_string(),
-                )));
-            };
+            let output_handle = invoke_callable(callable, &handles);
             if output_handle == 0 {
                 return Some(Err(semantics::JetComputeError::Unsupported(
                     "core.compute transform function returned no value".to_string(),
@@ -1954,16 +1904,6 @@ fn jet_jit_compute_device_vulkan() -> i64 {
 
 fn jet_jit_compute_device_webgpu() -> i64 {
     semantics::device_word(semantics::device_webgpu())
-}
-
-fn jet_jit_compute_device_show(device: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| {
-        let Some(device) = semantics::device_from_word(device) else {
-            runtime.set_trap("core.compute.device_show received an invalid device");
-            return 0;
-        };
-        runtime.heap.alloc_string(semantics::device_show(device))
-    })
 }
 
 fn jet_jit_compute_on_device(tensor: i64, device: i64) -> i64 {
@@ -2881,7 +2821,6 @@ host_fns! {
     device_cuda: "jet_compute_device_cuda" => jet_jit_compute_device_cuda: sig_zero;
     device_vulkan: "jet_compute_device_vulkan" => jet_jit_compute_device_vulkan: sig_zero;
     device_webgpu: "jet_compute_device_webgpu" => jet_jit_compute_device_webgpu: sig_zero;
-    device_show: "jet_jit_compute_device_show" => jet_jit_compute_device_show: sig_one;
     on_device: "jet_compute_on_device" => jet_jit_compute_on_device: sig_two;
     broadcast_to: "jet_compute_broadcast_to" => jet_jit_compute_broadcast_to: sig_two;
     transpose: "jet_compute_transpose" => jet_jit_compute_transpose: sig_one;

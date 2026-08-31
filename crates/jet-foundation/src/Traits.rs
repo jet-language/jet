@@ -2009,7 +2009,6 @@ impl TraitRegistry {
             crate::Syntax::TYPE_BYTES,
             "Clock",
             "Closed",
-            "ComputeDevice",
             "CountMinSketch",
             "DBError",
             "DBValue",
