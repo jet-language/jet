@@ -1,0 +1,678 @@
+{
+  "schema_version": "2393-r1-receipt-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A03",
+  "family": "OpenAI",
+  "task": "T4",
+  "arm": "Rust",
+  "opaque_arm_label": "Arm B",
+  "assignment": {
+    "task_bit": 1,
+    "task_bit_digest": "9601fe7a09a7d5fb30b0d8dc4da0d20c181da535ab23299dbbba878fbf17dba7",
+    "task_arm_order": [
+      "Rust",
+      "Jet"
+    ],
+    "session_order_from_T1": [
+      "Rust",
+      "Jet"
+    ]
+  },
+  "comparison_blind_mapping": {
+    "digest": "44d2078aff92d517aa172f204b008182881a55add9a2cfad06abc7c8bf321bb3",
+    "first_bit": 0,
+    "second_bit": 1,
+    "option_order": [
+      "Arm B",
+      "Arm A",
+      "no preference"
+    ]
+  },
+  "protocol": {
+    "path": "docs/audits/fresh-agent-5-of-5-rerun-2026-08-30.md",
+    "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+    "language_reference_sha256": "6313eade3a13e199c2006953453dd0ffed82db6bb173c46f354021c36bdbf509",
+    "prompt_path": ".tmp/2393-r1/prompts/A03-rust.txt",
+    "prompt_sha256": "da8627b915a279fd1add259e923df35b9de9c28bc290524f74853be6584f5efd",
+    "fixture": {
+      "task": "T4",
+      "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+      "expected": {
+        "success": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n"
+      },
+      "files": {
+        "success": {
+          "path": "report.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\n",
+          "sha256": "a9a0e89c7cd8d98eba7885756b010829b88b2890728d4ad8f2ff177faec35d9e"
+        }
+      }
+    }
+  },
+  "transport": {
+    "family": "OpenAI",
+    "adapter": "omp-task-fallback",
+    "detail": "OpenAI-family OMP task fallback; Rust task returned transport exit 1 after source and command evidence were persisted.",
+    "arm_order_deviation": null
+  },
+  "source_path": ".tmp/2393-r1/participants/A03/T4.rs",
+  "source_metrics": {
+    "bytes": 3177,
+    "physical_lines": 106,
+    "unicode_whitespace_tokens": 315,
+    "sha256": "677a7e0428a44b0cf7a4fcb05aeaa4b7520af4f63f4c0fbe693b78c4ffeb2f12"
+  },
+  "source": "use std::env;\nuse std::fmt::Write as _;\nuse std::fs;\nuse std::process;\n\nstruct Report {\n    count: i64,\n    name: String,\n    note: String,\n}\n\nfn fail(message: impl AsRef<str>) -> ! {\n    eprintln!(\"{}\", message.as_ref());\n    process::exit(1);\n}\n\nfn escape_json(value: &str) -> String {\n    let mut escaped = String::with_capacity(value.len());\n    for character in value.chars() {\n        match character {\n            '\"' => escaped.push_str(\"\\\\\\\"\"),\n            '\\\\' => escaped.push_str(\"\\\\\\\\\"),\n            '\\n' => escaped.push_str(\"\\\\n\"),\n            '\\r' => escaped.push_str(\"\\\\r\"),\n            '\\t' => escaped.push_str(\"\\\\t\"),\n            '\\u{08}' => escaped.push_str(\"\\\\b\"),\n            '\\u{0c}' => escaped.push_str(\"\\\\f\"),\n            character if character <= '\\u{1f}' => {\n                let _ = write!(escaped, \"\\\\u{:04x}\", character as u32);\n            }\n            character => escaped.push(character),\n        }\n    }\n    escaped\n}\n\nfn main() {\n    let mut arguments = env::args();\n    arguments.next();\n    let path = match arguments.next() {\n        Some(path) => path,\n        None => fail(\"missing input path\"),\n    };\n    if arguments.next().is_some() {\n        fail(\"unexpected extra argument\");\n    }\n\n    let input = match fs::read_to_string(&path) {\n        Ok(input) => input,\n        Err(error) => fail(format!(\"cannot read {}: {}\", path, error)),\n    };\n\n    let mut name: Option<String> = None;\n    let mut count: Option<i64> = None;\n    let mut note: Option<String> = None;\n\n    for (index, line) in input.lines().enumerate() {\n        if line.trim().is_empty() {\n            continue;\n        }\n        let (field, value) = match line.split_once('\\t') {\n            Some(parts) => parts,\n            None => fail(format!(\"malformed field on line {}\", index + 1)),\n        };\n        match field {\n            \"name\" => {\n                if name.is_some() {\n                    fail(\"duplicate name field\");\n                }\n                name = Some(value.to_owned());\n            }\n            \"count\" => {\n                if count.is_some() {\n                    fail(\"duplicate count field\");\n                }\n                count = Some(match value.parse::<i64>() {\n                    Ok(count) => count,\n                    Err(_) => fail(format!(\"invalid count on line {}\", index + 1)),\n                });\n            }\n            \"note\" => {\n                if note.is_some() {\n                    fail(\"duplicate note field\");\n                }\n                note = Some(value.to_owned());\n            }\n            _ => fail(format!(\"unknown field {:?} on line {}\", field, index + 1)),\n        }\n    }\n\n    let report = Report {\n        count: count.unwrap_or_else(|| fail(\"missing count field\")),\n        name: name.unwrap_or_else(|| fail(\"missing name field\")),\n        note: note.unwrap_or_else(|| fail(\"missing note field\")),\n    };\n\n    let name = escape_json(&report.name);\n    let note = escape_json(&report.note);\n    let mut output = String::new();\n    let _ = write!(\n        output,\n        \"{{\\\"count\\\":{},\\\"name\\\":\\\"{}\\\",\\\"note\\\":\\\"{}\\\"}}\",\n        report.count, name, note\n    );\n    println!(\"{}\", output);\n}\n",
+  "status": "measured",
+  "implementation_session": {
+    "adapter": "omp-task-fallback",
+    "model_family": "OpenAI",
+    "model": "gpt-5.6-luna",
+    "omp_direct_attempt": null,
+    "started_at": null,
+    "ended_at": null,
+    "wall_seconds": null,
+    "time_to_first_stdout_seconds": null,
+    "peak_rss_kb": null,
+    "exit_status": null,
+    "timed_out": null,
+    "stdout": null,
+    "stderr": null,
+    "prompt_path": ".tmp/2393-r1/prompts/A03-rust.txt",
+    "agent_ref": "agent://Card2393Rerun.A03RustOpenAI",
+    "history_ref": "history://Card2393Rerun.A03RustOpenAI",
+    "provenance": "OpenAI-family OMP task fallback; Rust task returned transport exit 1 after source and command evidence were persisted."
+  },
+  "commands": [
+    {
+      "argv": [
+        "./bin/rustc",
+        "T4.rs",
+        "-o",
+        "T4-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:18.620Z",
+      "ended_at": "2026-08-31T21:07:19.958Z",
+      "wall_seconds": 1.3382956139999442,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 175036,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T4.rs",
+        "-o",
+        "T4-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:19.957Z",
+      "ended_at": "2026-08-31T21:07:21.353Z",
+      "wall_seconds": 1.3956325539997778,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 176152,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T4-debug",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:21.353Z",
+      "ended_at": "2026-08-31T21:07:21.354Z",
+      "wall_seconds": 0.0009162749997340142,
+      "time_to_first_stdout_seconds": 0.0008270250000059605,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T4-release",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:21.354Z",
+      "ended_at": "2026-08-31T21:07:21.355Z",
+      "wall_seconds": 0.0006263729999773204,
+      "time_to_first_stdout_seconds": 0.0005400290000252425,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T3.rs",
+        "-o",
+        "T3-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:21.355Z",
+      "ended_at": "2026-08-31T21:07:22.638Z",
+      "wall_seconds": 1.2825565039999782,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 172996,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T3.rs",
+        "-o",
+        "T3-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:22.638Z",
+      "ended_at": "2026-08-31T21:07:24.028Z",
+      "wall_seconds": 1.3904344470002687,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 177808,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-debug",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:24.028Z",
+      "ended_at": "2026-08-31T21:07:24.029Z",
+      "wall_seconds": 0.000849307999946177,
+      "time_to_first_stdout_seconds": 0.0007524430002085865,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-debug",
+        "journal-failure.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:24.028Z",
+      "ended_at": "2026-08-31T21:07:24.029Z",
+      "wall_seconds": 0.0005952039998956025,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown record kind \"rename\" on line 2\n"
+    },
+    {
+      "argv": [
+        "./T3-release",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:24.029Z",
+      "ended_at": "2026-08-31T21:07:24.030Z",
+      "wall_seconds": 0.0006719200001098216,
+      "time_to_first_stdout_seconds": 0.0005780910002067685,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-release",
+        "journal-failure.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:24.030Z",
+      "ended_at": "2026-08-31T21:07:24.031Z",
+      "wall_seconds": 0.000538024999666959,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown record kind \"rename\" on line 2\n"
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T2.rs",
+        "-o",
+        "T2-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:24.031Z",
+      "ended_at": "2026-08-31T21:07:25.303Z",
+      "wall_seconds": 1.272490422999952,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 168156,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T2.rs",
+        "-o",
+        "T2-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:25.303Z",
+      "ended_at": "2026-08-31T21:07:26.623Z",
+      "wall_seconds": 1.3200175370001235,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 169344,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.623Z",
+      "ended_at": "2026-08-31T21:07:26.624Z",
+      "wall_seconds": 0.0008413529996760189,
+      "time_to_first_stdout_seconds": 0.0007228969996795058,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "inspect",
+        "alpha",
+        "--format",
+        "text"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.624Z",
+      "ended_at": "2026-08-31T21:07:26.625Z",
+      "wall_seconds": 0.0006337069999426603,
+      "time_to_first_stdout_seconds": 0.0005406599999405444,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "inspect name=alpha format=text dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "rm",
+        "alpha",
+        "--dry-run"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.624Z",
+      "ended_at": "2026-08-31T21:07:26.625Z",
+      "wall_seconds": 0.0005677910000085831,
+      "time_to_first_stdout_seconds": 0.0004783910000696778,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "remove name=alpha format=text dry_run=true\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "unknown",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.625Z",
+      "ended_at": "2026-08-31T21:07:26.626Z",
+      "wall_seconds": 0.0006269739996641874,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown command \"unknown\"\n"
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.626Z",
+      "ended_at": "2026-08-31T21:07:26.627Z",
+      "wall_seconds": 0.0006370930001139641,
+      "time_to_first_stdout_seconds": 0.0005380750000476837,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "inspect",
+        "alpha",
+        "--format",
+        "text"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.626Z",
+      "ended_at": "2026-08-31T21:07:26.627Z",
+      "wall_seconds": 0.0007431660001166165,
+      "time_to_first_stdout_seconds": 0.0006526029999367893,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "inspect name=alpha format=text dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "rm",
+        "alpha",
+        "--dry-run"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.627Z",
+      "ended_at": "2026-08-31T21:07:26.628Z",
+      "wall_seconds": 0.0008289089999161661,
+      "time_to_first_stdout_seconds": 0.000718408000189811,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "remove name=alpha format=text dry_run=true\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "unknown",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.628Z",
+      "ended_at": "2026-08-31T21:07:26.629Z",
+      "wall_seconds": 0.0006284679998643696,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown command \"unknown\"\n"
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T1.rs",
+        "-o",
+        "T1-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:26.628Z",
+      "ended_at": "2026-08-31T21:07:27.922Z",
+      "wall_seconds": 1.2935685069998726,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 179328,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T1.rs",
+        "-o",
+        "T1-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:27.923Z",
+      "ended_at": "2026-08-31T21:07:29.401Z",
+      "wall_seconds": 1.478419132000301,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 182240,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-debug",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:29.401Z",
+      "ended_at": "2026-08-31T21:07:29.402Z",
+      "wall_seconds": 0.0009664409998804331,
+      "time_to_first_stdout_seconds": 0.0008431759998202324,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-debug",
+        "records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:29.401Z",
+      "ended_at": "2026-08-31T21:07:29.402Z",
+      "wall_seconds": 0.0005851450003683567,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "duplicate field \"name\" in section \"base\"\n"
+    },
+    {
+      "argv": [
+        "./T1-release",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:29.402Z",
+      "ended_at": "2026-08-31T21:07:29.403Z",
+      "wall_seconds": 0.0006541459998115897,
+      "time_to_first_stdout_seconds": 0.0005665789996273816,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-release",
+        "records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
+      "started_at": "2026-08-31T21:07:29.403Z",
+      "ended_at": "2026-08-31T21:07:29.404Z",
+      "wall_seconds": 0.0007704880000092089,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "duplicate field \"name\" in section \"base\"\n"
+    }
+  ],
+  "task_outcome": {
+    "task": "T4",
+    "check_count": 0,
+    "compile_count": 2,
+    "build_count": 0,
+    "success_count": 2,
+    "failure_count": 0,
+    "check_ok": false,
+    "compile_ok": true,
+    "build_ok": false,
+    "success_ok": true,
+    "failure_ok": true,
+    "native_count": 1,
+    "native_ok": true,
+    "project_green": true
+  },
+  "correction_passes": 0,
+  "rating": {
+    "reading": 4,
+    "writing": 5,
+    "reasoning": 5,
+    "creating": 5,
+    "modifying": 4,
+    "diagnostics": 4,
+    "tooling_docs": 4,
+    "reason": "Lowest rating is 4: the supplied success fixture and byte output were verified, but T4 provided no fixed failure fixture and required no correction or documentation work."
+  },
+  "rating_response_raw": "{\"T1\":{\"reading\":4,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"Lowest ratings are 4 for modifying and tooling/docs: T1 needed no correction pass, and evidence covered only the required direct rustc runs with no documentation work requested.\"},\"T2\":{\"reading\":4,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":5,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"Lowest rating is tooling/docs=4: the observed work used the required direct rustc and binary commands, with no documentation path requested or exercised.\"},\"T3\":{\"reading\":4,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"Lowest ratings are 4 for reading, modifying, and tooling/docs: evidence was limited to the supplied journal cases, required no correction, and used only the mandated direct compiler/run tooling.\"},\"T4\":{\"reading\":4,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":4,\"reason\":\"Lowest rating is 4: the supplied success fixture and byte output were verified, but T4 provided no fixed failure fixture and required no correction or documentation work.\"}}",
+  "rating_response_ref": ".tmp/2393-r1/runs/A03-rust.rating.agent.json",
+  "rating_session": {
+    "adapter": "omp-task-follow-up",
+    "model_family": "OpenAI",
+    "model": "gpt-5.6-luna",
+    "started_at": null,
+    "ended_at": null,
+    "agent_ref": "agent://Card2393Rerun.A03RustOpenAI",
+    "history_ref": "history://Card2393Rerun.A03RustOpenAI"
+  },
+  "diagnostics": [
+    {
+      "step": 1,
+      "argv": [
+        "./T3-debug",
+        "journal-failure.log"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown record kind \"rename\" on line 2\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 2,
+      "argv": [
+        "./T3-release",
+        "journal-failure.log"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown record kind \"rename\" on line 2\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 3,
+      "argv": [
+        "./T2-debug",
+        "unknown",
+        "alpha"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown command \"unknown\"\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 4,
+      "argv": [
+        "./T2-release",
+        "unknown",
+        "alpha"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown command \"unknown\"\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 5,
+      "argv": [
+        "./T1-debug",
+        "records-failure.cfg"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "duplicate field \"name\" in section \"base\"\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 6,
+      "argv": [
+        "./T1-release",
+        "records-failure.cfg"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "duplicate field \"name\" in section \"base\"\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    }
+  ],
+  "diagnostic_policy": {
+    "first_diagnostic_names_seeded_cause": "true only for the seeded duplicate/unknown/rename fixture failures; false for warnings, ICEs, and other tool failures",
+    "unregistered_codes_are_not_relabelled": true
+  },
+  "status_detail": "Source and command evidence persisted despite a task-agent transport failure after measurement."
+}

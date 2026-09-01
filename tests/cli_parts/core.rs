@@ -380,7 +380,7 @@ fn organization_gate_policy_refuses_each_audited_invocation_gate() {
     let configured = dir.join("org-policy.jet");
     fs::write(
         &configured,
-        "policy: .{ unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n",
+        "policy: { unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n",
     )
     .unwrap();
     let output = Command::new(jet())

@@ -1956,7 +1956,7 @@ fn undeclared_setting_diagnostic(key: &str, why: &str, declaration_site: &str) -
         format!("`@build.settings.{key}` is undeclared"),
         why.to_string(),
         format!(
-            "add `{key}: Type = default` to the `settings: .{{ … }}` block in `{declaration_site}`"
+            "add `{key}: Type = default` to the `settings: {{ … }}` block in `{declaration_site}`"
         ),
         None,
     )

@@ -238,7 +238,7 @@ fn fold_switch(
             "E0302",
             format!("`@build.settings.{key}` is undeclared"),
             "a setting must be declared with a type and default before it can be read".to_string(),
-            format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
+            format!("add `{key}: Type = default` to the package `settings: {{ … }}` block"),
             Some(subject.span()),
         ));
         return empty_stmt(span);

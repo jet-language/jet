@@ -1,0 +1,843 @@
+{
+  "schema_version": "2393-r1-receipt-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A10",
+  "family": "Anthropic",
+  "task": "T4",
+  "arm": "Jet",
+  "opaque_arm_label": "Arm B",
+  "assignment": {
+    "task_bit": 1,
+    "task_bit_digest": "cb2a775a2bd748390e8d73cbb99ec37549bef0a4f1bfa11eb9a2530d326e49b1",
+    "task_arm_order": [
+      "Rust",
+      "Jet"
+    ],
+    "session_order_from_T1": [
+      "Jet",
+      "Rust"
+    ]
+  },
+  "comparison_blind_mapping": {
+    "digest": "af40dafa6ae5a5511e50b3f831030fe1d02774c85df34b297362bb3da86de163",
+    "first_bit": 1,
+    "second_bit": 0,
+    "option_order": [
+      "Arm A",
+      "Arm B",
+      "no preference"
+    ]
+  },
+  "protocol": {
+    "path": "docs/audits/fresh-agent-5-of-5-rerun-2026-08-30.md",
+    "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+    "language_reference_sha256": "e81956a7a2a5d67ef746b003801c5981750b0b9626ab34fb55651b924336d50d",
+    "prompt_path": ".tmp/2393-r1/prompts/A10-jet.txt",
+    "prompt_sha256": "826844ba389a8d4be7639c0fa6c4bc862bcea8b7f7b35b71a2704d54d01c603a",
+    "fixture": {
+      "task": "T4",
+      "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+      "expected": {
+        "success": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n"
+      },
+      "files": {
+        "success": {
+          "path": "report.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\n",
+          "sha256": "a9a0e89c7cd8d98eba7885756b010829b88b2890728d4ad8f2ff177faec35d9e"
+        }
+      }
+    }
+  },
+  "transport": {
+    "family": "Anthropic",
+    "adapter": "omp-command",
+    "detail": "Direct omp command; Rust rating retry corrected an incorrect prompt path.",
+    "arm_order_deviation": null
+  },
+  "source_path": ".tmp/2393-r1/participants/A10/T4.jet",
+  "source_metrics": {
+    "bytes": 1043,
+    "physical_lines": 40,
+    "unicode_whitespace_tokens": 120,
+    "sha256": "8cc3f39d134e85e6cbe4cfe0473fd6b8b62fffd4bc3cb9376fdd823d6b369c1d"
+  },
+  "source": "use core.files as files\nuse core.process as process\n\nfn json_escape(s: String) String -> {\n    result := s.replace(\"\\\\\", \"\\\\\\\\\").replace(\"\\\"\", \"\\\\\\\"\").replace(\"\\n\", \"\\\\n\").replace(\"\\t\", \"\\\\t\")\n    return result\n}\n\nfn run() {\n    path :: process.argv().get(1) ?? panic(\"missing path\")\n    text :: files.read(path) ?? panic(\"read failed\")\n    raw_lines :: text.lines()\n\n    name := \"\"\n    count := \"\"\n    note := \"\"\n\n    loop line in raw_lines {\n        trimmed :: ~line.trim()\n        if trimmed.is_empty() -> next\n\n        parts :: trimmed.split(\"\\t\").to_list()\n        if parts.len() < 2 -> next\n\n        key :: parts[0]\n        val :: ~parts[1]\n\n        if {\n            key == \"name\" -> name = ~val\n            key == \"count\" -> count = ~val\n            key == \"note\" -> note = ~val\n        }\n    }\n\n    count_int :: count.to_int() ?? panic(\"count is not a number\")\n    escaped_name :: json_escape(name)\n    escaped_note :: json_escape(note)\n\n    print(\"{{\\\"count\\\":{count_int},\\\"name\\\":\\\"{escaped_name}\\\",\\\"note\\\":\\\"{escaped_note}\\\"}}\")\n}\n",
+  "status": "measured",
+  "implementation_session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--no-pty",
+      "--tools=read,bash,write",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/prompts/A10-jet.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+    "started_at": "2026-08-31T23:30:33.405Z",
+    "ended_at": "2026-08-31T23:39:25.174Z",
+    "wall_seconds": 531.7688892639987,
+    "time_to_first_stdout_seconds": 531.7355567539986,
+    "peak_rss_kb": 325684,
+    "exit_status": 0,
+    "timed_out": false,
+    "stdout": "Now let me prepare the JSON result. Let me count correction passes: T1 had 1 correction pass (ownership/view fix), T2 had 2 (arm table default `_` → `else`, and the initial `if/else` chains to arm tables), T3 had 2 (arm table default and nested if syntax), T4 had 1 (`\\r` escape fix).\n\n{\"T1\":{\"source\":\"use core.files as files\\nuse core.process as process\\n\\nfn find_in(list: [String], target: String) Int -> {\\n    loop i in 0..list.len() - 1 {\\n        if list[i] == target -> return i\\n    }\\n    return -1\\n}\\n\\nfn run() {\\n    path :: process.argv().get(1) ?? panic(\\\"missing path\\\")\\n    text :: files.read(path) ?? panic(\\\"read failed\\\")\\n    raw_lines :: text.lines()\\n\\n    section_order := [String]{}\\n    entry_section := [String]{}\\n    entry_key := [String]{}\\n    entry_val := [String]{}\\n    inherits_from := [String]{}\\n    inherits_to := [String]{}\\n\\n    current := \\\"\\\"\\n\\n    loop line in raw_lines {\\n        trimmed :: ~line.trim()\\n        if trimmed.is_empty() -> next\\n\\n        if trimmed.starts_with(\\\"[\\\") && trimmed.ends_with(\\\"]\\\") {\\n            current = trimmed.slice(1, trimmed.len() - 2)\\n            section_order.push(~current)\\n            next\\n        }\\n\\n        if current.is_empty() {\\n            eprint(\\\"error: key outside section\\\")\\n            process.exit(1)\\n        }\\n\\n        parts :: trimmed.split(\\\" = \\\").to_list()\\n        if parts.len() < 2 {\\n            eprint(\\\"error: malformed line: {trimmed}\\\")\\n            process.exit(1)\\n        }\\n\\n        key :: ~parts[0]\\n        raw_val :: ~parts[1]\\n\\n        val := ~raw_val\\n        if raw_val.starts_with(\\\"\\\\\\\"\\\") && raw_val.ends_with(\\\"\\\\\\\"\\\") {\\n            val = raw_val.slice(1, raw_val.len() - 2)\\n        }\\n\\n        if key == \\\"inherits\\\" {\\n            inherits_from.push(~current)\\n            inherits_to.push(~val)\\n            next\\n        }\\n\\n        loop j in 0..entry_section.len() - 1 {\\n            if entry_section[j] == current && entry_key[j] == key {\\n                eprint(\\\"error: duplicate key '{key}' in section '{current}'\\\")\\n                process.exit(1)\\n            }\\n        }\\n\\n        entry_section.push(~current)\\n        entry_key.push(~key)\\n        entry_val.push(~val)\\n    }\\n\\n    loop s in 0..section_order.len() - 1 {\\n        sec :: section_order[s]\\n        parent_idx :: find_in(inherits_from, sec)\\n        printed_keys := [String]{}\\n\\n        if parent_idx >= 0 {\\n            parent :: inherits_to[parent_idx]\\n            loop p in 0..entry_key.len() - 1 {\\n                if entry_section[p] == parent {\\n                    pk :: entry_key[p]\\n                    override_idx := -1\\n                    loop c in 0..entry_key.len() - 1 {\\n                        if entry_section[c] == sec && entry_key[c] == pk {\\n                            override_idx = c\\n                            break\\n                        }\\n                    }\\n                    if override_idx >= 0 -> print(\\\"{sec}.{pk}={entry_val[override_idx]}\\\") else -> print(\\\"{sec}.{pk}={entry_val[p]}\\\")\\n                    printed_keys.push(~pk)\\n                }\\n            }\\n        }\\n\\n        loop e in 0..entry_key.len() - 1 {\\n            if entry_section[e] == sec {\\n                ek :: entry_key[e]\\n                already :: find_in(printed_keys, ek)\\n                if already < 0 {\\n                    print(\\\"{sec}.{ek}={entry_val[e]}\\\")\\n                    printed_keys.push(~ek)\\n                }\\n            }\\n        }\\n    }\\n}\",\"correction_passes\":1,\"commands\":[\"jet run T1.jet -- records.cfg\",\"jet run T1.jet -- records-failure.cfg\"],\"observed\":[\"stdout: base.name=Ada\\\\nbase.role=admin\\\\ndev.name=Ada\\\\ndev.role=reviewer, exit 0\",\"stderr: error: duplicate key 'name' in section 'base', no stdout, exit 1\"],\"notes\":\"Parses INI-like config with section headers, quoted values, and one-level inherits. Duplicate key detection exits non-zero with stderr message.\"},\"T2\":{\"source\":\"use core.process as process\\n\\nfn run() {\\n    args :: process.argv()\\n    if args.len() < 2 {\\n        eprint(\\\"error: missing command\\\")\\n        process.exit(1)\\n    }\\n\\n    cmd :: args[1]\\n    remaining := [String]{}\\n    loop i in 2..args.len() - 1 {\\n        remaining.push(~args[i])\\n    }\\n\\n    name := \\\"\\\"\\n    format := \\\"text\\\"\\n    dry_run := false\\n    json_flag := false\\n\\n    i := 0\\n    loop i < remaining.len() {\\n        arg :: remaining[i]\\n        if {\\n            arg == \\\"--json\\\" -> {\\n                json_flag = true\\n                i += 1\\n            }\\n            arg == \\\"--dry-run\\\" -> {\\n                dry_run = true\\n                i += 1\\n            }\\n            arg == \\\"--format\\\" -> {\\n                if i + 1 >= remaining.len() {\\n                    eprint(\\\"error: --format requires a value\\\")\\n                    process.exit(1)\\n                }\\n                format = ~remaining[i + 1]\\n                i += 2\\n            }\\n            arg.starts_with(\\\"-\\\") -> {\\n                eprint(\\\"error: unknown option '{arg}'\\\")\\n                process.exit(1)\\n            }\\n            else -> {\\n                name = ~arg\\n                i += 1\\n            }\\n        }\\n    }\\n\\n    if json_flag -> format = \\\"json\\\"\\n\\n    if {\\n        cmd == \\\"list\\\" || cmd == \\\"ls\\\" -> print(\\\"list name={name} format={format} dry_run={dry_run}\\\")\\n        cmd == \\\"inspect\\\" -> print(\\\"inspect name={name} format={format} dry_run={dry_run}\\\")\\n        cmd == \\\"remove\\\" || cmd == \\\"rm\\\" -> print(\\\"remove name={name} format={format} dry_run={dry_run}\\\")\\n        else -> {\\n            eprint(\\\"error: unknown command '{cmd}'\\\")\\n            process.exit(1)\\n        }\\n    }\\n}\",\"correction_passes\":2,\"commands\":[\"jet run T2.jet -- ls --json alpha\",\"jet run T2.jet -- inspect alpha --format text\",\"jet run T2.jet -- rm alpha --dry-run\",\"jet run T2.jet -- unknown alpha\"],\"observed\":[\"stdout: list name=alpha format=json dry_run=false, exit 0\",\"stdout: inspect name=alpha format=text dry_run=false, exit 0\",\"stdout: remove name=alpha format=text dry_run=true, exit 0\",\"stderr: error: unknown command 'unknown', no stdout, exit 1\"],\"notes\":\"Typed CLI dispatch with list/ls, inspect, remove/rm commands. Supports --json, --format text|json, and --dry-run flags. Unknown commands exit non-zero.\"},\"T3\":{\"source\":\"use core.files as files\\nuse core.process as process\\n\\nfn find_in(list: [String], target: String) Int -> {\\n    loop i in 0..list.len() - 1 {\\n        if list[i] == target -> return i\\n    }\\n    return -1\\n}\\n\\nfn run() {\\n    path :: process.argv().get(1) ?? panic(\\\"missing path\\\")\\n    text :: files.read(path) ?? panic(\\\"read failed\\\")\\n    raw_lines :: text.lines()\\n\\n    keys := [String]{}\\n    vals := [String]{}\\n    alive := [Bool]{}\\n\\n    loop line in raw_lines {\\n        trimmed :: ~line.trim()\\n        if trimmed.is_empty() -> next\\n\\n        parts :: trimmed.split(\\\"|\\\").to_list()\\n        if parts.len() < 2 {\\n            eprint(\\\"error: malformed record: {trimmed}\\\")\\n            process.exit(1)\\n        }\\n\\n        kind :: parts[0]\\n        key :: ~parts[1]\\n\\n        if {\\n            kind == \\\"put\\\" -> {\\n                if parts.len() < 3 {\\n                    eprint(\\\"error: malformed put record: {trimmed}\\\")\\n                    process.exit(1)\\n                }\\n                value :: ~parts[2]\\n                idx :: find_in(keys, key)\\n                if {\\n                    idx >= 0 -> {\\n                        vals[idx] = ~value\\n                        alive[idx] = true\\n                    }\\n                    else -> {\\n                        keys.push(~key)\\n                        vals.push(~value)\\n                        alive.push(true)\\n                    }\\n                }\\n            }\\n            kind == \\\"delete\\\" -> {\\n                idx :: find_in(keys, key)\\n                if idx >= 0 -> alive[idx] = false\\n            }\\n            else -> {\\n                eprint(\\\"error: unknown record kind '{kind}'\\\")\\n                process.exit(1)\\n            }\\n        }\\n    }\\n\\n    loop i in 0..keys.len() - 1 {\\n        if alive[i] -> print(\\\"{keys[i]}={vals[i]}\\\")\\n    }\\n}\",\"correction_passes\":2,\"commands\":[\"jet run T3.jet -- journal.log\",\"jet run T3.jet -- journal-failure.log\"],\"observed\":[\"stdout: beta=2\\\\ngamma=3, exit 0\",\"stderr: error: unknown record kind 'rename', no stdout, exit 1\"],\"notes\":\"Replays put/delete journal entries maintaining insertion order. Duplicate put updates value in place. Unknown record kinds exit non-zero.\"},\"T4\":{\"source\":\"use core.files as files\\nuse core.process as process\\n\\nfn json_escape(s: String) String -> {\\n    result := s.replace(\\\"\\\\\\\\\\\", \\\"\\\\\\\\\\\\\\\\\\\").replace(\\\"\\\\\\\"\\\", \\\"\\\\\\\\\\\\\\\"\\\").replace(\\\"\\\\n\\\", \\\"\\\\\\\\n\\\").replace(\\\"\\\\t\\\", \\\"\\\\\\\\t\\\")\\n    return result\\n}\\n\\nfn run() {\\n    path :: process.argv().get(1) ?? panic(\\\"missing path\\\")\\n    text :: files.read(path) ?? panic(\\\"read failed\\\")\\n    raw_lines :: text.lines()\\n\\n    name := \\\"\\\"\\n    count := \\\"\\\"\\n    note := \\\"\\\"\\n\\n    loop line in raw_lines {\\n        trimmed :: ~line.trim()\\n        if trimmed.is_empty() -> next\\n\\n        parts :: trimmed.split(\\\"\\\\t\\\").to_list()\\n        if parts.len() < 2 -> next\\n\\n        key :: parts[0]\\n        val :: ~parts[1]\\n\\n        if {\\n            key == \\\"name\\\" -> name = ~val\\n            key == \\\"count\\\" -> count = ~val\\n            key == \\\"note\\\" -> note = ~val\\n        }\\n    }\\n\\n    count_int :: count.to_int() ?? panic(\\\"count is not a number\\\")\\n    escaped_name :: json_escape(name)\\n    escaped_note :: json_escape(note)\\n\\n    print(\\\"{{\\\\\\\"count\\\\\\\":{count_int},\\\\\\\"name\\\\\\\":\\\\\\\"{escaped_name}\\\\\\\",\\\\\\\"note\\\\\\\":\\\\\\\"{escaped_note}\\\\\\\"}}\\\")\\n}\",\"correction_passes\":1,\"commands\":[\"jet run T4.jet -- report.tsv\"],\"observed\":[\"stdout: {\\\"count\\\":2,\\\"name\\\":\\\"Ada\\\",\\\"note\\\":\\\"line \\\\\\\"one\\\\\\\"\\\"}, exit 0, exact byte match with trailing newline\"],\"notes\":\"Parses TSV key-value pairs, builds typed report, outputs canonical JSON with count/name/note key order and proper escaping.\"}}\n",
+    "stderr": "Working...\n",
+    "prompt_path": ".tmp/2393-r1/prompts/A10-jet.txt",
+    "provenance": "Direct omp command; Rust rating retry corrected an incorrect prompt path."
+  },
+  "commands": [
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T1.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:39:43.492Z",
+      "ended_at": "2026-08-31T23:39:43.724Z",
+      "wall_seconds": 0.2316409579999745,
+      "time_to_first_stdout_seconds": 0.22198309199884533,
+      "peak_rss_kb": 54764,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "check: passed (source=T1.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=113, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=0)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:6:9\n    |\n  6 |         if list[i] == target -> return i\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:6:33\n    |\n  6 |         if list[i] == target -> return i\n    |                                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:30:13\n    |\n 30 |             current = trimmed.slice(1, trimmed.len() - 2)\n    |             ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:46:9\n    |\n 46 |         key :: ~parts[0]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:47:9\n    |\n 47 |         raw_val :: ~parts[1]\n    |         ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:51:13\n    |\n 51 |             val = raw_val.slice(1, raw_val.len() - 2)\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:60:9\n    |\n 60 |         loop j in 0..entry_section.len() - 1 {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:61:13\n    |\n 61 |             if entry_section[j] == current && entry_key[j] == key {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:73:9\n    |\n 73 |         sec :: section_order[s]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:74:9\n    |\n 74 |         parent_idx :: find_in(inherits_from, sec)\n    |         ^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:78:13\n    |\n 78 |             parent :: inherits_to[parent_idx]\n    |             ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:79:13\n    |\n 79 |             loop p in 0..entry_key.len() - 1 {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:80:17\n    |\n 80 |                 if entry_section[p] == parent {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:81:21\n    |\n 81 |                     pk :: entry_key[p]\n    |                     ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:83:21\n    |\n 83 |                     loop c in 0..entry_key.len() - 1 {\n    |                     ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:84:25\n    |\n 84 |                         if entry_section[c] == sec && entry_key[c] == pk {\n    |                         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:45\n    |\n 89 |                     if override_idx >= 0 -> print(\"{sec}.{pk}={entry_val[override_idx]}\") else -> print(\"{sec}.{pk}={entry_val[p]}\")\n    |                                             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:99\n    |\n 89 |                     if override_idx >= 0 -> print(\"{sec}.{pk}={entry_val[override_idx]}\") else -> print(\"{sec}.{pk}={entry_val[p]}\")\n    |                                                                                                   ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:95:9\n    |\n 95 |         loop e in 0..entry_key.len() - 1 {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:96:13\n    |\n 96 |             if entry_section[e] == sec {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:97:17\n    |\n 97 |                 ek :: entry_key[e]\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:98:17\n    |\n 98 |                 already :: find_in(printed_keys, ek)\n    |                 ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:100:21\n    |\n100 |                     print(\"{sec}.{ek}={entry_val[e]}\")\n    |                     ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n23 problems found\nrun `jet explain L2510` to learn more\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T1.jet",
+        "--",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:39:43.724Z",
+      "ended_at": "2026-08-31T23:39:44.004Z",
+      "wall_seconds": 0.2796065100003034,
+      "time_to_first_stdout_seconds": 0.27068542799912393,
+      "peak_rss_kb": 106648,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T1.jet",
+        "--",
+        "records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:39:44.004Z",
+      "ended_at": "2026-08-31T23:39:44.279Z",
+      "wall_seconds": 0.2752293530013412,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 107324,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "error: duplicate key 'name' in section 'base'\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "--release",
+        "T1.jet",
+        "--",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:39:44.279Z",
+      "ended_at": "2026-08-31T23:40:12.521Z",
+      "wall_seconds": 28.241803841000422,
+      "time_to_first_stdout_seconds": 28.23591897200048,
+      "peak_rss_kb": 224232,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T1.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:12.521Z",
+      "ended_at": "2026-08-31T23:40:40.410Z",
+      "wall_seconds": 27.888631386000664,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 55636,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "  jet  Reading    T1.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T1 in 27.8s ✓\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T2.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:40.410Z",
+      "ended_at": "2026-08-31T23:40:40.597Z",
+      "wall_seconds": 0.1873684490006417,
+      "time_to_first_stdout_seconds": 0.17753173200041056,
+      "peak_rss_kb": 53364,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "check: passed (source=T2.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=78, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=0)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:13:19\n    |\n 13 |         remaining.push(~args[i])\n    |                   ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:23:9\n    |\n 23 |         arg :: remaining[i]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:27:17\n    |\n 27 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:31:17\n    |\n 31 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:34:17\n    |\n 34 |                 if i + 1 >= remaining.len() {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:38:17\n    |\n 38 |                 format = ~remaining[i + 1]\n    |                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:38:17\n    |\n 38 |                 format = ~remaining[i + 1]\n    |                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:39:17\n    |\n 39 |                 i += 2\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:47:17\n    |\n 47 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\n9 problems found\nrun `jet explain L2510` to learn more\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T2.jet",
+        "--",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:40.597Z",
+      "ended_at": "2026-08-31T23:40:40.800Z",
+      "wall_seconds": 0.2031941529996693,
+      "time_to_first_stdout_seconds": 0.19669170700013638,
+      "peak_rss_kb": 91972,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T2.jet",
+        "--",
+        "inspect",
+        "alpha",
+        "--format",
+        "text"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:40.800Z",
+      "ended_at": "2026-08-31T23:40:41.002Z",
+      "wall_seconds": 0.20179820300079881,
+      "time_to_first_stdout_seconds": 0.19614897299930453,
+      "peak_rss_kb": 91428,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "inspect name=alpha format=text dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T2.jet",
+        "--",
+        "rm",
+        "alpha",
+        "--dry-run"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:41.002Z",
+      "ended_at": "2026-08-31T23:40:41.206Z",
+      "wall_seconds": 0.2036873809993267,
+      "time_to_first_stdout_seconds": 0.1975737260002643,
+      "peak_rss_kb": 91932,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "remove name=alpha format=text dry_run=true\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T2.jet",
+        "--",
+        "unknown",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:41.206Z",
+      "ended_at": "2026-08-31T23:40:41.405Z",
+      "wall_seconds": 0.19939791099913418,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 92064,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "error: unknown command 'unknown'\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "--release",
+        "T2.jet",
+        "--",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:40:41.405Z",
+      "ended_at": "2026-08-31T23:41:03.076Z",
+      "wall_seconds": 21.671408144999294,
+      "time_to_first_stdout_seconds": 21.66592082300037,
+      "peak_rss_kb": 223740,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T2.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:03.076Z",
+      "ended_at": "2026-08-31T23:41:24.241Z",
+      "wall_seconds": 21.164525048000737,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 54876,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "  jet  Reading    T2.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, IO, Mem.Alloc; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T2 in 21.1s ✓\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T3.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:24.241Z",
+      "ended_at": "2026-08-31T23:41:24.441Z",
+      "wall_seconds": 0.2003330620005727,
+      "time_to_first_stdout_seconds": 0.19038333999924362,
+      "peak_rss_kb": 54148,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "check: passed (source=T3.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=90, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=0)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:6:9\n    |\n  6 |         if list[i] == target -> return i\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:6:33\n    |\n  6 |         if list[i] == target -> return i\n    |                                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:30:9\n    |\n 30 |         kind :: parts[0]\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:31:9\n    |\n 31 |         key :: ~parts[1]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:39:17\n    |\n 39 |                 value :: ~parts[2]\n    |                 ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:40:17\n    |\n 40 |                 idx :: find_in(keys, key)\n    |                 ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:54:17\n    |\n 54 |                 idx :: find_in(keys, key)\n    |                 ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:65:9\n    |\n 65 |         if alive[i] -> print(\"{keys[i]}={vals[i]}\")\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:65:24\n    |\n 65 |         if alive[i] -> print(\"{keys[i]}={vals[i]}\")\n    |                        ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n9 problems found\nrun `jet explain L2510` to learn more\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T3.jet",
+        "--",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:24.441Z",
+      "ended_at": "2026-08-31T23:41:24.661Z",
+      "wall_seconds": 0.21953915399871768,
+      "time_to_first_stdout_seconds": 0.21385018799826502,
+      "peak_rss_kb": 92408,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T3.jet",
+        "--",
+        "journal-failure.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:24.661Z",
+      "ended_at": "2026-08-31T23:41:24.877Z",
+      "wall_seconds": 0.216363694999367,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 94212,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "error: unknown record kind 'rename'\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "--release",
+        "T3.jet",
+        "--",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:24.877Z",
+      "ended_at": "2026-08-31T23:41:53.466Z",
+      "wall_seconds": 28.588868134999647,
+      "time_to_first_stdout_seconds": 28.583284179000184,
+      "peak_rss_kb": 224780,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T3.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:41:53.466Z",
+      "ended_at": "2026-08-31T23:42:21.622Z",
+      "wall_seconds": 28.15558073199913,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 54316,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "  jet  Reading    T3.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T3 in 28.1s ✓\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T4.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:42:21.622Z",
+      "ended_at": "2026-08-31T23:42:21.809Z",
+      "wall_seconds": 0.18730096700042487,
+      "time_to_first_stdout_seconds": 0.17919069899991155,
+      "peak_rss_kb": 53940,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "check: passed (source=T4.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=81, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=0)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T4.jet:25:9\n    |\n 25 |         key :: parts[0]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T4.jet:26:9\n    |\n 26 |         val :: ~parts[1]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n2 problems found\nrun `jet explain L2510` to learn more\n"
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T4.jet",
+        "--",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:42:21.809Z",
+      "ended_at": "2026-08-31T23:42:22.008Z",
+      "wall_seconds": 0.19858249599859118,
+      "time_to_first_stdout_seconds": 0.19613350099883975,
+      "peak_rss_kb": 91744,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "--release",
+        "T4.jet",
+        "--",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:42:22.007Z",
+      "ended_at": "2026-08-31T23:42:43.684Z",
+      "wall_seconds": 21.676714379999787,
+      "time_to_first_stdout_seconds": 21.671275430999696,
+      "peak_rss_kb": 222704,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T4.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "started_at": "2026-08-31T23:42:43.684Z",
+      "ended_at": "2026-08-31T23:43:05.248Z",
+      "wall_seconds": 21.563989566000178,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 55204,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "  jet  Reading    T4.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T4 in 21.5s ✓\n"
+    }
+  ],
+  "task_outcome": {
+    "task": "T4",
+    "check_count": 1,
+    "compile_count": 0,
+    "build_count": 1,
+    "success_count": 2,
+    "failure_count": 0,
+    "check_ok": true,
+    "compile_ok": false,
+    "build_ok": true,
+    "success_ok": true,
+    "failure_ok": true,
+    "native_count": 1,
+    "native_ok": true,
+    "project_green": true
+  },
+  "correction_passes": 1,
+  "rating": {
+    "reading": 4,
+    "writing": 4,
+    "reasoning": 4,
+    "creating": 4,
+    "modifying": 4,
+    "diagnostics": 3,
+    "tooling_docs": 3,
+    "reason": "Inconsistent error strategy: panics on missing path arg and non-numeric count, but silently skips lines with fewer than 2 tab-separated fields (line 23 `if parts.len() < 2 -> next`), so malformed input can produce silently incomplete output rather than a diagnostic. Lowest: diagnostics at 3."
+  },
+  "rating_response_raw": "{\"ratings\":{\"T1\":{\"reading\":4,\"writing\":4,\"reasoning\":3,\"creating\":3,\"modifying\":3,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Parallel arrays with O(n²) linear scans instead of maps or structs; compiler warns about hidden costs in loops (L2510) across multiple sites. The inheritance override logic works but is brittle—nested loops doing manual key matching are hard to follow and extend. Lowest: reasoning/creating/modifying at 3.\"},\"T2\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Compiler warnings about hidden loop costs (L2510) on the remaining-args collection and the flag-parsing loop are not addressed; code doesn't use collection shape proofs or other idiomatic Jet patterns the warnings suggest. Lowest: tooling_docs at 3.\"},\"T3\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":3,\"modifying\":3,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Parallel arrays (keys, vals, alive) instead of a structured type make the replay logic verbose and fragile to extend—adding a field means adding another synchronized array. Same L2510 hidden-cost-in-loop warnings unaddressed. Lowest: creating/modifying at 3.\"},\"T4\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":3,\"tooling_docs\":3,\"reason\":\"Inconsistent error strategy: panics on missing path arg and non-numeric count, but silently skips lines with fewer than 2 tab-separated fields (line 23 `if parts.len() < 2 -> next`), so malformed input can produce silently incomplete output rather than a diagnostic. Lowest: diagnostics at 3.\"}}}\n",
+  "rating_response_ref": ".tmp/2393-r1/runs/A10-jet.rating.omp.json",
+  "rating_session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--tools=read",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/prompts/A10-jet-rating.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+    "started_at": "2026-09-01T00:01:48.721Z",
+    "ended_at": "2026-09-01T00:02:51.558Z",
+    "wall_seconds": 62.83691350200027,
+    "time_to_first_stdout_seconds": 62.80973639800027,
+    "peak_rss_kb": 327188,
+    "exit_status": 0,
+    "timed_out": false,
+    "stderr": "Working...\n",
+    "prompt_path": ".tmp/2393-r1/prompts/A10-jet-rating.txt"
+  },
+  "diagnostics": [
+    {
+      "step": 1,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T1.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510"
+      ],
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:6:9\n    |\n  6 |         if list[i] == target -> return i\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:6:33\n    |\n  6 |         if list[i] == target -> return i\n    |                                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:30:13\n    |\n 30 |             current = trimmed.slice(1, trimmed.len() - 2)\n    |             ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:46:9\n    |\n 46 |         key :: ~parts[0]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:47:9\n    |\n 47 |         raw_val :: ~parts[1]\n    |         ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:51:13\n    |\n 51 |             val = raw_val.slice(1, raw_val.len() - 2)\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:60:9\n    |\n 60 |         loop j in 0..entry_section.len() - 1 {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:61:13\n    |\n 61 |             if entry_section[j] == current && entry_key[j] == key {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:73:9\n    |\n 73 |         sec :: section_order[s]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:74:9\n    |\n 74 |         parent_idx :: find_in(inherits_from, sec)\n    |         ^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:78:13\n    |\n 78 |             parent :: inherits_to[parent_idx]\n    |             ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:79:13\n    |\n 79 |             loop p in 0..entry_key.len() - 1 {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:80:17\n    |\n 80 |                 if entry_section[p] == parent {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:81:21\n    |\n 81 |                     pk :: entry_key[p]\n    |                     ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:83:21\n    |\n 83 |                     loop c in 0..entry_key.len() - 1 {\n    |                     ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:84:25\n    |\n 84 |                         if entry_section[c] == sec && entry_key[c] == pk {\n    |                         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:45\n    |\n 89 |                     if override_idx >= 0 -> print(\"{sec}.{pk}={entry_val[override_idx]}\") else -> print(\"{sec}.{pk}={entry_val[p]}\")\n    |                                             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:99\n    |\n 89 |                     if override_idx >= 0 -> print(\"{sec}.{pk}={entry_val[override_idx]}\") else -> print(\"{sec}.{pk}={entry_val[p]}\")\n    |                                                                                                   ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:95:9\n    |\n 95 |         loop e in 0..entry_key.len() - 1 {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:96:13\n    |\n 96 |             if entry_section[e] == sec {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:97:17\n    |\n 97 |                 ek :: entry_key[e]\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:98:17\n    |\n 98 |                 already :: find_in(printed_keys, ek)\n    |                 ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:100:21\n    |\n100 |                     print(\"{sec}.{ek}={entry_val[e]}\")\n    |                     ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n23 problems found\nrun `jet explain L2510` to learn more\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 2,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T1.jet",
+        "--",
+        "records-failure.cfg"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "error: duplicate key 'name' in section 'base'\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 3,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T1.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "  jet  Reading    T1.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T1 in 27.8s ✓\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 4,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T2.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510"
+      ],
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:13:19\n    |\n 13 |         remaining.push(~args[i])\n    |                   ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:23:9\n    |\n 23 |         arg :: remaining[i]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:27:17\n    |\n 27 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:31:17\n    |\n 31 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:34:17\n    |\n 34 |                 if i + 1 >= remaining.len() {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T2.jet:38:17\n    |\n 38 |                 format = ~remaining[i + 1]\n    |                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:38:17\n    |\n 38 |                 format = ~remaining[i + 1]\n    |                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:39:17\n    |\n 39 |                 i += 2\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T2.jet:47:17\n    |\n 47 |                 i += 1\n    |                 ^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\n9 problems found\nrun `jet explain L2510` to learn more\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 5,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T2.jet",
+        "--",
+        "unknown",
+        "alpha"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "error: unknown command 'unknown'\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 6,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T2.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "  jet  Reading    T2.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, IO, Mem.Alloc; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T2 in 21.1s ✓\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 7,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T3.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510"
+      ],
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:6:9\n    |\n  6 |         if list[i] == target -> return i\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:6:33\n    |\n  6 |         if list[i] == target -> return i\n    |                                 ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:30:9\n    |\n 30 |         kind :: parts[0]\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:31:9\n    |\n 31 |         key :: ~parts[1]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:39:17\n    |\n 39 |                 value :: ~parts[2]\n    |                 ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:40:17\n    |\n 40 |                 idx :: find_in(keys, key)\n    |                 ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:54:17\n    |\n 54 |                 idx :: find_in(keys, key)\n    |                 ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:65:9\n    |\n 65 |         if alive[i] -> print(\"{keys[i]}={vals[i]}\")\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:65:24\n    |\n 65 |         if alive[i] -> print(\"{keys[i]}={vals[i]}\")\n    |                        ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n9 problems found\nrun `jet explain L2510` to learn more\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 8,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "run",
+        "T3.jet",
+        "--",
+        "journal-failure.log"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "error: unknown record kind 'rename'\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 9,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T3.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "  jet  Reading    T3.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T3 in 28.1s ✓\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 10,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "check",
+        "T4.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510",
+        "L2510"
+      ],
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T4.jet:25:9\n    |\n 25 |         key :: parts[0]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T4.jet:26:9\n    |\n 26 |         val :: ~parts[1]\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n2 problems found\nrun `jet explain L2510` to learn more\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 11,
+      "argv": [
+        "/etc/profiles/per-user/nate/bin/jet",
+        "build",
+        "T4.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "  jet  Reading    T4.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T4 in 21.5s ✓\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    }
+  ],
+  "diagnostic_policy": {
+    "first_diagnostic_names_seeded_cause": "true only for the seeded duplicate/unknown/rename fixture failures; false for warnings, ICEs, and other tool failures",
+    "unregistered_codes_are_not_relabelled": true
+  },
+  "status_detail": null
+}

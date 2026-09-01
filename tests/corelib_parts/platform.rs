@@ -148,7 +148,7 @@ fn run() {
     fs::write(&source_path, source).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"stat_mode\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Env, Exec, FS, IO, Mem.Alloc, Panic] } }\n",
+        "name: \"stat_mode\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env, Exec, FS, IO, Mem.Alloc, Panic] } }\n",
     )
     .unwrap();
     let source_arg = source_path.to_string_lossy().into_owned();
@@ -262,7 +262,7 @@ fn run() {
     fs::write(&source_path, source).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"fsync\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [FS, IO, Mem.Alloc, Panic] } }\n",
+        "name: \"fsync\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Panic] } }\n",
     )
     .unwrap();
     let source_arg = source_path.to_string_lossy().into_owned();

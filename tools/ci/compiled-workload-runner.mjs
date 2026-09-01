@@ -181,7 +181,7 @@ function writeWorkloadPackage(project) {
     path.join(project, "package.jet"),
     "name: \"compiled-workload\"\n" +
       "version: \"0.1.0\"\n" +
-      "authority: .{ holds: { allow: [Browser, FS, IO, Mem.Alloc, Net, Panic] } }\n",
+      "authority: { holds: { allow: [Browser, FS, IO, Mem.Alloc, Net, Panic] } }\n",
   );
 }
 

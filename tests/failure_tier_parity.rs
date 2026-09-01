@@ -207,7 +207,7 @@ fn failure_contract_matrix_matches_comptime_and_hosted_tiers() {
         "failure_contract_matrix_tiers",
         MATRIX,
         MATRIX_STDOUT,
-        "name: \"failure_contract_matrix_tiers\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+        "name: \"failure_contract_matrix_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     );
 }
 

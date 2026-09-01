@@ -16,7 +16,7 @@ fn generic_module_profile_fact_values_are_closed_and_fingerprinted() {
         root.join("package.jet"),
         r#"name: "profile_fact"
 version: "0.1.0"
-settings: .{ cache_slots: Int = 3 }
+settings: { cache_slots: Int = 3 }
 build: {
     compact: Build{ optimize: full, settings: { cache_slots: 2 } },
     spacious: Build{ optimize: full, settings: { cache_slots: 5 } },

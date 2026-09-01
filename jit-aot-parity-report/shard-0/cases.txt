@@ -1,0 +1,97 @@
+# c727: differential example-corpus gate manifest.
+# Every top-level examples/features/<topic>/*.jet appears in exactly one section.
+# Update only for intentional ratchet moves.
+# D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
+# examples whose default jet run REFUSES to run. Record stem + diagnostic code only.
+# tier_divergent is the other half: it ran under both tiers and the observables
+# differ. Record stem + the diverging stream(s) only.
+# aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited
+# non-zero, so NO tier comparison ran for the stem. expected_exit means one thing
+# and one thing only — the golden itself expects a non-zero exit. oracle_unavailable
+# is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.
+# A resident_jit or deopt_interp row may carry interpreter_refused: CODE.
+# That row has no interpreter output comparison. A resident_jit or
+# deopt_interp row without that detail does.
+#
+# That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
+# and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
+# stems this file classifies and how many it still says nothing about; both live
+# outside this file so a hand-edit cannot green the check by deleting the row that
+# fails. Rows may only GROW, unclassified stems may only SHRINK, and
+# tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks
+# both with no run at all.
+#
+# Never hand-write a classification: a row states an OBSERVED tier. Regenerate with
+#   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+#     bash tools/ci/jit-aot-parity.sh
+
+frontend_rejected:
+  crypto/random_api_split: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  errors/rollback_trait: E2417: explicit failure domain ``TxnErr`` is not an Error type
+  io/app_config: E2402: this implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists; E0107: nothing named `errors` exists here; E0003: this `if` needs an `else` arm
+  io/db_read_footprint: E0305: pattern `Val` doesn't match [String:DBValue]; E0107: nothing named `row` exists here
+  memory/try_allocation: E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here; E0003: this `if` needs an `else` arm; E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here
+  text/strings: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `??` only works on a fallible value, not String (text)
+  tooling/data_json: E0405: `?? return` can't return a value here
+  types/type_alias: E2417: explicit failure domain ``AppError`` is not an Error type; E0108: this `Err` holds `AppError`, but `Err` was expected; E0108: this `Ok` holds Int (a whole number), but Int !AppError was expected; E0405: the fallback is Int (a whole number), but the success value is Int !AppError
+
+gate_excluded:
+
+non_runnable:
+
+oracle_unavailable:
+
+expected_exit:
+  collections/zip_strict_mismatch: golden expects non-zero exit
+  concurrency/deadline_context: golden expects non-zero exit
+  memory/pool_stale_id: golden expects non-zero exit
+
+aot_broken:
+  collections/index_hook: AOT compile or run failed
+  lowlevel/linalg_simd: AOT compile or run failed
+  modules/library: AOT compile or run failed
+  net/http_web_defaults: AOT compile or run failed
+  ui/ui_motion: AOT compile or run failed
+
+resident_jit:
+  basics/bare_lambda_param
+  basics/first_hour
+  basics/loop_values
+  basics/signature_shape
+  cli/typed_entry_args
+  collections/max_by_tie
+  comptime/embed
+  concurrency/detached_task
+  concurrency/scoped_borrow_bands
+  concurrency/tasks
+  effects/infer_receiver
+  io/no_prelude
+  io/stdin_read_all
+  math/bit_not
+  math/modulo
+  memory/arena_regions
+  memory/parameter_modes
+  net/browser_network
+  serde/codable_default
+  serde/json_typed
+  text/decimal_exponents
+  tooling/internal_project_parts
+  types/enum_dot
+  types/option
+  web/web_wasm_int_export
+
+deopt_interp:
+  effects/capability_sigils
+  net/email_message: interpreter_refused: E2201
+  parsing/reader_hot_loop
+  serde/user_derive
+  time/time_order
+  tooling/statement_attributes
+  types/anonymous_unions
+
+run_tier_broken:
+  errors/core_error_conversion: E1803
+  tooling/compute_linalg: E1803
+
+tier_divergent:
+

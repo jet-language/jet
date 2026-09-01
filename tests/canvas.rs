@@ -4334,7 +4334,7 @@ fn canvas_project_capabilities_follow_checked_package_target() {
     let dir = temp_dir("project_capabilities");
     fs::write(
         dir.join("package.jet"),
-        "name: \"canvas_capabilities\"\nversion: \"0.1.0\"\ntarget: \"web\"\noutputs: .{ app: Executable{ entry: run } }\n",
+        "name: \"canvas_capabilities\"\nversion: \"0.1.0\"\ntarget: \"web\"\noutputs: { app: Executable{ entry: run } }\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -4368,12 +4368,12 @@ fn canvas_and_semindex_share_composed_package_facts() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"demo\"\nversion: \"0.1.0\"\nauthority: .{ holds: .{ allow: [FS], deny: [Net] } }\nconfigs: [\"release.jet\"]\noutputs: .{ workstation: System{ target: linux.x64 }, prod: Fleet{ hosts: .{ edge: \"system.workstation\" } } }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS], deny: [Net] } }\nconfigs: [\"release.jet\"]\noutputs: { workstation: System{ target: linux.x64 }, prod: Fleet{ hosts: { edge: \"system.workstation\" } } }\n",
     )
     .unwrap();
     fs::write(
         dir.join("release.jet"),
-        "Config{ outputs: .{ app: .Executable{ entry: run } } }\n",
+        "Config{ outputs: { app: .Executable{ entry: run } } }\n",
     )
     .unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
@@ -4938,7 +4938,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     );
     assert!(preview.contains("\"preview\":true"), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("+deps: .{"), "{preview}");
+    assert!(preview.contains("+deps: {"), "{preview}");
     assert!(preview.contains("+    logging: ../logging,"), "{preview}");
     let before_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");

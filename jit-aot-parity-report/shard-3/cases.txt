@@ -1,0 +1,97 @@
+# c727: differential example-corpus gate manifest.
+# Every top-level examples/features/<topic>/*.jet appears in exactly one section.
+# Update only for intentional ratchet moves.
+# D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
+# examples whose default jet run REFUSES to run. Record stem + diagnostic code only.
+# tier_divergent is the other half: it ran under both tiers and the observables
+# differ. Record stem + the diverging stream(s) only.
+# aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited
+# non-zero, so NO tier comparison ran for the stem. expected_exit means one thing
+# and one thing only — the golden itself expects a non-zero exit. oracle_unavailable
+# is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.
+# A resident_jit or deopt_interp row may carry interpreter_refused: CODE.
+# That row has no interpreter output comparison. A resident_jit or
+# deopt_interp row without that detail does.
+#
+# That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
+# and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
+# stems this file classifies and how many it still says nothing about; both live
+# outside this file so a hand-edit cannot green the check by deleting the row that
+# fails. Rows may only GROW, unclassified stems may only SHRINK, and
+# tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks
+# both with no run at all.
+#
+# Never hand-write a classification: a row states an OBSERVED tier. Regenerate with
+#   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+#     bash tools/ci/jit-aot-parity.sh
+
+frontend_rejected:
+  basics/named_args: E0003: expected a call, binding, assignment, or `return`, found `{`
+  patterns/refutable_test_bind: E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Ok`; E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Err`; E0305: pattern `Ok` doesn't match Int (a whole number); E0305: pattern `Ok` doesn't match Int (a whole number); E0409: `err` is not available after a pure pattern miss
+  text/hex_base64: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]
+  tooling/data_schema: E0405: `?? return` can't return a value here
+  tooling/sync_crdt: E0405: `?? return` can't return a value here
+
+gate_excluded:
+
+non_runnable:
+
+oracle_unavailable:
+
+expected_exit:
+  errors/env_divisor_trap: golden expects non-zero exit
+  memory/unsafe_sentries_provenance: golden expects non-zero exit
+
+aot_broken:
+  basics/callbacks: AOT compile or run failed
+  collections/iter_hook: AOT compile or run failed
+  net/http_readiness: AOT compile or run failed
+  net/tls_peer_identity: AOT compile or run failed
+  serde/csv_typed: AOT compile or run failed
+  serde/decode_migration: AOT compile or run failed
+  types/patchable: AOT compile or run failed
+
+resident_jit:
+  basics/functions
+  basics/value_loop_search
+  collections/card2308_int_map
+  collections/queue: interpreter_refused: E2201
+  comptime/comptime_block
+  comptime/find
+  concurrency/parallel_iter: interpreter_refused: E2201
+  concurrency/shield_commit
+  crypto/vault_key_wrap
+  effects/effect_declarations
+  effects/move_no_uaf
+  errors/discard_fallible
+  functions/lambda_bare_params
+  io/args_spec
+  math/floor_div: interpreter_refused: E2201
+  math/power_operator
+  memory/effect_denials
+  memory/ref_field
+  strings/slice_range
+  text/duration_facts
+  text/unicode_17
+  tooling/bench
+  types/capability_bundles
+  types/unit_literals
+  web/web_wasm_map
+
+deopt_interp:
+  contracts/inline_contracts
+  io/terminal
+  lowlevel/os_target_gating
+  memory/unsafe_sentries_source_off
+  types/external_methods
+
+run_tier_broken:
+  io/files: E1803
+  io/os_stop_cleanup: E1803
+  modules/selective_imports: E1803
+  tooling/compute_ndarray: E1803
+  tooling/para_map_crossover_bench: E0956
+  ui/ui_typed_style: E1803
+
+tier_divergent:
+

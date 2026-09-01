@@ -3755,7 +3755,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             repo.join("packages/hello/package.jet"),
-            "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: .{ hello: .Executable.{ entry: run } }\ndefaults: .{ run: hello }\n",
+            "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: { hello: .Executable{ entry: run } }\ndefaults: { run: hello }\n",
         )
         .unwrap();
         std::fs::write(source.join("main.jet"), "fn run() { print(\"hello\") }\n").unwrap();

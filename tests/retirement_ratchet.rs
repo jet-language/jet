@@ -1191,9 +1191,9 @@ fn tally(row: &Retirement) -> (usize, usize) {
                     continue;
                 }
                 let Some(text) = read(&path) else { continue };
-                if text.contains("policy: .{ auto_derive") {
+                if text.contains("policy: { auto_derive") {
                     retired += 1;
-                } else if text.contains("policy: .{ lints: .{ deny: [auto_derive]") {
+                } else if text.contains("policy: { lints: { deny: [auto_derive]") {
                     canonical += 1;
                 }
             }

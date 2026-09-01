@@ -1,0 +1,126 @@
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+   Compiling jet v1.0.0 (/home/nate/Projects/Github/jet)
+   Compiling jet-jit v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-jit)
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 06s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 39 misses, 34 builds
+frontend_rejected:
+  crypto/random_api_split: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  errors/rollback_trait: E2417: explicit failure domain ``TxnErr`` is not an Error type
+  io/app_config: E2402: this implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists; E0107: nothing named `errors` exists here; E0003: this `if` needs an `else` arm
+  io/db_read_footprint: E0305: pattern `Val` doesn't match [String:DBValue]; E0107: nothing named `row` exists here
+  memory/try_allocation: E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here; E0003: this `if` needs an `else` arm; E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here
+  text/strings: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `??` only works on a fallible value, not String (text)
+  tooling/data_json: E0405: `?? return` can't return a value here
+  types/type_alias: E2417: explicit failure domain ``AppError`` is not an Error type; E0108: this `Err` holds `AppError`, but `Err` was expected; E0108: this `Ok` holds Int (a whole number), but Int !AppError was expected; E0405: the fallback is Int (a whole number), but the success value is Int !AppError
+
+expected_exit:
+  collections/zip_strict_mismatch: golden expects non-zero exit
+  concurrency/deadline_context: golden expects non-zero exit
+  memory/pool_stale_id: golden expects non-zero exit
+
+aot_broken:
+  collections/index_hook: AOT compile or run failed
+  lowlevel/linalg_simd: AOT compile or run failed
+  modules/library: AOT compile or run failed
+  net/http_web_defaults: AOT compile or run failed
+  ui/ui_motion: AOT compile or run failed
+
+resident_jit:
+  basics/bare_lambda_param
+  basics/first_hour
+  basics/loop_values
+  basics/signature_shape
+  cli/typed_entry_args
+  collections/max_by_tie
+  comptime/embed
+  concurrency/detached_task
+  concurrency/scoped_borrow_bands
+  concurrency/tasks
+  effects/infer_receiver
+  io/no_prelude
+  io/stdin_read_all
+  math/bit_not
+  math/modulo
+  memory/arena_regions
+  memory/parameter_modes
+  net/browser_network
+  serde/codable_default
+  serde/json_typed
+  text/decimal_exponents
+  tooling/internal_project_parts
+  types/enum_dot
+  types/option
+  web/web_wasm_int_export
+
+deopt_interp:
+  effects/capability_sigils
+  net/email_message: interpreter_refused: E2201
+  parsing/reader_hot_loop
+  serde/user_derive
+  time/time_order
+  tooling/statement_attributes
+  types/anonymous_unions
+
+run_tier_broken:
+  errors/core_error_conversion: E1803
+  tooling/compute_linalg: E1803
+
+c727 corpus gate: shard 0/12 classified 50 examples (25 resident JIT, 7 deopt-interp, 2 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 335.49s
+

@@ -17,7 +17,7 @@
 //! forged or foreign artifact fails the pin before anything about its
 //! claimed effects is trusted (`check_before_map`).
 //!
-//! The package manifest owns the `Library.{ loadable: true }` field used to
+//! The package manifest owns the `.Library{ loadable: true }` field used to
 //! request this artifact. The artifact payload is the native shared object
 //! produced by the library build. The load site parses and checks the complete
 //! header, including the target and the exact checked export table, before it

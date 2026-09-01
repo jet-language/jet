@@ -1,0 +1,125 @@
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+    Blocking waiting for file lock on build directory
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 43 misses, 36 builds
+frontend_rejected:
+  basics/named_args: E0003: expected a call, binding, assignment, or `return`, found `{`
+  patterns/refutable_test_bind: E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Ok`; E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Err`; E0305: pattern `Ok` doesn't match Int (a whole number); E0305: pattern `Ok` doesn't match Int (a whole number); E0409: `err` is not available after a pure pattern miss
+  text/hex_base64: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]
+  tooling/data_schema: E0405: `?? return` can't return a value here
+  tooling/sync_crdt: E0405: `?? return` can't return a value here
+
+expected_exit:
+  errors/env_divisor_trap: golden expects non-zero exit
+  memory/unsafe_sentries_provenance: golden expects non-zero exit
+
+aot_broken:
+  basics/callbacks: AOT compile or run failed
+  collections/iter_hook: AOT compile or run failed
+  net/http_readiness: AOT compile or run failed
+  net/tls_peer_identity: AOT compile or run failed
+  serde/csv_typed: AOT compile or run failed
+  serde/decode_migration: AOT compile or run failed
+  types/patchable: AOT compile or run failed
+
+resident_jit:
+  basics/functions
+  basics/value_loop_search
+  collections/card2308_int_map
+  collections/queue: interpreter_refused: E2201
+  comptime/comptime_block
+  comptime/find
+  concurrency/parallel_iter: interpreter_refused: E2201
+  concurrency/shield_commit
+  crypto/vault_key_wrap
+  effects/effect_declarations
+  effects/move_no_uaf
+  errors/discard_fallible
+  functions/lambda_bare_params
+  io/args_spec
+  math/floor_div: interpreter_refused: E2201
+  math/power_operator
+  memory/effect_denials
+  memory/ref_field
+  strings/slice_range
+  text/duration_facts
+  text/unicode_17
+  tooling/bench
+  types/capability_bundles
+  types/unit_literals
+  web/web_wasm_map
+
+deopt_interp:
+  contracts/inline_contracts
+  io/terminal
+  lowlevel/os_target_gating
+  memory/unsafe_sentries_source_off
+  types/external_methods
+
+run_tier_broken:
+  io/files: E1803
+  io/os_stop_cleanup: E1803
+  modules/selective_imports: E1803
+  tooling/compute_ndarray: E1803
+  tooling/para_map_crossover_bench: E0956
+  ui/ui_typed_style: E1803
+
+c727 corpus gate: shard 3/12 classified 50 examples (25 resident JIT, 5 deopt-interp, 6 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 370.82s
+

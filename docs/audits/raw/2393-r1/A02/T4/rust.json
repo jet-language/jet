@@ -1,0 +1,722 @@
+{
+  "schema_version": "2393-r1-receipt-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A02",
+  "family": "Anthropic",
+  "task": "T4",
+  "arm": "Rust",
+  "opaque_arm_label": "Arm A",
+  "assignment": {
+    "task_bit": 1,
+    "task_bit_digest": "a680368bfa662ad76346fddf55f75c1cb31b03e51fb8d4eb9c470897b6db0978",
+    "task_arm_order": [
+      "Rust",
+      "Jet"
+    ],
+    "session_order_from_T1": [
+      "Rust",
+      "Jet"
+    ]
+  },
+  "comparison_blind_mapping": {
+    "digest": "f090e18dd40afb25a71d4a2643f41ff1a5660f5f39cd0e0eb647c85f4a8e93fc",
+    "first_bit": 1,
+    "second_bit": 1,
+    "option_order": [
+      "Arm B",
+      "Arm A",
+      "no preference"
+    ]
+  },
+  "protocol": {
+    "path": "docs/audits/fresh-agent-5-of-5-rerun-2026-08-30.md",
+    "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+    "language_reference_sha256": "6313eade3a13e199c2006953453dd0ffed82db6bb173c46f354021c36bdbf509",
+    "prompt_path": ".tmp/2393-r1/prompts/A02-rust.txt",
+    "prompt_sha256": "da8627b915a279fd1add259e923df35b9de9c28bc290524f74853be6584f5efd",
+    "fixture": {
+      "task": "T4",
+      "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+      "expected": {
+        "success": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n"
+      },
+      "files": {
+        "success": {
+          "path": "report.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\n",
+          "sha256": "a9a0e89c7cd8d98eba7885756b010829b88b2890728d4ad8f2ff177faec35d9e"
+        }
+      }
+    }
+  },
+  "transport": {
+    "family": "Anthropic",
+    "adapter": "omp-command",
+    "detail": "Direct omp command.",
+    "arm_order_deviation": null
+  },
+  "source_path": ".tmp/2393-r1/participants/A02/T4.rs",
+  "source_metrics": {
+    "bytes": 2119,
+    "physical_lines": 66,
+    "unicode_whitespace_tokens": 205,
+    "sha256": "4be01794a8ce53b11257c649eaaed59a9eebfddb17bfc197fd741bc482ea7a53"
+  },
+  "source": "use std::env;\nuse std::fs;\nuse std::process;\n\nfn json_escape(s: &str) -> String {\n    let mut out = String::new();\n    for c in s.chars() {\n        match c {\n            '\"' => out.push_str(\"\\\\\\\"\"),\n            '\\\\' => out.push_str(\"\\\\\\\\\"),\n            '\\n' => out.push_str(\"\\\\n\"),\n            '\\r' => out.push_str(\"\\\\r\"),\n            '\\t' => out.push_str(\"\\\\t\"),\n            c if (c as u32) < 0x20 => {\n                out.push_str(&format!(\"\\\\u{:04x}\", c as u32));\n            }\n            c => out.push(c),\n        }\n    }\n    out\n}\n\nfn main() {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 {\n        eprintln!(\"usage: {} <file>\", args[0]);\n        process::exit(1);\n    }\n    let content = fs::read_to_string(&args[1]).unwrap_or_else(|e| {\n        eprintln!(\"error: {}\", e);\n        process::exit(1);\n    });\n\n    let mut name: Option<String> = None;\n    let mut count: Option<i64> = None;\n    let mut note: Option<String> = None;\n\n    for line in content.lines() {\n        if line.is_empty() { continue; }\n        let parts: Vec<&str> = line.splitn(2, '\\t').collect();\n        if parts.len() != 2 {\n            eprintln!(\"malformed line: {}\", line);\n            process::exit(1);\n        }\n        match parts[0] {\n            \"name\" => name = Some(parts[1].to_string()),\n            \"count\" => {\n                count = Some(parts[1].parse().unwrap_or_else(|_| {\n                    eprintln!(\"invalid count: {}\", parts[1]);\n                    process::exit(1);\n                }));\n            }\n            \"note\" => note = Some(parts[1].to_string()),\n            other => {\n                eprintln!(\"unknown field: {}\", other);\n                process::exit(1);\n            }\n        }\n    }\n\n    let name = name.unwrap_or_else(|| { eprintln!(\"missing name\"); process::exit(1); });\n    let count = count.unwrap_or_else(|| { eprintln!(\"missing count\"); process::exit(1); });\n    let note = note.unwrap_or_else(|| { eprintln!(\"missing note\"); process::exit(1); });\n\n    println!(\"{{\\\"count\\\":{},\\\"name\\\":\\\"{}\\\",\\\"note\\\":\\\"{}\\\"}}\", count, json_escape(&name), json_escape(&note));\n}\n",
+  "status": "measured",
+  "implementation_session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--no-pty",
+      "--tools=read,bash,write",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/prompts/A02-rust.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+    "started_at": "2026-08-31T20:39:59.317Z",
+    "ended_at": "2026-08-31T20:42:52.806Z",
+    "wall_seconds": 173.48945915400003,
+    "time_to_first_stdout_seconds": 173.4599424200002,
+    "peak_rss_kb": 310484,
+    "exit_status": 0,
+    "timed_out": false,
+    "stdout": "All programs compiled, tested, and verified. Zero correction passes needed. Now I'll produce the final JSON output.\n\n{\"T1\":{\"source\":\"use std::env;\\nuse std::fs;\\nuse std::process;\\nuse std::collections::HashMap;\\n\\nstruct Section {\\n    name: String,\\n    keys: Vec<String>,\\n    values: HashMap<String, String>,\\n    inherits: Option<String>,\\n}\\n\\nfn main() {\\n    let args: Vec<String> = env::args().collect();\\n    if args.len() < 2 {\\n        eprintln!(\\\"usage: {} <file>\\\", args[0]);\\n        process::exit(1);\\n    }\\n    let content = fs::read_to_string(&args[1]).unwrap_or_else(|e| {\\n        eprintln!(\\\"error: {}\\\", e);\\n        process::exit(1);\\n    });\\n\\n    let mut sections: Vec<Section> = Vec::new();\\n    let mut current: Option<Section> = None;\\n\\n    for line in content.lines() {\\n        let line = line.trim();\\n        if line.is_empty() { continue; }\\n\\n        if line.starts_with('[') && line.ends_with(']') {\\n            if let Some(s) = current.take() {\\n                sections.push(s);\\n            }\\n            let name = line[1..line.len()-1].to_string();\\n            current = Some(Section {\\n                name,\\n                keys: Vec::new(),\\n                values: HashMap::new(),\\n                inherits: None,\\n            });\\n        } else if let Some(ref mut sec) = current {\\n            let parts: Vec<&str> = line.splitn(2, '=').collect();\\n            if parts.len() != 2 {\\n                eprintln!(\\\"malformed line: {}\\\", line);\\n                process::exit(1);\\n            }\\n            let key = parts[0].trim().to_string();\\n            let val_raw = parts[1].trim();\\n\\n            if key == \\\"inherits\\\" {\\n                let val = val_raw.trim_matches('\\\"').to_string();\\n                sec.inherits = Some(val);\\n            } else {\\n                if sec.values.contains_key(&key) {\\n                    eprintln!(\\\"duplicate key '{}' in section '[{}]'\\\", key, sec.name);\\n                    process::exit(1);\\n                }\\n                let val = val_raw.trim_matches('\\\"').to_string();\\n                sec.keys.push(key.clone());\\n                sec.values.insert(key, val);\\n            }\\n        }\\n    }\\n    if let Some(s) = current.take() {\\n        sections.push(s);\\n    }\\n\\n    let section_map: HashMap<String, usize> = sections.iter().enumerate()\\n        .map(|(i, s)| (s.name.clone(), i))\\n        .collect();\\n\\n    for sec in &sections {\\n        let mut resolved_keys: Vec<String> = Vec::new();\\n        let mut resolved_values: HashMap<String, String> = HashMap::new();\\n\\n        if let Some(ref parent_name) = sec.inherits {\\n            if let Some(&idx) = section_map.get(parent_name) {\\n                let parent = &sections[idx];\\n                for k in &parent.keys {\\n                    resolved_keys.push(k.clone());\\n                    resolved_values.insert(k.clone(), parent.values[k].clone());\\n                }\\n            }\\n        }\\n\\n        for k in &sec.keys {\\n            if !resolved_values.contains_key(k) {\\n                resolved_keys.push(k.clone());\\n            }\\n            resolved_values.insert(k.clone(), sec.values[k].clone());\\n        }\\n\\n        for k in &resolved_keys {\\n            println!(\\\"{}.{}={}\\\", sec.name, k, resolved_values[k]);\\n        }\\n    }\\n}\\n\",\"correction_passes\":0,\"commands\":[\"./bin/rustc T1.rs -o T1-debug\",\"./bin/rustc -O T1.rs -o T1-release\",\"./T1-debug records.cfg\",\"./T1-release records.cfg\",\"./T1-debug records-failure.cfg\",\"./T1-release records-failure.cfg\"],\"observed\":[\"T1-debug records.cfg: base.name=Ada base.role=admin dev.name=Ada dev.role=reviewer\",\"T1-release records.cfg: same correct output\",\"T1-debug records-failure.cfg: stderr duplicate key 'name' in section '[base]', exit 1, no stdout\",\"T1-release records-failure.cfg: same correct failure\"],\"notes\":\"Parses sections, quoted key=value, one-level inherits. Duplicate key in same section exits non-zero with diagnostic on stderr.\"},\"T2\":{\"source\":\"use std::env;\\nuse std::process;\\n\\nfn main() {\\n    let args: Vec<String> = env::args().skip(1).collect();\\n    if args.is_empty() {\\n        eprintln!(\\\"error: no command provided\\\");\\n        process::exit(1);\\n    }\\n\\n    let cmd = &args[0];\\n    let rest = &args[1..];\\n\\n    let op = match cmd.as_str() {\\n        \\\"list\\\" | \\\"ls\\\" => \\\"list\\\",\\n        \\\"inspect\\\" => \\\"inspect\\\",\\n        \\\"remove\\\" | \\\"rm\\\" => \\\"remove\\\",\\n        other => {\\n            eprintln!(\\\"unknown command: {}\\\", other);\\n            process::exit(1);\\n        }\\n    };\\n\\n    let mut format = \\\"text\\\".to_string();\\n    let mut dry_run = false;\\n    let mut name: Option<String> = None;\\n\\n    let mut i = 0;\\n    while i < rest.len() {\\n        match rest[i].as_str() {\\n            \\\"--json\\\" => {\\n                format = \\\"json\\\".to_string();\\n                i += 1;\\n            }\\n            \\\"--format\\\" => {\\n                i += 1;\\n                if i >= rest.len() {\\n                    eprintln!(\\\"--format requires a value\\\");\\n                    process::exit(1);\\n                }\\n                format = rest[i].clone();\\n                i += 1;\\n            }\\n            \\\"--dry-run\\\" => {\\n                dry_run = true;\\n                i += 1;\\n            }\\n            s if s.starts_with('-') => {\\n                eprintln!(\\\"unknown option: {}\\\", s);\\n                process::exit(1);\\n            }\\n            _ => {\\n                name = Some(rest[i].clone());\\n                i += 1;\\n            }\\n        }\\n    }\\n\\n    let name = name.unwrap_or_else(|| {\\n        eprintln!(\\\"missing name argument\\\");\\n        process::exit(1);\\n    });\\n\\n    println!(\\\"{} name={} format={} dry_run={}\\\", op, name, format, dry_run);\\n}\\n\",\"correction_passes\":0,\"commands\":[\"./bin/rustc T2.rs -o T2-debug\",\"./bin/rustc -O T2.rs -o T2-release\",\"./T2-debug ls --json alpha\",\"./T2-debug inspect alpha --format text\",\"./T2-debug rm alpha --dry-run\",\"./T2-debug unknown alpha\",\"./T2-release ls --json alpha\",\"./T2-release inspect alpha --format text\",\"./T2-release rm alpha --dry-run\",\"./T2-release unknown alpha\"],\"observed\":[\"ls --json alpha: list name=alpha format=json dry_run=false\",\"inspect alpha --format text: inspect name=alpha format=text dry_run=false\",\"rm alpha --dry-run: remove name=alpha format=text dry_run=true\",\"unknown alpha: stderr unknown command: unknown, exit 1, no stdout\",\"release builds: identical correct outputs\"],\"notes\":\"Single dispatch via match on command aliases. Options parsed positionally with --json as format shorthand. Unknown commands exit non-zero with no stdout.\"},\"T3\":{\"source\":\"use std::env;\\nuse std::fs;\\nuse std::process;\\nuse std::collections::HashMap;\\n\\nfn main() {\\n    let args: Vec<String> = env::args().collect();\\n    if args.len() < 2 {\\n        eprintln!(\\\"usage: {} <file>\\\", args[0]);\\n        process::exit(1);\\n    }\\n    let content = fs::read_to_string(&args[1]).unwrap_or_else(|e| {\\n        eprintln!(\\\"error: {}\\\", e);\\n        process::exit(1);\\n    });\\n\\n    let mut order: Vec<String> = Vec::new();\\n    let mut map: HashMap<String, String> = HashMap::new();\\n\\n    for line in content.lines() {\\n        if line.is_empty() { continue; }\\n        let parts: Vec<&str> = line.splitn(3, '|').collect();\\n        if parts.len() < 2 {\\n            eprintln!(\\\"malformed record: {}\\\", line);\\n            process::exit(1);\\n        }\\n        match parts[0] {\\n            \\\"put\\\" => {\\n                if parts.len() != 3 {\\n                    eprintln!(\\\"malformed put record: {}\\\", line);\\n                    process::exit(1);\\n                }\\n                let key = parts[1].to_string();\\n                let value = parts[2].to_string();\\n                if !map.contains_key(&key) {\\n                    order.push(key.clone());\\n                }\\n                map.insert(key, value);\\n            }\\n            \\\"delete\\\" => {\\n                let key = parts[1];\\n                map.remove(key);\\n                order.retain(|k| k != key);\\n            }\\n            other => {\\n                eprintln!(\\\"unknown record kind: {}\\\", other);\\n                process::exit(1);\\n            }\\n        }\\n    }\\n\\n    for key in &order {\\n        if let Some(value) = map.get(key) {\\n            println!(\\\"{}={}\\\", key, value);\\n        }\\n    }\\n}\\n\",\"correction_passes\":0,\"commands\":[\"./bin/rustc T3.rs -o T3-debug\",\"./bin/rustc -O T3.rs -o T3-release\",\"./T3-debug journal.log\",\"./T3-release journal.log\",\"./T3-debug journal-failure.log\",\"./T3-release journal-failure.log\"],\"observed\":[\"T3-debug journal.log: beta=2 gamma=3\",\"T3-release journal.log: same correct output\",\"T3-debug journal-failure.log: stderr unknown record kind: rename, exit 1, no stdout\",\"T3-release journal-failure.log: same correct failure\"],\"notes\":\"Replays put/delete journal in order, tracks insertion order via separate Vec. Unknown record kinds rejected with non-zero exit and no stdout.\"},\"T4\":{\"source\":\"use std::env;\\nuse std::fs;\\nuse std::process;\\n\\nfn json_escape(s: &str) -> String {\\n    let mut out = String::new();\\n    for c in s.chars() {\\n        match c {\\n            '\\\"' => out.push_str(\\\"\\\\\\\\\\\\\\\"\\\"),\\n            '\\\\\\\\' => out.push_str(\\\"\\\\\\\\\\\\\\\\\\\"),\\n            '\\\\n' => out.push_str(\\\"\\\\\\\\n\\\"),\\n            '\\\\r' => out.push_str(\\\"\\\\\\\\r\\\"),\\n            '\\\\t' => out.push_str(\\\"\\\\\\\\t\\\"),\\n            c if (c as u32) < 0x20 => {\\n                out.push_str(&format!(\\\"\\\\\\\\u{:04x}\\\", c as u32));\\n            }\\n            c => out.push(c),\\n        }\\n    }\\n    out\\n}\\n\\nfn main() {\\n    let args: Vec<String> = env::args().collect();\\n    if args.len() < 2 {\\n        eprintln!(\\\"usage: {} <file>\\\", args[0]);\\n        process::exit(1);\\n    }\\n    let content = fs::read_to_string(&args[1]).unwrap_or_else(|e| {\\n        eprintln!(\\\"error: {}\\\", e);\\n        process::exit(1);\\n    });\\n\\n    let mut name: Option<String> = None;\\n    let mut count: Option<i64> = None;\\n    let mut note: Option<String> = None;\\n\\n    for line in content.lines() {\\n        if line.is_empty() { continue; }\\n        let parts: Vec<&str> = line.splitn(2, '\\\\t').collect();\\n        if parts.len() != 2 {\\n            eprintln!(\\\"malformed line: {}\\\", line);\\n            process::exit(1);\\n        }\\n        match parts[0] {\\n            \\\"name\\\" => name = Some(parts[1].to_string()),\\n            \\\"count\\\" => {\\n                count = Some(parts[1].parse().unwrap_or_else(|_| {\\n                    eprintln!(\\\"invalid count: {}\\\", parts[1]);\\n                    process::exit(1);\\n                }));\\n            }\\n            \\\"note\\\" => note = Some(parts[1].to_string()),\\n            other => {\\n                eprintln!(\\\"unknown field: {}\\\", other);\\n                process::exit(1);\\n            }\\n        }\\n    }\\n\\n    let name = name.unwrap_or_else(|| { eprintln!(\\\"missing name\\\"); process::exit(1); });\\n    let count = count.unwrap_or_else(|| { eprintln!(\\\"missing count\\\"); process::exit(1); });\\n    let note = note.unwrap_or_else(|| { eprintln!(\\\"missing note\\\"); process::exit(1); });\\n\\n    println!(\\\"{{\\\\\\\"count\\\\\\\":{},\\\\\\\"name\\\\\\\":\\\\\\\"{}\\\\\\\",\\\\\\\"note\\\\\\\":\\\\\\\"{}\\\\\\\"}}\\\", count, json_escape(&name), json_escape(&note));\\n}\\n\",\"correction_passes\":0,\"commands\":[\"./bin/rustc T4.rs -o T4-debug\",\"./bin/rustc -O T4.rs -o T4-release\",\"./T4-debug report.tsv\",\"./T4-release report.tsv\"],\"observed\":[\"T4-debug report.tsv: {\\\"count\\\":2,\\\"name\\\":\\\"Ada\\\",\\\"note\\\":\\\"line \\\\\\\"one\\\\\\\"\\\"}\",\"T4-release report.tsv: same correct output\"],\"notes\":\"Parses TSV fields, builds typed report, outputs canonical JSON with key order count/name/note. Escapes quotes and control characters per JSON spec.\"}}\n",
+    "stderr": "Working...\n",
+    "prompt_path": ".tmp/2393-r1/prompts/A02-rust.txt",
+    "provenance": "Direct omp command."
+  },
+  "commands": [
+    {
+      "argv": [
+        "./bin/rustc",
+        "T4.rs",
+        "-o",
+        "T4-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:10.779Z",
+      "ended_at": "2026-08-31T20:43:12.090Z",
+      "wall_seconds": 1.310749723999761,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 177748,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T4.rs",
+        "-o",
+        "T4-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:12.090Z",
+      "ended_at": "2026-08-31T20:43:13.484Z",
+      "wall_seconds": 1.3938891819999553,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 176108,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T4-debug",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:13.484Z",
+      "ended_at": "2026-08-31T20:43:13.485Z",
+      "wall_seconds": 0.0008746469998732209,
+      "time_to_first_stdout_seconds": 0.0007653890000656247,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T4-release",
+        "report.tsv"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:13.484Z",
+      "ended_at": "2026-08-31T20:43:13.485Z",
+      "wall_seconds": 0.0006126780002377927,
+      "time_to_first_stdout_seconds": 0.0005234580002725125,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T3.rs",
+        "-o",
+        "T3-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:13.486Z",
+      "ended_at": "2026-08-31T20:43:14.792Z",
+      "wall_seconds": 1.3063302189996466,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 192784,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T3.rs",
+        "-o",
+        "T3-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:14.791Z",
+      "ended_at": "2026-08-31T20:43:16.215Z",
+      "wall_seconds": 1.4235178979998455,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 186752,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-debug",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:16.215Z",
+      "ended_at": "2026-08-31T20:43:16.216Z",
+      "wall_seconds": 0.0007758990000002086,
+      "time_to_first_stdout_seconds": 0.0006770399999804794,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-debug",
+        "journal-failure.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:16.215Z",
+      "ended_at": "2026-08-31T20:43:16.216Z",
+      "wall_seconds": 0.0006183990002609789,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown record kind: rename\n"
+    },
+    {
+      "argv": [
+        "./T3-release",
+        "journal.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:16.216Z",
+      "ended_at": "2026-08-31T20:43:16.217Z",
+      "wall_seconds": 0.0006515019997023046,
+      "time_to_first_stdout_seconds": 0.0005621719998307526,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "beta=2\ngamma=3\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T3-release",
+        "journal-failure.log"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:16.217Z",
+      "ended_at": "2026-08-31T20:43:16.218Z",
+      "wall_seconds": 0.0005839829999022186,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown record kind: rename\n"
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T2.rs",
+        "-o",
+        "T2-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:16.217Z",
+      "ended_at": "2026-08-31T20:43:17.473Z",
+      "wall_seconds": 1.2556017289999872,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 167684,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T2.rs",
+        "-o",
+        "T2-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:17.474Z",
+      "ended_at": "2026-08-31T20:43:18.787Z",
+      "wall_seconds": 1.313434828999918,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 172172,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.786Z",
+      "ended_at": "2026-08-31T20:43:18.787Z",
+      "wall_seconds": 0.0007010470000095666,
+      "time_to_first_stdout_seconds": 0.0006239100000821054,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "inspect",
+        "alpha",
+        "--format",
+        "text"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.787Z",
+      "ended_at": "2026-08-31T20:43:18.788Z",
+      "wall_seconds": 0.000695977000053972,
+      "time_to_first_stdout_seconds": 0.000604893000330776,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "inspect name=alpha format=text dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "rm",
+        "alpha",
+        "--dry-run"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.788Z",
+      "ended_at": "2026-08-31T20:43:18.789Z",
+      "wall_seconds": 0.000548816000111401,
+      "time_to_first_stdout_seconds": 0.00045527799986302855,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "remove name=alpha format=text dry_run=true\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-debug",
+        "unknown",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.788Z",
+      "ended_at": "2026-08-31T20:43:18.789Z",
+      "wall_seconds": 0.0006136399996466935,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown command: unknown\n"
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "ls",
+        "--json",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.789Z",
+      "ended_at": "2026-08-31T20:43:18.790Z",
+      "wall_seconds": 0.0006709889997728169,
+      "time_to_first_stdout_seconds": 0.000567781999707222,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "list name=alpha format=json dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "inspect",
+        "alpha",
+        "--format",
+        "text"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.790Z",
+      "ended_at": "2026-08-31T20:43:18.791Z",
+      "wall_seconds": 0.0006130979997105896,
+      "time_to_first_stdout_seconds": 0.0005174159999005496,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "inspect name=alpha format=text dry_run=false\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "rm",
+        "alpha",
+        "--dry-run"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.790Z",
+      "ended_at": "2026-08-31T20:43:18.791Z",
+      "wall_seconds": 0.0007394900000654161,
+      "time_to_first_stdout_seconds": 0.0006268150000832975,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "remove name=alpha format=text dry_run=true\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T2-release",
+        "unknown",
+        "alpha"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.791Z",
+      "ended_at": "2026-08-31T20:43:18.792Z",
+      "wall_seconds": 0.0006206829999573529,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "unknown command: unknown\n"
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "T1.rs",
+        "-o",
+        "T1-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:18.792Z",
+      "ended_at": "2026-08-31T20:43:20.113Z",
+      "wall_seconds": 1.3213700640001333,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 196764,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./bin/rustc",
+        "-O",
+        "T1.rs",
+        "-o",
+        "T1-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:20.113Z",
+      "ended_at": "2026-08-31T20:43:21.557Z",
+      "wall_seconds": 1.4438347029997967,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": 192836,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-debug",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:21.557Z",
+      "ended_at": "2026-08-31T20:43:21.558Z",
+      "wall_seconds": 0.0007901260000653565,
+      "time_to_first_stdout_seconds": 0.0006869189999997616,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-debug",
+        "records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:21.558Z",
+      "ended_at": "2026-08-31T20:43:21.559Z",
+      "wall_seconds": 0.0006011660001240671,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "duplicate key 'name' in section '[base]'\n"
+    },
+    {
+      "argv": [
+        "./T1-release",
+        "records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:21.558Z",
+      "ended_at": "2026-08-31T20:43:21.559Z",
+      "wall_seconds": 0.0007124780002050102,
+      "time_to_first_stdout_seconds": 0.000599934000056237,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "./T1-release",
+        "records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "started_at": "2026-08-31T20:43:21.559Z",
+      "ended_at": "2026-08-31T20:43:21.560Z",
+      "wall_seconds": 0.00069322199979797,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "duplicate key 'name' in section '[base]'\n"
+    }
+  ],
+  "task_outcome": {
+    "task": "T4",
+    "check_count": 0,
+    "compile_count": 2,
+    "build_count": 0,
+    "success_count": 2,
+    "failure_count": 0,
+    "check_ok": false,
+    "compile_ok": true,
+    "build_ok": false,
+    "success_ok": true,
+    "failure_ok": true,
+    "native_count": 1,
+    "native_ok": true,
+    "project_green": true
+  },
+  "correction_passes": 0,
+  "rating": {
+    "reading": 4,
+    "writing": 4,
+    "reasoning": 4,
+    "creating": 4,
+    "modifying": 4,
+    "diagnostics": 4,
+    "tooling_docs": 4,
+    "reason": "Lowest: writing (4). JSON output is assembled via a single format! string with manually placed braces and escaped quotes, which is correct but fragile — adding or reordering a field requires careful editing of that literal. The json_escape function is thorough, covering quotes, backslashes, newlines, carriage returns, tabs, and all control characters below U+0020. All four observed runs (debug/release × 2) produced correct JSON with properly escaped embedded quotes in the note field."
+  },
+  "rating_response_raw": "{\"ratings\":{\"T1\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":4,\"reason\":\"Lowest: reasoning (4). Inheritance resolution is single-level only — the print loop copies one parent's keys but does not recurse through inheritance chains. Sufficient for the observed single-level test input but would silently drop grandparent keys. trim_matches('\\\"') for quote stripping is correct here but would misbehave on values whose content starts or ends with a literal quote. All four observed runs (debug/release × success/failure) produced correct output and exit codes.\"},\"T2\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":4,\"reason\":\"Lowest: creating (4). The manual argument parser is functional and correct but unremarkable — a flat while-loop index march with cloned strings. The 'list' subcommand requiring a positional name argument is an odd semantic choice, though it matches whatever spec was given. Adding a new subcommand or option is straightforward. All eight observed runs (debug/release × 4 scenarios including unknown-command error) produced correct output.\"},\"T3\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":4,\"reason\":\"Lowest: modifying (4). delete uses order.retain(|k| k != key) which is O(n) per deletion — fine for observed small inputs but would degrade on large journals. The Vec+HashMap pair for ordered-map semantics is the standard Rust approach without pulling in indexmap. All four observed runs (debug/release × success/failure including unknown record kind 'rename') produced correct results.\"},\"T4\":{\"reading\":4,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":4,\"reason\":\"Lowest: writing (4). JSON output is assembled via a single format! string with manually placed braces and escaped quotes, which is correct but fragile — adding or reordering a field requires careful editing of that literal. The json_escape function is thorough, covering quotes, backslashes, newlines, carriage returns, tabs, and all control characters below U+0020. All four observed runs (debug/release × 2) produced correct JSON with properly escaped embedded quotes in the note field.\"}}\n",
+  "rating_response_ref": ".tmp/2393-r1/runs/A02-rust.rating.omp.json",
+  "rating_session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--no-pty",
+      "--tools=read",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/prompts/A02-rust-rating.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A02",
+    "started_at": "2026-08-31T23:53:09.568Z",
+    "ended_at": "2026-08-31T23:55:33.415Z",
+    "wall_seconds": 143.84656555199996,
+    "time_to_first_stdout_seconds": 143.81999192599952,
+    "peak_rss_kb": 314664,
+    "exit_status": 0,
+    "timed_out": false,
+    "stderr": "Working...\n",
+    "prompt_path": ".tmp/2393-r1/prompts/A02-rust-rating.txt"
+  },
+  "diagnostics": [
+    {
+      "step": 1,
+      "argv": [
+        "./T3-debug",
+        "journal-failure.log"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown record kind: rename\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 2,
+      "argv": [
+        "./T3-release",
+        "journal-failure.log"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown record kind: rename\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 3,
+      "argv": [
+        "./T2-debug",
+        "unknown",
+        "alpha"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown command: unknown\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 4,
+      "argv": [
+        "./T2-release",
+        "unknown",
+        "alpha"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "unknown command: unknown\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 5,
+      "argv": [
+        "./T1-debug",
+        "records-failure.cfg"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "duplicate key 'name' in section '[base]'\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 6,
+      "argv": [
+        "./T1-release",
+        "records-failure.cfg"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "duplicate key 'name' in section '[base]'\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    }
+  ],
+  "diagnostic_policy": {
+    "first_diagnostic_names_seeded_cause": "true only for the seeded duplicate/unknown/rename fixture failures; false for warnings, ICEs, and other tool failures",
+    "unregistered_codes_are_not_relabelled": true
+  },
+  "status_detail": null
+}

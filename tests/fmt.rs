@@ -8,8 +8,8 @@ use std::process::Command;
 #[test]
 fn package_transition_surface_formats_canonically_and_idempotently() {
     let sources = [
-        "name: \"demo\"\noutputs: .{ app: .Executable{ entry: run } }\n",
-        "pub development :: Config{ environments: .{ development: .Environment{ tools: [\"git\"] } } }\n",
+        "name: \"demo\"\noutputs: { app: .Executable{ entry: run } }\n",
+        "pub development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n",
         "pub app :: Config{ version: \"1\" }\n",
     ];
 
@@ -37,7 +37,7 @@ fn package_cli_migrates_retired_record_heads_before_validation() {
     let path = scratch.join("package.jet");
     fs::write(
         &path,
-        "name: \"demo\"\nauthority: .{ holds: { allow: [IO] } }\n",
+        "name: \"demo\"\nauthority: { holds: { allow: [IO] } }\n",
     )
     .unwrap();
 

@@ -1575,7 +1575,7 @@ jet:     ">=0.1.0"
 description: "A test package"
 license: "MIT OR Apache-2.0"
 repository: "https://example.com"
-deps: .{
+deps: {
 }
 "#;
     let path = PathBuf::from("package.jet");
@@ -2090,7 +2090,7 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\nauthority: .{\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n";
+        + "\nauthority: {\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n";
     let pm =
         jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority holds should parse");
     assert!(pm.effects_enabled);
@@ -2106,7 +2106,7 @@ fn manifest_parse_effects_block() {
 
 #[test]
 fn manifest_panic_budget_names_the_dependency_stop_site() {
-    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { deny: [Panic] } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { deny: [Panic] } }\n";
     let manifest = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect("Panic should be a manifest effect root");
     let entries = [jetpack::EffectBudget::PackageEffects {
@@ -2130,7 +2130,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
 
 #[test]
 fn manifest_parse_grants_block() {
-    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ grants: { \"pdf-lib\": [Net] } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: { grants: { \"pdf-lib\": [Net] } }\n";
     let pm =
         jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
     assert_eq!(
@@ -2143,7 +2143,7 @@ fn manifest_parse_grants_block() {
 fn manifest_parse_authority_block_holds_grants_trust_and_providers() {
     let raw = min_manifest("app", "0.1.0")
         + r#"
-authority: .{
+authority: {
     holds: { allow: [Net, DB.Read], deny: [Exec] },
     grants: { "image-codec": [FS.Read] },
     trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
@@ -2180,7 +2180,7 @@ authority: .{
 #[test]
 fn manifest_parse_authority_trust_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\nauthority: .{ trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n";
+        + "\nauthority: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n";
     let pm = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect("authority.trust block should parse");
     let policy = pm
@@ -2210,7 +2210,7 @@ fn manifest_parse_authority_trust_block() {
 
 #[test]
 fn manifest_authority_trust_rejects_unknown_decision() {
-    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ trust: { default: maybe } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: { trust: { default: maybe } }\n";
     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect_err("unknown trust decision should fail");
     assert!(matches!(
@@ -2230,7 +2230,7 @@ fn manifest_no_effects_block_disables_enforcement() {
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_effect() {
-    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [NotAnEffect] } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [NotAnEffect] } }\n";
     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect_err("unknown effect name should fail E1221");
     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
@@ -2244,7 +2244,7 @@ fn manifest_parse_effects_e1221_unknown_effect() {
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_field() {
-    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { nope: [FS] } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { nope: [FS] } }\n";
     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("unknown effects field should fail E1221");
     assert_eq!(diag.code, "E1221");
@@ -2259,7 +2259,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [IO] } }\n"),
+        &(min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [IO] } }\n"),
     );
     let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
@@ -2336,7 +2336,7 @@ fn cli_build_enforces_effect_budget_e1220() {
         &tmp,
         "package.jet",
         &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
-            + "\nauthority: .{ holds: { allow: [FS] } }\n"),
+            + "\nauthority: { holds: { allow: [FS] } }\n"),
     );
     write(
         &tmp,
@@ -2372,7 +2372,7 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [FS.Raed] } }\n"),
+        &(min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [FS.Raed] } }\n"),
     );
     write(&tmp, "run.jet", "fn run() {}\n");
 
@@ -2671,7 +2671,7 @@ fn manifest_add_dep_creates_table_when_absent() {
 
 #[test]
 fn manifest_add_dep_expands_inline_empty_table() {
-    let raw = min_manifest("root", "0.1.0") + "\ndeps: .{}\n";
+    let raw = min_manifest("root", "0.1.0") + "\ndeps: {}\n";
     let updated = jet::Manifest::add_dependency(
         &raw,
         "helpers",
@@ -2685,7 +2685,7 @@ fn manifest_add_dep_expands_inline_empty_table() {
         mf.dependencies.get("helpers"),
         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
     ));
-    assert!(updated.contains("deps: .{\n    helpers: ../helpers,\n}\n"));
+    assert!(updated.contains("deps: {\n    helpers: ../helpers,\n}\n"));
 }
 
 #[test]
@@ -5271,7 +5271,7 @@ fn cli_add_path_into_inline_empty_deps_table() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\ndeps: .{}\n"),
+        &(min_manifest("app", "0.1.0") + "\ndeps: {}\n"),
     );
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
@@ -5287,7 +5287,7 @@ fn cli_add_path_into_inline_empty_deps_table() {
     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw)
         .expect("jet add must leave an inline deps table parseable");
     assert!(manifest.dependencies.contains_key("mylib"));
-    assert!(raw.contains("deps: .{\n    mylib: ./mylib,\n}\n"));
+    assert!(raw.contains("deps: {\n    mylib: ./mylib,\n}\n"));
 
     let fetch = jet_cmd(&["fetch"], &tmp, &store);
     assert!(
@@ -5345,7 +5345,7 @@ fn cli_corrupt_manifest_has_one_diagnostic_across_package_commands() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\ndeps: .{\n}\nunknown: ../broken,\n"),
+        &(min_manifest("app", "0.1.0") + "\ndeps: {\n}\nunknown: ../broken,\n"),
     );
     write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
     let lib = tmp.join("mylib");
@@ -7322,7 +7322,7 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         );
 
         let exception_raw = format!(
-            "{raw}\npolicy: {{ exceptions: [PolicyException.{{ id: \"JSA-2026-0001\", scope: \"freshlib#1.2.0\", reason: \"urgent security fix\", expires: 9999999999 }}] }}\n"
+            "{raw}\npolicy: {{ exceptions: [PolicyException{{ id: \"JSA-2026-0001\", scope: \"freshlib#1.2.0\", reason: \"urgent security fix\", expires: 9999999999 }}] }}\n"
         );
         let exception_manifest =
             jet::Manifest::parse(&consumer.join("package.jet"), &exception_raw)
@@ -7933,7 +7933,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     fs::create_dir_all(&dep).unwrap();
     fs::write(
         app.join("package.jet"),
-        "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\n",
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n",
     )
     .unwrap();
     fs::write(
@@ -7964,7 +7964,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     let s = Scratch::new("type");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() => Secret {\n    return Secret.{ value: \"ok\" }\n}\n",
+        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() => Secret{ value: \"ok\" }\n",
     )
     .unwrap();
     fs::write(
@@ -8215,7 +8215,7 @@ fn cli_signed_advisory_feed_receipt_and_tamper_fail_closed() {
         fs::write(
             project.join("package.jet"),
             format!(
-                "{}\npolicy: {{ exceptions: [PolicyException.{{ id: \"JSA-2026-0001\", scope: \"mylib#1.0.0\", reason: \"urgent security fix\", expires: 1000 }}] }}\n",
+                "{}\npolicy: {{ exceptions: [PolicyException{{ id: \"JSA-2026-0001\", scope: \"mylib#1.0.0\", reason: \"urgent security fix\", expires: 1000 }}] }}\n",
                 min_manifest("app", "0.1.0")
             ),
         )

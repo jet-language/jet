@@ -455,7 +455,7 @@ fn mixed_assert_common_provenance(path: &Path) -> String {
 #[cfg(unix)]
 fn mixed_write_package(root: &Path, name: &str, deps: Option<String>) {
     let dependency_line = deps
-        .map(|deps| format!("deps: .{{ {deps} }}\n"))
+        .map(|deps| format!("deps: {{ {deps} }}\n"))
         .unwrap_or_default();
     fs::write(
         root.join("package.jet"),

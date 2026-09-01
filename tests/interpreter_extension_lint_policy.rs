@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 
 use common::Scratch;
 
-const POLICY: &str = "name: \"extension-policy\"\nversion: \"0.1.0\"\npolicy: .{ lints: .{ deny: [compiler_extension] } }\n";
+const POLICY: &str = "name: \"extension-policy\"\nversion: \"0.1.0\"\npolicy: { lints: { deny: [compiler_extension] } }\n";
 const SOURCE: &str = "fn x() {}\nfn run() {\n    print(1)\n}\n";
 
 fn compiler_extension() -> PathBuf {

@@ -1815,7 +1815,7 @@ fn package_policy_parses_exact_expiring_source_exception() {
 name: "consumer"
 version: "0.1.0"
 policy: {
-    exceptions: [PolicyException.{
+    exceptions: [PolicyException{
         id: "JSA-2026-0001",
         scope: "Acme.Widget#1.2.3",
         reason: "urgent security fix",
@@ -1834,7 +1834,7 @@ policy: {
 
     let invalid = jet::Manifest::parse(
         Path::new("package.jet"),
-        "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { exceptions: [PolicyException.{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }] }\n",
+        "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { exceptions: [PolicyException{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }] }\n",
     )
     .expect_err("exception scope ranges must fail closed");
     assert_eq!(invalid.code, "E1206");
@@ -8172,7 +8172,7 @@ fn env_jet_sources_resolve_without_toml() {
 fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let env_project = Scratch::new("transition-cli-env");
     let env_original =
-        "name: \"demo\"\nenvironments: .{ development: Environment{ tools: [\"git\"] } }\n";
+        "name: \"demo\"\nenvironments: { development: Environment{ tools: [\"git\"] } }\n";
     fs::write(env_project.join("package.jet"), env_original).unwrap();
 
     let checked = jet()
@@ -8337,7 +8337,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let hosts_project = Scratch::new("transition-cli-hosts");
     fs::write(
         hosts_project.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let hosts_split = jet()
@@ -8365,7 +8365,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let unknown_hosts = Scratch::new("transition-cli-unknown-host");
     fs::write(
         unknown_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let unknown = jet()
@@ -8380,7 +8380,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let stale_hosts = Scratch::new("transition-cli-stale-host");
     fs::write(
         stale_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let stale_split = jet()
@@ -8410,7 +8410,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let ambiguous_hosts = Scratch::new("transition-cli-ambiguous-host-journal");
     fs::write(
         ambiguous_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let ambiguous_split = jet()
@@ -8442,7 +8442,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let invalid_hosts = Scratch::new("transition-cli-invalid-host");
     fs::write(
         invalid_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let invalid = jet()
@@ -9712,15 +9712,15 @@ fn jetos_plan_projects_package_system_output_deterministically() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{
         name: "workstation"
         target: linux.x64
         packages: [ripgrep, "fd@nixpkgs", ripgrep]
-        services: .{ ssh: .{ enable: true, ports: [22] } }
-        options: .{ network: .{ hostName: "workstation" } }
+        services: { ssh: { enable: true, ports: [22] } }
+        options: { network: { hostName: "workstation" } }
     }
-    prod: Fleet{ hosts: .{ edge: "system.workstation" } }
+    prod: Fleet{ hosts: { edge: "system.workstation" } }
 }"#,
     )
     .unwrap();
@@ -9779,7 +9779,7 @@ fn package_host_split_preserves_system_projection_and_reaches_jetos() {
     let project = Scratch::new("package-host-split-parity");
     fs::write(
         project.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"halcyon\", target: linux.x64, packages: [ripgrep] } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"halcyon\", target: linux.x64, packages: [ripgrep] } }\n",
     )
     .unwrap();
 
@@ -9830,11 +9830,11 @@ fn jetos_plan_rejects_package_fleet_host_path_collision_before_generation() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{ target: linux.x64 }
     laptop: System{ target: linux.arm64 }
-    blue: Fleet{ hosts: .{ edge: system.workstation } }
-    green: Fleet{ hosts: .{ edge: system.laptop } }
+    blue: Fleet{ hosts: { edge: system.workstation } }
+    green: Fleet{ hosts: { edge: system.laptop } }
 }"#,
     )
     .unwrap();
@@ -9868,7 +9868,7 @@ fn jetos_plan_rejects_invalid_package_system_without_mutating_store() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{ workstation: System{ target: linux.x64, services: .{ ssh: .{} } } }"#,
+outputs: { workstation: System{ target: linux.x64, services: { ssh: {} } } }"#,
     )
     .unwrap();
 

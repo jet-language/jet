@@ -62,7 +62,7 @@ fn provenance_policy_none_logged_attested_and_e1204() {
     ] {
         let facts = jetpack::Package::PackageFacts::parse(
             &format!(
-                "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{{ trust: {{ require: {spelling} }} }}\n"
+                "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ require: {spelling} }} }}\n"
             ),
             "test",
         )

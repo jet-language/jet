@@ -251,7 +251,7 @@ fn epoch5_package_and_config_files_use_typed_formatter() {
     let package = write(
         &dir,
         jet::Syntax::PACKAGE_FILE,
-        "name: \"demo\"\noutputs: .{app: .Executable{entry: run}}\n",
+        "name: \"demo\"\noutputs: {app: .Executable{entry: run}}\n",
     );
     let config = write(
         &dir,

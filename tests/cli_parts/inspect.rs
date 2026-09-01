@@ -37,7 +37,7 @@ fn inspect_guarantees_reports_mixed_components_and_json() {
     let dir = isolated_cwd("inspect_guarantees_mixed");
     fs::write(
         dir.join("package.jet"),
-        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{ libxml: c@system, libz: c@system }\npolicy: .{ contain: [\"libxml\"] }\n",
+        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: { libxml: c@system, libz: c@system }\npolicy: { contain: [\"libxml\"] }\n",
     )
     .unwrap();
     fs::write(
@@ -94,7 +94,7 @@ fn inspect_guarantees_projects_normalized_team_policy() {
     let dir = isolated_cwd("inspect_guarantees_team_policy");
     fs::write(
         dir.join("package.jet"),
-        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{ zlib: c@system }\npolicy: .{ effects: .{ \"src\": -[IO, IO]> }, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: .{ deny: [float_money] } }\n",
+        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: { zlib: c@system }\npolicy: { effects: { \"src\": -[IO, IO]> }, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: { deny: [float_money] } }\n",
     )
     .unwrap();
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
@@ -154,10 +154,10 @@ fn inspect_guarantees_projects_inherited_package_policy_and_grants() {
     fs::write(
         dir.join("package.jet"),
         "name: \"guarantees\"\nversion: \"0.1.0\"\n\
-         deps: .{ dep: c@system }\n\
-         authority: .{ holds: { allow: [IO] }, grants: .{ \"dep\": [FS.Read] } }\n\
-         policy: .{ effects: .{ \"src\": -[IO]> }, unsafe: .Paths([\"src/ffi\"]), \
-         expert: .Deny, deps: .List([\"dep\"]), lints: .{ deny: [] })\n",
+         deps: { dep: c@system }\n\
+         authority: { holds: { allow: [IO] }, grants: { \"dep\": [FS.Read] } }\n\
+         policy: { effects: { \"src\": -[IO]> }, unsafe: .Paths([\"src/ffi\"]), \
+         expert: .Deny, deps: .List([\"dep\"]), lints: { deny: [] })\n",
     )
     .unwrap();
     fs::write(dir.join("src/main.jet"), "fn run() {}\n").unwrap();
@@ -221,8 +221,8 @@ fn inspect_guarantees_reports_source_less_dependencies_once_and_sorted() {
     fs::write(
         dir.join("package.jet"),
         "name: \"guarantees\"\nversion: \"0.1.0\"\n\
-         deps: .{ a_dep: c@system, m_dep: c@system, z_dep: js@\"widget#version=1@npm\" }\n\
-         policy: .{ deps: .List([\"a_dep\", \"m_dep\", \"z_dep\"]) }\n",
+         deps: { a_dep: c@system, m_dep: c@system, z_dep: js@\"widget#version=1@npm\" }\n\
+         policy: { deps: .List([\"a_dep\", \"m_dep\", \"z_dep\"]) }\n",
     )
     .unwrap();
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
@@ -260,7 +260,7 @@ fn package_team_policy_rejects_effect_unsafe_expert_and_dependency_violations() 
     for (tag, policy, source, expected_rule) in [
         (
             "team_policy_effect",
-            "effects: .{ \"main.jet\": -[]> }",
+            "effects: { \"main.jet\": -[]> }",
             "fn run() { print(\"outside the ceiling\") }\n",
             "policy.effects",
         ),
@@ -287,7 +287,7 @@ fn package_team_policy_rejects_effect_unsafe_expert_and_dependency_violations() 
         fs::write(
             dir.join("package.jet"),
             format!(
-                "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{{ zlib: c@system }}\npolicy: .{{ {policy} }}\n"
+                "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: {{ zlib: c@system }}\npolicy: {{ {policy} }}\n"
             ),
         )
         .unwrap();
@@ -321,7 +321,7 @@ fn inspect_guarantees_harden_contains_every_dependency() {
     let dir = isolated_cwd("inspect_guarantees_harden");
     fs::write(
         dir.join("package.jet"),
-        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: .{ libxml: c@system, libz: c@system }\npolicy: .{ harden: true }\n",
+        "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: { libxml: c@system, libz: c@system }\npolicy: { harden: true }\n",
     )
     .unwrap();
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
@@ -358,7 +358,7 @@ fn hardened_release_sentry_reaches_a_foreign_dependency() {
     fs::create_dir_all(&dependency).unwrap();
     fs::write(
         app.join("package.jet"),
-        "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\npolicy: .{ harden: true }\n",
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\npolicy: { harden: true }\n",
     )
     .unwrap();
     fs::write(
@@ -408,7 +408,7 @@ fn release_hardened_profile_catches_a_local_wrong_unsafe_region() {
         let dir = isolated_cwd(tag);
         fs::write(
             dir.join("package.jet"),
-            "name: \"sentry-profile\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+            "name: \"sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
         )
         .unwrap();
         fs::write(dir.join("main.jet"), source).unwrap();
@@ -465,7 +465,7 @@ fn run() {}
         let dir = isolated_cwd(tag);
         fs::write(
             dir.join("package.jet"),
-            "name: \"test-sentry-profile\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+            "name: \"test-sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
         )
         .unwrap();
         fs::write(dir.join("main.jet"), source).unwrap();
@@ -505,7 +505,7 @@ fn run() {}
 fn safe_release_profiles_emit_no_sentry_runtime_overhead() {
     for (tag, policy, profile) in [
         ("safe_release_normal", "", "release"),
-        ("safe_release_hardened", "policy: .{ harden: true }\n", "hardened"),
+        ("safe_release_hardened", "policy: { harden: true }\n", "hardened"),
     ] {
         let dir = isolated_cwd(tag);
         fs::write(

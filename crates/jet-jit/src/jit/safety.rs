@@ -119,7 +119,11 @@ fn resident_safe_compute_call(
         {
             args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        ("device_cpu" | "device_auto" | "device_metal" | "device_vulkan" | "device_webgpu", []) => {
+        // Every device_* Core row returns ComputeDevice, a plain scalar-like enum
+        // represented by the same i64 carrier used by other resident named values.
+        ("device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan" | "device_webgpu", [])
+            if matches!(erase_runtime_qualifiers(result_ty), Type::Named(name) if name == "ComputeDevice") =>
+        {
             true
         }
         ("on_device", [tensor, device])

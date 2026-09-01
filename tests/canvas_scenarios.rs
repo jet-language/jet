@@ -1305,7 +1305,7 @@ impl CanvasCase {
         } else if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
             fs::write(
                 dir.join("package.jet"),
-                "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: .{\n    cli: .Executable{ name: \"cli\", entry: run }\n    service: .Service{ name: \"service\", entry: serve }\n    web: .Executable{ name: \"web\", entry: web }\n    ui: .Executable{ name: \"ui\", entry: ui }\n    game: .Executable{ name: \"game\", entry: game }\n    library: .Library{ name: \"library\", entry: run }\n    build: .Check{ name: \"build\", entry: build }\n}\ndefaults: .{ run: cli }\n",
+                "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: {\n    cli: .Executable{ name: \"cli\", entry: run }\n    service: .Service{ name: \"service\", entry: serve }\n    web: .Executable{ name: \"web\", entry: web }\n    ui: .Executable{ name: \"ui\", entry: ui }\n    game: .Executable{ name: \"game\", entry: game }\n    library: .Library{ name: \"library\", entry: run }\n    build: .Check{ name: \"build\", entry: build }\n}\ndefaults: { run: cli }\n",
             )
             .expect("write Canvas session matrix package fixture");
             fs::write(

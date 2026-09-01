@@ -1364,13 +1364,13 @@ mod tests {
         let allow_dir = scratch("policy_allow");
         std::fs::write(
             allow_dir.join(Syntax::PACKAGE_FILE),
-            "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{ trust: { default: allow } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\nauthority: { trust: { default: allow } }\n",
         )
         .unwrap();
         let deny_dir = scratch("policy_deny");
         std::fs::write(
             deny_dir.join(Syntax::PACKAGE_FILE),
-            "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{ trust: { default: deny } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\nauthority: { trust: { default: deny } }\n",
         )
         .unwrap();
         let refs = [ref_spec("fastfetch@nixpkgs")];

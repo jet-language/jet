@@ -561,15 +561,15 @@ mod tests {
     fn projects_system_and_fleet_outputs_with_stable_identity() {
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{
         name: "workstation"
         target: linux.x64
         packages: [ripgrep, "fd@nixpkgs", ripgrep]
-        services: .{ ssh: .{ enable: true, ports: [22] } }
-        options: .{ network: .{ hostName: "workstation" } }
+        services: { ssh: { enable: true, ports: [22] } }
+        options: { network: { hostName: "workstation" } }
     }
-    prod: Fleet{ hosts: .{ edge: "system.workstation" } }
+    prod: Fleet{ hosts: { edge: "system.workstation" } }
 }"#,
             "package.jet",
         )
@@ -590,7 +590,7 @@ outputs: .{
     fn rejects_a_system_service_without_enable() {
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ host: System{ target: linux.x64, services: .{ ssh: .{} } } }"#,
+outputs: { host: System{ target: linux.x64, services: { ssh: {} } } }"#,
             "package.jet",
         )
         .unwrap();
@@ -604,9 +604,9 @@ outputs: .{ host: System{ target: linux.x64, services: .{ ssh: .{} } } }"#,
     fn rejects_a_fleet_host_that_could_escape_generation_storage() {
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{ target: linux.x64 }
-    prod: Fleet{ hosts: .{ "../escape": system.workstation }
+    prod: Fleet{ hosts: { "../escape": system.workstation }
     }
 }"#,
             "package.jet",
@@ -622,10 +622,10 @@ outputs: .{
     fn rejects_duplicate_fleet_names_and_host_paths() {
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{ target: linux.x64 }
-    blue: Fleet{ name: "prod", hosts: .{ edge: system.workstation } }
-    green: Fleet{ name: "prod", hosts: .{ other: system.workstation } }
+    blue: Fleet{ name: "prod", hosts: { edge: system.workstation } }
+    green: Fleet{ name: "prod", hosts: { other: system.workstation } }
 }"#,
             "package.jet",
         )
@@ -637,11 +637,11 @@ outputs: .{
 
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{ target: linux.x64 }
     laptop: System{ target: linux.arm64 }
-    blue: Fleet{ hosts: .{ edge: system.workstation } }
-    green: Fleet{ hosts: .{ edge: system.laptop } }
+    blue: Fleet{ hosts: { edge: system.workstation } }
+    green: Fleet{ hosts: { edge: system.laptop } }
 }"#,
             "package.jet",
         )

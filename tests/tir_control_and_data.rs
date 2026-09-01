@@ -11,7 +11,7 @@ use tir_support::{
 };
 
 const RESULT_HANDLER_PACKAGE: &str =
-    "name: \"result_handler_tiers\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\n";
+    "name: \"result_handler_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n";
 
 /// D-RESULT-DECON2=B / I9: the compact handler is only parser sugar for the
 /// existing Result pattern split, so every execution tier must agree without a

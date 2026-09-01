@@ -1,0 +1,97 @@
+# c727: differential example-corpus gate manifest.
+# Every top-level examples/features/<topic>/*.jet appears in exactly one section.
+# Update only for intentional ratchet moves.
+# D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
+# examples whose default jet run REFUSES to run. Record stem + diagnostic code only.
+# tier_divergent is the other half: it ran under both tiers and the observables
+# differ. Record stem + the diverging stream(s) only.
+# aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited
+# non-zero, so NO tier comparison ran for the stem. expected_exit means one thing
+# and one thing only — the golden itself expects a non-zero exit. oracle_unavailable
+# is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.
+# A resident_jit or deopt_interp row may carry interpreter_refused: CODE.
+# That row has no interpreter output comparison. A resident_jit or
+# deopt_interp row without that detail does.
+#
+# That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
+# and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
+# stems this file classifies and how many it still says nothing about; both live
+# outside this file so a hand-edit cannot green the check by deleting the row that
+# fails. Rows may only GROW, unclassified stems may only SHRINK, and
+# tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks
+# both with no run at all.
+#
+# Never hand-write a classification: a row states an OBSERVED tier. Regenerate with
+#   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+#     bash tools/ci/jit-aot-parity.sh
+
+frontend_rejected:
+  errors/errors: E2417: explicit failure domain ``ParseError`` is not an Error type; E2417: explicit failure domain ``ParseError`` is not an Error type; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `n` exists here; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `e` exists here
+  math/fraction: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  net/url_mime: E2417: explicit failure domain `String (text)` is not an Error type
+  serde/encoding: E2417: explicit failure domain `JSONError | String` is not an Error type
+  text/hex_decode_policy: E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here
+  tooling/data_stream_bounds: E0305: pattern `Val` doesn't match this value's type; E0107: nothing named `row` exists here; E0107: nothing named `row` exists here; E0305: pattern `None` doesn't match this value's type; E0305: pattern `Ok` doesn't match [DataGroup]; E0107: nothing named `rows` exists here; E0305: pattern `Err` doesn't match [DataGroup]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here
+  types/range_types: E2417: explicit failure domain `String (text)` is not an Error type; E2417: explicit failure domain `String (text)` is not an Error type
+
+gate_excluded:
+  ui/ui_native_linux: native GTK shell
+
+non_runnable:
+
+oracle_unavailable:
+
+expected_exit:
+  errors/error_context: golden expects non-zero exit
+  tooling/panic_report: golden expects non-zero exit
+
+aot_broken:
+  contracts/pre_post: AOT compile or run failed
+  memory/view_from_callback: AOT compile or run failed
+  net/http_rest_service: AOT compile or run failed
+  types/computed_field: AOT compile or run failed
+
+resident_jit:
+  basics/hello
+  basics/numbers
+  basics/values
+  collections/card2308_lazy_chain
+  comptime/comptime_core
+  comptime/find_empty
+  effects/pure
+  functions/lambda_inference
+  io/path
+  math/power_semantics
+  memory/entity_tree
+  memory/release_defer_lifo
+  net/browser_agent
+  patterns/struct_destructure
+  serde/encoding_base
+  syntax/byte_literals
+  tooling/branch_dispatch_bench
+  tooling/property_tests: interpreter_refused: E2201
+  tooling/testing_fake_data
+  types/value_tag_type
+  web/web_wasm_range
+
+deopt_interp:
+  basics/closure_capture_snapshot
+  collections/iter_tools_audit
+  collections/release_trait_bounds
+  concurrency/pipeline
+  concurrency/task_all
+  lowlevel/pointer_cast_deref
+  text/unicode_text
+  types/generic_constructor_inference
+
+run_tier_broken:
+  devloop/bench_override: E0956
+  effects/effect_grant: E1803
+  io/byte_buffer: E0956
+  io/files_depth: E1803
+  io/terminal_parity: E1803
+  tooling/compute_simd: E1803
+  ui/ui_view_tree: E1803
+
+tier_divergent:
+

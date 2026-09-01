@@ -1,0 +1,100 @@
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+
+thread 'corpus-gate-3' (652181) panicked at tests/dev_parts/support.rs:921:17:
+compiled binary run for `net/http_server_wasip2`: timed out after 30s
+stdout:
+true
+
+stderr:
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'corpus-gate-5' (652183) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `serde/yaml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\nnull\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\napp: myapp\nversion: 1.5\nservices:\n-\n  name: web\n  port: 80\n-\n  name: db\n  port: 5432\n", stderr: "", exit_code: 0 }
+
+thread 'corpus-gate-4' (652182) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `tooling/app_live` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "LiveQuery(id=3, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:2\nvalue:[alice,bob]\nLiveStats(queries=3, limit=1024, evictions=0, invalidations=4, ws_pushes=1)\nLiveQuery(id=4, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=4, limit=1024, evictions=0, invalidations=6, ws_pushes=1)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "LiveQuery(id=1, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:1\nvalue:[alice,bob]\nLiveStats(queries=1, limit=1024, evictions=0, invalidations=1, ws_pushes=0)\nLiveQuery(id=2, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=2, limit=1024, evictions=0, invalidations=2, ws_pushes=0)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+
+thread 'example_corpus_strict_jit_aot_differential_gate' (652165) panicked at tests/dev_parts/support.rs:4442:5:
+corpus gate classification failures:
+net/http_server_wasip2: compiled binary run for `net/http_server_wasip2`: timed out after 30s
+stdout:
+true
+
+stderr:
+
+serde/yaml: assertion `left == right` failed: `serde/yaml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\nnull\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\napp: myapp\nversion: 1.5\nservices:\n-\n  name: web\n  port: 80\n-\n  name: db\n  port: 5432\n", stderr: "", exit_code: 0 }
+tooling/app_live: assertion `left == right` failed: `tooling/app_live` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "LiveQuery(id=3, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:2\nvalue:[alice,bob]\nLiveStats(queries=3, limit=1024, evictions=0, invalidations=4, ws_pushes=1)\nLiveQuery(id=4, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=4, limit=1024, evictions=0, invalidations=6, ws_pushes=1)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "LiveQuery(id=1, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:1\nvalue:[alice,bob]\nLiveStats(queries=1, limit=1024, evictions=0, invalidations=1, ws_pushes=0)\nLiveQuery(id=2, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=2, limit=1024, evictions=0, invalidations=2, ws_pushes=0)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+test example_corpus_strict_jit_aot_differential_gate ... FAILED
+
+failures:
+
+failures:
+    example_corpus_strict_jit_aot_differential_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 432.01s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`

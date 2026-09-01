@@ -29,11 +29,11 @@ fn run() {
 const L0103_SOURCE: &str = include_str!("ui_lint/qualified_alias_import_liveness.jet");
 const L0202_SOURCE: &str = include_str!("ui_lint/shared_loop.jet");
 const DIAGNOSTIC_GATE_PACKAGE: &str =
-    "name: \"diagnostic_gate\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n";
+    "name: \"diagnostic_gate\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
 const L0103_SOURCE_OUTPUT: &str =
     "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n";
 const DENIED_LINT_PACKAGE: &str =
-    "name: \"diagnostic_gate_denied\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\npolicy: .{ lints: .{ deny: [unused_import] } }\n";
+    "name: \"diagnostic_gate_denied\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\npolicy: { lints: { deny: [unused_import] } }\n";
 const DENIED_LINT_SOURCE: &str = r#"
 use core.files as files
 

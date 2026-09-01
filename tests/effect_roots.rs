@@ -20,7 +20,7 @@ fn package_deny_ffi_covers_every_language_leaf() {
     let source = r#"
 name: "ffi_denied"
 version: "0.1.0"
-authority: .{ holds: { deny: [FFI] } }
+authority: { holds: { deny: [FFI] } }
 "#;
     let package = jetpack::Package::PackageFacts::parse(source, "package.jet")
         .expect("one-line FFI denial should parse");

@@ -9,7 +9,7 @@ use std::process::Command;
 const PACKAGE_SOURCE: &str = r#"
 name: "tail_return_parity"
 version: "0.1.0"
-authority: .{ holds: { allow: [IO] } }
+authority: { holds: { allow: [IO] } }
 "#;
 
 const COMPTIME_SOURCE: &str = r#"

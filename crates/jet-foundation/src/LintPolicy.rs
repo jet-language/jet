@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn parses_current_deny_spelling() {
         let names = parse_package_source(
-            r#"policy: .{ lints: .{ deny: [same_enum_guard_table, "float_money", compiler_extension] } }"#,
+            r#"policy: { lints: { deny: [same_enum_guard_table, "float_money", compiler_extension] } }"#,
         )
         .unwrap()
         .unwrap();
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn rejects_diagnostic_code_policy_value() {
         let code = ["L", "0302"].concat();
-        let source = format!("policy: .{{ lints: .{{ deny: [{code}] }} }}");
+        let source = format!("policy: {{ lints: {{ deny: [{code}] }} }}");
         let error = parse_package_source(&source).unwrap_err();
         assert!(error.detail.contains("use `same_enum_guard_table`"));
     }
@@ -457,7 +457,7 @@ mod tests {
     fn promotes_nested_subject_shorthand_lint_by_registered_name() {
         assert_eq!(code_for_name("subject_shorthand_nesting"), Some("L0512"));
         let deny =
-            parse_package_source("policy: .{ lints: .{ deny: [subject_shorthand_nesting] } }")
+            parse_package_source("policy: { lints: { deny: [subject_shorthand_nesting] } }")
                 .unwrap()
                 .unwrap();
         let lint = Diagnostic::lint(

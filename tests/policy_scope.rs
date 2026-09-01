@@ -31,10 +31,10 @@ fn package_policy_cannot_authorize_unsafe() {
 fn package_team_policy_parser_normalizes_typed_controls() {
     let package = jet::Package::PackageFacts::parse(
         "name: \"policy\"\nversion: \"0.1.0\"\n\
-         deps: .{ zlib: c@system }\n\
-         policy: .{ effects: .{ \"./src\": -[IO, IO]> }, \
+         deps: { zlib: c@system }\n\
+         policy: { effects: { \"./src\": -[IO, IO]> }, \
          unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, \
-        deps: .List([\"zlib\", \"zlib\"]), lints: .{ deny: [float_money] })\n",
+        deps: .List([\"zlib\", \"zlib\"]), lints: { deny: [float_money] })\n",
         "test",
     )
     .unwrap();
@@ -57,8 +57,8 @@ fn package_dependency_policy_checks_source_less_dependencies_once_in_order() {
     std::fs::write(
         root.join("package.jet"),
         "name: \"policy\"\nversion: \"0.1.0\"\n\
-         deps: .{ a_denied: c@system, m_allowed: c@system, z_denied: js@\"widget#version=1@npm\" }\n\
-         policy: .{ deps: .List([\"m_allowed\"]) }\n",
+         deps: { a_denied: c@system, m_allowed: c@system, z_denied: js@\"widget#version=1@npm\" }\n\
+         policy: { deps: .List([\"m_allowed\"]) }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -108,7 +108,7 @@ fn package_policy_declarations_inherit_to_imported_modules() {
     std::fs::write(
         root.join("package.jet"),
         "name: \"policy\"\nversion: \"0.1.0\"\n\
-         policy: .{ explicit_units: true }\n",
+         policy: { explicit_units: true }\n",
     )
     .unwrap();
     std::fs::write(root.join("main.jet"), "use child\nfn run() {}\n").unwrap();

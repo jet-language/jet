@@ -291,7 +291,7 @@ fn manifest_output_root_alias_is_live_for_direct_check() {
     std::fs::create_dir_all(dir.join("src/cli")).unwrap();
     std::fs::write(
         dir.join("package.jet"),
-        "name: \"manifest_output_check\"\nversion: \"0.1.0\"\noutputs: .{ dogfood: .Executable{ entry: app.run } }\n",
+        "name: \"manifest_output_check\"\nversion: \"0.1.0\"\noutputs: { dogfood: .Executable{ entry: app.run } }\n",
     )
     .unwrap();
     std::fs::write(
@@ -436,9 +436,9 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     );
 
     for source in [
-        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\n",
-        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
-        "app :: Output.Executable{ name: \"app\", entry: start }\napi :: Output.Service{ name: \"api\", entry: serve }\ndefaults: .{ run: api };\nfn start() {}\nfn serve() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\nfn run() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\napi :: Output.Service{ name: \"api\", entry: serve }\ndefaults: { run: api };\nfn start() {}\nfn serve() {}\n",
     ] {
         let stale_default = codes(source, jet::Sema::CompileMode::Run);
         assert!(
@@ -478,7 +478,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
         "E1321",
     );
     reject(
-        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\nfn run() {}\n",
         &[],
         "E1321",
     );
@@ -487,7 +487,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
 #[test]
 fn checked_default_selects_one_of_multiple_executables() {
     let bundle = checked_bundle(
-        "one :: Output.Executable{ name: \"one\", entry: first }\ntwo :: Output.Executable{ name: \"two\", entry: second }\ndefaults: .{ run: two };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
+        "one :: Output.Executable{ name: \"one\", entry: first }\ntwo :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: two };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );

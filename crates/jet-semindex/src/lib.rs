@@ -388,12 +388,12 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("package.jet"),
-            "name: \"demo\"\nversion: \"0.1.0\"\njet: \"0.4\"\nauthority: .{ holds: .{ allow: [FS], deny: [Net] }, grants: .{ \"textkit\": [IO] } }\nservices: .{ cache: .{ enable: true, ports: [6379], ready: \"ping\" } }\nenvironments: .{ dev: Environment{ tools: [\"git\"], services: .{ cache: .{ enable: true, ports: [6379] } }, secrets: .{ token: \"x\" } } }\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\ndev :: Config{ source: \"local\" }\n",
+            "name: \"demo\"\nversion: \"0.1.0\"\njet: \"0.4\"\nauthority: { holds: { allow: [FS], deny: [Net] }, grants: { \"textkit\": [IO] } }\nservices: { cache: { enable: true, ports: [6379], ready: \"ping\" } }\nenvironments: { dev: Environment{ tools: [\"git\"], services: { cache: { enable: true, ports: [6379] } }, secrets: { token: \"x\" } } }\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\ndev :: Config{ source: \"local\" }\n",
         )
         .unwrap();
         std::fs::write(
             root.join("release.jet"),
-            "pub release :: Config{ outputs: .{ app: Executable{ entry: run } } }\n",
+            "pub release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
         )
         .unwrap();
         let entry = root.join("run.jet");

@@ -4,7 +4,7 @@
 //!
 //! `examples/features/packages/outputs_build/` has no `main.jet`/`run.jet`
 //! convention file. Its `package.jet` uses a *dotted* entry —
-//! `outputs: .{ demo: .Executable.{ entry: service.run } }` — which follows
+//! `outputs: { demo: .Executable{ entry: service.run } }` — which follows
 //! `entry.jet`'s `use "service/module" as service` file import into
 //! `service/module.jet`. That's
 //! deliberate: a single-segment `entry: run` resolves through the existing
@@ -191,7 +191,7 @@ fn package_output_selects_non_run_callable_for_run_dev_and_effects() {
     let scratch = common::Scratch::new("package-output-callable");
     fs::write(
         scratch.join("package.jet"),
-        "name: \"selected_callable\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [IO] } }\noutputs: .{ app: .Executable{ entry: launch } }\n",
+        "name: \"selected_callable\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [IO] } }\noutputs: { app: .Executable{ entry: launch } }\n",
     )
     .unwrap();
     fs::write(
@@ -250,7 +250,7 @@ fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
     let entry = scratch.join("entry.jet");
     fs::write(
         scratch.join("package.jet"),
-        "name: \"nested_entry_wrapper\"\nversion: \"0.1.0\"\noutputs: .{ app: .Executable{ entry: app.leaf } }\n",
+        "name: \"nested_entry_wrapper\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: app.leaf } }\n",
     )
     .unwrap();
     fs::write(&entry, "use \"runner\" as runner\n").unwrap();
@@ -356,7 +356,7 @@ fn nested_output_failures_keep_the_package_diagnostic() {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("package.jet"),
-            "name: \"nested_output_negative\"\nversion: \"0.1.0\"\noutputs: .{ app: .Executable{ entry: app.cli_run } }\n",
+            "name: \"nested_output_negative\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: app.cli_run } }\n",
         )
         .unwrap();
         fs::write(dir.join("entry.jet"), entry).unwrap();
@@ -451,9 +451,9 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
         concat!(
             "name: \"nested_main_output\"\n",
             "version: \"0.1.0\"\n",
-            "outputs: .{ app: .Executable{ entry: cli.cli_run } }\n",
-            "defaults: .{ run: app }\n",
-            "authority: .{ holds: { allow: [IO] } }\n",
+            "outputs: { app: .Executable{ entry: cli.cli_run } }\n",
+            "defaults: { run: app }\n",
+            "authority: { holds: { allow: [IO] } }\n",
         ),
     )
     .expect("write package manifest");
@@ -534,8 +534,8 @@ fn manifest_output_rejects_missing_ambiguous_and_escaping_nested_entries() {
             concat!(
                 "name: \"invalid_nested_output\"\n",
                 "version: \"0.1.0\"\n",
-                "outputs: .{ app: .Executable{ entry: cli.cli_run } }\n",
-                "defaults: .{ run: app }\n",
+                "outputs: { app: .Executable{ entry: cli.cli_run } }\n",
+                "defaults: { run: app }\n",
             ),
         )
         .expect("write package manifest");

@@ -160,7 +160,7 @@ fn run() {
 }
 "#,
         "8080\n0\n0\n",
-        "name: \"optional_success_result_fallback\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+        "name: \"optional_success_result_fallback\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     );
 }
 

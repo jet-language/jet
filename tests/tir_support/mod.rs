@@ -11,7 +11,7 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 // application manifest. Give every scratch project one explicit test
 // authority decision so an authority-floor change cannot turn unrelated
 // tests into per-test allowlists.
-const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
+const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
 
 fn unique_tmp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);

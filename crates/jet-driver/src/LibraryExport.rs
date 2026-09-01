@@ -71,7 +71,7 @@ pub fn resolve_config(
     let Some(facts) = package_facts(bundle)? else {
         return Err(vec![e1341(
             "this build does not select a Library output",
-            "native and loadable artifacts are driven by a checked `outputs: .{ … }` Library fact (D-LIB-EXPORT1=C)",
+            "native and loadable artifacts are driven by a checked `outputs: { … }` Library fact (D-LIB-EXPORT1=C)",
             "select one Library with `--output=<name>`, or declare exactly one Library output in package.jet",
         )]);
     };
@@ -117,7 +117,7 @@ pub fn resolve_config(
             [] => {
                 return Err(vec![e1341(
                     "this build does not select a Library output",
-                    "native and loadable artifacts are driven by a checked `outputs: .{ … }` Library fact (D-LIB-EXPORT1=C)",
+                    "native and loadable artifacts are driven by a checked `outputs: { … }` Library fact (D-LIB-EXPORT1=C)",
                     "select one Library with `--output=<name>`, or declare exactly one Library output in package.jet",
                 )]);
             }

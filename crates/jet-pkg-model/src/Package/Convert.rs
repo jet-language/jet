@@ -124,10 +124,10 @@ jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
-authority: .{{ holds: {{ allow: [IO, Mem.Alloc] }} }}
+authority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}
 
 // Jet package dependencies:
-// deps: .{{
+// deps: {{
 //     helpers:  ../helpers,
 //     parsekit: {{ git: "https://github.com/acme/parsekit", tag: "v0.4.1" }},
 // }}
@@ -141,10 +141,9 @@ jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
-authority: .{{ holds: {{ allow: [IO, Mem.Alloc] }} }}
+authority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}
 
-deps: .{{
-}}
+deps: {{
 "#
         )
     }

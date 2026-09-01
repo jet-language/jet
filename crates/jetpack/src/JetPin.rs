@@ -673,7 +673,7 @@ pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<Strin
 /// The canonical `package.jet` body `jet init` writes: bare Package identity
 /// fields with a `jet:` channel pin (the running toolchain's channel).
 pub fn init_manifest(name: &str, channel: &str) -> String {
-    format!("name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: .{{}}\n")
+    format!("name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: {{}}\n")
 }
 
 // ──────────────────────────────────────────────

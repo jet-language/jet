@@ -42,7 +42,7 @@ fn run_with_mode(source: &str, name: &str, use_interpreter: bool) -> Output {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [FS, IO, Mem.Alloc, Net] } }\n",
+        "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Net] } }\n",
     )
     .unwrap();
     let file = dir.join("main.jet");

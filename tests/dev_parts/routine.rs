@@ -6970,7 +6970,7 @@ fn package_callable_survives_dev_and_run_watch_reload() {
         let scratch = common::Scratch::new("package-callable-reload");
         fs::write(
             scratch.join("package.jet"),
-            "name: \"callable_reload\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\noutputs: .{ app: .Executable{ entry: launch } }\n",
+            "name: \"callable_reload\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\noutputs: { app: .Executable{ entry: launch } }\n",
         )
         .unwrap();
         let file = scratch.join("entry.jet");

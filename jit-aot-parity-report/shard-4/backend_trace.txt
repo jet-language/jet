@@ -1,0 +1,56 @@
+# backend attribution (c727/c730)
+# resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0
+# run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)
+# tier_divergent = both tiers ran and the named stream(s) disagree
+# parity = pure-interpreter + default tiered + optimized AOT identity
+# only when the row has no interpreter_refused: CODE detail
+basics/closure_capture_snapshot	deopt_interp
+basics/hello	resident_jit
+basics/numbers	resident_jit
+basics/values	resident_jit
+collections/card2308_lazy_chain	resident_jit
+collections/iter_tools_audit	deopt_interp
+collections/release_trait_bounds	deopt_interp
+comptime/comptime_core	resident_jit
+comptime/find_empty	resident_jit
+concurrency/pipeline	deopt_interp
+concurrency/task_all	deopt_interp
+contracts/pre_post	aot_broken	AOT compile or run failed
+devloop/bench_override	run_tier_broken	E0956
+effects/effect_grant	run_tier_broken	E1803
+effects/pure	resident_jit
+errors/error_context	expected_exit	golden expects non-zero exit
+errors/errors	frontend_rejected	E2417: explicit failure domain ``ParseError`` is not an Error type; E2417: explicit failure domain ``ParseError`` is not an Error type; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `n` exists here; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `e` exists here
+functions/lambda_inference	resident_jit
+io/byte_buffer	run_tier_broken	E0956
+io/files_depth	run_tier_broken	E1803
+io/path	resident_jit
+io/terminal_parity	run_tier_broken	E1803
+lowlevel/pointer_cast_deref	deopt_interp
+math/fraction	frontend_rejected	E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+math/power_semantics	resident_jit
+memory/entity_tree	resident_jit
+memory/release_defer_lifo	resident_jit
+memory/view_from_callback	aot_broken	AOT compile or run failed
+net/browser_agent	resident_jit
+net/http_rest_service	aot_broken	AOT compile or run failed
+net/url_mime	frontend_rejected	E2417: explicit failure domain `String (text)` is not an Error type
+patterns/struct_destructure	resident_jit
+serde/encoding	frontend_rejected	E2417: explicit failure domain `JSONError | String` is not an Error type
+serde/encoding_base	resident_jit
+syntax/byte_literals	resident_jit
+text/hex_decode_policy	frontend_rejected	E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here
+text/unicode_text	deopt_interp
+tooling/branch_dispatch_bench	resident_jit
+tooling/compute_simd	run_tier_broken	E1803
+tooling/data_stream_bounds	frontend_rejected	E0305: pattern `Val` doesn't match this value's type; E0107: nothing named `row` exists here; E0107: nothing named `row` exists here; E0305: pattern `None` doesn't match this value's type; E0305: pattern `Ok` doesn't match [DataGroup]; E0107: nothing named `rows` exists here; E0305: pattern `Err` doesn't match [DataGroup]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here
+tooling/panic_report	expected_exit	golden expects non-zero exit
+tooling/property_tests	resident_jit	interpreter_refused: E2201
+tooling/testing_fake_data	resident_jit
+types/computed_field	aot_broken	AOT compile or run failed
+types/generic_constructor_inference	deopt_interp
+types/range_types	frontend_rejected	E2417: explicit failure domain `String (text)` is not an Error type; E2417: explicit failure domain `String (text)` is not an Error type
+types/value_tag_type	resident_jit
+ui/ui_native_linux	gate_excluded	native GTK shell
+ui/ui_view_tree	run_tier_broken	E1803
+web/web_wasm_range	resident_jit

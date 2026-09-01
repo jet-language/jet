@@ -291,7 +291,7 @@ impl<'a> Parser<'a> {
                     (crate::Policy::PolicyKey::Sentries, _, None) => return Err(Diagnostic::error("E0355", "`sentries` needs an explicit mode".to_string(), "sentry instrumentation is either on or off; it is not a boolean memory fact".to_string(), "write `sentries: .Off` or `sentries: .On`".to_string(), Some(name_span))),
                     (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, None, None) => crate::Policy::PolicyValue::Enabled,
                     (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, _, _) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
-                    (crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic, _, _) => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: .{{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
+                    (crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic, _, _) => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
                 };
             out.push(crate::Policy::PolicyDeclaration {
                 key,

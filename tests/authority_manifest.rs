@@ -5,7 +5,7 @@ use std::process::Command;
 const AUTHORITY_PACKAGE: &str = r#"
 name: "authority_tiers"
 version: "0.1.0"
-authority: .{
+authority: {
     holds: { allow: [IO], deny: [Exec] },
     grants: { "image-codec": [FS.Read] },
     trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow }, require: none },
@@ -62,7 +62,7 @@ fn default_run_records_source_linked_authority_delegation() {
     let package = r#"
 name: "authority_receipts"
 version: "0.1.0"
-authority: .{ holds: { allow: [Exec, IO] } }
+authority: { holds: { allow: [Exec, IO] } }
 "#;
     let program = r#"
 use core.process as process
@@ -105,16 +105,16 @@ fn malformed_authority_fields_share_e1221() {
     let cases = [
         (
             "holds",
-            "authority: .{ holds: { allow: [NotAnAuthority] } }",
+            "authority: { holds: { allow: [NotAnAuthority] } }",
         ),
         (
             "grants",
-            "authority: .{ grants: { \"dep\": [NotAnAuthority] } }",
+            "authority: { grants: { \"dep\": [NotAnAuthority] } }",
         ),
-        ("trust", "authority: .{ trust: { default: maybe } }"),
+        ("trust", "authority: { trust: { default: maybe } }"),
         (
             "providers",
-            "authority: .{ providers: { nix: { deny: [\"openssl-1.0\"] } } }",
+            "authority: { providers: { nix: { deny: [\"openssl-1.0\"] } } }",
         ),
     ];
 
@@ -136,9 +136,9 @@ fn malformed_authority_fields_share_e1221() {
 #[test]
 fn retired_authority_fields_name_the_new_block() {
     let cases = [
-        "grants: .{ \"dep\": [Net] }",
-        "policy: .{ trust: { default: prompt } }",
-        "policy: .{ providers: { nix: { registry: \"nixpkgs\" } } }",
+        "grants: { \"dep\": [Net] }",
+        "policy: { trust: { default: prompt } }",
+        "policy: { providers: { nix: { registry: \"nixpkgs\" } } }",
     ];
 
     for block in cases {
@@ -162,8 +162,8 @@ fn policy_keeps_unsafe_mode_and_package_floors() {
     let source = r#"
 name: "demo"
 version: "0.1.0"
-policy: .{ unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }
-authority: .{ holds: { deny: [Mem.Alloc] } }
+policy: { unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }
+authority: { holds: { deny: [Mem.Alloc] } }
 "#;
     let facts = jet::Package::PackageFacts::parse(source, "package.jet")
         .expect("policy floors and unsafe mode stay in policy");
@@ -185,9 +185,9 @@ authority: .{ holds: { deny: [Mem.Alloc] } }
     assert!(facts.authority.providers.is_empty());
 
     for retired in [
-        "policy: .{ no_alloc: true }",
-        "policy: .{ zero_rc: true }",
-        "policy: .{ arena_bounded: 65536 }",
+        "policy: { no_alloc: true }",
+        "policy: { zero_rc: true }",
+        "policy: { arena_bounded: 65536 }",
     ] {
         let source = format!("name: \"demo\"\nversion: \"0.1.0\"\n{retired}\n");
         let diagnostic = jet::Manifest::parse(Path::new("package.jet"), &source)
@@ -206,7 +206,7 @@ authority: .{ holds: { deny: [Mem.Alloc] } }
 
 #[test]
 fn retired_effect_budget_names_authority_holds() {
-    let source = "name: \"demo\"\nversion: \"0.1.0\"\neffects: .{ deny: [Net] }\n";
+    let source = "name: \"demo\"\nversion: \"0.1.0\"\neffects: { deny: [Net] }\n";
     let diagnostic = jet::Manifest::parse(std::path::Path::new("package.jet"), source)
         .expect_err("retired effects key must fail closed");
     assert_eq!(diagnostic.code, "E1206");
@@ -217,7 +217,7 @@ fn retired_effect_budget_names_authority_holds() {
 #[test]
 fn e1220_keeps_dependency_and_effect_provenance_after_key_move() {
     let manifest = jet::Package::PackageFacts::parse(
-        "name: \"demo\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [FS] } }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS] } }\n",
         "package.jet",
     )
     .expect("authority holds");

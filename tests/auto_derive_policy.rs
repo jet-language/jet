@@ -386,7 +386,7 @@ fn run() {}
 fn project_refusal_is_a_default_fact_and_explicit_codable_still_wins() {
     let bundle = loaded_project(
         "project_refusal_fact",
-        "policy: .{ lints: .{ deny: [auto_derive] } }",
+        "policy: { lints: { deny: [auto_derive] } }",
         r#"
 struct Defaulted { value: Int }
 
@@ -423,7 +423,7 @@ fn run() {}
 fn generic_deny_list_refuses_auto_derive() {
     let bundle = checked_project(
         "package_off",
-        "policy: .{ lints: .{ deny: [auto_derive] } }",
+        "policy: { lints: { deny: [auto_derive] } }",
         r#"
 #[Printable, Equatable, Debug]
 struct Enabled { value: Int }
@@ -502,7 +502,7 @@ fn old_auto_derive_key_is_rejected() {
     let legacy_key = ["auto", "derive"].join("_");
     std::fs::write(
         dir.join("package.jet"),
-        format!("name: \"old-key\"\nversion: \"1\"\npolicy: .{{ {legacy_key}: false }}\n"),
+        format!("name: \"old-key\"\nversion: \"1\"\npolicy: {{ {legacy_key}: false }}\n"),
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -616,7 +616,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(&nested_dir).unwrap();
     std::fs::write(
         nested_dir.join("package.jet"),
-        "name: \"nested\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
+        "name: \"nested\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(
@@ -652,7 +652,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     .unwrap();
     std::fs::write(
         dep.join("package.jet"),
-        "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(dep.join("dep.jet"), "pub struct DepType { value: Int }\n").unwrap();
@@ -729,7 +729,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         dep.join("package.jet"),
-        "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(dep.join("dep.jet"), "pub struct Token { value: Int }\n").unwrap();

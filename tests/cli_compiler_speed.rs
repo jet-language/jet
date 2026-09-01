@@ -718,7 +718,7 @@ fn run() {
         .unwrap();
         fs::write(
             scratch.join("package.jet"),
-            "name: \"compiler_speed\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\n",
+            "name: \"compiler_speed\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
         )
         .unwrap();
 

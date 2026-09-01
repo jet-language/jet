@@ -623,7 +623,7 @@ fn bodyless_package_module_stays_hidden_across_packages() {
         &[
             (
                 "app/package.jet",
-                "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\n",
+                "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n",
             ),
             (
                 "app/main.jet",

@@ -282,7 +282,7 @@ fn authority_ledger_mirrors_manifest_and_lock_block_shape() {
         scratch.join("package.jet"),
         r#"name: "ledger"
 version: "0.1.0"
-authority: .{
+authority: {
     holds: { allow: [IO], deny: [Exec] },
     grants: { "image-codec": [FS.Read] },
     trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
@@ -299,7 +299,7 @@ authority: .{
 
 [root]
 dependencies = []
-authority = .{ holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS.Read] }, trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } }, providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } } }
+authority = { holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS.Read] }, trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } }, providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } } }
 "#,
     )
     .unwrap();

@@ -101,8 +101,8 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
 
     let manifest = fs::read_to_string(project.join("package.jet")).expect("web scaffold manifest");
     assert!(
-        manifest.contains("authority: .{ holds: { allow: [IO, Browser] } }")
-            || manifest.contains("authority: .{ holds: { allow: [Browser, IO] } }"),
+        manifest.contains("authority: { holds: { allow: [IO, Browser] } }")
+            || manifest.contains("authority: { holds: { allow: [Browser, IO] } }"),
         "web scaffold authority must grant Browser:\n{manifest}"
     );
 

@@ -1817,7 +1817,7 @@ fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
             output.push_str(&format!("{field}: {value}\n"));
         }
     }
-    output.push_str("deps: .{\n");
+    output.push_str("deps: {\n");
     if let Some(deps_value) = deps_value.as_deref().and_then(record_body) {
         for entry in source_entries(deps_value) {
             let Some(name) = entry.field.as_deref() else {
@@ -2001,7 +2001,7 @@ fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> 
 
 fn render_fleet_config(host: &str, system: &str) -> String {
     format!(
-        "pub home :: Config{{\n    outputs: .{{\n        home: Fleet{{\n            name: \"home\"\n            hosts: .{{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
+        "pub home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
     )
 }
 
@@ -2245,7 +2245,7 @@ mod tests {
     fn environment_split_and_fold_restore_exact_root() {
         let root = temp_root("env");
         let original =
-            b"name: \"demo\"\nenvironments: .{ development: Environment{ tools: [\"git\"] } }\n";
+            b"name: \"demo\"\nenvironments: { development: Environment{ tools: [\"git\"] } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         let result = split(&root, SplitTarget::Environment, false).unwrap();
         assert_eq!(
@@ -2264,7 +2264,7 @@ mod tests {
         let root = temp_root("stale");
         fs::write(
             root.join(PACKAGE_FILE),
-            "name: \"demo\"\nenvironments: .{ dev: Environment{ } }\n",
+            "name: \"demo\"\nenvironments: { dev: Environment{ } }\n",
         )
         .unwrap();
         let plan = split_plan(&root, SplitTarget::Environment).unwrap();
@@ -2340,7 +2340,7 @@ mod tests {
     #[test]
     fn hosts_split_and_fold_restore_exact_root() {
         let root = temp_root("hosts");
-        let original = b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n";
+        let original = b"name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         split(
             &root,
@@ -2352,7 +2352,7 @@ mod tests {
         .unwrap();
         let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
         assert!(
-            fleet.contains("hosts: .{ server: system.server }"),
+            fleet.contains("hosts: { server: system.server }"),
             "{fleet}"
         );
         fold(&root, Path::new("package/fleet.jet"), false).unwrap();
@@ -2366,7 +2366,7 @@ mod tests {
         let root = temp_root("hosts-system-name");
         fs::write(
             root.join(PACKAGE_FILE),
-        "name: \"demo\"\noutputs: .{ server: System{ name: \"halcyon\", target: linux.x64 } }\n",
+        "name: \"demo\"\noutputs: { server: System{ name: \"halcyon\", target: linux.x64 } }\n",
         )
         .unwrap();
         split(
@@ -2379,7 +2379,7 @@ mod tests {
         .unwrap();
         let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
         assert!(
-            fleet.contains("hosts: .{ server: system.halcyon }"),
+            fleet.contains("hosts: { server: system.halcyon }"),
             "{fleet}"
         );
         let facts = PackageFacts::load(&root).unwrap().unwrap();
@@ -2393,7 +2393,7 @@ mod tests {
     fn fold_recovers_a_journaled_partial_split_without_touching_live_bytes() {
         let root = temp_root("hosts-partial");
         let original =
-            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\", target: linux.x64 } }\n";
+            b"name: \"demo\"\noutputs: { server: System{ name: \"server\", target: linux.x64 } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         let plan = split_plan(
             &root,
@@ -2425,7 +2425,7 @@ mod tests {
     fn corrupt_transition_journal_refuses_fold_without_mutation() {
         let root = temp_root("hosts-corrupt-journal");
         let original =
-            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\", target: linux.x64 } }\n";
+            b"name: \"demo\"\noutputs: { server: System{ name: \"server\", target: linux.x64 } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         split(
             &root,
@@ -2455,7 +2455,7 @@ mod tests {
         let invalid_root = temp_root("hosts-invalid");
         fs::write(
             invalid_root.join(PACKAGE_FILE),
-            "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
+            "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n",
         )
         .unwrap();
         let invalid = split(
@@ -2473,7 +2473,7 @@ mod tests {
         let ambiguous_root = temp_root("hosts-ambiguous");
         fs::write(
             ambiguous_root.join(PACKAGE_FILE),
-            "name: \"demo\"\noutputs: .{ server: Executable{ name: \"server\", entry: run } }\n",
+            "name: \"demo\"\noutputs: { server: Executable{ name: \"server\", entry: run } }\n",
         )
         .unwrap();
         let ambiguous = split(

@@ -1740,7 +1740,7 @@ fn mapped_string_list_flatten_compiles_resident() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n",
+        "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n",
     )
     .unwrap();
     let file = dir.join("mapped_string_flatten.jet");

@@ -1061,7 +1061,7 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
 ///
 /// A `package.jet` beside the examples is that topic's MANIFEST, not an
 /// example. `examples/features/modules/package.jet` declares the
-/// `settings: .{ cache_slots: … }` and `build:` profiles that
+/// `settings: { cache_slots: … }` and `build:` profiles that
 /// `modules/fact_value_arguments.jet` reads through `@build.settings.*`, so it
 /// is load-bearing on disk and can never parse as a program — a manifest binds
 /// `name: "…"`, which is E0003 in source. Discovering it as an example put one

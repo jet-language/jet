@@ -15,14 +15,14 @@ fn package_fleet_output_reaches_the_immutable_generation_and_retries_cleanly() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{
         target: linux.x64
-        options: .{ boot: .{ kernel: Linux }, init: .{ path: "/bin/init" } }
+        options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
     }
     prod: Fleet{
         name: "prod"
-        hosts: .{ edge: system.workstation }
+        hosts: { edge: system.workstation }
     }
 }"#,
     )
@@ -117,12 +117,12 @@ fn package_fleet_path_escape_fails_before_generation_publication() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{
+outputs: {
     workstation: System{
         target: linux.x64
-        options: .{ boot: .{ kernel: Linux }, init: .{ path: "/bin/init" } }
+        options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
     }
-    prod: Fleet{ hosts: .{ "../escape": system.workstation } }
+    prod: Fleet{ hosts: { "../escape": system.workstation } }
 }"#,
     )
     .unwrap();

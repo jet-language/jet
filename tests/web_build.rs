@@ -678,7 +678,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"webproj\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser] } }\n",
+        "name: \"webproj\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser] } }\n",
     )
     .unwrap();
 
@@ -720,7 +720,7 @@ fn jet_cli_infers_web_target_from_manifest() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\nauthority: .{ holds: { allow: [Browser] } }\n",
+        "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\nauthority: { holds: { allow: [Browser] } }\n",
     )
     .unwrap();
     fs::write(

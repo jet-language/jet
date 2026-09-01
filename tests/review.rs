@@ -21,7 +21,7 @@ fn review_joins_meaning_authority_and_receipt_changes() {
     let head = root.join("head");
     let manifest = |allow: &str| {
         format!(
-            "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: .{{ holds: {{ allow: [{allow}] }} }}\n"
+            "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"
         )
     };
     write(&base.join("package.jet"), &manifest("FS"));

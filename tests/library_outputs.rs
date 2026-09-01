@@ -518,7 +518,7 @@ fn library_output_selection_is_named_and_fail_closed() {
     let scratch = Scratch::new("library-output-selection");
     fs::write(
         scratch.path.join("package.jet"),
-        "name: \"library-selection\"\nversion: \"0.1.0\"\noutputs: .{\n    alpha: .Library{ name: \"alpha\", entry: run, native: true }\n    beta: .Library{ name: \"beta\", entry: run, native: true }\n    app: .Executable{ name: \"app\", entry: run }\n}\n",
+        "name: \"library-selection\"\nversion: \"0.1.0\"\noutputs: {\n    alpha: .Library{ name: \"alpha\", entry: run, native: true }\n    beta: .Library{ name: \"beta\", entry: run, native: true }\n    app: .Executable{ name: \"app\", entry: run }\n}\n",
     )
     .unwrap();
     fs::write(
@@ -560,7 +560,7 @@ fn locked_library_compile_requires_the_lock_stamp() {
     let scratch = Scratch::new("library-locked");
     fs::write(
         scratch.path.join("package.jet"),
-        "name: \"locked-library\"\nversion: \"0.1.0\"\noutputs: .{ core: .Library{ name: \"core\", native: true } }\n",
+        "name: \"locked-library\"\nversion: \"0.1.0\"\noutputs: { core: .Library{ name: \"core\", native: true } }\n",
     )
     .unwrap();
     fs::write(

@@ -2222,7 +2222,7 @@ export const scenarios = {
       const sourceBeforeReconnect = await ctx.source();
       await writeFile(join(projectRoot, "package.jet"), `name: "canvas_session_matrix"
 version: "0.1.0"
-    outputs: .{
+    outputs: {
     cli: .Executable{ name: "cli", entry: run }
     library: .Library{ name: "library", entry: run }
 }

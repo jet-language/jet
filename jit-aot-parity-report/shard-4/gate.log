@@ -1,0 +1,126 @@
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 40 misses, 36 builds
+frontend_rejected:
+  errors/errors: E2417: explicit failure domain ``ParseError`` is not an Error type; E2417: explicit failure domain ``ParseError`` is not an Error type; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `n` exists here; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `e` exists here
+  math/fraction: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  net/url_mime: E2417: explicit failure domain `String (text)` is not an Error type
+  serde/encoding: E2417: explicit failure domain `JSONError | String` is not an Error type
+  text/hex_decode_policy: E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here
+  tooling/data_stream_bounds: E0305: pattern `Val` doesn't match this value's type; E0107: nothing named `row` exists here; E0107: nothing named `row` exists here; E0305: pattern `None` doesn't match this value's type; E0305: pattern `Ok` doesn't match [DataGroup]; E0107: nothing named `rows` exists here; E0305: pattern `Err` doesn't match [DataGroup]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here
+  types/range_types: E2417: explicit failure domain `String (text)` is not an Error type; E2417: explicit failure domain `String (text)` is not an Error type
+
+gate_excluded:
+  ui/ui_native_linux: native GTK shell
+
+expected_exit:
+  errors/error_context: golden expects non-zero exit
+  tooling/panic_report: golden expects non-zero exit
+
+aot_broken:
+  contracts/pre_post: AOT compile or run failed
+  memory/view_from_callback: AOT compile or run failed
+  net/http_rest_service: AOT compile or run failed
+  types/computed_field: AOT compile or run failed
+
+resident_jit:
+  basics/hello
+  basics/numbers
+  basics/values
+  collections/card2308_lazy_chain
+  comptime/comptime_core
+  comptime/find_empty
+  effects/pure
+  functions/lambda_inference
+  io/path
+  math/power_semantics
+  memory/entity_tree
+  memory/release_defer_lifo
+  net/browser_agent
+  patterns/struct_destructure
+  serde/encoding_base
+  syntax/byte_literals
+  tooling/branch_dispatch_bench
+  tooling/property_tests: interpreter_refused: E2201
+  tooling/testing_fake_data
+  types/value_tag_type
+  web/web_wasm_range
+
+deopt_interp:
+  basics/closure_capture_snapshot
+  collections/iter_tools_audit
+  collections/release_trait_bounds
+  concurrency/pipeline
+  concurrency/task_all
+  lowlevel/pointer_cast_deref
+  text/unicode_text
+  types/generic_constructor_inference
+
+run_tier_broken:
+  devloop/bench_override: E0956
+  effects/effect_grant: E1803
+  io/byte_buffer: E0956
+  io/files_depth: E1803
+  io/terminal_parity: E1803
+  tooling/compute_simd: E1803
+  ui/ui_view_tree: E1803
+
+c727 corpus gate: shard 4/12 classified 50 examples (21 resident JIT, 8 deopt-interp, 7 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 329.01s
+

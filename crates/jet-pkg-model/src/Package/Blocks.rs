@@ -441,7 +441,7 @@ pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, Pack
                 }
             } else if trimmed.starts_with('"') {
                 // A bare quoted string with no `#`/`@`/path shape is a plain
-                // version selector (D-CONF-NAME1: `deps: .{ httpkit: "^2" }`).
+                // version selector (D-CONF-NAME1: `deps: { httpkit: "^2" }`).
                 DepSource::Version(unquoted)
             } else {
                 return Err(bad_dep_value(&name, trimmed));
@@ -891,7 +891,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     .map(|s| s.trim())
                     .ok_or_else(|| {
                         err(format!(
-                            "build profile `{name}` needs `settings: .{{ key: value, … }}`"
+                            "build profile `{name}` needs `settings: {{ key: value, … }}`"
                         ))
                     })?;
                 for (k, v) in key_value_entries(inner)? {
@@ -906,7 +906,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                 Syntax::RETIRED_BUILD_FIELD_FEATURES | Syntax::RETIRED_BUILD_FIELD_ENV
             ) {
                 return Err(err(format!(
-                    "build profile `{name}` uses retired `{key}:`; declare a typed `settings: .{{ key: Type = default }}` entry and override it with `--set key=value`"
+                    "build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"
                 )));
             } else {
                 return Err(err(format!(
@@ -1416,15 +1416,15 @@ pub(super) fn parse_policy(
         }
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
             let replacement = match name.as_str() {
-                "no_alloc" => Some("`authority: .{ holds: { deny: [Mem.Alloc] } }`".to_string()),
-                "zero_rc" => Some("`authority: .{ holds: { deny: [Mem.Rc] } }`".to_string()),
+                "no_alloc" => Some("`authority: { holds: { deny: [Mem.Alloc] } }`".to_string()),
+                "zero_rc" => Some("`authority: { holds: { deny: [Mem.Rc] } }`".to_string()),
                 "arena_bounded" => {
                     raw.parse::<u64>()
                         .ok()
                         .filter(|bytes| *bytes > 0)
                         .map(|bytes| {
                             format!(
-                            "`authority: .{{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`"
+                            "`authority: {{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`"
                         )
                         })
                 }
@@ -1453,7 +1453,7 @@ pub(super) fn parse_policy(
                 return Err(PackageParseError::RetiredPolicyField {
                     field: format!("policy.{name}"),
                     replacement: format!(
-                        "policy: .{{ lints: .{{ deny: [{}] }} }}",
+                        "policy: {{ lints: {{ deny: [{}] }} }}",
                         jet_foundation::LintPolicy::auto_derive_lint()
                             .lint_name
                             .expect("auto_derive lint must have a name")
@@ -1849,7 +1849,7 @@ fn parse_policy_exceptions(
             .and_then(|value| value.strip_suffix('}'))
             .ok_or_else(|| {
                 bad_policy(
-                    "`policy.exceptions` entries must use `PolicyException.{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }`",
+                    "`policy.exceptions` entries must use `PolicyException{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }`",
                 )
             })?;
         let mut id = None;
@@ -2074,7 +2074,7 @@ pub(super) fn parse_guarantee_policy(
 }
 
 /// Parse a standalone organization policy file whose entire content is one
-/// `policy: .{ … }` block (`JET_ORG_UNSAFE_POLICY`) — no other manifest
+/// `policy: { … }` block (`JET_ORG_UNSAFE_POLICY`) — no other manifest
 /// fields are legal there.
 pub fn parse_policy_document(
     text: &str,
@@ -2083,7 +2083,7 @@ pub fn parse_policy_document(
     let mut rest = text
         .trim()
         .strip_prefix(Syntax::MANIFEST_BLOCK_POLICY)
-        .ok_or_else(|| bad_mem("expected only `policy: .{ … }`"))?
+        .ok_or_else(|| bad_mem("expected only `policy: { … }`"))?
         .trim_start();
     rest = rest
         .strip_prefix(':')

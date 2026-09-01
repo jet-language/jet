@@ -52,7 +52,7 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     }
     let manifest = fs::read_to_string(project.join("package.jet")).unwrap();
     assert!(
-        manifest.contains("authority: .{ holds: { allow: [IO, Mem.Alloc, Exec] } }"),
+        manifest.contains("authority: { holds: { allow: [IO, Mem.Alloc, Exec] } }"),
         "scaffold must grant the effects used by its generated run.jet:\n{manifest}"
     );
     let source = fs::read_to_string(project.join("run.jet")).unwrap();

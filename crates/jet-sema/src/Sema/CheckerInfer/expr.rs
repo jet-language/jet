@@ -660,7 +660,7 @@ impl<'a> Checker<'a> {
                         format!("`@build.settings.{key}` is undeclared"),
                         "a setting must be declared with a type and default in the package manifest before it can be read"
                             .to_string(),
-                        format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
+                        format!("add `{key}: Type = default` to the package `settings: {{ … }}` block"),
                         Some(*span),
                     ));
                     return Some(None);

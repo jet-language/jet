@@ -116,7 +116,7 @@ fn append_authority_hold(raw: &str, effect: &str) -> String {
         out.push(String::new());
     }
     out.extend([
-        "authority: .{".to_string(),
+        "authority: {".to_string(),
         format!("    holds: {{ allow: [{}] }},", effect),
         "}".to_string(),
     ]);
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn authority_hold_edit_preserves_comments_and_reparses() {
-        let raw = "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: .{\n    holds: .{ allow: [FS] },\n}\n";
+        let raw = "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: {\n    holds: { allow: [FS] },\n}\n";
         let updated = add_authority_hold(raw, "Net");
 
         assert!(updated.contains("// keep this review note"));
@@ -360,19 +360,19 @@ mod tests {
         let nested = [
             "name: \"x\"",
             "version: \"1\"",
-            "deps: .{",
+            "deps: {",
             "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
             "    nested: {",
             "        inner: { value: \"kept\" },",
             "    },",
             "}",
-            "outputs: .{ x: .Library.{} }",
+            "outputs: { x: .Library{} }",
         ]
         .map(str::to_string);
         assert_eq!(block_line_range(&nested, "deps"), Some((3, 7)));
 
         let truncated = [
-            "deps: .{",
+            "deps: {",
             "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
             "    nested: {",
             "        inner: { value: \"unterminated\" },",

@@ -1,0 +1,1163 @@
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+   Compiling jet v1.0.0 (/home/nate/Projects/Github/jet)
+   Compiling jet-jit v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-jit)
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 06s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 39 misses, 34 builds
+frontend_rejected:
+  crypto/random_api_split: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  errors/rollback_trait: E2417: explicit failure domain ``TxnErr`` is not an Error type
+  io/app_config: E2402: this implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists; E0107: nothing named `errors` exists here; E0003: this `if` needs an `else` arm
+  io/db_read_footprint: E0305: pattern `Val` doesn't match [String:DBValue]; E0107: nothing named `row` exists here
+  memory/try_allocation: E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here; E0003: this `if` needs an `else` arm; E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here
+  text/strings: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `??` only works on a fallible value, not String (text)
+  tooling/data_json: E0405: `?? return` can't return a value here
+  types/type_alias: E2417: explicit failure domain ``AppError`` is not an Error type; E0108: this `Err` holds `AppError`, but `Err` was expected; E0108: this `Ok` holds Int (a whole number), but Int !AppError was expected; E0405: the fallback is Int (a whole number), but the success value is Int !AppError
+
+expected_exit:
+  collections/zip_strict_mismatch: golden expects non-zero exit
+  concurrency/deadline_context: golden expects non-zero exit
+  memory/pool_stale_id: golden expects non-zero exit
+
+aot_broken:
+  collections/index_hook: AOT compile or run failed
+  lowlevel/linalg_simd: AOT compile or run failed
+  modules/library: AOT compile or run failed
+  net/http_web_defaults: AOT compile or run failed
+  ui/ui_motion: AOT compile or run failed
+
+resident_jit:
+  basics/bare_lambda_param
+  basics/first_hour
+  basics/loop_values
+  basics/signature_shape
+  cli/typed_entry_args
+  collections/max_by_tie
+  comptime/embed
+  concurrency/detached_task
+  concurrency/scoped_borrow_bands
+  concurrency/tasks
+  effects/infer_receiver
+  io/no_prelude
+  io/stdin_read_all
+  math/bit_not
+  math/modulo
+  memory/arena_regions
+  memory/parameter_modes
+  net/browser_network
+  serde/codable_default
+  serde/json_typed
+  text/decimal_exponents
+  tooling/internal_project_parts
+  types/enum_dot
+  types/option
+  web/web_wasm_int_export
+
+deopt_interp:
+  effects/capability_sigils
+  net/email_message: interpreter_refused: E2201
+  parsing/reader_hot_loop
+  serde/user_derive
+  time/time_order
+  tooling/statement_attributes
+  types/anonymous_unions
+
+run_tier_broken:
+  errors/core_error_conversion: E1803
+  tooling/compute_linalg: E1803
+
+c727 corpus gate: shard 0/12 classified 50 examples (25 resident JIT, 7 deopt-interp, 2 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 335.49s
+
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cc") generated 3 warnings (run `cargo fix --bin "jet-cc" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (609924) panicked at tests/dev_parts/support.rs:2674:52:
+bundle should load: [Diagnostic { moment: Compile, severity: Error, code: "E0003", what: "expected a name for a pattern binding, found `.`", why: "names start with a letter or `_`", fix: "e.g. `main`, `count`, `_tmp`", span: Some(Span { start: 791, end: 792 }), cause: [], edit: None, applicability: None, safety: None, detail: None, structured: None }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 154.17s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+
+thread 'jet-compiler' (622513) panicked at crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2213:25:
+assertion `left == right` failed: live if branches must agree on their value type
+  left: Named("Unit")
+ right: String
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'jet-compiler' (622513) panicked at crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2213:25:
+assertion `left == right` failed: live if branches must agree on their value type
+  left: Named("Unit")
+ right: String
+
+thread 'jet-compiler' (622646) panicked at crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2213:25:
+assertion `left == right` failed: live if branches must agree on their value type
+  left: Named("Unit")
+ right: String
+
+thread 'jet-compiler' (622646) panicked at crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2213:25:
+assertion `left == right` failed: live if branches must agree on their value type
+  left: Named("Unit")
+ right: String
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+
+thread 'corpus-gate-3' (622471) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `serde/toml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "jet\nada\n8080\n2\n\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "jet\nada\n8080\n2\ntitle = \"jet\"\nports = [80, 443]\n\n[owner]\nname = \"ada\"\nport = 8080\n", stderr: "", exit_code: 0 }
+
+thread 'example_corpus_strict_jit_aot_differential_gate' (622455) panicked at tests/dev_parts/support.rs:4442:5:
+corpus gate classification failures:
+serde/toml: assertion `left == right` failed: `serde/toml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "jet\nada\n8080\n2\n\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "jet\nada\n8080\n2\ntitle = \"jet\"\nports = [80, 443]\n\n[owner]\nname = \"ada\"\nport = 8080\n", stderr: "", exit_code: 0 }
+test example_corpus_strict_jit_aot_differential_gate ... FAILED
+
+failures:
+
+failures:
+    example_corpus_strict_jit_aot_differential_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 325.41s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (641939) panicked at tests/dev_parts/support.rs:2732:21:
+Core conformance witness must run in the forced interpreter `conformance/core/crypto/expert/open_v1`, got: [Diagnostic { moment: Compile, severity: Error, code: "E2201", what: "`jet dev` can't interpret this program yet — the interpreter stopped here: ``core.crypto.expert.open_v1()`` isn't supported by the current evaluator yet", why: "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build", fix: "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live", span: Some(Span { start: 627, end: 634 }), cause: [], edit: None, applicability: None, safety: None, detail: None, structured: None }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 140.32s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+
+thread 'corpus-gate-3' (652181) panicked at tests/dev_parts/support.rs:921:17:
+compiled binary run for `net/http_server_wasip2`: timed out after 30s
+stdout:
+true
+
+stderr:
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'corpus-gate-5' (652183) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `serde/yaml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\nnull\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\napp: myapp\nversion: 1.5\nservices:\n-\n  name: web\n  port: 80\n-\n  name: db\n  port: 5432\n", stderr: "", exit_code: 0 }
+
+thread 'corpus-gate-4' (652182) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `tooling/app_live` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "LiveQuery(id=3, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:2\nvalue:[alice,bob]\nLiveStats(queries=3, limit=1024, evictions=0, invalidations=4, ws_pushes=1)\nLiveQuery(id=4, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=4, limit=1024, evictions=0, invalidations=6, ws_pushes=1)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "LiveQuery(id=1, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:1\nvalue:[alice,bob]\nLiveStats(queries=1, limit=1024, evictions=0, invalidations=1, ws_pushes=0)\nLiveQuery(id=2, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=2, limit=1024, evictions=0, invalidations=2, ws_pushes=0)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+
+thread 'example_corpus_strict_jit_aot_differential_gate' (652165) panicked at tests/dev_parts/support.rs:4442:5:
+corpus gate classification failures:
+net/http_server_wasip2: compiled binary run for `net/http_server_wasip2`: timed out after 30s
+stdout:
+true
+
+stderr:
+
+serde/yaml: assertion `left == right` failed: `serde/yaml` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\nnull\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "myapp\n1.5\n2\nweb\napp: myapp\nversion: 1.5\nservices:\n-\n  name: web\n  port: 80\n-\n  name: db\n  port: 5432\n", stderr: "", exit_code: 0 }
+tooling/app_live: assertion `left == right` failed: `tooling/app_live` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "LiveQuery(id=3, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:2\nvalue:[alice,bob]\nLiveStats(queries=3, limit=1024, evictions=0, invalidations=4, ws_pushes=1)\nLiveQuery(id=4, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=4, limit=1024, evictions=0, invalidations=6, ws_pushes=1)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "LiveQuery(id=1, footprint=users, generation=1, active=true, dirty=false, error=)\nvalue:[alice,bob]\nhit:1\nvalue:[alice,bob]\nLiveStats(queries=1, limit=1024, evictions=0, invalidations=1, ws_pushes=0)\nLiveQuery(id=2, footprint=ext:metrics, generation=1, active=true, dirty=false, error=)\nin-txn\ncommit:invalidate\nvalue:[alice,bob]\nLiveStats(queries=2, limit=1024, evictions=0, invalidations=2, ws_pushes=0)\nvalue:signal:users\n", stderr: "", exit_code: 0 }
+test example_corpus_strict_jit_aot_differential_gate ... FAILED
+
+failures:
+
+failures:
+    example_corpus_strict_jit_aot_differential_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 432.01s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (714674) panicked at tests/dev_parts/support.rs:2732:21:
+Core conformance witness must run in the forced interpreter `conformance/core/crypto/sha3_384`, got: [Diagnostic { moment: Compile, severity: Error, code: "E2201", what: "`jet dev` can't interpret this program yet — the interpreter stopped here: ``core.crypto.sha3_384()`` isn't supported by the current evaluator yet", why: "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build", fix: "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live", span: Some(Span { start: 137, end: 145 }), cause: [], edit: None, applicability: None, safety: None, detail: None, structured: None }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 161.30s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+    Blocking waiting for file lock on build directory
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 43 misses, 36 builds
+frontend_rejected:
+  basics/named_args: E0003: expected a call, binding, assignment, or `return`, found `{`
+  patterns/refutable_test_bind: E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Ok`; E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Err`; E0305: pattern `Ok` doesn't match Int (a whole number); E0305: pattern `Ok` doesn't match Int (a whole number); E0409: `err` is not available after a pure pattern miss
+  text/hex_base64: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]
+  tooling/data_schema: E0405: `?? return` can't return a value here
+  tooling/sync_crdt: E0405: `?? return` can't return a value here
+
+expected_exit:
+  errors/env_divisor_trap: golden expects non-zero exit
+  memory/unsafe_sentries_provenance: golden expects non-zero exit
+
+aot_broken:
+  basics/callbacks: AOT compile or run failed
+  collections/iter_hook: AOT compile or run failed
+  net/http_readiness: AOT compile or run failed
+  net/tls_peer_identity: AOT compile or run failed
+  serde/csv_typed: AOT compile or run failed
+  serde/decode_migration: AOT compile or run failed
+  types/patchable: AOT compile or run failed
+
+resident_jit:
+  basics/functions
+  basics/value_loop_search
+  collections/card2308_int_map
+  collections/queue: interpreter_refused: E2201
+  comptime/comptime_block
+  comptime/find
+  concurrency/parallel_iter: interpreter_refused: E2201
+  concurrency/shield_commit
+  crypto/vault_key_wrap
+  effects/effect_declarations
+  effects/move_no_uaf
+  errors/discard_fallible
+  functions/lambda_bare_params
+  io/args_spec
+  math/floor_div: interpreter_refused: E2201
+  math/power_operator
+  memory/effect_denials
+  memory/ref_field
+  strings/slice_range
+  text/duration_facts
+  text/unicode_17
+  tooling/bench
+  types/capability_bundles
+  types/unit_literals
+  web/web_wasm_map
+
+deopt_interp:
+  contracts/inline_contracts
+  io/terminal
+  lowlevel/os_target_gating
+  memory/unsafe_sentries_source_off
+  types/external_methods
+
+run_tier_broken:
+  io/files: E1803
+  io/os_stop_cleanup: E1803
+  modules/selective_imports: E1803
+  tooling/compute_ndarray: E1803
+  tooling/para_map_crossover_bench: E0956
+  ui/ui_typed_style: E1803
+
+c727 corpus gate: shard 3/12 classified 50 examples (25 resident JIT, 5 deopt-interp, 6 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 370.82s
+
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cc") generated 3 warnings (run `cargo fix --bin "jet-cc" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (775434) panicked at tests/dev_parts/support.rs:2732:21:
+Core conformance witness must run in the forced interpreter `conformance/core/crypto/expert/shared_secret_bytes`, got: [Diagnostic { moment: Compile, severity: Error, code: "E2201", what: "`jet dev` can't interpret this program yet — the interpreter stopped here: ``core.crypto.x25519()`` isn't supported by the current evaluator yet", why: "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build", fix: "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live", span: Some(Span { start: 282, end: 288 }), cause: [], edit: None, applicability: None, safety: None, detail: None, structured: None }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 131.53s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+oracle cache: 0 hits, 40 misses, 36 builds
+frontend_rejected:
+  errors/errors: E2417: explicit failure domain ``ParseError`` is not an Error type; E2417: explicit failure domain ``ParseError`` is not an Error type; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `n` exists here; E2402: this implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists; E0107: nothing named `e` exists here
+  math/fraction: E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+  net/url_mime: E2417: explicit failure domain `String (text)` is not an Error type
+  serde/encoding: E2417: explicit failure domain `JSONError | String` is not an Error type
+  text/hex_decode_policy: E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]; E0107: nothing named `error` exists here
+  tooling/data_stream_bounds: E0305: pattern `Val` doesn't match this value's type; E0107: nothing named `row` exists here; E0107: nothing named `row` exists here; E0305: pattern `None` doesn't match this value's type; E0305: pattern `Ok` doesn't match [DataGroup]; E0107: nothing named `rows` exists here; E0305: pattern `Err` doesn't match [DataGroup]; E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here; E0305: pattern `Ok` doesn't match Float (an approximate binary number); E0107: nothing named `v` exists here; E0305: pattern `Err` doesn't match Float (an approximate binary number); E0107: nothing named `error` exists here
+  types/range_types: E2417: explicit failure domain `String (text)` is not an Error type; E2417: explicit failure domain `String (text)` is not an Error type
+
+gate_excluded:
+  ui/ui_native_linux: native GTK shell
+
+expected_exit:
+  errors/error_context: golden expects non-zero exit
+  tooling/panic_report: golden expects non-zero exit
+
+aot_broken:
+  contracts/pre_post: AOT compile or run failed
+  memory/view_from_callback: AOT compile or run failed
+  net/http_rest_service: AOT compile or run failed
+  types/computed_field: AOT compile or run failed
+
+resident_jit:
+  basics/hello
+  basics/numbers
+  basics/values
+  collections/card2308_lazy_chain
+  comptime/comptime_core
+  comptime/find_empty
+  effects/pure
+  functions/lambda_inference
+  io/path
+  math/power_semantics
+  memory/entity_tree
+  memory/release_defer_lifo
+  net/browser_agent
+  patterns/struct_destructure
+  serde/encoding_base
+  syntax/byte_literals
+  tooling/branch_dispatch_bench
+  tooling/property_tests: interpreter_refused: E2201
+  tooling/testing_fake_data
+  types/value_tag_type
+  web/web_wasm_range
+
+deopt_interp:
+  basics/closure_capture_snapshot
+  collections/iter_tools_audit
+  collections/release_trait_bounds
+  concurrency/pipeline
+  concurrency/task_all
+  lowlevel/pointer_cast_deref
+  text/unicode_text
+  types/generic_constructor_inference
+
+run_tier_broken:
+  devloop/bench_override: E0956
+  effects/effect_grant: E1803
+  io/byte_buffer: E0956
+  io/files_depth: E1803
+  io/terminal_parity: E1803
+  tooling/compute_simd: E1803
+  ui/ui_view_tree: E1803
+
+c727 corpus gate: shard 4/12 classified 50 examples (21 resident JIT, 8 deopt-interp, 7 run-tier-broken, 0 tier-divergent)
+test example_corpus_strict_jit_aot_differential_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 329.01s
+
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (806197) panicked at tests/dev_parts/support.rs:2708:5:
+`conformance/core/crypto/expert/signing_key_bytes` must be resident-JIT safe for three-way differential: safety="entry not resident-safe: body stmt 3: Unsafe[0]>Let[1] `result` init=CoreCall:core.crypto.expert.signing_key_bytes ty=List(IntN { signed: false, bits: 8 })", compile=Err("run: jit core call unsupported: core.crypto.expert.signing_key_bytes")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 131.00s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+   Compiling jet-pkg-model v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-pkg-model)
+   Compiling jet v1.0.0 (/home/nate/Projects/Github/jet)
+   Compiling jet-driver v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-driver)
+   Compiling jet-env-model v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-env-model)
+   Compiling jet-jit v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-jit)
+   Compiling jet-semindex v0.1.0 (/home/nate/Projects/Github/jet/crates/jet-semindex)
+   Compiling jet-repl v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-repl)
+   Compiling jet-cli v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-cli)
+   Compiling jet-impact v0.1.0 (/home/nate/Projects/Github/jet/crates/jet-impact)
+   Compiling jet-debug v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-debug)
+   Compiling jet-devserver v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-devserver)
+   Compiling jetpack v1.0.0 (/home/nate/Projects/Github/jet/crates/jetpack)
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cc") generated 3 warnings (1 duplicate) (run `cargo fix --bin "jet-cc" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (2 duplicates)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 03s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (839570) panicked at crates/jet-codegen/src/Codegen/Items.rs:3389:5:
+internal compiler error: codegen reached a construct the typed IR does not cover: the expression `if outcome == {         .Continue(value) -> { print("publish…` at events.jet:19:5, in fn `show_publish` — compiler bug (I2/R7)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'example_corpus_strict_jit_aot_differential_gate' (821400) panicked at tests/dev_parts/support.rs:4442:5:
+corpus gate classification failures:
+ui/events: internal compiler error: codegen reached a construct the typed IR does not cover: the expression `if outcome == {         .Continue(value) -> { print("publish…` at events.jet:19:5, in fn `show_publish` — compiler bug (I2/R7)
+test example_corpus_strict_jit_aot_differential_gate ... FAILED
+
+failures:
+
+failures:
+    example_corpus_strict_jit_aot_differential_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 310.40s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+   Compiling jet-foundation v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-foundation)
+   Compiling jet v1.0.0 (/home/nate/Projects/Github/jet)
+   Compiling jet-lexer v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-lexer)
+   Compiling jet-canvas v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-canvas)
+   Compiling jet-rt v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-rt)
+   Compiling jet-parser v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-parser)
+   Compiling jet-comptime v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-comptime)
+   Compiling jet-sema v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-sema)
+   Compiling jet-codegen v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-codegen)
+   Compiling jet-pkg-model v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-pkg-model)
+   Compiling jet-driver v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-driver)
+   Compiling jet-semindex v0.1.0 (/home/nate/Projects/Github/jet/crates/jet-semindex)
+   Compiling jet-repl v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-repl)
+   Compiling jet-env-model v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-env-model)
+   Compiling jet-cli v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-cli)
+   Compiling jet-impact v0.1.0 (/home/nate/Projects/Github/jet/crates/jet-impact)
+   Compiling jet-debug v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-debug)
+   Compiling jet-devserver v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-devserver)
+   Compiling jetpack v1.0.0 (/home/nate/Projects/Github/jet/crates/jetpack)
+   Compiling jet-jit v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-jit)
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet-cxx") generated 3 warnings (run `cargo fix --bin "jet-cxx" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 57s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test core_conformance_corpus_uses_strict_three_tier_gate has been running for over 60 seconds
+
+thread 'jet-compiler' (855245) panicked at tests/dev_parts/support.rs:2732:21:
+Core conformance witness must run in the forced interpreter `conformance/core/crypto/pbkdf2_hmac`, got: [Diagnostic { moment: Compile, severity: Error, code: "E2201", what: "`jet dev` can't interpret this program yet — the interpreter stopped here: ``core.crypto.pbkdf2_hmac()`` isn't supported by the current evaluator yet", why: "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build", fix: "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live", span: Some(Span { start: 166, end: 177 }), cause: [], edit: None, applicability: None, safety: None, detail: None, structured: None }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core_conformance_corpus_uses_strict_three_tier_gate ... FAILED
+
+failures:
+
+failures:
+    core_conformance_corpus_uses_strict_three_tier_gate
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 163.62s
+
+error: test failed, to rerun pass `-p jet --test dev_corpus_gate`
+warning: /home/nate/Projects/Github/jet/Cargo.toml: file `/home/nate/Projects/Github/jet/Source/main.rs` found to be present in multiple build targets:
+  * `bin` target `jet`
+  * `bin` target `jet-cc`
+  * `bin` target `jet-cxx`
+warning: type `JetEncodingAllocationBudget` is more private than the item `CSVReader::allocation`
+   --> crates/jet-jit/src/enc_stream/mod.rs:286:13
+    |
+286 |             pub(crate) allocation: super::JetEncodingAllocationBudget,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `CSVReader::allocation` is reachable at visibility `pub(crate)`
+    |
+note: but type `JetEncodingAllocationBudget` is only usable at visibility `pub(self)`
+   --> crates/jet-jit/src/enc_stream/../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:64:1
+    |
+ 64 | struct JetEncodingAllocationBudget {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `jet-jit` (lib) generated 1 warning
+warning: unused variable: `runtime_bundle`
+    --> Source/CmdCompile.rs:7308:5
+     |
+7308 |     runtime_bundle: Option<&jet::AST::ProgramBundle>,
+     |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_runtime_bundle`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `checked_bundle` is never read
+   --> Source/CmdInspect.rs:906:34
+    |
+906 |         let mut checked_bundle = None;
+    |                                  ^^^^ this value is reassigned later and never used
+...
+927 |             checked_bundle = bundle;
+    |             -------------- `checked_bundle` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `rustc_args` is never used
+   --> Source/main.rs:423:19
+    |
+348 | impl ProfileConfig {
+    | ------------------ method in this implementation
+...
+423 |     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+    |                   ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jet` (bin "jet") generated 3 warnings (run `cargo fix --bin "jet" -p jet` to apply 1 suggestion)
+warning: `jet` (bin "jet-cc") generated 3 warnings (3 duplicates)
+warning: `jet` (bin "jet-cxx") generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running tests/dev_corpus_gate.rs (target/debug/deps/dev_corpus_gate-eba2fc82aea89468)
+
+running 1 test
+test example_corpus_strict_jit_aot_differential_gate has been running for over 60 seconds
+
+thread 'corpus-gate-2' (884152) panicked at tests/dev_parts/support.rs:4360:21:
+assertion `left == right` failed: `devloop/persist` pure-interpreter must match AOT stdout/stderr/exit
+  left: ProgramOutput { stdout: "2\n", stderr: "", exit_code: 0 }
+ right: ProgramOutput { stdout: "1\n", stderr: "", exit_code: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

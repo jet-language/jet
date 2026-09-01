@@ -465,7 +465,7 @@ fn output_default(
         diags.push(output_error(
             "`defaults:` needs one checked record".to_string(),
             "Output defaults map singular tool intents to Output addresses".to_string(),
-            "write `defaults: .{ run: app }`".to_string(),
+            "write `defaults: { run: app }`".to_string(),
             value.span(),
         ));
         return None;
@@ -671,7 +671,7 @@ pub(super) fn resolve_outputs(
                         .map(|index| resolved[*index].2.address.clone())
                         .collect::<Vec<_>>();
                     names.sort();
-                    diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: .{{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
+                    diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: {{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
                 }
             }
         }
