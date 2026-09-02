@@ -158,12 +158,45 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
         );
         let entries = core_conformance_shard(all_entries);
         assert!(!entries.is_empty(), "Core conformance corpus must have witnesses");
+        // Census mode: report every failing witness in one run instead of
+        // stopping at the first, so repairs are planned from a complete list.
+        let census = std::env::var("JET_CORE_CONFORMANCE_CENSUS").as_deref() == Ok("1");
+        let mut failures: Vec<(String, String)> = Vec::new();
+        if census {
+            std::panic::set_hook(Box::new(|_| {}));
+        }
         for (stem, file) in entries {
-            jet::Comptime::with_ambient(
-                Some(jet::Compiler::eval_core_call_with_type),
-                None,
-                None,
-                || assert_cranelift_three_way(&file, &stem),
+            let run = || {
+                jet::Comptime::with_ambient(
+                    Some(jet::Compiler::eval_core_call_with_type),
+                    None,
+                    None,
+                    || assert_cranelift_three_way(&file, &stem),
+                )
+            };
+            if !census {
+                run();
+                continue;
+            }
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+                let message = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "non-string panic".to_string());
+                failures.push((stem.clone(), message));
+            }
+        }
+        if census {
+            let _ = std::panic::take_hook();
+            for (stem, message) in &failures {
+                let line = message.replace('\n', " ");
+                eprintln!("CENSUS {stem}\t{}", &line[..line.len().min(600)]);
+            }
+            assert!(
+                failures.is_empty(),
+                "Core conformance census: {} witness(es) failed the strict three-tier gate",
+                failures.len()
             );
         }
     });
