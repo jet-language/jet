@@ -56,10 +56,10 @@ fn run() {{
     assert_eq!(out, "3.5\n3.0\n", "{out}");
 }
 
-/// D-INTDIV1=A: storing that Float back into a whole number is a type error,
-/// and the fix names `/%`. `n /= 2` reaches sema as `n = n / 2`, because
-/// compound assignment is desugared before checking, so both spellings get the
-/// same advice.
+/// D-INTDIV1=A: storing that exact quotient back into a whole number is a
+/// type error, and the fix names `/%`. `n /= 2` reaches sema as `n = n / 2`,
+/// because compound assignment is desugared before checking, so both spellings
+/// get the same advice. Struct fields use the same check.
 #[test]
 fn storing_a_quotient_in_a_whole_number_points_at_floor_division() {
     let dir = std::env::temp_dir().join(format!("jet_intdiv_{}", std::process::id()));
@@ -67,6 +67,7 @@ fn storing_a_quotient_in_a_whole_number_points_at_floor_division() {
     for src in [
         "fn run() {\n    n := 7\n    n /= 2\n    print(n)\n}\n",
         "fn run() {\n    n := 7\n    n = n / 2\n    print(n)\n}\n",
+        "struct Boxed { value: Int }\nfn run() {\n    item :: Boxed{ value: 7 / 2 }\n}\n",
     ] {
         let path = dir.join("intdiv_compound.jet");
         std::fs::write(&path, src).unwrap();

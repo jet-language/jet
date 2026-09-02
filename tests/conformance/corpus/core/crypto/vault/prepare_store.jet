@@ -2,8 +2,10 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn run() -[Secret]> {
+fn run() -[Secret, IO]> {
     key :: crypto.SigningKey.new_random() ?? return
-    result :: vault.prepare_store<crypto.SigningKey>("", ^key)
-    print(result == .Err(_))
+    plan :: vault.prepare_store<crypto.SigningKey>("", ^key) ?? return
+    write :: vault.authorize_write(&plan, "fixed prepare-store authorization") ?? return
+    result :: vault.commit_store(^write, ^plan) ?? return
+    print(result)
 }

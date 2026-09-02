@@ -9,8 +9,6 @@ use crate::AST::{
     StructDef, Type, VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-use std::time::Instant;
 
 #[derive(Clone)]
 pub(crate) struct UnitFact {
@@ -97,35 +95,6 @@ pub(crate) struct ExternFn {
     pub(crate) component: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CodegenPhaseTiming {
-    pub tir_us: u128,
-    pub emission_us: u128,
-}
-
-#[derive(Default)]
-pub(crate) struct PhaseTimes {
-    tir_us: std::cell::Cell<u128>,
-    emission_us: std::cell::Cell<u128>,
-}
-
-impl PhaseTimes {
-    fn add_tir(&self, us: u128) {
-        self.tir_us.set(self.tir_us.get().saturating_add(us));
-    }
-
-    fn add_emission(&self, us: u128) {
-        self.emission_us
-            .set(self.emission_us.get().saturating_add(us));
-    }
-
-    pub(crate) fn snapshot(&self) -> CodegenPhaseTiming {
-        CodegenPhaseTiming {
-            tir_us: self.tir_us.get(),
-            emission_us: self.emission_us.get(),
-        }
-    }
-}
 
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -133,8 +102,16 @@ pub(crate) struct Cx {
     /// D-FAIL-TIER1: callable contract clauses, kept beside the callable
     /// signature so call lowering can place `#Pre` at the caller.
     pub(crate) contract_sigs: HashMap<String, (Vec<ContractClause>, Vec<ContractClause>)>,
-    /// Top-level function name -> function value type (M8).
+    /// Top-level function name -> effective function value type (M8).
+    /// The return is the executable failure carrier used by calls.
     pub(crate) fn_types: HashMap<String, Type>,
+    /// D-NEVER1=C: sema-proved callable names whose bodies have no returning
+    /// path. Codegen consumes this fact; it never re-infers divergence.
+    pub(crate) diverging_functions: HashSet<String>,
+    /// Top-level function name -> source-declared function value type.
+    /// Binding a named function as a value uses this source contract; call
+    /// lowering uses `fn_types`' effective failure carrier instead.
+    pub(crate) fn_source_types: HashMap<String, Type>,
     /// Function name -> source parameter names for labeled compute transforms.
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
@@ -447,7 +424,6 @@ pub(crate) struct Cx {
     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
     /// Save/restored per block so each `#Transact` reports its own use.
     pub(crate) stm_touched: std::cell::Cell<bool>,
-    pub(crate) phase_timing: Option<Rc<PhaseTimes>>,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, JetPow, JetPowFloat, JetFloorDiv, JetFloorDivFloat, JetMod, JetTruncRem, JetMap, JetRemoveBy, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_map_keys, jet_map_values, jet_list_remove_value, jet_list_remove_slot, jet_priority_queue_remove_value, jet_priority_queue_remove_slot, jet_list_count, jet_list_concat, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_map_copy, jet_map_equal, jet_map_first_key, jet_map_to_list, jet_map_any, jet_map_all, jet_map_filter, jet_map_map_values, jet_map_fold, jet_map_flat_map, jet_map_max_value, jet_map_min_value, jet_map_intersection, jet_map_slice_keys, jet_map_from_keys, jet_map_contains_value, jet_map_pop_first, jet_list_replace, jet_list_slice, jet_list_binary_search, jet_list_binary_search_by, jet_list_union, jet_list_intersection, jet_list_difference, jet_list_random, jet_list_min_max, jet_list_min_max_by, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_empty, jet_iter_some, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip, jet_iter_zip_strict, jet_iter_zip_pad};\nuse super::__jet_Ordering;\n\n";
@@ -880,27 +856,8 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
         .map_or(name, |(_, leaf)| leaf)
 }
 
+
 impl Cx {
-    pub(crate) fn time_tir<R>(&self, work: impl FnOnce() -> R) -> R {
-        let Some(timing) = self.phase_timing.as_ref() else {
-            return work();
-        };
-        let started = Instant::now();
-        let result = work();
-        timing.add_tir(started.elapsed().as_micros());
-        result
-    }
-
-    pub(crate) fn time_emission<R>(&self, work: impl FnOnce() -> R) -> R {
-        let Some(timing) = self.phase_timing.as_ref() else {
-            return work();
-        };
-        let started = Instant::now();
-        let result = work();
-        timing.add_emission(started.elapsed().as_micros());
-        result
-    }
-
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
             crate::Codegen::TIR::TLocal::persistent(
@@ -1080,7 +1037,11 @@ impl Cx {
                 .unit_labels
                 .values()
                 .filter(|label| label.family == family && label.is_base)
-                .min_by(|left, right| left.symbol.cmp(&right.symbol))
+                .min_by(|left, right| {
+                    left.symbol
+                        .cmp(&right.symbol)
+                        .then_with(|| left.name.cmp(&right.name))
+                })
                 .map(|label| match style {
                     crate::AST::UnitFormat::Name => label.name.clone(),
                     crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
@@ -1184,8 +1145,16 @@ impl Cx {
             .get(alias)
             .or_else(|| {
                 self.inline_core_imports
-                    .values()
-                    .find_map(|scope| scope.get(alias))
+                    .iter()
+                    .filter_map(|(scope, imports)| {
+                        imports.get(alias).map(|module| (scope, module))
+                    })
+                    .min_by(|(left_scope, left_module), (right_scope, right_module)| {
+                        left_scope
+                            .cmp(right_scope)
+                            .then_with(|| left_module.cmp(right_module))
+                    })
+                    .map(|(_, module)| module)
             })
             .map(String::as_str)
     }
@@ -1195,8 +1164,16 @@ impl Cx {
             .get(alias)
             .or_else(|| {
                 self.inline_foreign_imports
-                    .values()
-                    .find_map(|scope| scope.get(alias))
+                    .iter()
+                    .filter_map(|(scope, imports)| {
+                        imports.get(alias).map(|module| (scope, module))
+                    })
+                    .min_by(|(left_scope, left_module), (right_scope, right_module)| {
+                        left_scope
+                            .cmp(right_scope)
+                            .then_with(|| left_module.cmp(right_module))
+                    })
+                    .map(|(_, module)| module)
             })
             .map(String::as_str)
     }
@@ -3136,7 +3113,7 @@ pub(crate) fn rust_return_type(cx: &Cx, ty: &Type) -> String {
 
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
     let extern_funcs = extern_func_map(&prog.items, None);
-    build_cx_items(&prog.items, src, file, None, &extern_funcs)
+    build_cx_items(&prog.items, src, file, None, &extern_funcs, "")
 }
 
 fn extern_func_map(
@@ -3562,7 +3539,13 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
         .dep_roots
         .iter()
         .filter(|(_, root)| module.path.starts_with(root))
-        .max_by_key(|(_, root)| root.components().count())
+        .max_by(|(left_name, left_root), (right_name, right_root)| {
+            left_root
+                .components()
+                .count()
+                .cmp(&right_root.components().count())
+                .then_with(|| left_name.cmp(right_name))
+        })
         .map(|(name, _)| name);
     cx.dependency_fenced = dependency.is_some_and(|name| {
         bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name)
@@ -4219,11 +4202,14 @@ pub(crate) fn build_cx_items(
     file: &str,
     link: Option<&FfiLink>,
     extern_funcs: &HashMap<String, ExternFn>,
+    package_edition: &str,
 ) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),
         contract_sigs: HashMap::new(),
         fn_types: HashMap::new(),
+        diverging_functions: HashSet::new(),
+        fn_source_types: HashMap::new(),
         fn_param_names: HashMap::new(),
         method_sigs: HashMap::new(),
         method_type_params: HashMap::new(),
@@ -4335,10 +4321,9 @@ pub(crate) fn build_cx_items(
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OSTarget::host(),
         web_wasm_noncopy_int: false,
-        package_edition: "2027".to_string(),
+        package_edition: package_edition.to_string(),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
-        phase_timing: None,
     };
 
     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
@@ -4652,6 +4637,9 @@ pub(crate) fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
+                if f.diverges {
+                    cx.diverging_functions.insert(f.name.clone());
+                }
                 cx.contract_sigs
                     .insert(f.name.clone(), (f.pre.clone(), f.post.clone()));
                 cx.fn_param_names.insert(
@@ -4677,7 +4665,7 @@ pub(crate) fn build_cx_items(
                             } else {
                                 p.ty.clone()
                             };
-                            (conv, ty)
+                            (conv, ty.with_effective_fn_returns())
                         })
                         .collect(),
                 );
@@ -4695,7 +4683,7 @@ pub(crate) fn build_cx_items(
                                 }
                             })
                             .collect(),
-                        ret: f.return_type.clone().map(Box::new),
+                        ret: Some(Box::new(f.effective_return_type())),
                         effect_bound: None,
                         param_contract: (!f.params.is_empty()).then(|| {
                             f.params
@@ -4724,6 +4712,16 @@ pub(crate) fn build_cx_items(
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
+                let source_fn_type = cx.fn_types.get(&f.name).cloned().map(|mut ty| {
+                    if let Type::Fn { ret, .. } = &mut ty {
+                        *ret = f.return_type.clone().map(Box::new);
+                    }
+                    ty
+                });
+                if let Some(source_fn_type) = source_fn_type {
+                    cx.fn_source_types
+                        .insert(f.name.clone(), source_fn_type);
+                }
                 // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
                 // (`...Trait` / `...[A, B]`) has no single Rust signature — record
                 // it so call-site lowering routes to the per-arity function
@@ -4876,9 +4874,9 @@ pub(crate) fn build_cx_items(
                             })
                             .collect(),
                     );
-                    // JIT print/use sites need the real return type (AOT emits the
-                    // Rust wrapper directly). Without this, TIR ExternCall falls
-                    // back to Unit and `print(extern(...))` becomes a no-op.
+                    // Foreign declarations keep their source return in fn_types:
+                    // the bridge wrapper has a raw ABI, not Jet's implicit Result
+                    // carrier. #Import(c) functions are ordinary Jet items and differ.
                     cx.fn_types.insert(
                         ef.name.clone(),
                         Type::Fn {
@@ -4916,7 +4914,8 @@ pub(crate) fn build_cx_items(
             }
             Item::CModule(cm) => {
                 // S59: C boundary functions register like extern rust so that
-                // cross-module call sites resolve argument conventions.
+                // cross-module call sites resolve argument conventions; their
+                // foreign wrapper retains the declared raw ABI in fn_types.
                 for ef in &cm.functions {
                     cx.sigs.insert(
                         ef.name.clone(),
@@ -5100,6 +5099,9 @@ pub(crate) fn build_cx_items(
                     for inner in body {
                         if let Item::Func(f) = inner {
                             let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
+                            if f.diverges {
+                                cx.diverging_functions.insert(mangled.clone());
+                            }
                             cx.contract_sigs
                                 .insert(mangled.clone(), (f.pre.clone(), f.post.clone()));
                             cx.fn_type_params.insert(
@@ -5625,6 +5627,29 @@ pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bo
     })
 }
 
+/// Core nominal values are emitted by the Prelude rather than registered in
+/// `Cx::type_names`. Most of those carriers derive `Clone`; these are the
+/// stateful stream/reader handles whose single-use state intentionally does not.
+fn core_type_cloneable(name: &str) -> bool {
+    core_rust_type_name(name).is_some()
+        && !matches!(
+            name,
+            "Clock"
+                | "Match"
+                | "DataStream"
+                | "JSONReader"
+                | "JSONWriter"
+                | "JSONLReader"
+                | "JSONLWriter"
+                | "CSVReader"
+                | "CSVWriter"
+                | "XMLReader"
+                | "XMLWriter"
+                | "CBORReader"
+                | "CBORWriter"
+        )
+}
+
 pub(crate) fn field_type_cloneable(
     ty: &Type,
     types: &HashSet<String>,
@@ -5650,7 +5675,7 @@ pub(crate) fn field_type_cloneable(
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
-        Type::Named(n) => types.contains(n),
+        Type::Named(n) => core_type_cloneable(n) || types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
         // than `ViewMut` — duplicating it would hand out a second no-move claim.

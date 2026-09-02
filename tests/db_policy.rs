@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, run_default_multi};
+use tir_support::{assert_tiers_agree, build_and_run, run_default_multi};
 
 const SOURCE: &str = r#"
 use core.db as db
@@ -112,6 +112,104 @@ fn run() {
 }
 "#;
 
+/// Hostile values, malformed placeholders, driver errors, policy denial, and
+/// rollback all cross the same SQL carrier and preserve one policy boundary.
+const HOSTILE_SOURCE: &str = r#"
+use app as application
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("tasks", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "attacker")
+    _created :: db.migrate(scoped, "tasks-v1", [
+        SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"}
+    ]) ?? panic("create")
+
+    payload :: "x'); DROP TABLE tasks; --"
+    _inserted :: scoped.execute(
+        SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"}
+    ) ?? panic("insert")
+    row :: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
+    body :: db.row_text(row, "body") ?? panic("missing body")
+    print("interpolation:{body}")
+
+    duplicate :: scoped.query(
+        SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"}
+    ) ?? panic("duplicate")
+    print("duplicate:{duplicate.len()}")
+
+    scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) ? _rows -> {
+        print("placeholder:accepted")
+    } ! _error -> {
+        print("placeholder:rejected")
+    }
+    scoped.query(SQL{"SELECT no_such_column FROM tasks"}) ? _rows -> {
+        print("driver:accepted")
+    } ! _error -> {
+        print("driver:rejected")
+    }
+    scoped.query(SQL{"SELECT body FROM other"}) ? _rows -> {
+        print("authority:accepted")
+    } ! _error -> {
+        print("authority:rejected")
+    }
+
+    live :: scoped.live(SQL{"SELECT body FROM tasks"}) ?? panic("live")
+    live_before :: application.live_get(live)
+    print("live-before:{live_before.contains(payload)}")
+    updated :: "updated"
+    _updated :: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
+    _invalidated :: application.invalidate("tasks")
+    live_after :: application.live_get(live)
+    print("live-after:{live_after.contains(updated)}")
+
+    tx_body :: "rolled back"
+    tx_count :: db.transaction(scoped, "rollback", [
+        SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
+        SQL{"INSERT INTO tasks (missing_column) VALUES (2)"}
+    ]) ?? -1
+    if {
+        tx_count < 0 -> print("rollback:rejected")
+        else -> print("rollback:accepted")
+    }
+    rollback_rows :: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
+    print("rollback-rows:{rollback_rows.len()}")
+    migration_count :: db.migrate(scoped, "broken", [
+        SQL{"CREATE TABLE migration_marker (id INTEGER)"},
+        SQL{"INSERT INTO tasks (missing_column) VALUES (3)"}
+    ]) ?? -1
+    if {
+        migration_count < 0 -> print("migration:rejected")
+        else -> print("migration:accepted")
+    }
+    retry_count :: db.migrate(scoped, "broken", [
+        SQL{"CREATE TABLE migration_marker (id INTEGER)"}
+    ]) ?? -1
+    if {
+        retry_count == 1 -> print("migration-retry:1")
+        else -> print("migration-retry:rejected")
+    }
+    _closed :: scoped.close()
+}
+"#;
+
+const HOSTILE_EXPECTED: &str = "interpolation:x'); DROP TABLE tasks; --\nduplicate:1\nplaceholder:rejected\ndriver:rejected\nauthority:rejected\nlive-before:true\nlive-after:true\nrollback:rejected\nrollback-rows:1\nmigration:rejected\nmigration-retry:1\n";
+
+#[test]
+fn typed_sql_hostile_operations_keep_policy_and_provenance_across_tiers() {
+    assert_tiers_agree("db_policy_hostile", HOSTILE_SOURCE, HOSTILE_EXPECTED);
+}
+
+#[test]
+fn typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity() {
+    assert_tiers_agree(
+        "db_policy_scope_all_tiers",
+        SOURCE,
+        "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n",
+    );
+}
+
 #[test]
 fn db_scope_enforces_policy_on_query_insert_and_live_aot() {
     let (code, stdout) = build_and_run("db_policy_scope", SOURCE);
@@ -194,4 +292,41 @@ fn invalid_row_policy_is_denied_the_same_way_default() {
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, INVALID_POLICY_EXPECTED);
+}
+const BLOB_SOURCE: &str = r#"
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("blobs", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "alice")
+    _created :: db.migrate(scoped, "blobs-v1", [
+        SQL{"CREATE TABLE blobs (payload BLOB, explicit_payload BLOB)"}
+    ]) ?? panic("create")
+    payload :: [U8]{0, 1, 2, 127, 128, 255}
+    explicit_payload :: [U8]{0, 1, 2, 127, 128, 255}
+    bound :: DBValue.Blob(explicit_payload)
+    _inserted :: scoped.execute(
+        SQL{"INSERT INTO blobs (payload, explicit_payload) VALUES ({payload}, {bound})"}
+    ) ?? panic("insert")
+    row :: scoped.query_one(
+        SQL{"SELECT payload, explicit_payload FROM blobs"}
+    ) ?? panic("query")
+    direct :: db.row_value(row, "payload") ?? panic("direct row value")
+    explicit :: db.row_value(row, "explicit_payload") ?? panic("explicit row value")
+    direct_bytes :: direct.blob() ?? panic("direct blob")
+    explicit_bytes :: explicit.blob() ?? panic("explicit blob")
+    print("direct:{direct_bytes}")
+    print("explicit:{explicit_bytes}")
+    print("equal:{direct_bytes == payload && explicit_bytes == explicit_payload}")
+}
+"#;
+
+#[test]
+fn sqlite_blob_round_trip_preserves_bytes_across_tiers() {
+    assert_tiers_agree(
+        "db_policy_blob",
+        BLOB_SOURCE,
+        "direct:[0, 1, 2, 127, 128, 255]\nexplicit:[0, 1, 2, 127, 128, 255]\nequal:true\n",
+    );
 }

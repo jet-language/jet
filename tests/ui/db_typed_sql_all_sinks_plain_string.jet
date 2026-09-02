@@ -1,0 +1,12 @@
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scope :: conn.with_policy(policy, "owner")
+    text :: "SELECT 1"
+    _rows :: scope.query(text)
+    _one :: scope.query_one(text)
+    _changed :: scope.execute(text)
+    _live :: scope.live(text)
+}

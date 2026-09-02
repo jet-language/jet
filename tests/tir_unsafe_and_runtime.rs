@@ -8,7 +8,22 @@ mod tir_support;
 use std::fs;
 use std::path::PathBuf;
 
-use tir_support::{build_and_run, build_and_run_full, have_rustc};
+use tir_support::{
+    assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc,
+};
+const FROM_ADDR_SOURCE: &str = r###"
+use core.mem as _mem
+
+fn run() {
+    value :: 7
+    #Unsafe("value is live on this stack frame and the pointer never escapes") {
+        addr :: _mem.address_of(value)
+        result :: _mem.Ptr<Int>.from_addr(addr)
+        print(result.*)
+    }
+}
+"###;
+
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
@@ -24,7 +39,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) Int {
+fn read_reg(addr: Int) Int -> {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -71,7 +86,7 @@ fn mem_address_of_never_folds_plain_or_parenthesized() {
             "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) Int {{
+fn read_reg(addr: Int) Int -> {{
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }}
@@ -121,7 +136,7 @@ fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be valid\")
-fn read_reg(addr: Int) Int {
+fn read_reg(addr: Int) Int -> {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -350,11 +365,39 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
 /// default JIT, forced interpreter, and AOT. Only the witness is disabled.
 #[test]
 fn sentry_source_policy_off_is_tier_parity() {
+    let source = include_str!("../examples/features/memory/unsafe_sentries_source_off.jet")
+        .replace("use core.mem", "use core.mem as _mem");
     tir_support::assert_tiers_agree(
         "unsafe_sentries_source_off",
-        include_str!("../examples/features/memory/unsafe_sentries_source_off.jet"),
+        &source,
         "41\n",
     );
+}
+
+/// D-MEM-SENTRY1: `from_addr` uses the canonical evaluator's stack sentry.
+/// Default JIT and AOT execute it; forced interpretation reports E2201 at the
+/// honest low-level boundary, matching the existing sentry-tier contract.
+#[test]
+fn from_addr_sentry_is_tier_parity() {
+    let (jit_code, jit_out, jit_err) =
+        tir_support::jit_run("core_mem_from_addr", FROM_ADDR_SOURCE);
+    assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
+    assert_eq!(jit_out, "7\n", "default JIT output drifted:\n{jit_err}");
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("core_mem_from_addr", FROM_ADDR_SOURCE);
+    assert_eq!(interpreter_code, 1, "forced interpreter must report E2201");
+    assert!(interpreter_out.is_empty(), "forced interpreter leaked stdout");
+    assert!(
+        interpreter_err.contains("Error [E2201]"),
+        "forced interpreter lost the canonical low-level boundary:\n{interpreter_err}"
+    );
+    if have_rustc() {
+        let (aot_code, aot_out, aot_err) =
+            build_and_run_full("jet_tir_from_addr", "core_mem_from_addr", FROM_ADDR_SOURCE);
+        assert_eq!(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}");
+        assert_eq!(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}");
+        assert_eq!(aot_err, jit_err, "AOT/default JIT stderr disagrees");
+    }
 }
 
 /// D-MEM-SENTRY1: provenance, quarantine, and alignment faults keep the same
@@ -486,16 +529,16 @@ struct Pair<T> {
     first: T
     second: T
 }
-fn make_pair<T>(a: T, b: T) Pair<T> {
+fn make_pair<T>(a: T, b: T) Pair<T> -> {
     return Pair<T>{first: ~a, second: ~b}
 }
 struct Stack<T> {
     items: [T]
 }
-fn empty_stack<T>() Stack<T> {
+fn empty_stack<T>() Stack<T> -> {
     return Stack<T>{items: []}
 }
-fn push<T>(s: Stack<T>, item: T) Stack<T> {
+fn push<T>(s: Stack<T>, item: T) Stack<T> -> {
     dup := ~s
     dup.items.push(item)
     return dup
@@ -530,7 +573,7 @@ fn foreign_struct_construction() {
     .unwrap();
     let main_src = "\
 use \"note\"
-fn make() Note {
+fn make() Note -> {
     return note.Note{ title: \"hello\", pages: 3 }
 }
 fn run() {
@@ -682,7 +725,7 @@ fn polymorphic_core_specials() {
 use core.math as math
 use core.math.random as random
 use core.term as io
-fn calc() Int {
+fn calc() Int -> {
     a :: math.abs((-5))
     b :: math.min(3, 7)
     c :: math.max(3, 7)
@@ -721,7 +764,7 @@ fn http_request_response_accessors() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) HTTPResponse {
+fn handle(req: HTTPRequest) HTTPResponse -> {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
@@ -729,7 +772,7 @@ fn handle(req: HTTPRequest) HTTPResponse {
     body :: \"m={m} p={p}\"
     return server.response(200, body)
 }
-fn describe(resp: HTTPResponse) String {
+fn describe(resp: HTTPResponse) String -> {
     s :: resp.status()
     b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"
@@ -754,7 +797,7 @@ fn task_spawn_join() {
         return;
     }
     let src = "\
-fn sum_range(first: Int, last: Int) Int {
+fn sum_range(first: Int, last: Int) Int -> {
     total := 0
     loop n in first..last {
         total = (total + n)
@@ -988,60 +1031,90 @@ fn task_failure_rail() {
     let src = r#"
 use core.time as time
 
-fn boom() Int {
+fn boom() Int -> {
     panic("boom")
     return 0
 }
-fn deadline() Int {
+fn deadline() Int -> {
     #Context(deadline: 0) {
         time.sleep(1ms)
     }
     return 0
 }
-fn failure_label(error: TaskFailure) String {
-    if error == {
-        .Panicked(reason) -> {
-            return "panic:{reason}"
-        }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
-    }
-}
-fn run() {
+fn panic_rail() {
     task.group workers {
         failed :: task boom()
-        failed_result :: failed.join()
-        if failed_result == {
-            .Err(error) -> { print(failure_label(error)) }
+        if failed.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
             .Ok(_) -> { print("wrong panic variant") }
         }
-        all_result :: task.all { boom(), 2 }
-        if all_result == {
-            .Err(error) -> { print(failure_label(error)) }
+    }
+}
+fn all_rail() {
+    task.group workers {
+        if (task.all { boom(), 2 }) == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
             .Ok(_) -> { print("wrong all variant") }
         }
+    }
+}
+fn deadline_rail() {
+    task.group workers {
         expired :: task deadline()
-        expired_result :: expired.join()
-        if expired_result == {
-            .Err(error) -> { print(failure_label(error)) }
+        if expired.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
             .Ok(_) -> { print("wrong deadline variant") }
         }
+    }
+}
+fn cancel_rail() {
+    task.group workers {
         cancelled :: task {
             time.sleep(1000ms)
         }
         cancelled.cancel()
-        cancelled_result :: cancelled.join()
-        if cancelled_result == {
-            .Err(error) -> { print(failure_label(error)) }
+        if cancelled.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
             .Ok(_) -> { print("wrong cancel variant") }
         }
     }
 }
+fn run() {
+    panic_rail()
+    all_rail()
+    deadline_rail()
+    cancel_rail()
+}
 "#;
-    assert_task_tier_parity(
+    assert_tiers_agree_with_application_policy(
         "tir_task_failure_rail",
         src,
-        "panic:boom\npanic:boom\ndeadline\ncancelled\n",
+        "panic:boom (spawn site 0): boom\npanic:boom (spawn site 1): boom\ndeadline\ncancelled\n",
+        "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n",
     );
 }
 
@@ -1051,7 +1124,7 @@ fn task_all_allows_nested_task_in_every_tier() {
         return;
     }
     let src = "\
-fn nested(value: Int) Int {
+fn nested(value: Int) Int -> {
     inner :: task value + 1
     return inner.join() ?? 0
 }
@@ -1150,10 +1223,10 @@ fn run() {
 #[test]
 fn task_all_consumes_branches_once() {
     let valid = r#"
-fn first() Int {
+fn first() Int -> {
     return 10
 }
-fn second() Int {
+fn second() Int -> {
     return 20
 }
 fn run() {
@@ -1177,7 +1250,7 @@ fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
     let src = "\
 use core.time as time
 
-fn slow(value: Int) Int {
+fn slow(value: Int) Int -> {
     time.sleep(1ms)
     return value
 }
@@ -1330,13 +1403,13 @@ fn select_receives_from_real_channel() {
     let src = r#"
 fn run() {
     (sender, receiver) :: channel<Int>()
-    task :: task {
+    worker :: task {
         sender.send(42)
-        if {
-            value, receiver -> print(value)
-        }
     }
-    task.join() ?? panic("task failed")
+    if {
+        value, receiver -> { print(value) }
+    }
+    worker.join() ?? panic("task failed")
 }
 "#;
     let (code, stdout) = build_and_run("tir_select", src);
@@ -1353,14 +1426,14 @@ fn method_call_collection_iteration() {
         return;
     }
     let src = "\
-fn count_chars(s: String) Int {
+fn count_chars(s: String) Int -> {
     n := 0
     loop c in s.chars() {
         n+= 1
     }
     return n
 }
-fn join_words(s: String) String {
+fn join_words(s: String) String -> {
     out := \"\"
     loop w in s.split(\",\") {
         out = \"{out}[{w}]\"
@@ -1386,7 +1459,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: ?Int) String {
+fn describe(x: ?Int) String -> {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -1395,7 +1468,7 @@ fn describe(x: ?Int) String {
     }
     return \"?\"
 }
-fn first_even(xs: [Int]) Int {
+fn first_even(xs: [Int]) Int -> {
     out := [Int]{}
     i := 0
     loop i < xs.len() {
@@ -1424,32 +1497,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: ?Int) Int {
+fn from_ne(x: ?Int) Int -> {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: ?Int) Int {
+fn from_else(x: ?Int) Int -> {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: ?Int) Int {
+fn and_tail(x: ?Int) Int -> {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: ?Int) Int {
+fn still_binds(x: ?Int) Int -> {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: ?String) String {
+fn text_ne(x: ?String) String -> {
     if x != None {
         return x
     }
@@ -1512,7 +1585,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() ?Int { return Val(1) }
+fn get() ?Int -> { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)

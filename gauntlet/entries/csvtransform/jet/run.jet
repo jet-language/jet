@@ -1,8 +1,9 @@
 use core.[data, files]
 
+#Codable
 struct Sale {
     region: String
-    amount: Float
+    amount: Decimal
 }
 
 #CLI
@@ -13,12 +14,12 @@ struct Args {
 fn run(args: Args) {
     text :: files.read(args.input) ?? panic("read failed")
     sales :: data.csv<Sale>(text) ?? panic("csv failed")
-    positive :: data.filter(sales, sale -> sale.amount > 0.0)
-    loop group in data.group_sum(positive, sale -> sale.region, sale -> sale.amount) {
+    positive :: data.filter(sales, sale -> (sale.amount.to_string().to_float() ?? 0.0) > 0.0)
+    loop group in data.group_sum(positive, sale -> sale.region, sale -> sale.amount.to_string().to_float() ?? 0.0) {
         sum :: "{group.sum:Fixed(2)}"
         print("{group.key} n={group.count} sum={sum}")
     }
-    total :: positive.fold(Float{0.0}, (total, sale) -> total + sale.amount)
-    sum :: "{total:Fixed(2)}"
+    total :: positive.fold(Decimal("0.00"), (total, sale) -> total + sale.amount)
+    sum :: total.to_string()
     print("total n={positive.len()} sum={sum}")
 }

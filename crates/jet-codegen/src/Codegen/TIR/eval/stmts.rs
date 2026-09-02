@@ -1755,6 +1755,85 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Ok(Flow::Normal);
                     }
                 }
+                // D-HTTP-CHUNKS1=A: `HTTPBody.chunks` is a one-pass Prelude
+                // iterator. The ambient bridge owns the native iterator handle;
+                // this loop only unwraps Option<Result<bytes, HTTPError>> and
+                // preserves the yielded Result for the user's pattern match.
+                if progress.is_none()
+                    && matches!(
+                        &coll,
+                        CtValue::Struct { type_name, .. } if type_name == "HTTPBodyChunks"
+                    )
+                {
+                    let stride = match step {
+                        Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
+                        None => 1,
+                    };
+                    if stride <= 0 {
+                        return Err(unsupported("for-in stride <= 0", self.span()));
+                    }
+                    let mut skipped = 0i64;
+                    let mut index = 0i64;
+                    loop {
+                        self.burn()?;
+                        let mut args = [];
+                        let next = crate::Comptime::try_ambient_handle(
+                            "HTTPClient:HTTPBodyChunks:next",
+                            &mut coll,
+                            &mut args,
+                            self.span(),
+                        )
+                        .ok_or_else(|| unsupported("HTTPBodyChunks.next adapter", self.span()))??;
+                        let item = match next {
+                            CtValue::Present(value) => match *value {
+                                CtValue::Present(item) => CtValue::Present(item),
+                                CtValue::Failed(CtReport::Clean(_)) => break,
+                                CtValue::Failed(CtReport::Told(error)) => {
+                                    CtValue::Failed(CtReport::Told(error))
+                                }
+                                _ => {
+                                    return Err(unsupported(
+                                        "HTTPBodyChunks.next result",
+                                        self.span(),
+                                    ))
+                                }
+                            },
+                            CtValue::Failed(CtReport::Clean(_)) => break,
+                            _ => {
+                                return Err(unsupported(
+                                    "HTTPBodyChunks.next result",
+                                    self.span(),
+                                ))
+                            }
+                        };
+                        if skipped != 0 {
+                            skipped -= 1;
+                            index = index.saturating_add(1);
+                            continue;
+                        }
+                        if let Some(v2) = var2 {
+                            scope.insert(var.clone(), CtValue::Int(index));
+                            scope.insert(v2.clone(), item);
+                        } else {
+                            scope.insert(var.clone(), item);
+                        }
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => break,
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                break
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                        index = index.saturating_add(1);
+                        skipped = stride - 1;
+                    }
+                    return Ok(Flow::Normal);
+                }
                 if method_kind.is_some() {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
@@ -1824,151 +1903,162 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 if stride <= 0 {
                     return Err(unsupported("for-in stride <= 0", self.span()));
                 }
-                match coll {
-                    CtValue::List(items) => {
-                        let mut i = 0usize;
-                        let mut progress_count = 0usize;
-                        let mut progress_yielded = 0usize;
-                        let mut naturally_exhausted = true;
-                        while i < items.len() {
-                            self.burn()?;
-                            let next_i = i.saturating_add(stride as usize).min(items.len());
-                            if let Some((
-                                description,
-                                format,
-                                started_at,
-                                total,
-                                pulls,
-                                _,
-                                known_total,
-                            )) = progress.as_ref()
-                            {
-                                let requested = if progress_count == 0 {
-                                    1
-                                } else {
-                                    stride as usize
-                                };
-                                let end =
-                                    progress_yielded.saturating_add(requested).min(pulls.len());
-                                let raw_pulls: usize = pulls[progress_yielded..end].iter().sum();
-                                progress_yielded = end;
-                                let raw_pulls = if *known_total {
-                                    raw_pulls.min(total.saturating_sub(progress_count))
-                                } else {
-                                    raw_pulls
-                                };
-                                if raw_pulls != 0 {
-                                    for pulled in
-                                        (progress_count + 1)..=(progress_count + raw_pulls)
-                                    {
-                                        let text = progress_semantics::jet_progress_render(
-                                            description,
-                                            format,
-                                            pulled,
-                                            (*known_total).then_some(*total),
-                                            progress_elapsed(*started_at),
-                                            progress_no_color(),
-                                        );
-                                        progress_emit(self.sink.as_ref(), &text);
-                                    }
-                                }
-                                progress_count = progress_count.saturating_add(raw_pulls);
-                            }
-                            // D-RANGE-EXCL1=C: two bindings are index then item;
-                            // one binding stays item-only.
-                            if let Some(v2) = var2 {
-                                scope.insert(var.clone(), CtValue::Int(i as i64));
-                                scope.insert(v2.clone(), items[i].clone());
+                let sequence_len = match &coll {
+                    CtValue::List(items) => Some(items.len()),
+                    // `[U8]` values use the compact byte carrier in the evaluator.
+                    // AOT iterates the same bytes as integer elements.
+                    CtValue::Bytes(bytes) => Some(bytes.len()),
+                    _ => None,
+                };
+                if let Some(sequence_len) = sequence_len {
+                    let mut i = 0usize;
+                    let mut progress_count = 0usize;
+                    let mut progress_yielded = 0usize;
+                    let mut naturally_exhausted = true;
+                    while i < sequence_len {
+                        self.burn()?;
+                        let next_i = i.saturating_add(stride as usize).min(sequence_len);
+                        if let Some((
+                            description,
+                            format,
+                            started_at,
+                            total,
+                            pulls,
+                            _tail,
+                            known_total,
+                        )) = progress.as_ref()
+                        {
+                            let requested = if progress_count == 0 {
+                                1
                             } else {
-                                scope.insert(var.clone(), items[i].clone());
-                            }
-                            match self.exec_stmts(body, scope)? {
-                                Flow::Normal | Flow::Continue => {}
-                                Flow::Break => {
-                                    naturally_exhausted = false;
-                                    break;
-                                }
-                                Flow::BreakLabel(ref name)
-                                    if label.as_deref() == Some(name.as_str()) =>
-                                {
-                                    naturally_exhausted = false;
-                                    break;
-                                }
-                                Flow::ContinueLabel(ref name)
-                                    if label.as_deref() == Some(name.as_str()) => {}
-                                other => return Ok(other),
-                            }
-                            i = next_i;
-                        }
-                        if naturally_exhausted {
-                            if let Some((
-                                description,
-                                format,
-                                started_at,
-                                total,
-                                pulls,
-                                tail,
-                                known_total,
-                            )) = progress.as_ref()
-                            {
-                                let remaining =
-                                    pulls[progress_yielded..].iter().sum::<usize>() + *tail;
-                                let remaining = if *known_total {
-                                    remaining.min(total.saturating_sub(progress_count))
-                                } else {
-                                    remaining
-                                };
-                                if remaining != 0 {
-                                    for pulled in
-                                        (progress_count + 1)..=(progress_count + remaining)
-                                    {
-                                        let text = progress_semantics::jet_progress_render(
-                                            description,
-                                            format,
-                                            pulled,
-                                            (*known_total).then_some(*total),
-                                            progress_elapsed(*started_at),
-                                            progress_no_color(),
-                                        );
-                                        progress_emit(self.sink.as_ref(), &text);
-                                    }
-                                }
-                            }
-                        }
-                        Ok(Flow::Normal)
-                    }
-                    CtValue::Map(entries) => {
-                        let pairs: Vec<(CtValue, CtValue)> = entries
-                            .iter()
-                            .map(|(k, v)| (k.to_value(), v.clone()))
-                            .collect();
-                        let mut i = 0usize;
-                        while i < pairs.len() {
-                            self.burn()?;
-                            let (k, v) = &pairs[i];
-                            if let Some(v2) = var2 {
-                                scope.insert(var.clone(), k.clone());
-                                scope.insert(v2.clone(), v.clone());
+                                stride as usize
+                            };
+                            let end =
+                                progress_yielded.saturating_add(requested).min(pulls.len());
+                            let raw_pulls: usize = pulls[progress_yielded..end].iter().sum();
+                            progress_yielded = end;
+                            let raw_pulls = if *known_total {
+                                raw_pulls.min(total.saturating_sub(progress_count))
                             } else {
-                                scope.insert(var.clone(), k.clone());
-                            }
-                            match self.exec_stmts(body, scope)? {
-                                Flow::Normal | Flow::Continue => {}
-                                Flow::Break => break,
-                                Flow::BreakLabel(ref name)
-                                    if label.as_deref() == Some(name.as_str()) =>
+                                raw_pulls
+                            };
+                            if raw_pulls != 0 {
+                                for pulled in
+                                    (progress_count + 1)..=(progress_count + raw_pulls)
                                 {
-                                    break
+                                    let text = progress_semantics::jet_progress_render(
+                                        description,
+                                        format,
+                                        pulled,
+                                        (*known_total).then_some(*total),
+                                        progress_elapsed(*started_at),
+                                        progress_no_color(),
+                                    );
+                                    progress_emit(self.sink.as_ref(), &text);
                                 }
-                                Flow::ContinueLabel(ref name)
-                                    if label.as_deref() == Some(name.as_str()) => {}
-                                other => return Ok(other),
                             }
-                            i = i.saturating_add(stride as usize);
+                            progress_count = progress_count.saturating_add(raw_pulls);
                         }
-                        Ok(Flow::Normal)
+                        // D-RANGE-EXCL1=C: two bindings are index then item;
+                        // one binding stays item-only.
+                        let item = match &coll {
+                            CtValue::List(items) => items[i].clone(),
+                            CtValue::Bytes(bytes) => CtValue::Int(i64::from(bytes[i])),
+                            _ => unreachable!("sequence length came from list or bytes"),
+                        };
+                        if let Some(v2) = var2 {
+                            scope.insert(var.clone(), CtValue::Int(i as i64));
+                            scope.insert(v2.clone(), item);
+                        } else {
+                            scope.insert(var.clone(), item);
+                        }
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => {
+                                naturally_exhausted = false;
+                                break;
+                            }
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                naturally_exhausted = false;
+                                break;
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                        i = next_i;
                     }
-                    _ => Err(unsupported("for-in collection", self.span())),
+                    if naturally_exhausted {
+                        if let Some((
+                            description,
+                            format,
+                            started_at,
+                            total,
+                            pulls,
+                            tail,
+                            known_total,
+                        )) = progress.as_ref()
+                        {
+                            let remaining =
+                                pulls[progress_yielded..].iter().sum::<usize>() + *tail;
+                            let remaining = if *known_total {
+                                remaining.min(total.saturating_sub(progress_count))
+                            } else {
+                                remaining
+                            };
+                            if remaining != 0 {
+                                for pulled in
+                                    (progress_count + 1)..=(progress_count + remaining)
+                                {
+                                    let text = progress_semantics::jet_progress_render(
+                                        description,
+                                        format,
+                                        pulled,
+                                        (*known_total).then_some(*total),
+                                        progress_elapsed(*started_at),
+                                        progress_no_color(),
+                                    );
+                                    progress_emit(self.sink.as_ref(), &text);
+                                }
+                            }
+                        }
+                    }
+                    return Ok(Flow::Normal);
+                }
+                if let CtValue::Map(entries) = coll {
+                    let pairs: Vec<(CtValue, CtValue)> = entries
+                        .iter()
+                        .map(|(k, v)| (k.to_value(), v.clone()))
+                        .collect();
+                    let mut i = 0usize;
+                    while i < pairs.len() {
+                        self.burn()?;
+                        let (k, v) = &pairs[i];
+                        if let Some(v2) = var2 {
+                            scope.insert(var.clone(), k.clone());
+                            scope.insert(v2.clone(), v.clone());
+                        } else {
+                            scope.insert(var.clone(), k.clone());
+                        }
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => break,
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                break;
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                        i = i.saturating_add(stride as usize);
+                    }
+                    Ok(Flow::Normal)
+                } else {
+                    Err(unsupported("for-in collection", self.span()))
                 }
             }
             TStmt::EnumMatch {

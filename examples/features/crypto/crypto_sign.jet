@@ -2,10 +2,10 @@
 use core.crypto as crypto
 
 fn run() {
-    key :: crypto.SigningKey.new_random() ?? return Err("signing key")
+    key :: crypto.SigningKey.new_random() ?? return
     msg :: [U8]{116, 0x65, 0x73, 0x74}
-    sig :: crypto.sign(key, msg) ?? return Err("sign failed")
+    sig :: crypto.sign(key, msg) ?? return
     print("sig len: {sig.bytes().len()}")
-    verified :: crypto.verify(key.public_key(), msg, sig) ?? return Err("verify failed")
+    verified :: crypto.verify(key.public_key(), msg, sig) ?? return
     print("verify ok: {verified}")
 }

@@ -3258,6 +3258,7 @@ impl LocalCas {
     }
 }
 
+
 #[cfg(unix)]
 pub(super) fn secure_read_file(base: &Path, path: &Path) -> io::Result<Vec<u8>> {
     use std::ffi::CString;

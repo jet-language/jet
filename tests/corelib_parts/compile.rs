@@ -1111,7 +1111,7 @@ fn run() {
             .arg("interrupt_tiers.jet")
             .current_dir(&dir)
             .env("NO_COLOR", "1")
-            .env("JET_CACHE_DIR", dir.join(format!("cache-{tier}")))
+            .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
             .env("JET_RUN_CACHE_DIR", dir.join(format!("run-cache-{tier}")))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

@@ -1238,7 +1238,10 @@ impl<'a> Fmt<'a> {
                 let text = int_literal_spelling(self.src, *span, *n, raw.as_deref());
                 self.write(&text);
             }
-            Expr::Float(v, _, _, _) => self.write(&fmt_float(*v)),
+            Expr::Float(v, span, _, raw) => {
+                let text = float_literal_spelling(self.src, *span, *v, raw.as_deref());
+                self.write(&text);
+            }
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
             Expr::UnitLit { raw, suffix, .. } => {
                 self.write(raw);

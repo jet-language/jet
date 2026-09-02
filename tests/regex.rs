@@ -335,6 +335,27 @@ fn run() {
 }
 
 #[test]
+fn anchored_api_log_prefilters_preserve_semantics() {
+    let src = r#"fn run() {
+    rx :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /static/file/1 HTTP/1.1\" 500 42"))
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 200 42"))
+    print(rx.is_match("prefix 192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+}
+"#;
+    let expected = "true\nfalse\nfalse\nfalse\n";
+    if have_toolchain() {
+        assert_eq!(
+            run_regex(src),
+            expected,
+            "anchored required literals must only reject impossible lines"
+        );
+    }
+    tir_support::assert_tiers_agree("anchored_api_log_prefilters", src, expected);
+}
+
+#[test]
 fn typed_head_raw_escapes_agree_across_tiers() {
     let src = r#"fn run() {
     digits :: Regex{"\d+"}

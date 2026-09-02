@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use jet_foundation::SHA256::{sha256, sha256_hex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -12,13 +13,17 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub mod runtime;
 pub const STORE_VERSION: &str = "jet.store.v1";
 pub const STORE_ENV: &str = "JET_STORE_DIR";
 pub const DEFAULT_CAP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 pub const DEFAULT_RESERVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const LOCK_WAIT: Duration = Duration::from_secs(2);
+/// Maximum time a store operation waits for a live lock owner by default.
+pub const DEFAULT_LOCK_WAIT: Duration = Duration::from_secs(120);
 const LOCK_RETRY: Duration = Duration::from_millis(10);
+const LOCK_RETRY_MAX: Duration = Duration::from_millis(250);
 const ACTION_MAGIC: &[u8] = b"jet.store.v1\0action\0";
+const ARTIFACT_MAGIC: &[u8] = b"jet.store.v1\0artifact\0";
 const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 static FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -203,12 +208,14 @@ impl LeaseTarget {
 }
 
 /// The machine-wide store configuration. The optional cap is an explicit host
-/// override; without it the effective limit is adaptive.
+/// override; without it the effective limit is adaptive. Lock acquisition
+/// waits up to [`DEFAULT_LOCK_WAIT`] unless overridden.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoreConfig {
     root: PathBuf,
     cap_bytes: Option<u64>,
     reserve_bytes: u64,
+    lock_wait: Duration,
 }
 
 impl StoreConfig {
@@ -217,6 +224,7 @@ impl StoreConfig {
             root: root.into(),
             cap_bytes: None,
             reserve_bytes: DEFAULT_RESERVE_BYTES,
+            lock_wait: DEFAULT_LOCK_WAIT,
         }
     }
 
@@ -227,11 +235,12 @@ impl StoreConfig {
             None => default_store_root()?,
         };
         let cap_bytes = parse_optional_size("JET_STORE_CAP_BYTES")?;
-        let reserve_bytes = parse_size("JET_STORE_RESERVE_BYTES")?.unwrap_or(DEFAULT_RESERVE_BYTES);
+        let reserve_bytes = parse_optional_size("JET_STORE_RESERVE_BYTES")?.unwrap_or(DEFAULT_RESERVE_BYTES);
         Ok(Self {
             root,
             cap_bytes,
             reserve_bytes,
+            lock_wait: DEFAULT_LOCK_WAIT,
         })
     }
 
@@ -245,6 +254,12 @@ impl StoreConfig {
         self
     }
 
+    /// Set the maximum time to wait for a live lock owner.
+    pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
+        self.lock_wait = lock_wait;
+        self
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -255,6 +270,10 @@ impl StoreConfig {
 
     pub fn reserve_bytes(&self) -> u64 {
         self.reserve_bytes
+    }
+
+    pub fn lock_wait(&self) -> Duration {
+        self.lock_wait
     }
 }
 
@@ -321,6 +340,7 @@ pub struct StoreStatus {
     pub reserve_bytes: u64,
     pub available_bytes: Option<u64>,
     pub live_leases: usize,
+    pub host_limit_bytes: Option<u64>,
     pub entries: Vec<EntryStatus>,
     pub tiers: Vec<String>,
 }
@@ -336,6 +356,179 @@ pub struct PruneReport {
     pub blocked: bool,
 }
 
+/// A verified action record that points at one immutable CAS object.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredArtifact {
+    pub action: ActionHandle,
+    pub object: ObjectHandle,
+    pub path: PathBuf,
+    pub executable: bool,
+}
+/// One compiler-owned node execution recorded for `explain-build`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BuildNodeRecord {
+    pub kind: String,
+    pub key: String,
+    pub subject: String,
+    pub duration_ms: f64,
+    pub why_ran: String,
+    pub inputs: Vec<String>,
+}
+
+/// Immutable per-build node evidence stored in the machine-wide CAS.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BuildRecord {
+    pub schema: String,
+    pub program: String,
+    pub nodes: Vec<BuildNodeRecord>,
+}
+
+impl BuildRecord {
+    pub const SCHEMA: &'static str = "jet.build-record/v1";
+
+    pub fn new(program: impl Into<String>, nodes: Vec<BuildNodeRecord>) -> Self {
+        Self {
+            schema: Self::SCHEMA.to_string(),
+            program: program.into(),
+            nodes,
+        }
+    }
+
+    /// The CAS payload is JSON so tools can inspect it without a second codec.
+    pub fn to_json(&self) -> String {
+        let mut output = format!(
+            "{{\"schema\":\"{}\",\"program\":\"{}\",\"nodes\":[",
+            json_escape(&self.schema),
+            json_escape(&self.program)
+        );
+        for (index, node) in self.nodes.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            output.push_str(&format!(
+                "{{\"kind\":\"{}\",\"key\":\"{}\",\"subject\":\"{}\",\"duration_ms\":{},\"why_ran\":\"{}\",\"inputs\":[",
+                json_escape(&node.kind),
+                json_escape(&node.key),
+                json_escape(&node.subject),
+                if node.duration_ms.is_finite() && node.duration_ms >= 0.0 {
+                    node.duration_ms
+                } else {
+                    0.0
+                },
+                json_escape(&node.why_ran)
+            ));
+            for (input_index, input) in node.inputs.iter().enumerate() {
+                if input_index != 0 {
+                    output.push(',');
+                }
+                output.push('"');
+                output.push_str(&json_escape(input));
+                output.push('"');
+            }
+            output.push_str("]}");
+        }
+        output.push_str("]}");
+        output
+    }
+
+    pub fn from_json(payload: &str) -> Result<Self, String> {
+        let value = parse_json(payload).map_err(|_| "build record is not valid JSON".to_string())?;
+        let object = value
+            .as_object()
+            .map_err(|error| format!("build record must be an object: {error}"))?;
+        let schema = object
+            .get("schema")
+            .ok_or_else(|| "build record is missing schema".to_string())?
+            .as_str()
+            .map_err(|error| format!("build record schema is invalid: {error}"))?
+            .to_string();
+        if schema != Self::SCHEMA {
+            return Err(format!("unsupported build record schema `{schema}`"));
+        }
+        let program = object
+            .get("program")
+            .ok_or_else(|| "build record is missing program".to_string())?
+            .as_str()
+            .map_err(|error| format!("build record program is invalid: {error}"))?
+            .to_string();
+        let values = object
+            .get("nodes")
+            .ok_or_else(|| "build record is missing nodes".to_string())?
+            .as_array()
+            .map_err(|error| format!("build record nodes are invalid: {error}"))?;
+        let mut nodes = Vec::with_capacity(values.len());
+        for value in values {
+            let node = value
+                .as_object()
+                .map_err(|error| format!("build record node is invalid: {error}"))?;
+            let string_field = |name: &str| -> Result<String, String> {
+                node.get(name)
+                    .ok_or_else(|| format!("build record node is missing {name}"))?
+                    .as_str()
+                    .map(|value| value.to_string())
+                    .map_err(|error| format!("build record node {name} is invalid: {error}"))
+            };
+            let duration_ms = match node
+                .get("duration_ms")
+                .ok_or_else(|| "build record node is missing duration_ms".to_string())?
+            {
+                JSONValue::Number(value) => *value as f64,
+                JSONValue::Flt(value) => *value,
+                _ => return Err("build record node duration_ms is invalid".to_string()),
+            };
+            if !duration_ms.is_finite() || duration_ms < 0.0 {
+                return Err("build record node duration_ms is out of range".to_string());
+            }
+            let inputs = node
+                .get("inputs")
+                .ok_or_else(|| "build record node is missing inputs".to_string())?
+                .as_array()
+                .map_err(|error| format!("build record node inputs are invalid: {error}"))?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(|value| value.to_string())
+                        .map_err(|error| format!("build record node input is invalid: {error}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            nodes.push(BuildNodeRecord {
+                kind: string_field("kind")?,
+                key: string_field("key")?,
+                subject: string_field("subject")?,
+                duration_ms,
+                why_ran: string_field("why_ran")?,
+                inputs,
+            });
+        }
+        Ok(Self {
+            schema,
+            program,
+            nodes,
+        })
+    }
+}
+
+/// Result of looking up a named artifact. Corrupt records and objects are
+/// quarantined before `Corrupt` is returned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArtifactLookup {
+    Missing,
+    Corrupt,
+    Hit(StoredArtifact),
+}
+
+/// Result of restoring a named artifact to a display path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArtifactRestore {
+    Missing,
+    Corrupt,
+    Hit {
+        object: ObjectHandle,
+        executable: bool,
+    },
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     Io(io::Error),
@@ -344,7 +537,11 @@ pub enum StoreError {
     InvalidKey(String),
     Corrupt { path: PathBuf, reason: String },
     Conflict { path: PathBuf },
-    Locked(PathBuf),
+    Locked {
+        path: PathBuf,
+        owner_pid: Option<u32>,
+        elapsed: Duration,
+    },
     Capacity {
         path: PathBuf,
         needed_bytes: u64,
@@ -364,7 +561,19 @@ impl fmt::Display for StoreError {
                 write!(formatter, "corrupt store entry {}: {reason}", path.display())
             }
             Self::Conflict { path } => write!(formatter, "immutable store entry already differs: {}", path.display()),
-            Self::Locked(path) => write!(formatter, "store lock is owned by a live process: {}", path.display()),
+            Self::Locked {
+                path,
+                owner_pid,
+                elapsed,
+            } => {
+                let owner = owner_pid.map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
+                write!(
+                    formatter,
+                    "store lock is owned by a live process (owner pid {owner}) after waiting {:.3}s: {}",
+                    elapsed.as_secs_f64(),
+                    path.display()
+                )
+            }
             Self::Capacity {
                 path,
                 needed_bytes,
@@ -438,7 +647,7 @@ impl Store {
     }
 
     pub fn object_path(&self, object: &ObjectHandle) -> PathBuf {
-        self.root().join("blobs").join(object.key())
+        self.root().join("cas").join(object.key())
     }
 
     pub fn action_path(&self, action: &ActionHandle) -> PathBuf {
@@ -484,6 +693,136 @@ impl Store {
                 Ok(Some(bytes))
             }
         }
+    }
+    /// Read a blob when only its digest is available. This is the lookup used
+    /// by BuildRecord pointers; the bytes remain verified before returning.
+    pub fn blob_by_digest(&self, digest: &Digest) -> Result<Option<Vec<u8>>, StoreError> {
+        let key = EntryKey::Blob(digest.to_hex());
+        let path = self.root().join("cas").join(digest.to_hex());
+        match read_file(&path)? {
+            RawRead::Missing => Ok(None),
+            RawRead::Corrupt(reason) => {
+                self.quarantine_after_read(&key, &path, &reason);
+                Ok(None)
+            }
+            RawRead::Bytes(bytes) => {
+                if Digest::hash(&bytes) != *digest {
+                    self.quarantine_after_read(&key, &path, "digest mismatch");
+                    return Ok(None);
+                }
+                self.touch_after_read(&key, bytes.len() as u64);
+                Ok(Some(bytes))
+            }
+        }
+    }
+    /// Publish one immutable build record through the ordinary blob CAS.
+    ///
+    /// `key` is the caller's content key. The small index pointer is mutable
+    /// only so `latest_build_record` can find the newest content key.
+    pub fn publish_build_record(
+        &self,
+        key: &str,
+        record: &BuildRecord,
+    ) -> Result<ObjectHandle, StoreError> {
+        let object = self.publish_blob(record.to_json().as_bytes())?;
+        self.ensure_layout()?;
+        let pointer = self.build_record_pointer_path(key);
+        if let Some(existing) = self.read_build_pointer(&pointer)? {
+            if existing != object {
+                if self.build_record(key)?.as_ref() != Some(record) {
+                    return Err(StoreError::Conflict { path: pointer });
+                }
+            }
+        }
+        let latest = self.latest_build_record_pointer_path(&record.program);
+        let _lock = self.acquire_lock()?;
+        atomic_write(&pointer, object.to_string().as_bytes())?;
+        atomic_write(&latest, key.as_bytes())?;
+        Ok(object)
+    }
+
+    /// Load an immutable build record addressed by its content key.
+    pub fn build_record(&self, key: &str) -> Result<Option<BuildRecord>, StoreError> {
+        let pointer = self.build_record_pointer_path(key);
+        let Some(object) = self.read_build_pointer(&pointer)? else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.get_blob(&object)? else {
+            return Ok(None);
+        };
+        let payload = String::from_utf8(bytes).map_err(|_| StoreError::Corrupt {
+            path: pointer,
+            reason: "build record blob is not UTF-8".to_string(),
+        })?;
+        BuildRecord::from_json(&payload)
+            .map(Some)
+            .map_err(|reason| StoreError::Corrupt {
+                path: self.build_record_pointer_path(key),
+                reason,
+            })
+    }
+
+    /// Load the most recent record for a logical program path.
+    pub fn latest_build_record(&self, program: &str) -> Result<Option<BuildRecord>, StoreError> {
+        let path = self.latest_build_record_pointer_path(program);
+        let key = match read_file(&path)? {
+            RawRead::Missing => return Ok(None),
+            RawRead::Corrupt(reason) => {
+                return Err(StoreError::Corrupt { path, reason });
+            }
+            RawRead::Bytes(bytes) => String::from_utf8(bytes)
+                .map_err(|_| StoreError::Corrupt {
+                    path: path.clone(),
+                    reason: "latest build pointer is not UTF-8".to_string(),
+                })?
+                .trim()
+                .to_string(),
+        };
+        self.build_record(&key)
+    }
+
+    fn build_record_pointer_path(&self, key: &str) -> PathBuf {
+        self.root()
+            .join("build-records")
+            .join("records")
+            .join(Digest::hash(key.as_bytes()).to_hex())
+    }
+
+    fn latest_build_record_pointer_path(&self, program: &str) -> PathBuf {
+        self.root()
+            .join("build-records")
+            .join("latest")
+            .join(Digest::hash(program.as_bytes()).to_hex())
+    }
+
+    fn read_build_pointer(&self, path: &Path) -> Result<Option<ObjectHandle>, StoreError> {
+        let bytes = match read_file(path)? {
+            RawRead::Missing => return Ok(None),
+            RawRead::Corrupt(reason) => {
+                return Err(StoreError::Corrupt {
+                    path: path.to_path_buf(),
+                    reason,
+                });
+            }
+            RawRead::Bytes(bytes) => bytes,
+        };
+        let value = String::from_utf8(bytes)
+            .map_err(|_| StoreError::Corrupt {
+                path: path.to_path_buf(),
+                reason: "build record pointer is not UTF-8".to_string(),
+            })?
+            .trim()
+            .to_string();
+        let (digest, length) = value.split_once(':').ok_or_else(|| StoreError::Corrupt {
+            path: path.to_path_buf(),
+            reason: "build record pointer has invalid handle".to_string(),
+        })?;
+        let digest = Digest::from_hex(digest)?;
+        let length = length.parse::<u64>().map_err(|_| StoreError::Corrupt {
+            path: path.to_path_buf(),
+            reason: "build record pointer has invalid length".to_string(),
+        })?;
+        Ok(Some(ObjectHandle::new(digest, length)))
     }
 
     pub fn get_object(&self, object: &ObjectHandle) -> Result<Option<Vec<u8>>, StoreError> {
@@ -617,6 +956,38 @@ impl Store {
         self.status_locked()
     }
 
+    /// Return the persisted machine-level cap, if one was configured.
+    pub fn host_limit(&self) -> Result<Option<u64>, StoreError> {
+        let path = self.host_limit_path();
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(StoreError::Io(error)),
+        };
+        let value = std::str::from_utf8(&bytes)
+            .map_err(|_| StoreError::Config(format!("host limit is not valid UTF-8: {}", path.display())))?
+            .trim();
+        if value.is_empty() {
+            return Err(StoreError::Config(format!("host limit is empty: {}", path.display())));
+        }
+        Ok(Some(parse_size(value)?))
+    }
+
+    /// Persist or clear the stricter machine-level cap.
+    pub fn set_host_limit(&self, limit_bytes: Option<u64>) -> Result<(), StoreError> {
+        self.ensure_layout()?;
+        let _lock = self.acquire_lock()?;
+        let path = self.host_limit_path();
+        match limit_bytes {
+            Some(limit) => atomic_write(&path, format!("{limit}\n").as_bytes()),
+            None => match fs::remove_file(&path) {
+                Ok(()) => sync_dir(self.root()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(StoreError::Io(error)),
+            },
+        }
+    }
+
     pub fn prune(&self, target_bytes: Option<u64>) -> Result<PruneReport, StoreError> {
         self.ensure_layout()?;
         let _lock = self.acquire_lock()?;
@@ -626,6 +997,124 @@ impl Store {
 
     pub fn prune_to(&self, target_bytes: u64) -> Result<PruneReport, StoreError> {
         self.prune(Some(target_bytes))
+    }
+
+    /// Publish a file as one CAS blob and an immutable action record keyed by
+    /// the caller's already-computed lower-case SHA-256 build key.
+    pub fn publish_file(&self, key: &str, source: &Path) -> Result<StoredArtifact, StoreError> {
+        let action = action_for_key(key)?;
+        let metadata = fs::symlink_metadata(source)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(StoreError::Corrupt {
+                path: source.to_path_buf(),
+                reason: "published artifact is not a regular file".to_string(),
+            });
+        }
+        let bytes = fs::read(source)?;
+        let object = self.publish_blob(&bytes)?;
+        let record = encode_artifact(object, is_executable(&metadata));
+        self.publish_action(action, &record)?;
+        match self.lookup_artifact(key)? {
+            ArtifactLookup::Hit(artifact) => Ok(artifact),
+            ArtifactLookup::Missing | ArtifactLookup::Corrupt => Err(StoreError::Corrupt {
+                path: self.action_path(&action),
+                reason: "published artifact disappeared before verification".to_string(),
+            }),
+        }
+    }
+
+    /// Verify and locate a named artifact without copying it.
+    pub fn lookup_artifact(&self, key: &str) -> Result<ArtifactLookup, StoreError> {
+        let action = action_for_key(key)?;
+        let action_path = self.action_path(&action);
+        let record = match read_file(&action_path)? {
+            RawRead::Missing => return Ok(ArtifactLookup::Missing),
+            RawRead::Corrupt(reason) => {
+                self.quarantine_after_read(&EntryKey::Action(action.key()), &action_path, &reason);
+                return Ok(ArtifactLookup::Corrupt);
+            }
+            RawRead::Bytes(bytes) => match decode_action(action, &bytes) {
+                Ok(record) => record,
+                Err(reason) => {
+                    self.quarantine_after_read(&EntryKey::Action(action.key()), &action_path, &reason);
+                    return Ok(ArtifactLookup::Corrupt);
+                }
+            },
+        };
+        let Some((object, executable)) = decode_artifact(&record) else {
+            self.quarantine_after_read(
+                &EntryKey::Action(action.key()),
+                &action_path,
+                "artifact record has an unknown version or short header",
+            );
+            return Ok(ArtifactLookup::Corrupt);
+        };
+        let object_path = self.object_path(&object);
+        match read_file(&object_path)? {
+            RawRead::Missing => {
+                self.quarantine_after_read(
+                    &EntryKey::Action(action.key()),
+                    &action_path,
+                    "artifact record references a missing object",
+                );
+                Ok(ArtifactLookup::Corrupt)
+            }
+            RawRead::Corrupt(reason) => {
+                self.quarantine_after_read(&EntryKey::Blob(object.key()), &object_path, &reason);
+                self.quarantine_after_read(
+                    &EntryKey::Action(action.key()),
+                    &action_path,
+                    "artifact record references a corrupt object",
+                );
+                Ok(ArtifactLookup::Corrupt)
+            }
+            RawRead::Bytes(bytes) => {
+                if bytes.len() as u64 != object.length() || Digest::hash(&bytes) != object.digest() {
+                    self.quarantine_after_read(
+                        &EntryKey::Blob(object.key()),
+                        &object_path,
+                        "digest or length mismatch",
+                    );
+                    self.quarantine_after_read(
+                        &EntryKey::Action(action.key()),
+                        &action_path,
+                        "artifact record references a corrupt object",
+                    );
+                    return Ok(ArtifactLookup::Corrupt);
+                }
+                self.touch_after_read(&EntryKey::Blob(object.key()), bytes.len() as u64);
+                self.touch_after_read(&EntryKey::Action(action.key()), record.len() as u64);
+                Ok(ArtifactLookup::Hit(StoredArtifact {
+                    action,
+                    object,
+                    path: object_path,
+                    executable,
+                }))
+            }
+        }
+    }
+
+    /// Verify and copy a named artifact to `destination`, preserving its
+    /// executable bit. Corrupt entries are removed from the active namespace.
+    pub fn restore_file(&self, key: &str, destination: &Path) -> Result<ArtifactRestore, StoreError> {
+        let lookup = self.lookup_artifact(key)?;
+        match lookup {
+            ArtifactLookup::Missing => Ok(ArtifactRestore::Missing),
+            ArtifactLookup::Corrupt => Ok(ArtifactRestore::Corrupt),
+            ArtifactLookup::Hit(artifact) => {
+                let _lease = self.acquire_artifact_lease(&[
+                    LeaseTarget::Action(artifact.action),
+                    LeaseTarget::Blob(artifact.object),
+                ])?;
+                let bytes = fs::read(&artifact.path)?;
+                atomic_write(destination, &bytes)?;
+                set_executable(destination, artifact.executable)?;
+                Ok(ArtifactRestore::Hit {
+                    object: artifact.object,
+                    executable: artifact.executable,
+                })
+            }
+        }
     }
 
     fn publish_data(&self, key: EntryKey, path: PathBuf, bytes: &[u8]) -> Result<(), StoreError> {
@@ -648,7 +1137,11 @@ impl Store {
     }
 
     fn status_locked(&self) -> Result<StoreStatus, StoreError> {
-        let journal = read_journal(&self.root().join("journal"))?;
+        let mut journal = read_journal(&self.root().join("journal"))?;
+        if !journal.valid {
+            self.compact_journal_locked()?;
+            journal = read_journal(&self.root().join("journal"))?;
+        }
         let leases = self.read_leases_locked(true)?;
         let pinned: BTreeSet<EntryKey> = leases
             .iter()
@@ -676,6 +1169,7 @@ impl Store {
             reserve_bytes: self.config.reserve_bytes(),
             available_bytes: disk.map(|stats| stats.available_bytes),
             live_leases: leases.len(),
+            host_limit_bytes: self.host_limit()?,
             entries,
             tiers: vec!["local".to_string()],
         })
@@ -778,7 +1272,30 @@ impl Store {
         }
         Ok(())
     }
+    fn limit_with_disk(&self, total_bytes: Option<u64>) -> u64 {
+        let adaptive = total_bytes
+            .map(|total| (total / 10).min(DEFAULT_CAP_BYTES).max(1))
+            .unwrap_or(DEFAULT_CAP_BYTES);
+        let configured = self.config.cap_bytes().unwrap_or(adaptive);
+        self.host_limit()
+            .ok()
+            .flatten()
+            .map_or(configured, |host| configured.min(host))
+    }
 
+    fn host_limit_path(&self) -> PathBuf {
+        self.root().join("host-limit")
+    }
+
+    fn ensure_layout(&self) -> Result<(), StoreError> {
+        fs::create_dir_all(self.root())?;
+        for name in ["cas", "ac", "lto", "locks", "leases", "quarantine", "build-records"] {
+            ensure_dir(&self.root().join(name))?;
+        }
+        ensure_dir(&self.root().join("build-records").join("records"))?;
+        ensure_dir(&self.root().join("build-records").join("latest"))?;
+        Ok(())
+    }
     fn quarantine_after_read(&self, key: &EntryKey, path: &Path, reason: &str) {
         let Ok(_lock) = self.acquire_lock() else {
             return;
@@ -792,7 +1309,6 @@ impl Store {
         };
         let _ = self.append_journal_locked("touch", key, length);
     }
-
     fn quarantine_locked(&self, key: &EntryKey, path: &Path, _reason: &str) -> Result<(), StoreError> {
         if !path.exists() && fs::symlink_metadata(path).is_err() {
             return Ok(());
@@ -891,7 +1407,7 @@ impl Store {
     fn scan_entries(&self) -> Result<Vec<StoredEntry>, StoreError> {
         let mut entries = Vec::new();
         scan_flat_namespace(
-            &self.root().join("blobs"),
+            &self.root().join("cas"),
             EntryKind::Blob,
             None,
             &mut entries,
@@ -924,27 +1440,14 @@ impl Store {
         Ok(entries)
     }
 
-    fn limit_with_disk(&self, total_bytes: Option<u64>) -> u64 {
-        self.config.cap_bytes().unwrap_or_else(|| {
-            total_bytes
-                .map(|total| (total / 10).min(DEFAULT_CAP_BYTES).max(1))
-                .unwrap_or(DEFAULT_CAP_BYTES)
-        })
-    }
-
-    fn ensure_layout(&self) -> Result<(), StoreError> {
-        fs::create_dir_all(self.root())?;
-        for name in ["blobs", "ac", "lto", "locks", "leases", "quarantine"] {
-            ensure_dir(&self.root().join(name))?;
-        }
-        Ok(())
-    }
 
     fn acquire_lock(&self) -> Result<StoreLock, StoreError> {
         let path = self.root().join("locks").join("store.lock");
         let owner = ProcessIdentity::current();
         let owner_line = format!("{STORE_VERSION}|lock|{}|{}\n", owner.pid(), owner.start());
-        let deadline = Instant::now() + LOCK_WAIT;
+        let started = Instant::now();
+        let deadline = started + self.config.lock_wait();
+        let mut retry = LOCK_RETRY;
         loop {
             match OpenOptions::new().write(true).create_new(true).open(&path) {
                 Ok(mut file) => {
@@ -959,19 +1462,27 @@ impl Store {
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let existing = fs::read(&path).ok();
-                    let is_live = existing
-                        .as_deref()
-                        .and_then(parse_owner_line)
-                        .map(|identity| owner_liveness(&identity).unwrap_or(true))
+                    let existing_owner = existing.as_deref().and_then(parse_owner_line);
+                    let owner_pid = existing_owner.as_ref().map(ProcessIdentity::pid);
+                    let is_live = existing_owner
+                        .as_ref()
+                        .map(|identity| owner_liveness(identity).unwrap_or(true))
                         .unwrap_or(true);
                     if !is_live && fs::remove_file(&path).is_ok() {
                         sync_dir(path.parent().expect("lock path has parent"))?;
+                        retry = LOCK_RETRY;
                         continue;
                     }
-                    if Instant::now() >= deadline {
-                        return Err(StoreError::Locked(path));
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Err(StoreError::Locked {
+                            path,
+                            owner_pid,
+                            elapsed: now.saturating_duration_since(started),
+                        });
                     }
-                    thread::sleep(LOCK_RETRY);
+                    thread::sleep(retry.min(deadline.saturating_duration_since(now)));
+                    retry = retry.saturating_mul(2).min(LOCK_RETRY_MAX);
                 }
                 Err(error) => return Err(StoreError::Io(error)),
             }
@@ -1210,6 +1721,50 @@ fn decode_action(action: ActionHandle, bytes: &[u8]) -> Result<Vec<u8>, String> 
     Ok(payload.to_vec())
 }
 
+fn action_for_key(key: &str) -> Result<ActionHandle, StoreError> {
+    Ok(ActionHandle::new(Digest::from_hex(key)?))
+}
+
+fn encode_artifact(object: ObjectHandle, executable: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(ARTIFACT_MAGIC.len() + 32 + 8 + 1);
+    bytes.extend_from_slice(ARTIFACT_MAGIC);
+    bytes.extend_from_slice(object.digest().as_bytes());
+    bytes.extend_from_slice(&object.length().to_le_bytes());
+    bytes.push(u8::from(executable));
+    bytes
+}
+
+fn decode_artifact(bytes: &[u8]) -> Option<(ObjectHandle, bool)> {
+    let expected = ARTIFACT_MAGIC.len() + 32 + 8 + 1;
+    if bytes.len() != expected || !bytes.starts_with(ARTIFACT_MAGIC) {
+        return None;
+    }
+    let digest_start = ARTIFACT_MAGIC.len();
+    let digest_end = digest_start + 32;
+    let length_end = digest_end + 8;
+    let digest: [u8; 32] = bytes[digest_start..digest_end].try_into().ok()?;
+    let length = u64::from_le_bytes(bytes[digest_end..length_end].try_into().ok()?);
+    let executable = match bytes[length_end] {
+        0 => false,
+        1 => true,
+        _ => return None,
+    };
+    Some((ObjectHandle::new(Digest(digest), length), executable))
+}
+
+fn is_executable(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
 fn parse_lease(_path: &Path, bytes: &[u8]) -> Option<LeaseRecord> {
     let text = std::str::from_utf8(bytes).ok()?;
     let mut lines = text.lines();
@@ -1400,12 +1955,29 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         drop(file);
         fs::rename(&temporary, path)?;
         sync_dir(parent)?;
+
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+fn set_executable(path: &Path, executable: bool) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = fs::metadata(path)?;
+        let mut permissions = metadata.permissions();
+        let mode = permissions.mode();
+        permissions.set_mode(if executable { mode | 0o111 } else { mode & !0o111 });
+        fs::set_permissions(path, permissions)?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, executable);
+    }
+    Ok(())
 }
 
 fn create_new_synced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
@@ -1482,17 +2054,48 @@ fn validate_component(value: &str, label: &str) -> Result<(), StoreError> {
 
 fn parse_optional_size(name: &str) -> Result<Option<u64>, StoreError> {
     match std::env::var(name) {
-        Ok(value) => value
-            .parse::<u64>()
-            .map(Some)
-            .map_err(|_| StoreError::Config(format!("{name} must be an unsigned byte count"))),
+        Ok(value) => parse_size(&value).map(Some).map_err(|error| match error {
+            StoreError::Config(message) => StoreError::Config(format!("{name}: {message}")),
+            other => other,
+        }),
         Err(std::env::VarError::NotPresent) => Ok(None),
         Err(std::env::VarError::NotUnicode(_)) => Err(StoreError::Config(format!("{name} is not valid UTF-8"))),
     }
 }
 
-fn parse_size(name: &str) -> Result<Option<u64>, StoreError> {
-    parse_optional_size(name)
+/// Parse a byte size such as `4G`, `512MiB`, or a bare byte count.
+pub fn parse_size(value: &str) -> Result<u64, StoreError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(StoreError::Config("size cannot be empty".to_string()));
+    }
+    let upper = value.to_ascii_uppercase();
+    let suffixes = [
+        ("TIB", 1024u64.pow(4)),
+        ("TB", 1024u64.pow(4)),
+        ("GIB", 1024u64.pow(3)),
+        ("GB", 1024u64.pow(3)),
+        ("MIB", 1024u64.pow(2)),
+        ("MB", 1024u64.pow(2)),
+        ("KIB", 1024u64),
+        ("KB", 1024u64),
+        ("T", 1024u64.pow(4)),
+        ("G", 1024u64.pow(3)),
+        ("M", 1024u64.pow(2)),
+        ("K", 1024u64),
+        ("B", 1u64),
+    ];
+    let (number, multiplier) = suffixes
+        .iter()
+        .find_map(|(suffix, multiplier)| upper.strip_suffix(suffix).map(|number| (number, *multiplier)))
+        .unwrap_or((upper.as_str(), 1));
+    let number = number
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| StoreError::Config(format!("invalid byte size `{value}`")))?;
+    number
+        .checked_mul(multiplier)
+        .ok_or_else(|| StoreError::Config(format!("byte size `{value}` is too large")))
 }
 
 fn default_store_root() -> Result<PathBuf, StoreError> {
@@ -1620,6 +2223,9 @@ fn filesystem_stats(path: &Path) -> Option<DiskStats> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, Barrier};
 
     fn test_store(cap: u64) -> (Store, PathBuf) {
         let root = std::env::temp_dir().join(format!("jet-store-test-{}-{}", std::process::id(), next_counter()));
@@ -1634,6 +2240,78 @@ mod tests {
     }
 
     #[test]
+    fn lock_timeout_reports_owner_and_elapsed_wait() {
+        let (_, root) = test_store(1024);
+        let store = Store::open(
+            StoreConfig::new(root.clone())
+                .with_cap_bytes(1024)
+                .with_reserve_bytes(0)
+                .with_lock_wait(Duration::from_millis(25)),
+        )
+        .expect("store opens");
+        let lock = store.acquire_lock().expect("test lock");
+        let error = match store.acquire_lock() {
+            Err(error) => error,
+            Ok(_) => panic!("live lock unexpectedly acquired"),
+        };
+        let text = error.to_string();
+        match error {
+            StoreError::Locked {
+                path,
+                owner_pid,
+                elapsed,
+            } => {
+                assert_eq!(path, root.join("locks/store.lock"));
+                assert_eq!(owner_pid, Some(ProcessIdentity::current().pid()));
+                assert!(elapsed >= Duration::from_millis(25));
+            }
+            other => panic!("unexpected lock error: {other:?}"),
+        }
+        assert!(text.contains("owner pid"));
+        assert!(text.contains("after waiting"));
+        drop(lock);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn concurrent_publishers_wait_for_shared_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-store-concurrent-{}-{}",
+            std::process::id(),
+            next_counter()
+        ));
+        let store = Store::open(
+            StoreConfig::new(root.clone())
+                .with_cap_bytes(1024 * 1024)
+                .with_reserve_bytes(0)
+                .with_lock_wait(Duration::from_secs(3)),
+        )
+        .expect("store opens");
+        let lock = store.acquire_lock().expect("test lock");
+        let barrier = Arc::new(Barrier::new(3));
+        let left_store = store.clone();
+        let left_barrier = barrier.clone();
+        let left = thread::spawn(move || {
+            left_barrier.wait();
+            left_store.publish_blob(b"left")
+        });
+        let right_store = store.clone();
+        let right_barrier = barrier.clone();
+        let right = thread::spawn(move || {
+            right_barrier.wait();
+            right_store.publish_blob(b"right")
+        });
+        barrier.wait();
+        thread::sleep(Duration::from_millis(2200));
+        drop(lock);
+        let left = left.join().expect("left publisher thread");
+        let right = right.join().expect("right publisher thread");
+        assert!(left.is_ok(), "left publish failed: {left:?}");
+        assert!(right.is_ok(), "right publish failed: {right:?}");
+        cleanup(&root);
+    }
+
+    #[test]
     fn blob_round_trip_and_layout() {
         let (store, root) = test_store(1024);
         let bytes = b"hello store";
@@ -1641,7 +2319,7 @@ mod tests {
         assert_eq!(object.length(), bytes.len() as u64);
         assert_eq!(store.get_blob(&object).expect("get"), Some(bytes.to_vec()));
         assert!(store.object_path(&object).is_file());
-        assert!(root.join("blobs").is_dir());
+        assert!(root.join("cas").is_dir());
         assert!(root.join("ac").is_dir());
         assert!(root.join("lto").is_dir());
         assert!(root.join("locks").is_dir());
@@ -1735,7 +2413,7 @@ mod tests {
         let (store, root) = test_store(3);
         let result = store.publish_blob(b"four");
         assert!(matches!(result, Err(StoreError::Capacity { .. })));
-        assert_eq!(fs::read_dir(root.join("blobs")).expect("blobs").count(), 0);
+        assert_eq!(fs::read_dir(root.join("cas")).expect("cas").count(), 0);
         cleanup(&root);
     }
 
@@ -1752,6 +2430,150 @@ mod tests {
         let reopened = Store::open(store.config().clone()).expect("reopen");
         assert_eq!(reopened.get_blob(&object).expect("get"), Some(b"payload".to_vec()));
         assert!(reopened.status().expect("status").entries.len() == 1);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn size_parser_accepts_human_units() {
+        assert_eq!(parse_size("42").unwrap(), 42);
+        assert_eq!(parse_size("1k").unwrap(), 1024);
+        assert_eq!(parse_size("2KB").unwrap(), 2 * 1024);
+        assert_eq!(parse_size("3MiB").unwrap(), 3 * 1024 * 1024);
+        assert_eq!(parse_size("4gb").unwrap(), 4 * 1024 * 1024 * 1024);
+        assert!(parse_size("nope").is_err());
+        assert!(parse_size("18446744073709551615K").is_err());
+    }
+
+    #[test]
+    fn host_limit_overrides_adaptive_and_persists() {
+        let (store, root) = test_store(1024);
+        assert_eq!(store.host_limit().unwrap(), None);
+        store.set_host_limit(Some(512)).unwrap();
+        assert_eq!(store.host_limit().unwrap(), Some(512));
+        assert_eq!(store.limit(), 512);
+        let reopened = Store::open(store.config().clone()).unwrap();
+        assert_eq!(reopened.host_limit().unwrap(), Some(512));
+        reopened.set_host_limit(None).unwrap();
+        assert_eq!(reopened.host_limit().unwrap(), None);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn reserve_admission_refuses_when_disk_reserve_would_be_breached() {
+        let (_, root) = test_store(u64::MAX);
+        let gated = Store::open(
+            StoreConfig::new(root.clone())
+                .with_cap_bytes(u64::MAX)
+                .with_reserve_bytes(u64::MAX),
+        )
+        .unwrap();
+        assert!(matches!(
+            gated.publish_blob(b"reserve"),
+            Err(StoreError::Capacity { .. })
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn artifact_round_trip_repairs_corrupt_object() {
+        let (store, root) = test_store(1024 * 1024);
+        let source = root.join("input");
+        let destination = root.join("output");
+        fs::write(&source, b"artifact").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&source).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&source, permissions).unwrap();
+        }
+        let key = Digest::hash(b"artifact-key").to_hex();
+        let artifact = store.publish_file(&key, &source).unwrap();
+        assert!(artifact.path.starts_with(root.join("cas")));
+        assert!(matches!(
+            store.restore_file(&key, &destination).unwrap(),
+            ArtifactRestore::Hit {
+                executable: true,
+                ..
+            }
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), b"artifact");
+        #[cfg(unix)]
+        assert_ne!(
+            fs::metadata(&destination)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+        fs::write(&artifact.path, b"broken").unwrap();
+        assert!(matches!(
+            store.restore_file(&key, &destination).unwrap(),
+            ArtifactRestore::Corrupt
+        ));
+        store.publish_file(&key, &source).unwrap();
+        assert!(matches!(
+            store.restore_file(&key, &destination).unwrap(),
+            ArtifactRestore::Hit { .. }
+        ));
+        cleanup(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn second_process_live_lease_blocks_prune() {
+        const CHILD_ROOT: &str = "JET_STORE_LEASE_CHILD_ROOT";
+        const CHILD_KEY: &str = "JET_STORE_LEASE_CHILD_KEY";
+        const CHILD_LENGTH: &str = "JET_STORE_LEASE_CHILD_LENGTH";
+        const CHILD_READY: &str = "JET_STORE_LEASE_CHILD_READY";
+        const CHILD_RELEASE: &str = "JET_STORE_LEASE_CHILD_RELEASE";
+
+        if let Some(child_root) = std::env::var_os(CHILD_ROOT) {
+            let root = PathBuf::from(child_root);
+            let key = std::env::var(CHILD_KEY).unwrap();
+            let length = std::env::var(CHILD_LENGTH).unwrap().parse().unwrap();
+            let object = ObjectHandle::new(Digest::from_hex(&key).unwrap(), length);
+            let store =
+                Store::open(StoreConfig::new(root).with_cap_bytes(1024).with_reserve_bytes(0)).unwrap();
+            let lease = store.acquire_lease(&[object]).unwrap();
+            fs::write(std::env::var_os(CHILD_READY).unwrap(), b"ready").unwrap();
+            let release = PathBuf::from(std::env::var_os(CHILD_RELEASE).unwrap());
+            while !release.is_file() {
+                thread::sleep(Duration::from_millis(5));
+            }
+            drop(lease);
+            return;
+        }
+
+        let (store, root) = test_store(1024);
+        let object = store.publish_blob(b"leased").unwrap();
+        let ready = root.join("child-ready");
+        let release = root.join("child-release");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::second_process_live_lease_blocks_prune", "--nocapture"])
+            .env(CHILD_ROOT, &root)
+            .env(CHILD_KEY, object.digest().to_hex())
+            .env(CHILD_LENGTH, object.length().to_string())
+            .env(CHILD_READY, &ready)
+            .env(CHILD_RELEASE, &release)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.is_file() {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!("lease child exited early: {status}");
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for lease child");
+            thread::sleep(Duration::from_millis(5));
+        }
+        let report = store.prune_to(0).unwrap();
+        assert!(report.blocked);
+        assert!(store.object_path(&object).is_file());
+        fs::write(&release, b"release").unwrap();
+        assert!(child.wait().unwrap().success());
+        let report = store.prune_to(0).unwrap();
+        assert!(!report.blocked);
         cleanup(&root);
     }
 }

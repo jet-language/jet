@@ -652,6 +652,52 @@ fn ui_snapshots() {
     );
 }
 
+#[test]
+fn e0109_live_diagnostic_matches_explanation_page() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/ui/e0109_int_string.jet");
+    let source = fs::read_to_string(&path).expect("E0109 Int/String fixture");
+    let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+        .expect_err("an Int/String operator must be rejected");
+    let live = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0109")
+        .expect("Int/String fixture must produce E0109");
+    let explanation = jet::Explain::lookup("E0109").expect("E0109 explanation");
+    // Registry rows keep sentence-case prose; live diagnostics apply the
+    // shared lower-case projection before rendering the diagnostic body.
+    assert_eq!(
+        explanation
+            .what
+            .as_deref()
+            .map(jet_foundation::Outcome::jet_sentence_case_line),
+        Some(live.what.clone())
+    );
+    assert_eq!(
+        explanation
+            .why
+            .as_deref()
+            .map(jet_foundation::Outcome::jet_sentence_case_line),
+        Some(live.why.clone())
+    );
+    assert_eq!(
+        explanation
+            .fix
+            .as_deref()
+            .map(jet_foundation::Outcome::jet_sentence_case_line),
+        Some(live.fix.clone())
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["explain", "E0109"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run E0109 explanation");
+    assert!(output.status.success(), "explain E0109 failed: {output:?}");
+    let rendered = String::from_utf8(output.stdout).expect("E0109 explanation is UTF-8");
+    assert_eq!(rendered, jet::Explain::render(&explanation, false));
+}
+
 fn run_retired_gate_flag_snapshot(file: &str) -> String {
     let retirement = jet::Syntax::retirement("allow-impure").expect("retired gate row");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))

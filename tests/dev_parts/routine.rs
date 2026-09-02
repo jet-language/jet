@@ -2510,6 +2510,62 @@ fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
 }
 
 #[test]
+fn decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+    let dir = common::unique_tmp("jet_decimal_scale_parity");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("decimal_scale.jet");
+    let source = r#"fn run() {
+    left :: 1.20
+    right :: 2.30
+    print(left + right)
+    print(right - left)
+    print(9.5 * 2.0)
+}
+"#;
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let expected = ProgramOutput::ran("3.50\n1.10\n19.0\n".into(), String::new(), 0);
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("Decimal interpreter failed: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "decimal_scale_parity");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "Decimal scale arithmetic must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "Decimal scale arithmetic must not use interpreter fallback"
+    );
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("Decimal default run failed: {diags:?}"),
+    };
+    let aot = compiled_binary_output(&dir, "decimal_scale_parity", 0, "decimal_scale", &shown);
+
+    assert_eq!(interpreted, expected, "Decimal interpreter scale drift");
+    assert_eq!(resident, expected, "Decimal resident JIT scale drift");
+    assert_eq!(default, expected, "Decimal default JIT scale drift");
+    assert_eq!(aot, expected, "Decimal AOT scale drift");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn type_alias_example_matches_golden_on_all_execution_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

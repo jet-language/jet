@@ -1520,6 +1520,9 @@ pub(crate) struct ModuleState {
     /// `Int` runtime. Keep this fact in sema; codegen must not rediscover it
     /// by enumerating source expression shapes.
     exact_int_reachable: std::cell::Cell<bool>,
+    /// D-NEVER1=C: names whose checked bodies have no returning path. This is
+    /// a compiler-only bottom fact; it never becomes a public `Never` type.
+    diverging_functions: std::collections::HashSet<String>,
     funcs: HashMap<String, FuncSig>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
@@ -1621,6 +1624,9 @@ pub(crate) fn type_uses_default_int(ty: &Type) -> bool {
 
 pub(crate) struct Checker<'a> {
     funcs: &'a HashMap<String, FuncSig>,
+    /// D-NEVER1=C: sema's fixed-point bottom facts. A call consults this
+    /// registry before ordinary value joining; no engine infers divergence.
+    diverging_functions: &'a std::collections::HashSet<String>,
     registry: &'a TypeRegistry,
     effect_facts: &'a jet_foundation::Facts::FactRegistry,
     consts: &'a HashMap<String, Type>,

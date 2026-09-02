@@ -72,12 +72,15 @@ it closes the handle first, then removes the staged file. `jet run` and
 interpreter invocations clear their loaded-module table at teardown, so failed
 calls do not retain mapped libraries or staged payloads.
 
-Jet panic cannot cross the C ABI as a C++ exception. It terminates the calling
-process. Hosts must treat a panicking export as process failure, not recover it
-with C++ exception handling. The checked-in `foreign.cpp` host exercises thread
-entry, nested calls, allocator ownership, thread-local entry, signal
-preservation, and repeated load/unload cycles; `tests/library_outputs.rs` also
-invokes a panic-only Library through that host in a child process.
+Jet panic cannot cross the C ABI as a C++ exception. The export boundary catches
+the panic, writes the normal `Stop [E3001]` runtime report to stderr, and
+terminates the calling process with status 70. A failed Jet error edge is
+reported before termination with status 1. Hosts must treat either outcome as
+process failure, not recover it with C++ exception handling. The checked-in
+`foreign.cpp` host exercises thread entry, nested calls, allocator ownership,
+thread-local entry, signal preservation, and repeated load/unload cycles;
+`tests/library_outputs.rs` also invokes a panic-only Library through that host
+in a child process.
 
 ## Typed target profiles
 

@@ -21,6 +21,10 @@ import { fileURLToPath } from "node:url";
  * Recipes below are only small, known-good seeds. Hard or effectful operations
  * are hand-authored under tests/conformance/corpus and remain visible as
  * uncovered until someone supplies their real arguments and authority.
+ * Generic core rows may be called through a typed receiver (`mem.Ptr<T>.from_addr`)
+ * even when the denominator row is published under `core.mem`. The source
+ * matcher accepts that generic-receiver shape for every row; sema remains the
+ * authority for whether the receiver and method are valid.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -171,6 +175,7 @@ const UNIT_RESULT_KEYS = new Set([
   "core.http.server.static_files",
   "core.http.server.cors",
   "core.http.server.request_id",
+  "core.http.server.serve_once_listener",
   "core.perf.reset_fidelity",
   "core.perf.override_fidelity",
   "core.tasks.yield_now",
@@ -640,6 +645,14 @@ function valueReachesObserver(code, source, observers, value, after) {
         ({ open, close }) => open > after && expressionConsumesValue(source.slice(open + 1, close), held),
       );
       if (seen) return true;
+      // Builder values are also consumed by instance methods used as bare
+      // statements. This keeps `server.html(...); server.port(...)` honest
+      // without treating an unobserved binding as covered.
+      const methodUse = new RegExp(
+        `(?<![A-Za-z0-9_.])${escapedRegExp(held)}\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_]*\\s*\\(`,
+        "g",
+      );
+      if (Array.from(code.matchAll(methodUse)).some(({ index }) => index > after)) return true;
       if (matchArmObserves(code, observers, held)) return true;
       for (const candidate of bindings) {
         if (reached.has(candidate.name)) continue;
@@ -709,8 +722,11 @@ function sourceErrors(key, source) {
     return errors;
   }
   const alias = aliases[0][1];
+  // A registry row may name a method whose canonical surface is a generic
+  // receiver (`alias.Type<T>.method(...)`) rather than `alias.method(...)`.
+  // Match both shapes without hard-coding one type or method.
   const call = new RegExp(
-    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?\\(`,
+    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*(?:${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?|[A-Za-z_][A-Za-z0-9_]*\\s*<[^{}]*>\\s*\\.\\s*${escapedRegExp(name)}\\s*)\\(`,
     "g",
   );
   const calls = Array.from(code.matchAll(call));
@@ -745,7 +761,11 @@ function sourceErrors(key, source) {
     const tail = code.slice(callClose + 1, lineEnd < 0 ? code.length : lineEnd);
     const propagated = /\?\?\s*panic\s*\(/.test(tail);
     const observesSuccess = observers.some(({ open }) => open > callClose);
-    if (!directObserver && !(propagated && observesSuccess)) {
+    // Unit-returning rows are consumed by the effect they perform. A later
+    // observer in the same witness records that effect without manufacturing
+    // a value or wrapping the call in a lambda.
+    const observesUnitEffect = UNIT_RESULT_KEYS.has(key) && observesSuccess;
+    if (!directObserver && !(propagated && observesSuccess) && !observesUnitEffect) {
       errors.push("direct result is not consumed by print/eprint/assert or explicit error propagation");
     }
   }

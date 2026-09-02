@@ -572,7 +572,7 @@ mod jet_devserver_impl {
         "app.wasm",
         "index.html",
     ];
-    const JET_DEVSERVER_STAGING_FILES: [&str; 9] = [
+    const JET_DEVSERVER_STAGING_FILES: [&str; 8] = [
         "web.manifest.json",
         "jet_dom_runtime.js",
         "app.js",
@@ -581,7 +581,6 @@ mod jet_devserver_impl {
         "app.wasm",
         "app.wasm.map",
         "index.html",
-        "jet-timing-backend.json",
     ];
 
     #[cfg(unix)]

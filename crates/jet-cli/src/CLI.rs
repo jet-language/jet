@@ -278,6 +278,7 @@ pub enum HandlerKey {
     Exec,
     Env,
     SharedStore,
+    Cache,
     Perf,
     Reserved,
     Facts,
@@ -333,6 +334,7 @@ impl HandlerKey {
             Self::Exec => "exec",
             Self::Env => "env",
             Self::SharedStore => "shared-store",
+            Self::Cache => "cache",
             Self::Perf => "perf",
             Self::Reserved => "reserved",
             Self::Facts => "facts",
@@ -343,7 +345,12 @@ impl HandlerKey {
     pub const fn keeps_group(self) -> bool {
         matches!(
             self,
-            Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv | Self::SharedStore
+            Self::GcReport
+                | Self::Perf
+                | Self::Env
+                | Self::InspectEnv
+                | Self::SharedStore
+                | Self::Cache
         )
     }
 }
@@ -444,6 +451,29 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
     NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
     NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
+];
+const CACHE_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec {
+        name: "status",
+        usage: "status",
+        summary: "Show machine-wide artifact store usage",
+        handler: HandlerKey::Cache,
+        also_canonical_top_level: true,
+    },
+    NestedCommandSpec {
+        name: "prune",
+        usage: "prune --to <size>",
+        summary: "Prune the artifact store to a target size",
+        handler: HandlerKey::Cache,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "limit",
+        usage: "limit --host <size>",
+        summary: "Set the host-wide artifact store limit",
+        handler: HandlerKey::Cache,
+        also_canonical_top_level: false,
+    },
 ];
 // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
 // `jetpack env` subverbs exposed through Jet's environment front door. `env`
@@ -993,10 +1023,10 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "cache",
-        summary: "Manage host-owned binary-cache bindings",
+        summary: "Manage the machine-wide artifact store",
         headline: false,
-        actions: &[],
-        exhaustive: false,
+        actions: CACHE_ACTIONS,
+        exhaustive: true,
         usage: None,
     },
     CommandSpec {
@@ -1415,7 +1445,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--repo", help: "With merge install-driver: Git worktree to configure" },
     FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
     FlagSpec { long: "--topic", help: "With inspect digest: Emit one digest topic" },
-    FlagSpec { long: "--to", help: "With publish: Foreign registry (pypi | npm | maven | nuget)" },
+    FlagSpec { long: "--to", help: "With publish/cache: Foreign registry, or prune target size" },
     FlagSpec { long: "--list-topics", help: "With inspect digest: List digest topics" },
     FlagSpec { long: "--kind", help: "With inspect gates/authority: Filter one gate kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
@@ -1448,6 +1478,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "With fetch: Lock a manifest-less script's inline deps instead of fetching a project" },
     FlagSpec { long: "--read-only", help: "With shared-store enroll: Grant read-only broker access" },
+    FlagSpec { long: "--host", help: "With cache limit: Host-wide store cap" },
     FlagSpec { long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
     FlagSpec { long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name" },
@@ -2605,6 +2636,9 @@ mod tests {
             ("self", "devtools", Devtools, "devtools", false),
             ("self", "lsp", Lsp, "lsp", false),
             ("self", "exec", Exec, "exec", false),
+            ("cache", "status", Cache, "cache", true),
+            ("cache", "prune", Cache, "cache", true),
+            ("cache", "limit", Cache, "cache", true),
             ("env", "test", Env, "env", true),
             ("env", "hook", Env, "env", true),
             ("env", "sync", Env, "env", true),

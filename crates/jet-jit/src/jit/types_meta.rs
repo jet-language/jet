@@ -247,7 +247,10 @@ pub(crate) fn clif_ty_with_distinct(
     if let Type::Tagged { inner, .. } = &ty {
         return clif_ty_with_distinct(inner, distinct_bases);
     }
-    if matches!(&ty, Type::Named(n) if n == "Unit") {
+    if matches!(
+        &ty,
+        Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_NEVER
+    ) {
         return None;
     }
     // D-RANGE-VALUE1: Range uses a lossless three-value resident ABI
@@ -1107,9 +1110,30 @@ impl<'a> JitMeta<'a> {
             .or_else(|| core_struct_field_type(type_name, field))
     }
 
-    /// Discriminant index from the Prelude declaration order or a user enum table.
+    /// Discriminant index from the Prelude declaration order, a Rust-only Core
+    /// control enum, or a user enum table.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
         let enum_name = self.canonical_nominal(enum_name);
+        let control_index = match enum_name {
+            // D-NETDEP1=A: these enums are sema-owned control values, not
+            // Prelude declarations, but their wire ABI is the shared ordinal.
+            "NetShutdown" => match variant {
+                "Read" => Some(0),
+                "Write" => Some(1),
+                "Both" => Some(2),
+                _ => None,
+            },
+            "NetReadyInterest" => match variant {
+                "Read" => Some(0),
+                "Write" => Some(1),
+                "ReadWrite" => Some(2),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(index) = control_index {
+            return Some(index);
+        }
         if let Some(index) = prelude_enum_variant_index(enum_name, variant) {
             return Some(index);
         }

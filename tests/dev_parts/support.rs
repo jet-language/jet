@@ -975,7 +975,7 @@ fn cli_tier_output_with_answers(
     cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("NO_COLOR", "1")
         .env("JET_RUN_CACHE_DIR", &cache)
-        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_STORE_DIR", cache.join("build"))
         .stdin(fs::File::open(answer_file(&cache, &tag, 0, answers)).unwrap());
     let output = command_output_with_timeout(
         cmd,
@@ -2586,7 +2586,7 @@ fn run_cli_default_resident(command: &str, file: &str, tag: &str) -> ProgramOutp
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("NO_COLOR", "1")
         .env("JET_RUN_CACHE_DIR", &cache)
-        .env("JET_CACHE_DIR", cache.join("build"));
+        .env("JET_STORE_DIR", cache.join("build"));
     let output = command_output_with_timeout(
         cmd,
         *DEV_DIFF_TIMEOUT,

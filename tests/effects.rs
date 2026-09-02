@@ -1262,7 +1262,7 @@ fn run() {
         .arg("--release")
         .arg(&entry)
         .current_dir(&root)
-        .env("JET_CACHE_DIR", root.join("cache"))
+        .env("JET_STORE_DIR", root.join("cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

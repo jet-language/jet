@@ -186,7 +186,7 @@ const PREFERRED_UI: &[(&str, &str)] = &[
     ("E0105", "tests/ui/defined_twice.jet"),
     ("E0107", "tests/ui/unknown_name.jet"),
     ("E0108", "tests/ui/decision_hook_wrong_handler.jet"),
-    ("E0109", "tests/ui/mixed_numbers.jet"),
+    ("E0109", "tests/ui/e0109_int_string.jet"),
     ("E0110", "tests/ui/cond_not_bool.jet"),
     ("E0111", "tests/ui/assign_to_val.jet"),
     ("E0119", "tests/ui/effect_unknown_name.jet"),

@@ -469,7 +469,7 @@ pub(crate) use values::url_parts_to_ct;
 use values::{as_string_rows, csv_rows_from_records, named_tuple};
 pub(super) use values::{url_parts_from_ct, URL_INTERNAL_PREFIX};
 
-pub(in super::super) fn apply_core_pure_method(
+pub fn apply_core_pure_method(
     recv: &CtValue,
     method: &str,
     args: &[CtValue],
@@ -478,7 +478,7 @@ pub(in super::super) fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
-pub(in super::super) fn sketch_add(
+pub fn sketch_add(
     recv: &CtValue,
     args: &[CtValue],
     span: Span,

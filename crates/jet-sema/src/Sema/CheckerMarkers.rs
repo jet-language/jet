@@ -281,10 +281,12 @@ fn materialize_static_marker_values(
     invalid: &HashSet<usize>,
 ) {
     fn apply(marker: &mut Marker, validated: &HashMap<usize, ValidatedRuleArguments>) {
-        marker.ct = validated
-            .get(&marker.name_span.start)
-            .and_then(|arguments| arguments.constant_for_source(0))
-            .cloned();
+        let Some(arguments) = validated.get(&marker.name_span.start) else {
+            // Some function markers carry a parser-seeded compile-time fact.
+            // Keep it when the static-rule pass has no replacement value.
+            return;
+        };
+        marker.ct = arguments.constant_for_source(0).cloned();
     }
     fn apply_all(
         markers: &mut Vec<Marker>,

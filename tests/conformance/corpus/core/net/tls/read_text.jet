@@ -8,12 +8,7 @@ fn run() {
     client :: net.tcp_connect(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
     net.tcp_close(&server) ?? panic("close")
-    result :: net.tls_connect(^client, "localhost")
-    print(result == {
-        .Ok(stream) -> tls.read_text(&stream, 1) == {
-            .Ok(_) -> true
-            .Err(_) -> false
-        }
-        .Err(_) -> true
-    })
+    print(net.tls_connect(^client, "localhost") ? stream ->
+        tls.read_text(&stream, 1) ? text -> true ! read_error -> false
+        ! connect_error -> true)
 }

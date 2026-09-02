@@ -483,15 +483,28 @@ mod jet_simd_f64x4_avx {
         lane_source: Native,
     ) -> Native {
         unsafe {
-            let pair = match INDEX {
-                0 | 2 => arch::_mm256_unpacklo_pd(lane_source, lane_source),
-                1 | 3 => arch::_mm256_unpackhi_pd(lane_source, lane_source),
+            // AVX2 can broadcast a selected lane in one permute. Keep the
+            // AVX-only unpack/permute path for Ivy Bridge and other AVX hosts.
+            #[cfg(target_feature = "avx2")]
+            let lane = match INDEX {
+                0 => arch::_mm256_permute4x64_pd::<0x00>(lane_source),
+                1 => arch::_mm256_permute4x64_pd::<0x55>(lane_source),
+                2 => arch::_mm256_permute4x64_pd::<0xaa>(lane_source),
+                3 => arch::_mm256_permute4x64_pd::<0xff>(lane_source),
                 _ => unreachable!("F64x4 lane index validated before native access"),
             };
-            let lane = match INDEX {
-                0 | 1 => arch::_mm256_permute2f128_pd::<0x00>(pair, pair),
-                2 | 3 => arch::_mm256_permute2f128_pd::<0x11>(pair, pair),
-                _ => unreachable!("F64x4 lane index validated before native access"),
+            #[cfg(not(target_feature = "avx2"))]
+            let lane = {
+                let pair = match INDEX {
+                    0 | 2 => arch::_mm256_unpacklo_pd(lane_source, lane_source),
+                    1 | 3 => arch::_mm256_unpackhi_pd(lane_source, lane_source),
+                    _ => unreachable!("F64x4 lane index validated before native access"),
+                };
+                match INDEX {
+                    0 | 1 => arch::_mm256_permute2f128_pd::<0x00>(pair, pair),
+                    2 | 3 => arch::_mm256_permute2f128_pd::<0x11>(pair, pair),
+                    _ => unreachable!("F64x4 lane index validated before native access"),
+                }
             };
             let factor = arch::_mm256_mul_pd(arch::_mm256_set1_pd(scale), lane);
             arch::_mm256_mul_pd(value, factor)
@@ -911,11 +924,20 @@ fn jet_simd_f64x4_binary(
         };
         return jet_simd_f64x4_avx::to_array(value);
     }
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    if let Some(value) = jet_simd_x86::f64x4_binary_if_available(left, right, op) {
-        return value;
+    #[cfg(not(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx"
+    )))]
+    {
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            not(target_feature = "avx")
+        ))]
+        if let Some(value) = jet_simd_x86::f64x4_binary_if_available(left, right, op) {
+            return value;
+        }
+        jet_simd_binary_array(left, right, op)
     }
-    jet_simd_binary_array(left, right, op)
 }
 
 #[inline(always)]
@@ -967,15 +989,24 @@ fn jet_simd_f64x4_neg(left: &[f64; 4]) -> [f64; 4] {
         let value = jet_simd_f64x4_avx::from_array(*left);
         return jet_simd_f64x4_avx::to_array(jet_simd_f64x4_avx::neg(value));
     }
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    if let Some(value) = jet_simd_x86::f64x4_neg_if_available(left) {
-        return value;
+    #[cfg(not(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx"
+    )))]
+    {
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            not(target_feature = "avx")
+        ))]
+        if let Some(value) = jet_simd_x86::f64x4_neg_if_available(left) {
+            return value;
+        }
+        let mut out = *left;
+        for value in &mut out {
+            *value = -*value;
+        }
+        out
     }
-    let mut out = *left;
-    for value in &mut out {
-        *value = -*value;
-    }
-    out
 }
 
 #[inline(always)]

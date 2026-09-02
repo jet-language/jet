@@ -51,7 +51,7 @@ enum JetHTTPRequestFraming {
     Chunked,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct JetHTTPRequestHead {
     framing: JetHTTPRequestFraming,
     expect_continue: bool,
@@ -62,6 +62,7 @@ struct JetHTTPRequestHead {
     content_encoding_layers: usize,
     trailer_names: Vec<String>,
 }
+
 
 struct JetHTTPDeflateBits<'a> {
     input: &'a [u8],
@@ -2799,44 +2800,44 @@ fn jet_http_srv_read_streaming(
         status: 400,
         message: "request read failed",
     })?;
-    let mut header = Vec::with_capacity(1024);
-    let mut peeked = [0u8; MAX_HEADER_BYTES + 1];
+    let mut header = [0u8; MAX_HEADER_BYTES + 1];
+    let mut header_len = 0usize;
     loop {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Ok(None);
         }
-        let deadline = if keep_alive && !header.is_empty() {
+        let deadline = if keep_alive && header_len > 0 {
             options.read_idle_timeout
         } else {
             timeout
         };
         if started.elapsed() >= deadline {
-            return if keep_alive && header.is_empty() {
+            return if keep_alive && header_len == 0 {
                 Ok(None)
             } else {
                 Err(JetHTTPReadError { status: 408, message: "request timed out" })
             };
         }
-        match stream.peek(&mut peeked) {
-            Ok(0) if header.is_empty() => return Ok(None),
+        match stream.peek(&mut header) {
+            Ok(0) if header_len == 0 => return Ok(None),
             Ok(0) => return Err(JetHTTPReadError {
                 status: 400,
                 message: "request headers ended early",
             }),
-            Ok(available) if available > header.len() => {
-                header.extend_from_slice(&peeked[header.len()..available]);
-                if let Some(end) = jet_http_header_end(&header) {
-                    let header_len = end + 4;
-                    if header_len > MAX_HEADER_BYTES {
+            Ok(available) if available > header_len => {
+                header_len = available;
+                if let Some(end) = jet_http_header_end(&header[..header_len]) {
+                    let request_header_len = end + 4;
+                    if request_header_len > MAX_HEADER_BYTES {
                         return Err(JetHTTPReadError {
                             status: 431,
                             message: "request headers are too large",
                         });
                     }
-                    header.truncate(header_len);
+                    header_len = request_header_len;
                     break;
                 }
-                if header.len() > MAX_HEADER_BYTES {
+                if header_len > MAX_HEADER_BYTES {
                     return Err(JetHTTPReadError {
                         status: 431,
                         message: "request headers are too large",
@@ -2847,14 +2848,14 @@ fn jet_http_srv_read_streaming(
             Err(_) => return Err(JetHTTPReadError { status: 400, message: "request read failed" }),
         }
     }
-    if let Err(error) = stream.read_exact(&mut header) {
+    if let Err(error) = stream.read_exact(&mut header[..header_len]) {
         return Err(if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
             JetHTTPReadError { status: 408, message: "request timed out" }
         } else {
             JetHTTPReadError { status: 400, message: "request read failed" }
         });
     }
-    let header_end = header.len() - 4;
+    let header_end = header_len - 4;
     let head = jet_http_validate_headers(&header[..header_end])?;
     let body_already_arrived = if head.expect_continue {
         let _ = stream.set_nonblocking(true);
@@ -2971,7 +2972,10 @@ fn jet_http_mux_serve_once_listener(
     mux: &JetHTTPMux,
 ) -> Result<(), String> {
     use std::io::Write;
-    jet_http_mux_validate(mux)?;
+    let route_cache = mux.route_cache();
+    if let Some(error) = route_cache.validation_error.clone() {
+        return Err(error);
+    }
     let (mut stream, _peer) = jet_http_accept_once(listener, std::time::Duration::from_secs(5))?;
     let (req, version) = match jet_http_srv_read_streaming(
         &mut stream,
@@ -2988,7 +2992,8 @@ fn jet_http_mux_serve_once_listener(
             return Ok(());
         }
     };
-    let resp = jet_http_mux_dispatch(mux, req).unwrap_or_else(jet_http_srv_error_response);
+    let resp = jet_http_mux_dispatch_cached(mux, req, &route_cache)
+        .unwrap_or_else(jet_http_srv_error_response);
     jet_http_srv_write_response(&mut stream, &resp, &version, true)
         .map_err(|error| error.to_string())
 }
@@ -4018,9 +4023,17 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
 
 fn jet_http_mux_dispatch(
     mux: &JetHTTPMux,
-    mut req: JetHTTPRequest,
+    req: JetHTTPRequest,
 ) -> Result<JetHTTPResponse, JetHTTPError> {
     let route_cache = mux.route_cache();
+    jet_http_mux_dispatch_cached(mux, req, &route_cache)
+}
+
+fn jet_http_mux_dispatch_cached(
+    mux: &JetHTTPMux,
+    mut req: JetHTTPRequest,
+    route_cache: &JetHTTPMuxRouteCache,
+) -> Result<JetHTTPResponse, JetHTTPError> {
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     if requested_method == "OPTIONS" && req.path == "*" {
@@ -4043,19 +4056,17 @@ fn jet_http_mux_dispatch(
     } else {
         std::borrow::Cow::Borrowed(req.path.as_str())
     };
-    let path = match jet_http_route_path(route_target.as_ref()) {
-        Ok(path) => path,
-        Err(_) => {
-            let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
-                Ok(jet_http_srv_response_owned(400, "400 Bad Request".to_string()))
-            });
-            let response = jet_http_mux_run_handler(mux, req, handler);
-            return Ok(jet_http_srv_head_response(response, is_head));
-        }
-    };
+    if jet_http_route_validate_path(route_target.as_ref()).is_err() {
+        let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
+            Ok(jet_http_srv_response_owned(400, "400 Bad Request".to_string()))
+        });
+        let response = jet_http_mux_run_handler(mux, req, handler);
+        return Ok(jet_http_srv_head_response(response, is_head));
+    }
     // Route lookup uses an immutable validated snapshot. Never retain the
     // registry lock while composing middleware or running user code: handlers
     // may overlap and may register another route on this same mux.
+    let route_path = route_target.as_ref();
     let mut path_match_count = 0usize;
     let mut has_head = false;
     let mut selected = None;
@@ -4064,7 +4075,7 @@ fn jet_http_mux_dispatch(
         let Some(pattern) = route.pattern.as_ref() else {
             continue;
         };
-        if !jet_http_route_matches(pattern, &path) {
+        if !jet_http_route_matches_path(pattern, route_path) {
             continue;
         }
         path_match_count += 1;
@@ -4100,15 +4111,16 @@ fn jet_http_mux_dispatch(
         selected
     };
     if let Some((_, route, pattern)) = selected {
-        req.params = jet_http_route_params(pattern, &path);
+        req.params = jet_http_route_params_path(pattern, route_path)
+            .expect("validated HTTP route path");
         req.route_template = Some(route.route.pattern.clone());
-        let response = jet_http_mux_run_handler(mux, req, route.route.handler.clone());
+        let response = jet_http_mux_run_handler_ref(mux, req, &route.route.handler);
         return Ok(jet_http_srv_head_response(response, is_head));
     }
     if path_match_count > 0 {
         let allow = jet_http_allowed_methods(route_cache.routes.iter().filter_map(|route| {
             let pattern = route.pattern.as_ref()?;
-            jet_http_route_matches(pattern, &path).then_some(route.route.method.as_str())
+            jet_http_route_matches_path(pattern, route_path).then_some(route.route.method.as_str())
         }));
         let handler: JetHTTPHandler = std::sync::Arc::new(move |_| {
             Ok(jet_http_srv_response_with_headers(
@@ -4126,6 +4138,26 @@ fn jet_http_mux_dispatch(
     let response = jet_http_mux_run_handler(mux, req, handler);
     Ok(jet_http_srv_head_response(response, is_head))
 }
+
+fn jet_http_mux_run_handler_ref(
+    mux: &JetHTTPMux,
+    req: JetHTTPRequest,
+    handler: &JetHTTPHandler,
+) -> JetHTTPResponse {
+    let middlewares_empty = match mux.1.lock() {
+        Ok(middlewares) => middlewares.is_empty(),
+        Err(_) => return jet_http_srv_internal_response(),
+    };
+    if middlewares_empty {
+        return match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => jet_http_srv_error_response(error),
+            Err(_) => jet_http_srv_internal_response(),
+        };
+    }
+    jet_http_mux_run_handler(mux, req, handler.clone())
+}
+
 
 fn jet_http_mux_run_handler(
     mux: &JetHTTPMux,
@@ -4208,6 +4240,67 @@ fn jet_http_srv_format_connection(resp: &JetHTTPResponse, version: &str, close: 
     jet_http_srv_write_response(&mut bytes, resp, version, close)
         .expect("in-memory HTTP response formatting cannot fail");
     String::from_utf8(bytes).expect("text compatibility response contains UTF-8")
+}
+fn jet_http_srv_connection_nominates(headers: &JetHTTPHeaders, name: &str) -> bool {
+    for (candidate, value) in headers {
+        if candidate.eq_ignore_ascii_case("connection")
+            && value
+                .split(',')
+                .map(str::trim)
+                .any(|nominated| nominated.eq_ignore_ascii_case(name))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+
+fn jet_http_srv_write_bytes_response(
+    writer: &mut impl std::io::Write,
+    header: &str,
+    body: &JetHTTPBody,
+    expected_length: Option<usize>,
+) -> Result<Option<usize>, JetHTTPError> {
+    use std::io::Write;
+    let mut state = body.state.lock().map_err(|_| JetHTTPError::Internal {
+        incident_id: "http-body-lock".to_string(),
+    })?;
+    let Some(source) = state.source.take() else {
+        return Ok(None);
+    };
+    let JetHTTPBodySource::Bytes(reader) = source else {
+        state.source = Some(source);
+        return Ok(None);
+    };
+    let position = reader.position();
+    let bytes = reader.into_inner();
+    let start = usize::try_from(position).unwrap_or(bytes.len()).min(bytes.len());
+    let bytes = &bytes[start..];
+    let total = header.len().saturating_add(bytes.len());
+    let slices = [std::io::IoSlice::new(header.as_bytes()), std::io::IoSlice::new(bytes)];
+    let first = writer.write_vectored(&slices).map_err(|_| JetHTTPError::IO {
+        operation: "write response body".to_string(),
+    })?;
+    if first < total {
+        if first < header.len() {
+            writer.write_all(&header.as_bytes()[first..]).map_err(|_| JetHTTPError::IO {
+                operation: "write response headers".to_string(),
+            })?;
+            writer.write_all(bytes).map_err(|_| JetHTTPError::IO {
+                operation: "write response body".to_string(),
+            })?;
+        } else {
+            writer.write_all(&bytes[first - header.len()..]).map_err(|_| JetHTTPError::IO {
+                operation: "write response body".to_string(),
+            })?;
+        }
+    }
+    state.drained.store(true, std::sync::atomic::Ordering::Release);
+    if expected_length.is_some_and(|length| length != bytes.len()) {
+        return Err(JetHTTPError::InvalidFraming);
+    }
+    Ok(Some(bytes.len()))
 }
 
 fn jet_http_srv_write_response(
@@ -4295,31 +4388,31 @@ fn jet_http_srv_write_response(
         if close || close_delimited { "close" } else { "keep-alive" },
     )
     .expect("response formatting cannot fail");
-    let connection_headers = resp
-        .headers
-        .all("connection")
-        .into_iter()
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>();
     for (name, value) in &resp.headers {
         let framing = name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("transfer-encoding")
             || name.eq_ignore_ascii_case("trailer")
             || name.eq_ignore_ascii_case("connection");
-        let nominated = connection_headers
-            .iter()
-            .any(|candidate| name.eq_ignore_ascii_case(candidate));
+        let nominated = jet_http_srv_connection_nominates(&resp.headers, name);
         if !framing && !nominated {
             write!(&mut out, "{}: {}\r\n", name, value)
                 .expect("response formatting cannot fail");
         }
     }
     out.push_str("\r\n");
-    writer.write_all(out.as_bytes()).map_err(|_| JetHTTPError::IO {
-        operation: "write response headers".to_string(),
-    })?;
+    let direct_body = if !resp.suppress_body && !body_forbidden && !reset_content && !chunked {
+        jet_http_srv_write_bytes_response(writer, &out, &resp.body, known_length)?
+    } else {
+        None
+    };
+    if direct_body.is_none() {
+        writer.write_all(out.as_bytes()).map_err(|_| JetHTTPError::IO {
+            operation: "write response headers".to_string(),
+        })?;
+    }
+    if direct_body.is_some() {
+        return Ok(());
+    }
     if !resp.suppress_body && !body_forbidden && !reset_content {
         let mut written = 0usize;
         for chunk in resp.body.chunks(64 * 1024)? {

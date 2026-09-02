@@ -2,7 +2,9 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn run() -[Secret]> {
-    result :: vault.prepare_generate<crypto.SigningKey>("")
-    print(result == .Err(_))
+fn run() -[Secret, IO]> {
+    plan :: vault.prepare_generate<crypto.SigningKey>("") ?? return
+    write :: vault.authorize_write(&plan, "fixed prepare-generate authorization") ?? return
+    result :: vault.commit_generate(^write, ^plan) ?? return
+    print(result)
 }

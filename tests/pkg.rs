@@ -1756,7 +1756,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
                 root.join(".cache").join(label).join("run"),
             )
             .env(
-                "JET_CACHE_DIR",
+                "JET_STORE_DIR",
                 root.join(".cache").join(label).join("build"),
             )
             .output()
@@ -1784,7 +1784,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
             .current_dir(&root)
             .args(["build", "--target=web", shown])
             .env("NO_COLOR", "1")
-            .env("JET_CACHE_DIR", root.join(".cache").join("web"))
+            .env("JET_STORE_DIR", root.join(".cache").join("web"))
             .output()
             .expect("web command must run");
         assert!(

@@ -16,9 +16,7 @@ fn run(args: WorkloadArgs) {
     _created :: db.migrate(scoped, "agent-rows-v1", [
         SQL{"CREATE TABLE agent_rows (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}
     ]) ?? panic("create")
-    rows :: csv.rows(
-        text, delimiter: "\t", header: true, skip_blank: true
-    ) ?? panic("cannot parse input")
+    rows :: csv.rows(text, delimiter: "\t", header: true, skip_blank: true) ?? panic("cannot parse input")
     loop row in rows {
         fields :: row.fields
         line_number :: row.line
@@ -34,18 +32,12 @@ fn run(args: WorkloadArgs) {
             return
         }
         name :: fields[1]
-        _inserted :: scoped.execute(
-            SQL{"INSERT INTO agent_rows (id, name) VALUES ({id}, {name})"}
-        ) ?? panic("insert")
+        _inserted :: scoped.execute(SQL{"INSERT INTO agent_rows (id, name) VALUES ({id}, {name})"}) ?? panic("insert")
     }
-    count_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM agent_rows"}) ?? panic("count")
-    count_row :: count_opt ?? panic("count row")
+    count_row :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM agent_rows"}) ?? panic("count")
     count :: db.row_int(count_row, "n") ?? 0
     selected_id :: 2
-    selected_opt :: scoped.query_one(
-        SQL{"SELECT name FROM agent_rows WHERE id = {selected_id}"}
-    ) ?? panic("selected")
-    selected_row :: selected_opt ?? panic("selected row")
+    selected_row :: scoped.query_one(SQL{"SELECT name FROM agent_rows WHERE id = {selected_id}"}) ?? panic("selected")
     selected :: db.row_text(selected_row, "name") ?? "missing"
     print("rows={count}")
     print("selected={selected}")

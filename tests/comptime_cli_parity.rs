@@ -71,9 +71,8 @@ fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(args)
         .current_dir(project)
-        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_STORE_DIR", cache.join("build"))
         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-        .env("JET_RUNTIME_CACHE_DIR", cache.join("runtime"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap_or_else(|error| panic!("spawn `{}`: {error}", args.join(" ")))
@@ -91,7 +90,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", &file_name])
         .current_dir(&case_dir)
-        .env("JET_CACHE_DIR", cache.join("aot"))
+        .env("JET_STORE_DIR", cache.join("aot"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap_or_else(|error| panic!("failed to spawn AOT build for `{stem}`: {error}"));
@@ -122,7 +121,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         .args(["run", &file_name, "--trace-tiers"])
         .current_dir(&case_dir)
         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_STORE_DIR", cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap_or_else(|error| panic!("failed to spawn `jet run` for `{stem}`: {error}"));
@@ -153,7 +152,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         .args(["run", "--interpret", &file_name, "--trace-tiers"])
         .current_dir(&case_dir)
         .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
-        .env("JET_CACHE_DIR", interpreted_cache.join("build"))
+        .env("JET_STORE_DIR", interpreted_cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap_or_else(|error| {
@@ -354,7 +353,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "computed_constants.jet"])
         .current_dir(&scratch.path)
-        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_STORE_DIR", cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("build computed constants example");
@@ -378,7 +377,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
         .args(["run", "computed_constants.jet"])
         .current_dir(&scratch.path)
         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-        .env("JET_CACHE_DIR", cache.join("default"))
+        .env("JET_STORE_DIR", cache.join("default"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run computed constants through default jet run");
@@ -392,7 +391,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
         .args(["run", "--interpret", "computed_constants.jet"])
         .current_dir(&scratch.path)
         .env("JET_RUN_CACHE_DIR", cache.join("interpret-run"))
-        .env("JET_CACHE_DIR", cache.join("interpret-build"))
+        .env("JET_STORE_DIR", cache.join("interpret-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run computed constants through the interpreter");
@@ -436,7 +435,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         .args(["run", "job_runner.jet"])
         .current_dir(&scratch.path)
         .env("JET_RUN_CACHE_DIR", cache.join("default-run"))
-        .env("JET_CACHE_DIR", cache.join("default-build"))
+        .env("JET_STORE_DIR", cache.join("default-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run job runner through default jet run");
@@ -450,7 +449,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "job_runner.jet"])
         .current_dir(&scratch.path)
-        .env("JET_CACHE_DIR", cache.join("aot-build"))
+        .env("JET_STORE_DIR", cache.join("aot-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("build job runner example");
@@ -475,7 +474,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         .args(["run", "job_runner.jet", "--", "--help"])
         .current_dir(&scratch.path)
         .env("JET_RUN_CACHE_DIR", cache.join("job-help-run"))
-        .env("JET_CACHE_DIR", cache.join("job-help-build"))
+        .env("JET_STORE_DIR", cache.join("job-help-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("show default job subcommand help");
@@ -504,7 +503,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
             .args(["run", "job_runner.jet", "--", job])
             .current_dir(&scratch.path)
             .env("JET_RUN_CACHE_DIR", cache.join(format!("{job}-run")))
-            .env("JET_CACHE_DIR", cache.join(format!("{job}-build")))
+            .env("JET_STORE_DIR", cache.join(format!("{job}-build")))
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("run named job `{job}`: {error}"));
@@ -641,7 +640,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
                 "JET_RUN_CACHE_DIR",
                 cache.join(format!("{golden_name}-run")),
             )
-            .env("JET_CACHE_DIR", cache.join(format!("{golden_name}-build")))
+            .env("JET_STORE_DIR", cache.join(format!("{golden_name}-build")))
             .env("NO_COLOR", "1")
             .output()
             .expect("run default CLI command");
@@ -655,7 +654,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
                 cache.join(format!("{golden_name}-interpret-run")),
             )
             .env(
-                "JET_CACHE_DIR",
+                "JET_STORE_DIR",
                 cache.join(format!("{golden_name}-interpret-build")),
             )
             .env("NO_COLOR", "1")
@@ -690,7 +689,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         .args(["run", "subcommands.jet", "--", "--confg", "prod"])
         .current_dir(&scratch.path)
         .env("JET_RUN_CACHE_DIR", cache.join("unknown-run"))
-        .env("JET_CACHE_DIR", cache.join("unknown-build"))
+        .env("JET_STORE_DIR", cache.join("unknown-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run CLI with an unknown flag");
@@ -1095,9 +1094,8 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
             "--json",
         ])
         .current_dir(&root)
-        .env("JET_CACHE_DIR", scratch.join("bench-cache"))
+        .env("JET_STORE_DIR", scratch.join("bench-cache"))
         .env("JET_RUN_CACHE_DIR", scratch.join("bench-run-cache"))
-        .env("JET_RUNTIME_CACHE_DIR", scratch.join("bench-runtime-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("measure keep sink benchmark");
@@ -1255,7 +1253,7 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
         ])
         .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run"))
-        .env("JET_CACHE_DIR", scratch.join("cache/release-build"))
+        .env("JET_STORE_DIR", scratch.join("cache/release-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run committed package entry through release jet run");
@@ -1270,7 +1268,7 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
         .args(["run", entry.to_str().expect("entry path is utf8")])
         .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/run"))
-        .env("JET_CACHE_DIR", scratch.join("cache/default"))
+        .env("JET_STORE_DIR", scratch.join("cache/default"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run committed package entry through default jet run");
@@ -1290,7 +1288,7 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
         ])
         .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/dev-run"))
-        .env("JET_CACHE_DIR", scratch.join("cache/dev-build"))
+        .env("JET_STORE_DIR", scratch.join("cache/dev-build"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run committed package entry through interpreted jet dev");

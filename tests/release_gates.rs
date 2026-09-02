@@ -468,7 +468,7 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         "peerMeasured",
         "samples",
         "targetArtifactProof",
-        "JET_CACHE_DIR",
+        "JET_STORE_DIR",
         ".jet",
     ] {
         assert!(runner.contains(field), "compiled workload runner lost {field}");

@@ -548,14 +548,10 @@ pub(super) fn realize_ref_outcome(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    // Build the index client even when a hangar cache candidate exists: the
-    // cached path falls back to the indexed provider when the closure proof
-    // fails (see `locked_pin` above), and that provider names the exact
-    // missing logical path (E1350) only with an index. Construction is a few
-    // stats and tiny reads; resolution stays lazy, so warm cached runs never
-    // touch the network. On the cached path an unconfigured index is not an
-    // error — the candidate is expected to serve without it.
-    let nix_index_client = if uses_nix && fixtures.is_none() {
+    // Build the index client when an unresolved Nix ref may need discovery.
+    // A lock-pinned ref is already bound to its project CAS bundle; opening a
+    // catalog here would make offline replay depend on unrelated host state.
+    let nix_index_client = if uses_nix && fixtures.is_none() && !locked_pin {
         let built = match flags.local_nix_catalog.as_deref() {
             Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
             None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
@@ -948,6 +944,12 @@ pub(super) fn realize_adapter(
 fn report_realize_error(theme: &Theme, error: &Store::RealizeError) {
     match error {
         Store::RealizeError::Integrity(failure) => Store::report_integrity(theme, failure),
+        Store::RealizeError::LockedNix(error) => theme.error_coded(
+            "E1350",
+            "locked Nix closure could not be replayed",
+            &error.to_string(),
+            "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock.",
+        ),
         Store::RealizeError::Store(error) => {
             let detail = error.to_string();
             if detail.starts_with("unreproducible action") {

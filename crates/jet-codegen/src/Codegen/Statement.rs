@@ -400,14 +400,11 @@ pub(crate) fn emit_named_fn_value_sync(cx: &Cx, name: &str, ft: &Type) -> String
 
 fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: bool) -> String {
     let rust_name = mangle(name);
-    // The contextual function type can carry sema's effective Result return
-    // for a nested callable parameter. A named declaration's source type is
-    // the ABI this thunk calls and exposes, so prefer that registry entry when
-    // it is available; generated or foreign names still use the supplied type.
-    let fn_type = match cx.fn_types.get(name) {
-        Some(declared @ Type::Fn { .. }) => declared,
-        _ => ft,
-    };
+    // The caller chooses the ABI view. Source-facing values pass the source
+    // function type; executable callback slots pass the effective carrier.
+    // Keep this emitter mechanical so the two views never get guessed from
+    // a global registry.
+    let fn_type = ft;
     let Type::Fn { params, ret, .. } = fn_type else {
         return rust_name;
     };
@@ -447,23 +444,18 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
         cx.rust_type(fn_type)
     };
     // A Jet declaration with the default failure contract returns
-    // `JetOutcome<success, JetErr>` in AOT, while a `fn(...) T` callback
-    // carries only `T`. Explicit `?T`/`!E` returns already expose their
-    // outcome carrier in the function type and must remain direct.
+    // `JetOutcome<success, JetErr>` in AOT, while a source-facing `fn(...) T`
+    // callback unwraps that carrier. Explicit `?T`/`!E` returns already expose
+    // their outcome carrier in the source function type and remain direct.
     //
-    // Sema's callable parameter projection deliberately changes nested
-    // function returns to their effective carrier. The named declaration
-    // registry retains the source return spelling, which is the authority
-    // needed here to distinguish a default `T` from an explicit `?T`/`!E`.
-    let returns_outcome = match cx.fn_types.get(name) {
-        Some(Type::Fn { ret, .. }) => matches!(
+    // The selected `fn_type` above is authoritative: effective callback slots
+    // must return the carrier, while source-facing bindings must unwrap it.
+    let returns_outcome = match fn_type {
+        Type::Fn { ret, .. } => matches!(
             ret.as_deref(),
             Some(Type::Option(_)) | Some(Type::Result { .. })
         ),
-        _ => matches!(
-            ret.as_deref(),
-            Some(Type::Option(_)) | Some(Type::Result { .. })
-        ),
+        _ => false,
     };
     if !middleware
         && returns_outcome

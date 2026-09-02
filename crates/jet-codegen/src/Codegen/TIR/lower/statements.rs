@@ -2837,6 +2837,20 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                         // Totality: if the source omitted the type, infer it ONCE here from
                         // the init's already-resolved type. Codegen never infers.
+                        // A named function value is an executable callable,
+                        // so its TIR binding keeps the effective Result
+                        // carrier. The source spelling remains in
+                        // `fn_source_types` for diagnostics and wrapper
+                        // selection, not for the Rust local ABI.
+                        let named_fn_value_ty = match &init.kind {
+                            TExprKind::FnValue {
+                                kind:
+                                    TFnValueKind::NamedFn {
+                                        name: Some(_), ..
+                                    },
+                            } => Some(init.ty.clone()),
+                            _ => None,
+                        };
                         // A written Tensor place has an internal carrier that keeps the
                         // owner/range for the shared Prelude window setter. It must stay
                         // inferred; the source-facing ViewMut spelling is a sema type,
@@ -2852,6 +2866,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             || init.ty.is_compute_view_mut()
                         {
                             init.ty.clone()
+                        } else if let Some(fn_ty) = named_fn_value_ty.as_ref() {
+                            fn_ty.clone()
                         } else {
                             b.ty.as_ref()
                                 .map(|ty| ty.without_user_tags().clone())
@@ -2944,6 +2960,16 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             TLetTy::Inferred
                         } else if send_fn {
                             TLetTy::SendFn(ty.clone())
+                        } else if named_fn_value_ty.is_some() {
+                            // A named callback's surface binding type is the source
+                            // declaration, not sema's effective failure carrier.
+                            crate::Codegen::TIR::let_ty_for_opt(
+                                Some(&ty),
+                                cx,
+                                mut_fn,
+                                is_resource,
+                                b.gc_promotion.is_some() || b.gc_transferred,
+                            )
                         } else {
                             crate::Codegen::TIR::let_ty_for_opt(
                                 b.ty.as_ref(),

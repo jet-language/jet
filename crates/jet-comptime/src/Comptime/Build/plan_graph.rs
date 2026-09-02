@@ -6,6 +6,83 @@ use super::handles::{ActionId, PluginId, TargetId, TargetRef};
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
 use super::targets::{BuildTarget, TargetKind};
+use jet_foundation::SHA256::sha256_hex;
+
+/// The compiler-owned nodes that share the BuildPlan graph with declared
+/// actions. Their keys contain only logical names and content digests, never
+/// checkout-specific paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BuildNodeKind {
+    Check,
+    Compile,
+    Link,
+}
+impl BuildNodeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Compile => "compile",
+            Self::Link => "link",
+        }
+    }
+}
+
+/// A static compiler node in a BuildPlan. Runtime duration and cache reason
+/// live in the store's BuildRecord; this value is the graph identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildPlanNode {
+    pub kind: BuildNodeKind,
+    pub key: String,
+    pub subject: String,
+    pub inputs: Vec<String>,
+    pub input_digests: Vec<(String, String)>,
+}
+
+impl BuildPlanNode {
+    pub fn new(
+        kind: BuildNodeKind,
+        subject: impl Into<String>,
+        mut input_digests: Vec<(String, String)>,
+    ) -> Self {
+        input_digests.sort();
+        input_digests.dedup();
+        let inputs = input_digests
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let subject = subject.into();
+        let key = compiler_node_key(kind, &subject, &input_digests);
+        Self {
+            kind,
+            key,
+            subject,
+            inputs,
+            input_digests,
+        }
+    }
+}
+
+/// Canonical content key for a compiler-owned BuildPlan node.
+pub fn compiler_node_key(
+    kind: BuildNodeKind,
+    subject: &str,
+    input_digests: &[(String, String)],
+) -> String {
+    let mut inputs = input_digests.to_vec();
+    inputs.sort();
+    let mut bytes = Vec::new();
+    for value in ["jet.action-key.v2", "compiler-node", kind.as_str(), subject] {
+        bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(value.as_bytes());
+    }
+    for (name, digest) in inputs {
+        for value in [name, digest] {
+            bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+    }
+    sha256_hex(&bytes)
+}
 
 pub(super) const MAX_ACTIONS: usize = 100_000;
 
@@ -19,6 +96,8 @@ pub struct BuildPlan {
     pub(super) probes: Vec<BuildProbe>,
     pub(super) plugins: Vec<BuildPlugin>,
     pub(super) generated_modules: Vec<BuildGeneratedModule>,
+    /// Compiler-owned Check/Compile/Link nodes in deterministic order.
+    pub(super) compiler_nodes: Vec<BuildPlanNode>,
     pub(super) default: Option<TargetRef>,
     /// D-CONF-SPLIT1=A: computed fact writers produced by the selected
     /// `fn build`. They remain compile-time data and enter action identity so
@@ -29,6 +108,20 @@ pub struct BuildPlan {
 impl BuildPlan {
     pub fn fact_contributions(&self) -> &[jet_foundation::Policy::FactContribution] {
         &self.fact_contributions
+    }
+
+    pub fn compiler_nodes(&self) -> &[BuildPlanNode] {
+        &self.compiler_nodes
+    }
+
+    pub fn set_compiler_nodes(&mut self, mut nodes: Vec<BuildPlanNode>) {
+        nodes.sort_by(|left, right| {
+            left.kind
+                .cmp(&right.kind)
+                .then_with(|| left.subject.cmp(&right.subject))
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        self.compiler_nodes = nodes;
     }
 }
 
@@ -61,6 +154,7 @@ pub struct BuildGraph {
     pub targets: Vec<BuildGraphTarget>,
     pub actions: Vec<BuildGraphAction>,
     pub files: Vec<BuildGraphFile>,
+    pub nodes: Vec<BuildPlanNode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2728,13 +2728,11 @@ fn subject(
     ])
 }
 fn toolchain() -> Result<CanonicalJson, String> {
-    let executable = running_executable()
-        .map_err(|e| format!("cannot identify running compiler executable: {e}"))?;
-    let _ = executable_digest(&executable)?;
+    let compiler_digest = crate::CmdProve::proof_compiler_digest();
     let body = CanonicalJson::object([
         (
             "compiler_build_id".into(),
-            CanonicalJson::String(env!("JET_COMPILER_BUILD_ID").into()),
+            CanonicalJson::String(compiler_digest),
         ),
         (
             "jet_version".into(),
@@ -2863,10 +2861,6 @@ fn provider(
         CanonicalJson::String(stable_id(&body)),
     );
     Ok(CanonicalJson::Object(map))
-}
-fn executable_digest(path: &Path) -> Result<String, String> {
-    jet::SHA256::sha256_file_hex(path)
-        .map_err(|e| format!("cannot hash running compiler executable: {e}"))
 }
 /// Stable handle to this process's executable bytes. Cargo may atomically
 /// replace the pathname returned by `current_exe` while parallel test targets
@@ -3511,7 +3505,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn running_executable_selection_is_stable_and_fail_closed() {
-        use super::{executable_digest, select_running_executable};
+        use super::select_running_executable;
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -3546,7 +3540,6 @@ mod tests {
             select_running_executable(&current, &stable).unwrap(),
             current
         );
-        assert!(executable_digest(&current).is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 }

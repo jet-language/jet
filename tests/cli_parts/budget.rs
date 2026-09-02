@@ -561,7 +561,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
             .arg("build")
             .arg(dirs[0].join("src/run.jet"))
             .current_dir(&dirs[0])
-            .env("JET_CACHE_DIR", &cache),
+            .env("JET_STORE_DIR", &cache),
     );
     assert_eq!(
         primed.status.code(),
@@ -585,7 +585,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
                 Command::new(&copied)
                     .args(["budget", "check", "--json"])
                     .current_dir(dir)
-                    .env("JET_CACHE_DIR", &cache)
+                    .env("JET_STORE_DIR", &cache)
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped()),
             )

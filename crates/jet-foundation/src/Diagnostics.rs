@@ -10,6 +10,8 @@
 //! (owner, 2026-06-11) — and width-aware caret columns so the underline
 //! lines up even when the source line holds wide characters or emoji.
 
+use std::cell::Cell;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     /// Byte offset into the source, inclusive.
@@ -245,9 +247,9 @@ impl Diagnostic {
             moment: row.moment,
             severity: row.severity,
             code,
-            what: crate::Outcome::jet_sentence_case_line(&rendered.what),
-            why: crate::Outcome::jet_sentence_case_line(&rendered.why),
-            fix: crate::Outcome::jet_sentence_case_line(&rendered.fix),
+            what: rendered.what,
+            why: rendered.why,
+            fix: rendered.fix,
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
@@ -1357,6 +1359,30 @@ pub fn render_ice_report(what: &str, detail: &str, generated_file_attached: bool
     report
 }
 
+thread_local! {
+    static ICE_PANIC_HOOK_SUPPRESSED: Cell<bool> = const { Cell::new(false) };
+}
+
+struct IcePanicHookGuard(bool);
+
+impl Drop for IcePanicHookGuard {
+    fn drop(&mut self) {
+        ICE_PANIC_HOOK_SUPPRESSED.with(|flag| flag.set(self.0));
+    }
+}
+
+/// Run a speculative compiler operation without printing its caught panic.
+///
+/// The panic still unwinds to the caller, which can treat the operation as a
+/// failed optional fold. The flag is thread-local so another compiler worker's
+/// real internal error remains visible.
+pub fn with_ice_panic_hook_suppressed<R>(f: impl FnOnce() -> R) -> R {
+    let previous = ICE_PANIC_HOOK_SUPPRESSED.with(|flag| flag.replace(true));
+    let _guard = IcePanicHookGuard(previous);
+    f()
+}
+
+
 /// I2: installs the one process-wide panic hook so an uncaught panic
 /// anywhere in the jet binary prints the branded `render_ice_report` output
 /// instead of Rust's raw panic text (no `thread 'main' panicked at`), then
@@ -1372,6 +1398,9 @@ pub fn render_ice_report(what: &str, detail: &str, generated_file_attached: bool
 /// must never ship a live panic-on-env-var backdoor.
 pub fn install_ice_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
+        if ICE_PANIC_HOOK_SUPPRESSED.with(Cell::get) {
+            return;
+        }
         let backtrace_wanted = std::env::var_os("RUST_BACKTRACE").is_some_and(|v| v != "0");
         let backtrace = backtrace_wanted.then(std::backtrace::Backtrace::force_capture);
         let what = info

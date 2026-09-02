@@ -4122,8 +4122,11 @@ overlapping gzip rows of D-DEP-ARCHIVE1/D-CODECS1.
 sink, SQLite first; explicit `.begin/.commit/.rollback` distinct from
 `#Transact` (D-DBDRIVER1). D-DBMIGRATE1 runs ordered `[SQL]` statements and
 records their template text and bindings in the migration checksum. Rows stay
-inspectable maps with typed `db.row_*` reads, and `db.transaction`/`db.migrate`
-provide rollback over the same policy-bound SQL path. `core.http`: client+server submodules; client
+inspectable maps with typed `db.row_*` reads. `DBValue` is the closed SQL value
+carrier: `Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])`; a blob
+binding and a queried blob preserve every byte, and `.blob()` reads it back
+without text conversion. `db.transaction`/`db.migrate` provide rollback over
+the same policy-bound SQL path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
 plain `fn(req: Request) Response` on a `mux` (`mux.get("/users/:id", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)`) with HTTPS enabled by the named

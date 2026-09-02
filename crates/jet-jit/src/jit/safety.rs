@@ -1533,6 +1533,7 @@ pub(crate) fn jit_enum_type(ty: &Type) -> bool {
 fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
         || jit_list_of_int_list_type(ty)
+        || jit_list_of_flattenable_list_type(ty)
         || jit_list_task_type(ty)
         || jit_list_record_type(ty)
         || jit_map_string_type(ty)
@@ -2234,6 +2235,17 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return !args.is_empty()
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
+            if module == "core.encoding.csv" {
+                let supported = match method.as_str() {
+                    "parse" | "rows" => args.len() == 4,
+                    "decode" | "to_string" => args.len() == 1,
+                    "query" => args.len() == 2,
+                    "writer" => (1..=2).contains(&args.len()),
+                    "reader" => args.len() == 5,
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
             if module == "core.text" {
                 return match method.as_str() {
                     "lower" | "upper" | "trim" | "scalar_count" | "byte_count" | "graphemes"
@@ -2367,7 +2379,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 let supported = match method.as_str() {
                     "open_memory" => args.is_empty(),
                     "open" => args.len() == 1,
-                    "policy" | "row_int" | "row_text" => args.len() == 2,
+                    "policy" | "row_value" | "row_int" | "row_text" => args.len() == 2,
                     "migrate" | "transaction" => args.len() == 3,
                     _ => false,
                 };
@@ -2432,6 +2444,31 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     ("volatile_read", [_]) | ("volatile_write", [_, _]) => false,
                     _ => false,
                 };
+            }
+            if matches!(
+                module.as_str(),
+                "core.web.storage.local" | "core.web.storage.session"
+            ) {
+                let supported = match (method.as_str(), args.len()) {
+                    ("get" | "remove", 1) | ("set", 2) => true,
+                    ("clear", 0) => true,
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if module == "core.http.server" && method == "bind" {
+                let supported = args.len() == 2
+                    || (args.len() == 3 && matches!(&args[2].ty, Type::Option(_)));
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if module == "core.http.server" && method == "serve_once" {
+                return args.len() == 2
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+
+            if module == "core.http.server" && method == "access_log" {
+                return args.len() == 2
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if (module == "app" || module == "core.web")
                 && matches!(
@@ -2822,6 +2859,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     )))
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
+        TExprKind::EnumLit { payload, .. } => {
+            jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
+        }
         TExprKind::StructLit { fields, .. } => {
             (jit_struct_type(&expr.ty)
                 || matches!(&expr.ty, Type::TraitObject(_))
@@ -2918,21 +2958,16 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 && resident_safe_deref_source(arg)
                 && resident_safe_expr(arg, callees)
         }
-        TExprKind::EnumLit { payload, .. } => {
-            jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
-        }
-        TExprKind::Present(inner) | TExprKind::Ok(inner) | TExprKind::Err(inner) => {
-            resident_safe_expr(inner, callees)
-        }
         TExprKind::Try { inner, convert, .. } => {
-            matches!(
+            let conversion_ok = matches!(
                 convert,
                 TIR::TTryConvert::None
                     | TIR::TTryConvert::Never
                     | TIR::TTryConvert::DefaultErr
                     | TIR::TTryConvert::Typed { .. }
                     | TIR::TTryConvert::WidenUnion { .. }
-            ) && resident_safe_expr(inner, callees)
+            );
+            conversion_ok && resident_safe_expr(inner, callees)
         }
         TExprKind::OptField { base, .. } => {
             matches!(
@@ -3097,8 +3132,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             (jit_value_type(&expr.ty)
                 || jit_list_native_type(&expr.ty)
                 || jit_struct_type(&expr.ty)
-                || jit_tuple_type(&expr.ty))
-                && stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                || jit_tuple_type(&expr.ty)
+                || matches!(
+                    &expr.ty,
+                    Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER
+                ))
+            && stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
         }
         TExprKind::Lambda(lam) => {
             !lam.uses_stack_sentry
@@ -3284,6 +3323,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && resident_safe_expr(index, callees)
                     && (intish_ty(&index.ty) || matches!(&index.ty, Type::Named(_)))
             }
+            THostCall::OptionProbe { inner, .. } => resident_safe_expr(inner, callees),
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } | THostCall::SwitchSubjectValue => true,
             THostCall::StrMatchScan { subject, .. } => resident_safe_expr(subject, callees),
@@ -4316,7 +4356,8 @@ fn resident_safe_builtin_op(
         }
         // JIT ABI: Iter producers already materialize list handles.
         TBuiltinOp::IterToList | TBuiltinOp::IterCollect | TBuiltinOp::ListLazy => {
-            (jit_list_iter_elem_type(recv_ty).is_some()
+            let receiver_ok = resident_safe_expr(recv, callees);
+            let type_ok = jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
                 || jit_list_native_type(recv_ty)
                 || matches!(
@@ -4325,8 +4366,8 @@ fn resident_safe_builtin_op(
                         if name == jet_foundation::Syntax::TYPE_ITER
                             && args.len() == 1
                             && matches!(&args[0], Type::Named(unit) if unit == "Unit")
-                ))
-                && args.is_empty()
+                );
+            type_ok && args.is_empty() && receiver_ok
         }
         TBuiltinOp::Take | TBuiltinOp::StepBy | TBuiltinOp::Chunks | TBuiltinOp::Windows => {
             jit_list_iter_elem_type(recv_ty).is_some()
@@ -5003,7 +5044,9 @@ fn resident_safe_if_cond_leaf(cond: &TIfCond, callees: &HashSet<String>) -> bool
                 && resident_safe_if_cond_leaf(cond, callees)
         }
         TIfCond::And { left, right } => {
-            resident_safe_if_cond_leaf(left, callees) && resident_safe_if_cond_leaf(right, callees)
+            let left_ok = resident_safe_if_cond_leaf(left, callees);
+            let right_ok = resident_safe_if_cond_leaf(right, callees);
+            left_ok && right_ok
         }
     }
 }
@@ -5216,11 +5259,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     matches!(&subj.ty, Type::Option(_)) && resident_safe_expr(subj, callees)
                 }
             };
-            cond_ok
-                && then_body.iter().all(|s| resident_safe_stmt(s, callees))
-                && else_body
-                    .as_ref()
-                    .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
+            let then_ok = then_body.iter().all(|s| resident_safe_stmt(s, callees));
+            let else_ok = else_body
+                .as_ref()
+                .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)));
+            cond_ok && then_ok && else_ok
         }
         TStmt::Loop { body, .. } => body.iter().all(|s| resident_safe_stmt(s, callees)),
         TStmt::While { cond, body, .. } => {
@@ -5457,20 +5500,30 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     || jit_list_record_type(&collection.ty));
             let map_ok =
                 method_kind.is_none() && var2.is_some() && jit_map_string_type(&collection.ty);
+            let chunks_ok = method_kind.is_none()
+                && var2.is_none()
+                && matches!(&collection.ty, Type::Named(name) if name == "HTTPBodyChunks");
             // `by_value` marks Stream/Iter/HTTPBodyChunks/moved lists. List and
             // FixedList materialize as handles; true lazy Stream stays out.
             let by_value_ok = !*by_value
                 || jet_foundation::Collections::is_iter_type(&collection.ty)
                 || matches!(&collection.ty, Type::List(_) | Type::FixedList { .. })
+                || matches!(&collection.ty, Type::Named(name) if name == "HTTPBodyChunks")
                 || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
-            (chars_ok || iterable_ok || stream_ok || list_ok || list_pair_ok || map_ok)
-                && by_value_ok
-                && resident_safe_expr(source, callees)
-                && resident_safe_expr(collection, callees)
-                && step
-                    .as_ref()
-                    .is_none_or(|step| resident_safe_expr(step, callees))
-                && body.iter().all(|s| resident_safe_stmt(s, callees))
+            let source_ok = resident_safe_expr(source, callees);
+            let collection_ok = resident_safe_expr(collection, callees);
+            let step_ok = step
+                .as_ref()
+                .is_none_or(|step| resident_safe_expr(step, callees));
+            let body_ok = body.iter().all(|s| resident_safe_stmt(s, callees));
+            let result =
+                (chars_ok || iterable_ok || stream_ok || list_ok || list_pair_ok || map_ok || chunks_ok)
+                    && by_value_ok
+                    && source_ok
+                    && collection_ok
+                    && step_ok
+                    && body_ok;
+            result
         }
         TStmt::EnumMatch {
             scrutinee,
@@ -6034,11 +6087,14 @@ fn for_in_collection_shape_supported(
             || jit_closure_elem_type(&collection.ty).is_some()
             || jit_list_record_type(&collection.ty));
     let map_ok = var2.is_some() && jit_map_string_type(&collection.ty);
+    let chunks_ok = var2.is_none()
+        && matches!(&collection.ty, Type::Named(name) if name == "HTTPBodyChunks");
     let by_value_ok = !by_value
         || jet_foundation::Collections::is_iter_type(&collection.ty)
         || matches!(&collection.ty, Type::List(_) | Type::FixedList { .. })
+        || matches!(&collection.ty, Type::Named(name) if name == "HTTPBodyChunks")
         || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
-    (list_ok || stream_ok || list_pair_ok || map_ok) && by_value_ok
+    (list_ok || stream_ok || list_pair_ok || map_ok || chunks_ok) && by_value_ok
 }
 
 fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Option<String> {
@@ -6756,7 +6812,8 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
     if lam.uses_stack_sentry {
         return false;
     }
-    if lam.captures.len() > 4 {
+    // Callback ABI slots carry captures and source parameters together.
+    if lam.captures.len().saturating_add(lam.params.len()) > 4 {
         return false;
     }
     if !lam
@@ -7165,6 +7222,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::DBValueFloat
         | THandleOp::DBValueText
         | THandleOp::DBValueBool
+        | THandleOp::DBValueBlob
         | THandleOp::DBValueIsNull
             if args.is_empty() =>
         {
@@ -7253,9 +7311,27 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::ProcessStdinWrite => args.len() == 1,
         THandleOp::TerminalSessionResize => args.len() == 1,
-        THandleOp::EventMethod { method } => {
-            matches!((method.as_str(), args.len()), ("cancel" | "is_active", 0))
-        }
+        THandleOp::EventMethod { method } => match method.as_str() {
+            "listener_count"
+            | "join"
+            | "close"
+            | "summary"
+            | "active_count"
+            | "cancel"
+            | "unsubscribe"
+            | "state"
+            | "delivered_handlers"
+            | "is_active"
+                if args.is_empty() =>
+            {
+                true
+            }
+            "on" | "once" if args.len() == 2 => true,
+            "on_priority" if args.len() == 3 => true,
+            "emit" | "emit_async" if args.len() == 1 => true,
+            "run" if args.len() == 1 || args.len() == 2 => true,
+            _ => false,
+        },
         // Keep residency aligned with the actual LowerCtx HTTP arms below.
         // The evaluator has a separate ambient bridge for the subset field
         // forms, and both paths call the shared Prelude adapters.
@@ -7265,6 +7341,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             ("HTTPResponse", "header") if args.len() == 1 => true,
             ("HTTPResponse", "json") if args.len() <= 1 => true,
             ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "chunks") if args.len() <= 1 => true,
+            ("HTTPBodyChunks", "next") if args.is_empty() => true,
             ("HTTPBody", "copy_to") if args.len() == 2 => true,
             ("HTTPRequest", "json") if args.len() == 1 => true,
             ("HTTPRequest", "body") if args.len() == 1 => true,
@@ -7296,8 +7374,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             ("HTTPRequest", "text") if args.len() <= 1 => true,
             ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
             ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "chunks") if args.len() <= 1 => true,
+            ("HTTPBodyChunks", "next") if args.is_empty() => true,
             ("HTTPBody", "copy_to") if args.len() == 2 => true,
             ("HTTPResponse", "status" | "body") if args.is_empty() => true,
+            ("HTTPResponse", "header") if args.len() == 2 => true,
             ("HTTPResponse", "text") if args.len() <= 1 => true,
             ("HTTPResponse", "trailers") if args.len() == 1 => true,
             ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,

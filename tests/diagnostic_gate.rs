@@ -66,7 +66,7 @@ fn run_cli(project: &common::Scratch, cache: &str, args: &[&str]) -> Output {
             project.path.join(format!("cache/{cache}/run")),
         )
         .env(
-            "JET_CACHE_DIR",
+            "JET_STORE_DIR",
             project.path.join(format!("cache/{cache}/build")),
         )
         .env("NO_COLOR", "1")

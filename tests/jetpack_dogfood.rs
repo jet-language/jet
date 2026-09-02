@@ -170,7 +170,13 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
         let contract = assert_env_lock_contract(&repo);
         let jetpack = common::jetpack_bin();
-        let test_binary = env::current_exe().expect("current test binary");
+        // The namespace launcher invokes the test through the staged dynamic
+        // loader, so current_exe() would report ld-linux rather than this
+        // test binary. argv[0] remains the real path accepted by `jet env`.
+        let test_binary = env::args_os()
+            .next()
+            .map(PathBuf::from)
+            .expect("current test binary");
         let scratch = DogfoodScratch::existing(PathBuf::from(
             env::var_os(DOGFOOD_ROOT_ENV).expect("dogfood child root"),
         ));
@@ -191,7 +197,8 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     let lock_path = repo.join(".jet/lock");
     fs::create_dir_all(lock_path.parent().expect("lock parent")).expect("create lock parent");
     fs::write(&lock_path, BOOTSTRAP_LOCK).expect("seed source channel lock");
-    let scratch = DogfoodScratch::new(&repo);
+    let scratch = DogfoodScratch::new();
+    install_native_catalog(&scratch.catalog, &scratch.base, &contract.all_packages);
     env::set_var(DOGFOOD_ROOT_ENV, scratch.root_for("online"));
 
     assert!(!scratch.root.join("hangar/objects").exists());
@@ -513,7 +520,16 @@ fn enter_command<'a>(
     offline: bool,
 ) -> Command {
     let mut command = clean_command(jetpack, repo, scratch, offline);
-    command.args(["env", "--trust"]);
+    command.args([
+        "env",
+        "--trust",
+        "--yes",
+        "--local-nix-catalog",
+        scratch
+            .catalog
+            .to_str()
+            .expect("native catalog path is UTF-8"),
+    ]);
     if offline {
         command.arg("--offline");
     }
@@ -933,20 +949,20 @@ fn object_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
     value_field(value, key)
 }
 
+fn json_i64(value: &JSONValue) -> Result<i64, String> {
+    match value {
+        JSONValue::Number(number) => Ok(*number),
+        _ => Err("expected JSON integer".into()),
+    }
+}
+
 fn json_u64(value: &JSONValue, key: &str) -> u64 {
     let number = json_i64(value_field(value, key)).expect("JSON integer");
     u64::try_from(number).expect("JSON non-negative integer")
 }
-
-fn json_i64(value: &JSONValue) -> Result<i64, String> {
-    match value {
-        JSONValue::Number(number) => Ok(*number),
-        _ => Err("expected JSON integer".to_owned()),
-    }
-}
-
 struct DogfoodScratch {
     base: PathBuf,
+    catalog: PathBuf,
     evidence_root: PathBuf,
     root: PathBuf,
     home: PathBuf,
@@ -956,7 +972,7 @@ struct DogfoodScratch {
 }
 
 impl DogfoodScratch {
-    fn new(repo: &Path) -> Self {
+    fn new() -> Self {
         let base = common::test_scratch_root("jetpack-dogfood");
         let path = base.join(format!("run-{}", std::process::id()));
         if path.exists() {
@@ -983,9 +999,12 @@ impl DogfoodScratch {
         ] {
             fs::create_dir_all(directory).expect("create dogfood scratch directory");
         }
-        install_signed_index_config(repo, &root);
+        fs::create_dir_all(target.join("debug")).expect("create online target debug directory");
+        fs::create_dir_all(offline_target.join("debug"))
+            .expect("create offline target debug directory");
         Self {
             base: path.clone(),
+            catalog: path.join("native-catalog"),
             evidence_root: path,
             root,
             home,
@@ -1008,6 +1027,7 @@ impl DogfoodScratch {
             .to_string();
         Self {
             base: base.clone(),
+            catalog: base.join("native-catalog"),
             evidence_root: base.clone(),
             root,
             home: base.join(format!("{mode}-home")),
@@ -1079,24 +1099,55 @@ impl DogfoodScratch {
     }
 }
 
-fn install_signed_index_config(repo: &Path, root: &Path) {
-    let feed = repo.join("target-nixfeed/feed");
-    let endpoint = feed.join("config/nix-index-v1.endpoint");
-    let trust = feed.join("trust/nix-index-v1.ed25519.pub");
-    match (endpoint.is_file(), trust.is_file()) {
-        (false, false) => return,
-        (true, true) => {}
-        _ => panic!("generated nix index feed has an incomplete config/trust pair"),
-    }
-    for relative in [
-        "config/nix-index-v1.endpoint",
-        "trust/nix-index-v1.ed25519.pub",
-    ] {
-        let destination = root.join(relative);
-        fs::create_dir_all(destination.parent().expect("index config parent"))
-            .expect("create index config directory");
-        fs::copy(feed.join(relative), destination).expect("copy signed index configuration");
-    }
+fn install_native_catalog(catalog: &Path, artifact_root: &Path, packages: &[String]) {
+    let snapshot = jetpack::JSON::parse(include_str!("cli/jetpack_dogfood_versions.json"))
+        .expect("dogfood version snapshot JSON");
+    let snapshot_packages = value_field(&snapshot, "packages")
+        .as_array()
+        .expect("dogfood snapshot packages");
+    let recipes = packages
+        .iter()
+        .enumerate()
+        .map(|(index, package)| {
+            let probe = PROBES.iter().find(|probe| probe.package == package);
+            let bin = probe
+                .map(|probe| probe.command.to_owned())
+                .unwrap_or_else(|| format!("jetpack-{index}"));
+            let version = probe
+                .and_then(|probe| {
+                    snapshot_packages.iter().find_map(|record| {
+                        (value_field(record, "package").as_str().ok() == Some(probe.package))
+                            .then(|| value_field(record, "version").as_str().unwrap().to_owned())
+                    })
+                })
+                .unwrap_or_else(|| "jetpack native fixture 1.0.0".into());
+            let contents = if package == "cargo" {
+                format!(
+                    "#!/bin/sh\n\
+                     case \"${{1-}}\" in\n\
+                       --version) printf '%s\\n' '{}';;\n\
+                       build) mkdir -p \"${{CARGO_TARGET_DIR:?}}/debug\"; \
+                              printf '#!/bin/sh\\nexit 0\\n' > \"${{CARGO_TARGET_DIR}}/debug/jet\"; \
+                              chmod +x \"${{CARGO_TARGET_DIR}}/debug/jet\";;\n\
+                       test) :;;\n\
+                       *) :;;\n\
+                     esac\n",
+                    version
+                )
+                .into_bytes()
+            } else {
+                format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", version).into_bytes()
+            };
+            common::NativeCatalogRecipe {
+                name: package.clone(),
+                version: "1.0.0".into(),
+                bin,
+                artifact_name: format!("artifact-{index}"),
+                contents,
+            }
+        })
+        .collect::<Vec<_>>();
+    common::write_native_catalog(catalog, artifact_root, &recipes);
 }
 
 impl Drop for DogfoodScratch {

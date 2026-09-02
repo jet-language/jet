@@ -206,3 +206,33 @@ fn mode_of(meta: &std::fs::Metadata) -> i64 {
     // Non-Unix metadata has no portable permission bits; expose readonly as 0/1.
     i64::from(u8::from(meta.permissions().readonly()))
 }
+pub(crate) fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
+    use std::io::{Read, Seek, SeekFrom};
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    f.seek(SeekFrom::Start(offset.max(0) as u64))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    let mut buf = vec![0u8; len.max(0) as usize];
+    let n = f
+        .read(&mut buf)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    buf.truncate(n);
+    Ok(buf)
+}
+pub(crate) fn jet_std_fs_read_bytes(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    std::fs::read(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
+}

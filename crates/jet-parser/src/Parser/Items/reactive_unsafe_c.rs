@@ -133,6 +133,7 @@ impl<'a> Parser<'a> {
             return_view_provenance: None,
             declared_return_view_provenance: None,
             gc_return: false,
+            diverges: false,
             gc_scope: false,
             is_unsafe: false,
             unsafe_reason: None,
@@ -456,7 +457,7 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
-            functions.push(self.extern_fn()?);
+            functions.push(self.extern_fn(matches!(kind, CModuleKind::Extern))?);
         }
         self.expect(TokKind::RBrace, "to close the C FFI module body")?;
         let end = self.toks[self.pos - 1].span.end;

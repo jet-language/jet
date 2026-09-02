@@ -2709,12 +2709,14 @@
     impl JetDecimal {
         pub fn from_str(s: &str) -> Result<Self, String> {
             let (negative, digits, scale) = crate::jet_json_number::json_decimal_lexeme(s)?;
+            // Keep lexical scale at the source boundary. Exact Decimal
+            // display distinguishes `2` from `2.0`; arithmetic applies the
+            // shared presentation-scale rule below.
             Ok(JetDecimal {
                 negative,
                 digits,
                 scale,
-            }
-            .normalize())
+            })
         }
 
         /// Project one JSON number token directly into base-10 digits. This
@@ -2805,16 +2807,27 @@
             JetBigInt::from_str(&s).unwrap()
         }
 
-        fn from_bigint(v: JetBigInt, scale: u32, negative: bool) -> JetDecimal {
+        /// D-DECIMAL1 / D-TYPE2-DEFAULT1: preserve exact presentation scale.
+        /// Addition and subtraction use the finer operand scale. Multiplication
+        /// starts at the sum of operand scales and trims only exact trailing
+        /// zero places down to that same finer scale.
+        fn from_bigint_preserving_scale(
+            v: JetBigInt,
+            scale: u32,
+            negative: bool,
+        ) -> JetDecimal {
             let s = v.to_string_rep();
             let body = if s.starts_with('-') { &s[1..] } else { &s };
             let digits: Vec<u8> = body.bytes().map(|b| b - b'0').collect();
             JetDecimal {
-                negative,
+                negative: negative && digits != [0],
                 digits,
                 scale,
             }
-            .normalize()
+        }
+
+        fn from_bigint(v: JetBigInt, scale: u32, negative: bool) -> JetDecimal {
+            Self::from_bigint_preserving_scale(v, scale, negative).normalize()
         }
 
         pub fn add(&self, other: &JetDecimal) -> JetDecimal {
@@ -2828,14 +2841,14 @@
                 b.negative
             };
             if a.negative == b.negative {
-                JetDecimal::from_bigint(sum, a.scale, negative)
+                JetDecimal::from_bigint_preserving_scale(sum, a.scale, negative)
             } else {
                 let diff = if a.to_bigint().cmp_abs(&b.to_bigint()) >= 0 {
                     a.to_bigint().sub_abs(&b.to_bigint())
                 } else {
                     b.to_bigint().sub_abs(&a.to_bigint())
                 };
-                JetDecimal::from_bigint(diff, a.scale, negative)
+                JetDecimal::from_bigint_preserving_scale(diff, a.scale, negative)
             }
         }
 
@@ -2846,10 +2859,20 @@
         }
 
         pub fn mul(&self, other: &JetDecimal) -> JetDecimal {
-            let prod = self.to_bigint().mul(&other.to_bigint());
-            JetDecimal::from_bigint(
+            let mut prod = self.to_bigint().mul(&other.to_bigint());
+            let mut scale = self.scale + other.scale;
+            let minimum_scale = self.scale.max(other.scale);
+            while scale > minimum_scale {
+                let (next, remainder) = prod.div_rem_small(10);
+                if remainder != 0 {
+                    break;
+                }
+                prod = next;
+                scale -= 1;
+            }
+            JetDecimal::from_bigint_preserving_scale(
                 prod,
-                self.scale + other.scale,
+                scale,
                 self.negative != other.negative,
             )
         }

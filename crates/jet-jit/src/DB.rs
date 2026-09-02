@@ -52,6 +52,7 @@ const DV_INT: i64 = 1;
 const DV_FLOAT: i64 = 2;
 const DV_TEXT: i64 = 3;
 const DV_BOOL: i64 = 4;
+const DV_BLOB: i64 = 5;
 
 thread_local! {
     /// JIT-local policy capabilities. The token is passed through Cranelift
@@ -143,6 +144,34 @@ fn alloc_dbvalue_float(f: f64) -> i64 {
     })
 }
 
+fn alloc_byte_list(bytes: &[u8]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for byte in bytes {
+            let _ = rt.heap.list_push_int(list, i64::from(*byte));
+        }
+        list
+    })
+}
+
+fn alloc_dbvalue_value(value: wire::DBValue) -> i64 {
+    match value {
+        wire::DBValue::Null => alloc_dbvalue_record(DV_NULL, 0),
+        wire::DBValue::Int(value) => alloc_dbvalue_record(DV_INT, value),
+        wire::DBValue::Float(value) => alloc_dbvalue_float(value),
+        wire::DBValue::Text(value) => {
+            let text = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+            alloc_dbvalue_record(DV_TEXT, text)
+        }
+        wire::DBValue::Bool(value) => alloc_dbvalue_record(DV_BOOL, i64::from(value)),
+        wire::DBValue::Blob(value) => {
+            let bytes = alloc_byte_list(&value);
+            alloc_dbvalue_record(DV_BLOB, bytes)
+        }
+    }
+}
+
+
 fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
     Concurrency::with_runtime_mut(|rt| {
         let disc = rt.heap.record_get_int(handle, 0)?;
@@ -163,6 +192,15 @@ fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
             DV_BOOL => Some(wire::DBValue::Bool(
                 rt.heap.record_get_int(handle, 1).unwrap_or(0) != 0,
             )),
+            DV_BLOB => {
+                let list = rt.heap.record_get_int(handle, 1)?;
+                let len = rt.heap.list_len(list)?;
+                let mut bytes = Vec::with_capacity(len as usize);
+                for i in 0..len {
+                    bytes.push(u8::try_from(rt.heap.list_get_int(list, i)?).ok()?);
+                }
+                Some(wire::DBValue::Blob(bytes))
+            }
             _ => None,
         }
     })
@@ -202,6 +240,10 @@ pub(crate) fn alloc_dbvalue_list(values: Vec<wire::DBValue>) -> i64 {
                 alloc_dbvalue_record(DV_TEXT, text)
             }
             wire::DBValue::Bool(value) => alloc_dbvalue_record(DV_BOOL, i64::from(value)),
+            wire::DBValue::Blob(value) => {
+                let bytes = alloc_byte_list(&value);
+                alloc_dbvalue_record(DV_BLOB, bytes)
+            }
         })
         .collect::<Vec<_>>();
     Concurrency::with_runtime_mut(|rt| {
@@ -291,6 +333,16 @@ fn rows_to_list_of_maps(rows: Vec<wire::JetDBRow>) -> i64 {
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_BOOL);
                         let _ = rt.heap.record_set_int(h, 1, i64::from(*b));
+                        h
+                    }
+                    wire::DBValue::Blob(bytes) => {
+                        let list = rt.heap.alloc_empty_list();
+                        for byte in bytes {
+                            let _ = rt.heap.list_push_int(list, i64::from(*byte));
+                        }
+                        let h = rt.heap.alloc_record(2);
+                        let _ = rt.heap.record_set_int(h, 0, DV_BLOB);
+                        let _ = rt.heap.record_set_int(h, 1, list);
                         h
                     }
                 };
@@ -507,6 +559,18 @@ fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
     }
 }
 
+fn jet_jit_db_row_value(row: i64, key: i64) -> i64 {
+    let key_s = clone_string(key);
+    let val = Concurrency::with_runtime_mut(|rt| {
+        let kid = rt.heap.alloc_string(key_s.clone());
+        rt.heap.map_get(row, kid)
+    });
+    match val.and_then(read_dbvalue) {
+        Some(value) => result_ok(alloc_dbvalue_value(value) as u64),
+        None => result_err_msg(&format!("missing column `{key_s}`")),
+    }
+}
+
 fn jet_jit_db_row_text(row: i64, key: i64) -> i64 {
     let key_s = clone_string(key);
     let val = Concurrency::with_runtime_mut(|rt| {
@@ -560,6 +624,15 @@ fn jet_jit_dbvalue_text(handle: i64) -> i64 {
                 let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
                 result_ok(sid as u64)
             }
+            Err(e) => result_err_msg(&e),
+        },
+        None => result_err_msg("invalid DBValue"),
+    }
+}
+fn jet_jit_dbvalue_blob(handle: i64) -> i64 {
+    match read_dbvalue(handle) {
+        Some(v) => match v.blob() {
+            Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
             Err(e) => result_err_msg(&e),
         },
         None => result_err_msg("invalid DBValue"),
@@ -644,6 +717,7 @@ host_fns! {
     }
     open_memory: "jet_jit_db_open_memory" => jet_jit_db_open_memory: nullary;
     open: "jet_jit_db_open" => jet_jit_db_open: unary;
+    row_value: "jet_jit_db_row_value" => jet_jit_db_row_value: binary;
     policy: "jet_jit_db_policy" => jet_jit_db_policy: binary;
     with_policy: "jet_jit_db_with_policy" => jet_jit_db_with_policy: ternary;
     close: "jet_jit_db_close" => jet_jit_db_close: unary_i8;
@@ -661,6 +735,7 @@ host_fns! {
     dbvalue_int: "jet_jit_dbvalue_int" => jet_jit_dbvalue_int: unary;
     dbvalue_float: "jet_jit_dbvalue_float" => jet_jit_dbvalue_float: unary;
     dbvalue_text: "jet_jit_dbvalue_text" => jet_jit_dbvalue_text: unary;
+    dbvalue_blob: "jet_jit_dbvalue_blob" => jet_jit_dbvalue_blob: unary;
     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
 }

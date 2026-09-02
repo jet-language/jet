@@ -288,10 +288,27 @@ fn http_text_result() -> Type {
 
 
 impl<'a> Checker<'a> {
-    fn expr_definitely_diverges(expr: &Expr) -> bool {
+    fn expr_definitely_diverges(&self, expr: &Expr) -> bool {
         match expr.without_parens() {
-            Expr::Todo { .. } => true,
-            Expr::Call(call) => call.name == Syntax::BUILTIN_PANIC,
+            Expr::Todo { .. } | Expr::NoElse(_) => true,
+            Expr::Call(call) => {
+                call.name == Syntax::BUILTIN_PANIC
+                    || self.diverging_functions.contains(&call.name)
+            }
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
+                let core_diverges = self
+                    .core_module_path_from_receiver(receiver)
+                    .and_then(|(module, _, _)| {
+                        crate::Sema::CheckerCoreLib::core_call_signature(&module, method)
+                    })
+                    .and_then(|(_, ret)| ret)
+                    .is_some_and(|ret| {
+                        matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER)
+                    });
+                core_diverges || self.imported_call_diverges(receiver, method)
+            }
             Expr::If {
                 then_body,
                 then_value,
@@ -300,13 +317,27 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let then_diverges = crate::Sema::Diagnostics::block_definitely_exits(then_body)
-                    || Self::expr_definitely_diverges(then_value);
+                    || self.expr_definitely_diverges(then_value);
                 let else_diverges = crate::Sema::Diagnostics::block_definitely_exits(else_body)
-                    || Self::expr_definitely_diverges(else_value);
+                    || self.expr_definitely_diverges(else_value);
                 then_diverges && else_diverges
             }
             _ => false,
         }
+    }
+    fn imported_call_diverges(&self, receiver: &Expr, method: &str) -> bool {
+        let Expr::Ident(alias, _) = receiver.without_parens() else {
+            return false;
+        };
+        let Some(module_idx) = self.imports.get(alias).copied() else {
+            return false;
+        };
+        self.modules
+            .and_then(|modules| modules.get(module_idx))
+            .is_some_and(|state| state.diverging_functions.contains(method))
+    }
+    pub(crate) fn expr_diverges(&self, expr: &Expr) -> bool {
+        self.expr_definitely_diverges(expr)
     }
     fn named_local_type(&self, expr: &Expr) -> Option<String> {
         match expr.without_parens() {
@@ -1905,6 +1936,13 @@ impl<'a> Checker<'a> {
         } else {
             self.auto_propagate_call(e, result)
         };
+        if self.expr_definitely_diverges(e)
+            || result
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, Type::Named(name) if name == Syntax::TYPE_NEVER))
+        {
+            self.flow.reachable = false;
+        }
         if result
             .as_ref()
             .is_some_and(crate::Sema::type_uses_default_int)
@@ -2650,7 +2688,7 @@ impl<'a> Checker<'a> {
             }
         );
         if !result_pattern {
-            let branch_diverges = Self::expr_definitely_diverges(value);
+            let branch_diverges = self.expr_definitely_diverges(value);
             let result = if self.statement_expr_inference || branch_diverges {
                 // A braced dispatch arm is a statement arm when the whole
                 // dispatch is used as a statement. Use the statement call
@@ -2904,6 +2942,8 @@ impl<'a> Checker<'a> {
                 let else_ty = self.infer_pattern_branch_value(cond, else_value);
                 self.pop_scope();
                 let else_path = self.flow.clone();
+                let then_ty = then_ty.filter(|_| then_path.reachable);
+                let else_ty = else_ty.filter(|_| else_path.reachable);
                 // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
                 // on one arm and not the other. `Moved::join` is a union (keeps
                 // either arm's move), so the merged store alone would call this
@@ -2949,9 +2989,9 @@ impl<'a> Checker<'a> {
                         // `todo`, `panic`, and an all-diverging nested value-if
                         // do not contribute a live branch type. Keep the type
                         // from the branch that can reach the join.
-                        let then_is_diverging = Self::expr_definitely_diverges(then_value)
+                        let then_is_diverging = self.expr_definitely_diverges(then_value)
                             || crate::Sema::Diagnostics::block_definitely_exits(then_body);
-                        let else_is_diverging = Self::expr_definitely_diverges(else_value)
+                        let else_is_diverging = self.expr_definitely_diverges(else_value)
                             || crate::Sema::Diagnostics::block_definitely_exits(else_body);
                         if a == b || else_is_diverging {
                             // Update a typed hole's expected_type to match what
@@ -2977,6 +3017,17 @@ impl<'a> Checker<'a> {
                             Some(joined)
                         } else {
                             if self.collect_item_types.is_empty() {
+                                let fix = if matches!(
+                                    (&a, &b),
+                                    (
+                                        Type::Named(left),
+                                        Type::Named(right)
+                                    ) if left == Syntax::TYPE_NEVER || right == Syntax::TYPE_NEVER
+                                ) {
+                                    "make each returning branch produce the same value type; a non-returning branch needs no value".to_string()
+                                } else {
+                                    format!("make both branches produce {} (or the same type)", a.show())
+                                };
                                 self.diags.push(Diagnostic::error(
                                     "E0124",
                                     format!(
@@ -2986,13 +3037,11 @@ impl<'a> Checker<'a> {
                                     ),
                                     "an `if` used as a value must give the same type on every path (S68)"
                                         .to_string(),
-                                    format!(
-                                        "make both branches produce {} (or the same type)",
-                                        a.show()
-                                    ),
+                                    fix,
                                     Some(span),
                                 ));
-                            } else {
+                            }
+                            else {
                                 self.diags.push(Diagnostic::error(
                                     "E0074",
                                     "this collecting loop produces incompatible item types"
@@ -5751,7 +5800,26 @@ impl<'a> Checker<'a> {
                 None
             }
         });
+        // A map literal is one owning destination, but its entries are checked
+        // independently. Track repeated owned locals here so lowering does not
+        // emit several moves from one `String`/record value (I2/E0382).
+        let mut remaining_value_idents = std::collections::HashMap::<String, usize>::new();
+        for (_, value) in entries.iter() {
+            if let Expr::Ident(name, _) = value {
+                *remaining_value_idents.entry(name.clone()).or_default() += 1;
+            }
+        }
         for (k, v) in entries.iter_mut() {
+            let value_name = match v {
+                Expr::Ident(name, _) => Some(name.clone()),
+                _ => None,
+            };
+            let repeated_owned_value = value_name.as_ref().is_some_and(|name| {
+                let remaining = remaining_value_idents.entry(name.clone()).or_default();
+                let repeated = *remaining > 1;
+                *remaining = remaining.saturating_sub(1);
+                repeated
+            });
             self.reject_fixed_storage(k, "be stored in a map");
             self.reject_fixed_storage(v, "be stored in a map");
             let Some(kt) = expected_map
@@ -5768,6 +5836,20 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
+            // An owned local also needs one implicit copy when the map is not
+            // its last use in the enclosing block. Borrowed parameters already
+            // follow the ordinary owning-slot path; only owned locals are
+            // handled here.
+            let copy_owned_value = value_name.as_ref().is_some_and(|name| {
+                self.lookup(name).is_some_and(|info| {
+                    info.param_conv.is_none()
+                        && !type_is_copy(&info.ty)
+                        && (repeated_owned_value || self.is_name_live_after(name))
+                })
+            });
+            if copy_owned_value && self.is_cloneable_type(&vt) {
+                self.insert_implicit_copy(v, &vt, &vt);
+            }
             if !self.map_key_type_eligible(&kt) {
                 self.diags.push(Diagnostic::error(
                 "E0502",

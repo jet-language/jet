@@ -429,6 +429,7 @@ pub fn validate_web_tir_support(
             &module.display,
             link,
             &extern_funcs,
+            &bundle.edition,
         );
         populate_cx_from_bundle(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -2580,6 +2581,7 @@ fn collect_web_funcs(
             &module.display,
             None,
             &extern_funcs,
+            &bundle.edition,
         );
         cx.debug_linemap = true;
         populate_cx_from_bundle(&mut cx, bundle, i);
@@ -2623,6 +2625,7 @@ fn collect_web_close_funcs(
             &module.display,
             None,
             &extern_funcs,
+            &bundle.edition,
         );
         populate_cx_from_bundle(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -4914,6 +4917,7 @@ fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
             &module.display,
             None,
             &extern_funcs,
+            &bundle.edition,
         );
         cx.web_wasm_noncopy_int = true;
         populate_cx_from_bundle(&mut cx, bundle, module_index);
@@ -11714,7 +11718,7 @@ fn web_tzdb_files() -> Result<Vec<(String, Vec<u8>)>, std::io::Error> {
     Ok(files)
 }
 
-fn wasm_time_zone_prelude() -> Result<String, std::io::Error> {
+pub(crate) fn wasm_time_zone_prelude() -> Result<String, std::io::Error> {
     use std::fmt::Write as _;
 
     let mut out = String::from(

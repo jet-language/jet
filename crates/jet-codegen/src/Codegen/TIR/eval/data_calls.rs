@@ -7,7 +7,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue, DataPipeline};
+use crate::Comptime::{
+    apply_core_call, apply_core_call_with_type, apply_data_line_call, CtReport, CtValue,
+    DataPipeline,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use jet_foundation::PackageEdition;
@@ -458,12 +461,229 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 };
                 DataPipeline::schema_value(&recv, args.first().map(|arg| &arg.ty), row, span)
             }
-            // I4: this evaluator is also default `jet run`'s tier-0, so the
-            // `what` names the call. "at comptime (impure tier)" described a
-            // runtime call site as compile-time work.
-            "lazy" | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by"
-            | "inner_join" | "left_join" | "describe" | "csv_reader" | "json_reader" => {
-                Err(unsupported(&format!("`core.data.{method}()`"), span))
+            "lazy" => {
+                let table = self.eval_expr(&args[0], scope)?;
+                let CtValue::Struct { type_name, fields } = table else {
+                    return Err(unsupported("`data.lazy()` needs a Table", span));
+                };
+                if type_name != "Table" {
+                    return Err(unsupported("`data.lazy()` needs a Table", span));
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value.clone())
+                };
+                Ok(ct_struct(
+                    "LazyFrame",
+                    vec![
+                        (
+                            "rows",
+                            field("rows")
+                                .ok_or_else(|| unsupported("Table rows are missing", span))?,
+                        ),
+                        ("missing", field("missing").unwrap_or(CtValue::Int(0))),
+                        ("plan", field("plan").unwrap_or_else(|| CtValue::List(Vec::new()))),
+                        ("operations", CtValue::List(Vec::new())),
+                        (
+                            "elem_type",
+                            field("elem_type")
+                                .unwrap_or_else(|| CtValue::Str("Unknown".to_string())),
+                        ),
+                    ],
+                ))
+            }
+            "lazy_filter" | "lazy_sort_by" => {
+                let frame = self.eval_expr(&args[0], scope)?;
+                let function = self.eval_expr(&args[1], scope)?;
+                let CtValue::Struct { type_name, fields } = frame else {
+                    return Err(unsupported(
+                        &format!("`data.{method}()` needs a LazyFrame"),
+                        span,
+                    ));
+                };
+                if type_name != "LazyFrame" {
+                    return Err(unsupported(
+                        &format!("`data.{method}()` needs a LazyFrame"),
+                        span,
+                    ));
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value.clone())
+                };
+                let mut plan = match field("plan") {
+                    Some(CtValue::List(values)) => values,
+                    _ => Vec::new(),
+                };
+                let kind = if method == "lazy_filter" {
+                    "filter"
+                } else {
+                    "sort_by"
+                };
+                plan.push(CtValue::Str(kind.to_string()));
+                let mut operations = match field("operations") {
+                    Some(CtValue::List(values)) => values,
+                    _ => Vec::new(),
+                };
+                operations.push(ct_struct(
+                    "DataLazyOperation",
+                    vec![
+                        ("kind", CtValue::Str(kind.to_string())),
+                        ("function", function),
+                    ],
+                ));
+                Ok(ct_struct(
+                    "LazyFrame",
+                    vec![
+                        (
+                            "rows",
+                            field("rows")
+                                .ok_or_else(|| unsupported("LazyFrame rows are missing", span))?,
+                        ),
+                        ("missing", field("missing").unwrap_or(CtValue::Int(0))),
+                        ("plan", CtValue::List(plan)),
+                        ("operations", CtValue::List(operations)),
+                        (
+                            "elem_type",
+                            field("elem_type")
+                                .unwrap_or_else(|| CtValue::Str("Unknown".to_string())),
+                        ),
+                    ],
+                ))
+            }
+            "plan" => {
+                let frame = self.eval_expr(&args[0], scope)?;
+                match frame {
+                    CtValue::Struct { type_name, fields } if type_name == "LazyFrame" => fields
+                        .into_iter()
+                        .find_map(|(name, value)| (name == "plan").then_some(value))
+                        .ok_or_else(|| unsupported("LazyFrame plan is missing", span)),
+                    _ => Err(unsupported("`data.plan()` needs a LazyFrame", span)),
+                }
+            }
+            "collect" => {
+                let frame = self.eval_expr(&args[0], scope)?;
+                let CtValue::Struct { type_name, fields } = frame else {
+                    return Err(unsupported("`data.collect()` needs a LazyFrame", span));
+                };
+                if type_name != "LazyFrame" {
+                    return Err(unsupported("`data.collect()` needs a LazyFrame", span));
+                }
+                let mut rows = match fields.iter().find(|(name, _)| name == "rows") {
+                    Some((_, CtValue::List(rows))) => rows.clone(),
+                    _ => return Err(unsupported("LazyFrame rows are missing", span)),
+                };
+                let operations = match fields.iter().find(|(name, _)| name == "operations") {
+                    Some((_, CtValue::List(values))) => values.clone(),
+                    _ => Vec::new(),
+                };
+                for operation in operations {
+                    let CtValue::Struct { type_name, fields } = operation else {
+                        return Err(unsupported("invalid lazy operation", span));
+                    };
+                    if type_name != "DataLazyOperation" {
+                        return Err(unsupported("invalid lazy operation", span));
+                    }
+                    let kind = fields.iter().find_map(|(name, value)| {
+                        (name == "kind").then_some(value)
+                    });
+                    let function = fields.iter().find_map(|(name, value)| {
+                        (name == "function").then_some(value)
+                    });
+                    let (Some(CtValue::Str(kind)), Some(function)) = (kind, function) else {
+                        return Err(unsupported("invalid lazy operation", span));
+                    };
+                    if kind == "filter" {
+                        let mut kept = Vec::new();
+                        for row in rows {
+                            if as_bool(
+                                &self.call_callable_in_scope(function, vec![row.clone()], scope)?,
+                                span,
+                            )? {
+                                kept.push(row);
+                            }
+                        }
+                        rows = kept;
+                    } else if kind == "sort_by" {
+                        let mut keyed = Vec::with_capacity(rows.len());
+                        for row in rows {
+                            let key = self
+                                .call_callable_in_scope(function, vec![row.clone()], scope)?
+                                .jet_show();
+                            keyed.push((key, row));
+                        }
+                        keyed.sort_by(|left, right| left.0.cmp(&right.0));
+                        rows = keyed.into_iter().map(|(_, row)| row).collect();
+                    } else {
+                        return Err(unsupported("invalid lazy operation", span));
+                    }
+                }
+                let mut plan = match fields.iter().find(|(name, _)| name == "plan") {
+                    Some((_, CtValue::List(values))) => values.clone(),
+                    _ => Vec::new(),
+                };
+                plan.push(CtValue::Str("collect".to_string()));
+                Ok(ct_struct(
+                    "Table",
+                    vec![
+                        ("rows", CtValue::List(rows)),
+                        (
+                            "missing",
+                            fields
+                                .iter()
+                                .find(|(name, _)| name == "missing")
+                                .map(|(_, value)| value.clone())
+                                .unwrap_or(CtValue::Int(0)),
+                        ),
+                        ("plan", CtValue::List(plan)),
+                        (
+                            "elem_type",
+                            fields
+                                .iter()
+                                .find(|(name, _)| name == "elem_type")
+                                .map(|(_, value)| value.clone())
+                                .unwrap_or_else(|| CtValue::Str("Unknown".to_string())),
+                        ),
+                    ],
+                ))
+            }
+            "sort_by" => {
+                let rows = match self.eval_expr(&args[0], scope)? {
+                    CtValue::List(rows) => rows,
+                    _ => return Err(unsupported("`data.sort_by()` needs a list", span)),
+                };
+                let function = &args[1];
+                let mut callable = None;
+                let mut keyed = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let key = self
+                        .apply_callable_once(function, &mut callable, vec![row.clone()], scope)?
+                        .jet_show();
+                    keyed.push((key, row));
+                }
+                keyed.sort_by(|left, right| left.0.cmp(&right.0));
+                let value = CtValue::List(keyed.into_iter().map(|(_, row)| row).collect());
+                Ok(if checked { ok(value) } else { value })
+            }
+            "query" => {
+                let rows = self.eval_expr(&args[0], scope)?;
+                let query = self.eval_expr(&args[1], scope)?;
+                apply_core_call_with_type(
+                    "core.data",
+                    "query",
+                    vec![rows, query],
+                    span,
+                    self.repl_mode,
+                    Some(call_ty),
+                )
+            }
+            "describe" => {
+                let values = self.eval_expr(&args[0], scope)?;
+                apply_core_call("core.data", "describe", vec![values], span, self.repl_mode)
             }
             _ => {
                 let mut argv = Vec::with_capacity(args.len());

@@ -46,6 +46,12 @@ struct FrontEndItem {
     column: usize,
 }
 
+struct FrontEndWarning {
+    path: String,
+    source: String,
+    diagnostic: Diagnostic,
+}
+
 struct ContractDeclaration {
     id: String,
     path: String,
@@ -276,20 +282,28 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let replay_time_ms = replay_authority.as_ref().map(|authority| authority.time_ms);
 
     let mut items = Vec::new();
+    let mut warnings = Vec::new();
     let mut declarations = Vec::new();
     for member in &target.members {
         let source = String::from_utf8_lossy(&member.bytes).into_owned();
         let (semantic_items, member_declarations) =
             semantic_front_end_items(&target, &member.path, &source);
         declarations.extend(member_declarations);
-        let diagnostics = jet::check_with_path(&member.path);
-        if diagnostics.is_empty() {
+        let (errors, member_warnings): (Vec<_>, Vec<_>) = jet::check_with_path(&member.path)
+            .into_iter()
+            .partition(|diagnostic| matches!(diagnostic.severity, Severity::Error));
+        warnings.extend(member_warnings.into_iter().map(|diagnostic| FrontEndWarning {
+            path: member.path.clone(),
+            source: source.clone(),
+            diagnostic,
+        }));
+        if errors.is_empty() {
             items.extend(semantic_items.into_iter().map(|mut item| {
                 item.source = source.clone();
                 item
             }));
         } else {
-            for diagnostic in diagnostics {
+            for diagnostic in errors {
                 let span = diagnostic_span(&source, &diagnostic);
                 let (line, column) = diagnostic
                     .span
@@ -418,6 +432,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let report = render_report(
         &target,
         &items,
+        &warnings,
         &tests,
         &budgets,
         &solver,
@@ -466,6 +481,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             if let Some(diagnostic) = &item.diagnostic {
                 eprintln!("{}", diagnostic.render(&item.path, &item.source));
             }
+        }
+        for warning in &warnings {
+            eprintln!(
+                "{}",
+                warning.diagnostic.render(&warning.path, &warning.source)
+            );
         }
         for row in outside_selected_lenses(&lenses, &items, &tests, &budgets, &declarations) {
             println!("{row}");
@@ -2355,14 +2376,21 @@ fn is_build_identity_path(path: &str) -> bool {
     matches!(path.rsplit('/').next(), Some("package.jet" | "build.jet"))
 }
 
+/// Return the content-derived compiler identity emitted by `build.rs`.
+///
+/// `build.rs` hashes `jet.compiler.v2`, verbose rustc identity and build
+/// facts, then every byte and relative path under the Cargo files, `Source`,
+/// Jet crates, reference docs, examples, and the compatibility oracle.
+pub(crate) fn proof_compiler_digest() -> String {
+    env!("JET_COMPILER_BUILD_ID").to_string()
+}
+
 fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, String> {
-    #[cfg(target_os = "linux")]
-    let compiler_path = PathBuf::from("/proc/self/exe");
-    #[cfg(not(target_os = "linux"))]
-    let compiler_path = std::env::current_exe()
-        .map_err(|error| format!("cannot identify running compiler: {error}"))?;
-    let compiler_digest = jet::SHA256::sha256_file_hex(&compiler_path)
-        .map_err(|error| format!("cannot hash running compiler: {error}"))?;
+    // `JET_COMPILER_BUILD_ID` is the content-derived compiler identity from
+    // `build.rs`; do not hash the running debug executable through a bounded
+    // tree-input reader.
+    let compiler_digest = proof_compiler_digest();
+
     let rustc = Command::new("rustc")
         .args(["-vV"])
         .output()
@@ -2380,10 +2408,7 @@ fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, S
         ),
         (
             "compiler_build_id".to_string(),
-            option_env!("JET_COMPILER_BUILD_ID")
-                .unwrap_or("unversioned")
-                .as_bytes()
-                .to_vec(),
+            env!("JET_COMPILER_BUILD_ID").as_bytes().to_vec(),
         ),
         (
             "runner_id".to_string(),
@@ -2671,6 +2696,7 @@ fn evidence_id(target: &Target, kind: &str, origin: &str, span: &str, claim: &st
 fn render_report(
     target: &Target,
     items: &[FrontEndItem],
+    warnings: &[FrontEndWarning],
     tests: &[TestItem],
     budgets: &jet::BudgetView::BudgetProjection,
     solver: &[crate::ProveSolver::SolverEvidence],
@@ -2884,6 +2910,13 @@ fn render_report(
             "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"replay\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"observed\",\"producer\":\"jet-replay\",\"property\":null,\"reason\":\"parity_not_available\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"executed\"}}",
             json(&id),
             json(&target.root)
+        ));
+    }
+    for warning in warnings {
+        diagnostics.push(diagnostic_json(
+            &warning.path,
+            &warning.source,
+            &warning.diagnostic,
         ));
     }
     let evidence = evidence_rows.join(",");

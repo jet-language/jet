@@ -19,7 +19,8 @@
 // and this bridge crate are two independently built crates linked at the
 // program's final `rustc` invocation, so they can't share Rust types. They
 // exchange the final bound values and result rows as tagged-length wire text
-// (`encode`/`decode` below).
+// (`encode`/`decode` below). Blob bytes use an ASCII hexadecimal envelope at
+// this String boundary, so arbitrary binary values remain lossless.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -129,9 +130,7 @@ pub fn jet_db_query(handle: u64, sql: &str, params_wire: &str) -> String {
                     ValueRef::Text(b) => rusqlite::types::Value::Text(
                         std::str::from_utf8(b).unwrap_or("").to_string(),
                     ),
-                    // Blobs have no `DBValue` shape yet — surface as NULL (same
-                    // posture as the old `jet_db_query_json`).
-                    ValueRef::Blob(_) => rusqlite::types::Value::Null,
+                    ValueRef::Blob(bytes) => rusqlite::types::Value::Blob(bytes.to_vec()),
                 };
                 cols.push((name.clone(), v));
             }
@@ -169,7 +168,8 @@ pub fn jet_db_execute(handle: u64, sql: &str, params_wire: &str) -> String {
 // item count, `:`, then that many self-delimiting items back to back. Every
 // length is a byte count, so arbitrary text (including an "injection-looking"
 // literal like `'; DROP TABLE x; --`) round-trips exactly — no escaping, no
-// quoting, nothing for a hostile payload to break out of.
+// quoting, nothing for a hostile payload to break out of. Blob payloads use an
+// ASCII hexadecimal envelope because this bridge's wire carrier is `String`.
 
 fn encode_count_prefixed(items: &[String]) -> String {
     let mut out = String::new();
@@ -183,6 +183,29 @@ fn encode_count_prefixed(items: &[String]) -> String {
 
 fn encode_tagged(tag: char, payload: &str) -> String {
     format!("{tag}{}:{payload}", payload.len())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn hex_decode(payload: &str) -> Option<Vec<u8>> {
+    if payload.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(payload.len() / 2);
+    for pair in payload.as_bytes().chunks_exact(2) {
+        let high = (pair[0] as char).to_digit(16)?;
+        let low = (pair[1] as char).to_digit(16)?;
+        out.push(((high << 4) | low) as u8);
+    }
+    Some(out)
 }
 
 fn encode_row(cols: &[(String, rusqlite::types::Value)]) -> String {
@@ -202,7 +225,7 @@ fn encode_value(v: &rusqlite::types::Value) -> String {
         Value::Integer(n) => encode_tagged('I', &n.to_string()),
         Value::Real(f) => encode_tagged('F', &f.to_string()),
         Value::Text(s) => encode_tagged('T', s),
-        Value::Blob(_) => encode_tagged('N', ""),
+        Value::Blob(bytes) => encode_tagged('X', &hex_encode(bytes)),
     }
 }
 
@@ -240,6 +263,7 @@ fn decode_params(wire: &str) -> Vec<rusqlite::types::Value> {
             'F' => Value::Real(payload.parse().unwrap_or(0.0)),
             'T' => Value::Text(payload),
             'B' => Value::Integer(if payload == "1" { 1 } else { 0 }),
+            'X' => hex_decode(&payload).map(Value::Blob).unwrap_or(Value::Null),
             _ => Value::Null,
         });
     }

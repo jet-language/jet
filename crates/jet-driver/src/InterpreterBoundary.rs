@@ -120,9 +120,15 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
             }
             if debug_impure {
                 let (imported_modules, _) = core_import_maps(std::slice::from_ref(import));
+                let mut imported_modules = imported_modules.into_iter().collect::<Vec<_>>();
+                imported_modules.sort_unstable_by(|left, right| {
+                    left.0
+                        .cmp(&right.0)
+                        .then_with(|| left.1.cmp(&right.1))
+                });
                 if let Some(feature) = imported_modules
-                    .values()
-                    .find_map(|name| native_module_feature(name, true))
+                    .iter()
+                    .find_map(|(_, name)| native_module_feature(name, true))
                 {
                     return Some(Boundary {
                         feature: feature.to_string(),
@@ -239,6 +245,10 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         // the `EnvSet` host call, which the TIR evaluator marshals to that
         // same `core.sys.set` adapter.
         ("core.sys", "get" | "set" | "home_dir") => None,
+        // `core.sys.decode` runs through the evaluator's shared environment
+        // carrier and typed DataTree decoder, so it is safe for the forced
+        // interpreter just like the other explicitly ambient sys leaves.
+        ("core.sys", "decode") => None,
         // The platform-family fact is the one OS fact implemented by the
         // ambient interpreter; other core.sys facts remain native-only below.
         ("core.sys", "family") => None,

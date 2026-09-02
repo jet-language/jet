@@ -2315,6 +2315,42 @@ impl<'a> Checker<'a> {
             .visible(self.module_idx, owner_mod, type_name)
     }
 
+    /// Check a struct field value through the shared assignability rules.
+    /// Plain mismatches do not emit a diagnostic in `check_type_assignable`,
+    /// so record construction supplies the field-specific E0108 fallback.
+    fn check_struct_field_assignable(
+        &mut self,
+        field: &str,
+        expected: &Type,
+        actual: &Type,
+        value: &Expr,
+        span: Span,
+    ) {
+        let reported = self.check_type_assignable(expected, actual, span);
+        if !reported && expected != actual {
+            let fix = if *expected == Type::Int
+                && matches!(value, Expr::Binary(BinOp::Div, _, _, _))
+                && matches!(actual, Type::Named(name) if name == Syntax::TYPE_FRACTION)
+            {
+                "use `/%` to divide and round down (`/%=` in place), or make the field a Float"
+                    .to_string()
+            } else {
+                type_fix_hint(expected, actual)
+            };
+            self.diags.push(Diagnostic::error(
+                "E0108",
+                format!(
+                    "field `{field}` holds {}, but this value is {}",
+                    expected.show(),
+                    actual.show()
+                ),
+                "a field keeps one type for its whole life".to_string(),
+                fix,
+                Some(span),
+            ));
+        }
+    }
+
     pub(crate) fn check_struct_lit(
         &mut self,
         type_name: &str,
@@ -2557,10 +2593,22 @@ impl<'a> Checker<'a> {
                         self.report_owned_string_as_view_str(expr.span());
                     } else if is_patch_lit {
                         if let Some(inner) = inst.unwrap_option() {
-                            self.check_type_assignable(&inner, &et, expr.span());
+                            self.check_struct_field_assignable(
+                                name,
+                                &inner,
+                                &et,
+                                expr,
+                                expr.span(),
+                            );
                         }
                     } else if !string_view_compatible {
-                        self.check_type_assignable(&inst, &et, expr.span());
+                        self.check_struct_field_assignable(
+                            name,
+                            &inst,
+                            &et,
+                            expr,
+                            expr.span(),
+                        );
                     }
                 }
             } else if self
@@ -2644,7 +2692,13 @@ impl<'a> Checker<'a> {
             self.expected_type = saved_expected;
             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-                self.check_type_assignable(&inst, &et, filled.span());
+                self.check_struct_field_assignable(
+                    &name,
+                    &inst,
+                    &et,
+                    &filled,
+                    filled.span(),
+                );
             }
             fields.push((name, name_span, filled));
         }

@@ -210,6 +210,9 @@ fn jet_jit_math_ln_1p(x: f64) -> f64 {
 fn jet_jit_math_log(x: f64, base: f64) -> f64 {
     x.log(base)
 }
+fn jet_jit_math_log10(x: f64) -> f64 {
+    x.log10()
+}
 fn jet_jit_math_copysign(x: f64, y: f64) -> f64 {
     x.copysign(y)
 }
@@ -403,6 +406,7 @@ host_fns! {
     exp_m1: "jet_jit_math_exp_m1" => jet_jit_math_exp_m1: f64_f64;
     ln_1p: "jet_jit_math_ln_1p" => jet_jit_math_ln_1p: f64_f64;
     log: "jet_jit_math_log" => jet_jit_math_log: f64_f64_f64;
+    log10: "jet_jit_math_log10" => jet_jit_math_log10: f64_f64;
     copysign: "jet_jit_math_copysign" => jet_jit_math_copysign: f64_f64_f64;
     signum: "jet_jit_math_signum" => jet_jit_math_signum: f64_f64;
     fma: "jet_jit_math_fma" => jet_jit_math_fma: fma;

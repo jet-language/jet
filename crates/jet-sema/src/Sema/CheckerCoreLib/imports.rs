@@ -780,7 +780,17 @@ impl<'a> Checker<'a> {
                 }
                 self.check_write_arg_change(arg);
             }
-            let ret = sig.effective_return_type();
+            // C-module wrappers expose the declared C ABI directly.  Their
+            // internal `FuncSig` still uses the ordinary hidden failure
+            // carrier, but that carrier must not leak into a qualified C
+            // import call (D-ADOPT-GUEST1).
+            let ret = if sig.is_c_abi {
+                sig.return_type
+                    .clone()
+                    .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+            } else {
+                sig.effective_return_type()
+            };
             return Some(qualify_unit(
                 self.resolve_type(self.trait_reg.instantiate_type(&ret, &subst)),
             ))

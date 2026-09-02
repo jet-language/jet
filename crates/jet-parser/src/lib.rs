@@ -593,4 +593,24 @@ mod raw_literal_fmt_tests {
         let twice = Formatter::format_source(&once).expect("typed literal should reformat");
         assert_eq!(once, twice, "typed-literal formatting must be idempotent");
     }
+    #[test]
+    fn numeric_literals_keep_ratified_spelling() {
+        let src = "fn run() {\n\
+    population :: 8_100_000_000\n\
+    red :: 0xFF\n\
+    perms :: 0o755\n\
+    flags :: 0b1010\n\
+    avogadro :: 6.022e23\n\
+}\n";
+        let once = Formatter::format_source(src).expect("numeric literals should format");
+        for literal in ["8_100_000_000", "0xFF", "0o755", "0b1010", "6.022e23"] {
+            assert!(
+                once.contains(literal),
+                "formatter rewrote ratified literal `{literal}`:\n{once}"
+            );
+        }
+        let twice = Formatter::format_source(&once).expect("formatted literals should reformat");
+        assert_eq!(once, twice, "numeric literal formatting must be idempotent");
+    }
 }
+

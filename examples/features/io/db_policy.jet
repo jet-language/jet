@@ -12,8 +12,7 @@ fn run() {
     _one :: scoped.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
     rows :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
     print("rows:{rows.len()}")
-    bypass :: scoped.query(SQL{"SELECT title FROM other"})
-    if bypass == {
+    if scoped.query(SQL{"SELECT title FROM other"}) == {
         .Ok(_) -> { print("bypass:accepted") }
         .Err(_) -> { print("bypass:rejected") }
     }

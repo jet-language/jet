@@ -6,7 +6,7 @@ use jet::Comptime::Build::{
     ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
     ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildCapability,
     BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPlan,
-    BuildPolicy, BuildProvenance,
+    BuildNodeKind, BuildPlanNode, BuildPolicy, BuildProvenance,
     BuildResourcePool, CacheHitReason, CacheMissReason, CompilerPackageSpec, ContentDigest,
     FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
     LocalCas, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
@@ -1603,12 +1603,15 @@ fn remote_driver_consumes_authenticated_worker_result() {
 
 #[test]
 fn build_failure_report_survives_local_remote_cache_and_replay() {
-    let false_path = std::env::var_os("PATH")
+    // `false` is a coreutils applet on some hosts; sandbox canonicalization
+    // can change argv[0] and make its stderr host-dependent. Use `sh -c` so
+    // the failed action has the same empty stderr as the remote fixture.
+    let shell_path = std::env::var_os("PATH")
         .into_iter()
         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-        .map(|directory| directory.join("false"))
+        .map(|directory| directory.join("sh"))
         .find(|path| path.is_file())
-        .expect("the test host needs a `false` executable");
+        .expect("the test host needs a `sh` executable");
 
     let local_root = std::env::temp_dir().join(format!(
         "jet_build_failure_report_{}_local",
@@ -1620,7 +1623,11 @@ fn build_failure_report_survives_local_remote_cache_and_replay() {
     let local_action = local_context
         .action(
             "parity-failure",
-            ActionSpec::cached([false_path.to_string_lossy().to_string()])
+            ActionSpec::cached([
+                shell_path.to_string_lossy().to_string(),
+                "-c".to_string(),
+                "exit 1".to_string(),
+            ])
                 .with_outputs(["build/failure"])
                 .with_cap(BuildCapability::Exec),
         )
@@ -4033,4 +4040,27 @@ fn declared_hangar_toolchain_binds_virtual_mount_and_action_identity() {
         first.action_key(first_action).unwrap(),
         second.action_key(second_action).unwrap()
     );
+}
+ 
+#[test]
+fn compiler_nodes_are_sorted_and_path_independent() {
+    let first = BuildPlanNode::new(
+        BuildNodeKind::Check,
+        "src/main.jet",
+        vec![
+            ("src/z.jet".to_string(), "digest-z".to_string()),
+            ("src/a.jet".to_string(), "digest-a".to_string()),
+        ],
+    );
+    let second = BuildPlanNode::new(
+        BuildNodeKind::Check,
+        "src/main.jet",
+        vec![
+            ("src/a.jet".to_string(), "digest-a".to_string()),
+            ("src/z.jet".to_string(), "digest-z".to_string()),
+        ],
+    );
+    assert_eq!(first, second);
+    assert_eq!(first.inputs, vec!["src/a.jet", "src/z.jet"]);
+    assert_eq!(first.key.len(), 64);
 }

@@ -991,7 +991,46 @@ pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
     Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
 }
 
+/// D-DBDRIVER1 / I9: the interpreter's `DBValue` carrier needs the exact
+/// `JetShow` projection from `Prelude/CoreLib/JetStd/DBPluginWire.rs`.
+/// `Blob` can arrive as a byte buffer from a driver or as a typed `[U8]` list
+/// while evaluating a literal; both represent the same database value.
+fn db_value_display(value: &CtValue) -> Option<String> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return None;
+    };
+    let type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name.as_str());
+    if type_name != crate::Syntax::TYPE_DB_VALUE {
+        return None;
+    }
+    match (variant.as_str(), args.as_slice()) {
+        ("Null", []) => Some("null".to_string()),
+        ("Int", [(_, CtValue::Int(value))]) => Some(value.to_string()),
+        ("Float", [(_, CtValue::Float(value))]) => Some(value.as_f64().to_string()),
+        ("Text", [(_, CtValue::Str(value))]) => Some(value.clone()),
+        ("Bool", [(_, CtValue::Bool(value))]) => Some(value.to_string()),
+        ("Blob", [(_, value)]) => db_blob_display(value),
+        _ => None,
+    }
+}
+
+fn db_blob_display(value: &CtValue) -> Option<String> {
+    as_bytes(value, Span::new(0, 0))
+        .ok()
+        .map(|bytes| format!("{bytes:?}"))
+}
+
 pub(super) fn display(value: &CtValue) -> Option<String> {
+    if let Some(text) = db_value_display(value) {
+        return Some(text);
+    }
     // DataTree/JSON values use the ordered JSON projection on every tier. The
     // generic enum renderer below is for nominal enums and would expose the
     // erased `Object(JSONObject { ... })` carrier instead.

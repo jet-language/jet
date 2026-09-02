@@ -176,6 +176,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         return_view_provenance: None,
         declared_return_view_provenance: None,
         gc_return: false,
+        diverges: false,
         gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,

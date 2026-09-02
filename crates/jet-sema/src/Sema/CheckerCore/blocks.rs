@@ -1,8 +1,7 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Captures::stmt_refs_name;
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::{block_definitely_exits, block_definitely_returns};
-use crate::Syntax;
+use crate::Sema::Diagnostics::block_definitely_returns;
 use crate::AST::{AccessConvention, BinOp, Expr, LValue, Stmt, StrPart, Type};
 impl<'a> Checker<'a> {
     // --- statements -----------------------------------------------------
@@ -108,7 +107,7 @@ impl<'a> Checker<'a> {
         match stmt {
             Stmt::Expr(expr)
                 if !self.tail_has_authored_semicolon(expr.span())
-                    && !Self::is_diverging_tail(expr) =>
+                    && !self.is_diverging_tail(expr) =>
             {
                 let span = expr.span();
                 let mut value = Some(std::mem::replace(expr, Expr::Absent(span)));
@@ -120,7 +119,7 @@ impl<'a> Checker<'a> {
                     *expr = value;
                 }
             }
-            Stmt::Expr(expr) if Self::is_diverging_tail(expr) => {
+            Stmt::Expr(expr) if self.is_diverging_tail(expr) => {
                 // Diverging expressions such as `panic(...)` and `todo` do
                 // not need to produce the promised value.
                 self.check_stmt(stmt);
@@ -178,28 +177,8 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_expected;
     }
 
-    fn is_diverging_tail(expr: &Expr) -> bool {
-        fn branch_diverges(body: &[Stmt], value: &Expr) -> bool {
-            block_definitely_exits(body) || is_diverging_expr(value)
-        }
-        fn is_diverging_expr(expr: &Expr) -> bool {
-            match expr.without_parens() {
-                Expr::Todo { .. } => true,
-                Expr::Call(call) => call.name == Syntax::BUILTIN_PANIC,
-                Expr::If {
-                    then_body,
-                    then_value,
-                    else_body,
-                    else_value,
-                    ..
-                } => {
-                    branch_diverges(then_body, then_value)
-                        && branch_diverges(else_body, else_value)
-                }
-                _ => false,
-            }
-        }
-        is_diverging_expr(expr)
+    fn is_diverging_tail(&self, expr: &Expr) -> bool {
+        self.expr_diverges(expr)
     }
 
     /// L0514 / D-BRANCH-LINT1: adjacent classic guards over one stable

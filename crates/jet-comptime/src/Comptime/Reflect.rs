@@ -3077,6 +3077,7 @@ mod tests {
             return_view_provenance: None,
             declared_return_view_provenance: None,
             gc_return: false,
+            diverges: false,
             gc_scope: false,
             kernel: None,
             markers: Vec::new(),

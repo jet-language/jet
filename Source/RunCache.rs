@@ -3,7 +3,7 @@
 //! Keys an unchanged `jet run` by source + WatchService dependency stamps +
 //! compiler-build identity + configuration. A hit reloads a captured tier-1
 //! Cranelift module (see `jet_jit::run_cached_module`) and skips load/parse/
-//! check/TIR lowering/codegen. Does not touch AOT [`BuildCache`].
+//! check/TIR lowering/codegen. It does not touch AOT artifacts in `jet-store`.
 
 use crate::SHA256::sha256_hex;
 use jet_devserver::WatchService::{PathStamp, RootKind, WatchGraph};
@@ -72,16 +72,11 @@ pub fn phases() -> RunPhases {
     }
 }
 
-/// Where warm artifacts live. One statement of the path law, so a caller — a
-/// test especially — asks instead of restating it: `JET_RUN_CACHE_DIR` wins,
-/// then `JET_CACHE_DIR/run`, then `~/.cache/jet/run`. The default is OUTSIDE the
-/// tree, so a test that does not redirect it measures the developer's machine.
+/// Where warm artifacts live. `JET_RUN_CACHE_DIR` wins. The default is
+/// `~/.cache/jet/run`, outside the project tree.
 pub fn cache_root() -> PathBuf {
     if let Ok(dir) = std::env::var("JET_RUN_CACHE_DIR") {
         return PathBuf::from(dir);
-    }
-    if let Ok(dir) = std::env::var("JET_CACHE_DIR") {
-        return PathBuf::from(dir).join("run");
     }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))

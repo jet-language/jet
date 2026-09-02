@@ -5,8 +5,8 @@
 //! compressed NAR path, follows references, and publishes one Hangar batch.
 
 use super::{
-    entry_id, CacheIdentity, Closure, NixCompression, NixNarInfo, NixPublicKey, ProducerRecord,
-    ProgressHandle, Roots, StoreEntry,
+    content_addressed_entry_id, CacheIdentity, Closure, NixCompression, NixNarInfo, NixPublicKey,
+    ProducerRecord, ProgressHandle, Roots, StoreEntry,
 };
 use crate::{Envelope, RuntimePolicy, SHA256};
 use std::cell::RefCell;
@@ -996,11 +996,11 @@ impl<'a> NixAdmission<'a> {
                 .filter(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
                 .map(|_| object.hangar_path.join("bin"));
             entries.push(StoreEntry {
-                id: entry_id(
+                id: content_addressed_entry_id(
                     &name,
                     "",
                     &reference,
-                    &object.hangar_path.display().to_string(),
+                    &object.hangar_digest,
                 ),
                 name,
                 version: String::new(),

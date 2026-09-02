@@ -1454,8 +1454,8 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
     Shell::run_command(env, cmd)
 }
 
-fn plan_needs_package_catalog(plan: &RunPlan) -> bool {
-    plan.refs.iter().any(|spec| match &spec.source {
+fn ref_needs_package_catalog(plan: &RunPlan, spec: &RefSpec::RefSpec) -> bool {
+    match &spec.source {
         RefSpec::Source::Jetpack | RefSpec::Source::Nixpkgs => true,
         RefSpec::Source::Named(name) => plan
             .table
@@ -1463,7 +1463,30 @@ fn plan_needs_package_catalog(plan: &RunPlan) -> bool {
             .or_else(|| plan.table.upstream(name))
             .is_some_and(|source| source.contains("NixOS/nixpkgs")),
         _ => false,
-    })
+    }
+}
+
+fn plan_needs_package_catalog(plan: &RunPlan) -> bool {
+    plan.refs
+        .iter()
+        .any(|spec| ref_needs_package_catalog(plan, spec))
+}
+
+/// A complete project lock is its own package authority. Once every
+/// catalog-backed ref has a portable Nix record, discovery would only add an
+/// unrelated catalog precondition before Store can replay the project CAS.
+fn plan_has_complete_locked_catalog(plan: &RunPlan) -> bool {
+    let mut found = false;
+    for spec in &plan.refs {
+        if !ref_needs_package_catalog(plan, spec) {
+            continue;
+        }
+        found = true;
+        if Lock::locked_nix_package(&plan.project_root, &spec.raw).is_none() {
+            return false;
+        }
+    }
+    found
 }
 
 fn project_catalog_binding(roots: &Store::Roots, project_dir: &Path) -> PathBuf {
@@ -1506,7 +1529,10 @@ fn configure_project_catalog(
     plan: &RunPlan,
     flags: &mut Flags,
 ) -> Result<(), i32> {
-    if flags.local_nix_catalog.is_some() || !plan_needs_package_catalog(plan) {
+    if flags.local_nix_catalog.is_some()
+        || !plan_needs_package_catalog(plan)
+        || plan_has_complete_locked_catalog(plan)
+    {
         return Ok(());
     }
     let official_endpoint = roots.root.join("config/nix-index-v1.endpoint");
@@ -1651,10 +1677,12 @@ fn replay_locked_nix(
         let object_digests = if let Some(digests) = bundles.get(&closure.project_cas_bundle) {
             digests.clone()
         } else {
-            let (_, digests) = Store::import_nix_cas_bundle(
+            let (_, digests) = Store::import_nix_cas_bundle_checked(
                 project_dir,
                 roots,
                 &closure.project_cas_bundle,
+                &closure,
+                &envelope,
             )
             .map_err(|error| {
                 format!(
@@ -1826,8 +1854,9 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         Ok(replayed) => replayed,
         Err(error) => {
-            theme.error(
-                "locked Nix replay failed",
+            theme.error_coded(
+                "E1350",
+                "locked Nix closure could not be replayed",
                 &error,
                 "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock",
             );

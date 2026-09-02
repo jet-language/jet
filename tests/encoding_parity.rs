@@ -1778,10 +1778,10 @@ fn run() {
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("next")
+    first :: reader.next()
     if first == {
-        Val(_) -> print(true)
-        None -> print(false)
+        .Val(_) -> print(true)
+        .None -> print(false)
     }
     print(files.read(path) ?? panic("read"))
 }
@@ -1797,10 +1797,10 @@ fn run() {
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("next")
+    first :: reader.next()
     if first == {
-        Val(_) -> print(true)
-        None -> print(false)
+        .Val(_) -> print(true)
+        .None -> print(false)
     }
     print(files.read(path) ?? panic("read"))
 }
@@ -1847,10 +1847,10 @@ fn run() {
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("next")
+    first :: reader.next()
     if first == {
-        Val(_) -> print(true)
-        None -> print(false)
+        .Val(_) -> print(true)
+        .None -> print(false)
     }
     print(files.read(path) ?? panic("read"))
 }
@@ -1875,10 +1875,10 @@ fn run() {
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("next")
+    first :: reader.next()
     if first == {
-        Val(_) -> print(true)
-        None -> print(false)
+        .Val(_) -> print(true)
+        .None -> print(false)
     }
     whole := DataTree.Object([
         "aa": DataTree.Int(1),

@@ -163,7 +163,7 @@ fn assert_packaged_cli_tiers_agree(src: &str, expected_stdout: &str) {
         let output = command
             .arg("run.jet")
             .current_dir(&root)
-            .env("JET_CACHE_DIR", &cache)
+            .env("JET_STORE_DIR", &cache)
             .env("JETPACK_ENV", "1")
             .env("NO_COLOR", "1")
             .output()

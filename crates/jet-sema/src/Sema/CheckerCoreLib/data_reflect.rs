@@ -1,4 +1,4 @@
-use super::core_types::decode_error_ty;
+use super::core_types::{decode_error_ty, u8_ty};
 use crate::AST::Type;
 
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
@@ -49,7 +49,8 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
 
 /// D-DBDRIVER1: accessor methods on `DBValue` — read back the tagged value a
 /// query bound or a row column carried. Mirrors `datatree_method_return`'s
-/// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`).
+/// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`),
+/// while `blob` returns the exact `[U8]` payload.
 pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
     match (method, n_args) {
         ("int", 0) => Some(Type::Result {
@@ -66,6 +67,10 @@ pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
         }),
         ("bool", 0) => Some(Type::Result {
             ok: Box::new(Type::Bool),
+            err: Box::new(Type::String),
+        }),
+        ("blob", 0) => Some(Type::Result {
+            ok: Box::new(Type::List(Box::new(u8_ty()))),
             err: Box::new(Type::String),
         }),
         ("is_null", 0) => Some(Type::Bool),

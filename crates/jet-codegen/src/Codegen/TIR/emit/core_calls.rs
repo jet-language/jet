@@ -1226,6 +1226,24 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
             }
         }
+        // D-TERM1: `term.binwrite(Path, [U8])` has an ambient/JIT adapter,
+        // while AOT still emits the same FSWriteOps Prelude kernel directly.
+        ("core.term", "binwrite") => {
+            let path = if matches!(
+                args.first().map(|arg| &arg.ty),
+                Some(Type::Named(name)) if name == "Path"
+            ) {
+                format!("({}).jet_show()", arg(0))
+            } else {
+                arg(0)
+            };
+            format!(
+                "{}jet_std_io_binwrite(&({}), &({}))",
+                cx.root_prefix,
+                path,
+                arg(1)
+            )
+        }
         
         
         
@@ -1625,7 +1643,16 @@ pub(crate) fn emit_tir_core_call(
             let target = enc_target_rust(ret_ty, cx);
             let prefix = args.get(0).map(|_| format!("&({})", arg(0))).unwrap_or_else(|| "&\"\".to_string()".to_string());
             let file = args.get(1).map(|_| format!("&({})", arg(1))).unwrap_or_else(|| "&\".env\".to_string()".to_string());
-            let allow = args.get(2).map(|_| format!("&({})", arg(2))).unwrap_or_else(|| "&Vec::new()".to_string());
+            let allow = args.get(2).map(|value| {
+                if matches!(
+                    &value.kind,
+                    crate::Codegen::TIR::TExprKind::ListLit(items) if items.is_empty()
+                ) {
+                    "&Vec::<String>::new()".to_string()
+                } else {
+                    format!("&({})", arg(2))
+                }
+            }).unwrap_or_else(|| "&Vec::<String>::new()".to_string());
             format!("{}::<{}>({}, {}, {})", helper("jet_std_env_decode"), target, prefix, file, allow)
         }
         ("core.encoding.json", "to_string") => {
@@ -3618,10 +3645,21 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("core.web.storage.local" | "core.web.storage.session", "get") => {
-            "None::<String>".to_string()
+            format!("{}jet_web_storage_get(&({}))", cx.root_prefix, arg(0))
         }
-        ("core.web.storage.local" | "core.web.storage.session", "set" | "remove" | "clear") => {
-            "()".to_string()
+        ("core.web.storage.local" | "core.web.storage.session", "remove") => {
+            format!("{{ {}jet_web_storage_remove(&({})); () }}", cx.root_prefix, arg(0))
+        }
+        ("core.web.storage.local" | "core.web.storage.session", "set") => {
+            format!(
+                "{{ {}jet_web_storage_set(&({}), &({})); () }}",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )
+        }
+        ("core.web.storage.local" | "core.web.storage.session", "clear") => {
+            format!("{{ {}jet_web_storage_clear(); () }}", cx.root_prefix)
         }
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)`
         // constructor — the builder methods dispatch through

@@ -88,7 +88,7 @@ fn default_run_and_dev_route_to_fast_production_lens() {
         let output = Command::new(jet())
             .args(&args)
             .current_dir(&scratch.path)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
+            .env("JET_STORE_DIR", scratch.join("build-cache"))
             .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()

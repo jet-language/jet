@@ -442,7 +442,7 @@ pub(crate) fn check_guest_symbol_collisions(
             &mut symbols,
             "jet_text_free".to_string(),
             "<generated>",
-            "generated Library symbols",
+            "generated C symbol",
             "jet_text_free",
             None,
             diags,

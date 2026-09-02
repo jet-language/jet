@@ -1,6 +1,6 @@
 //! E2-M3 (D-DX2 + D-BUILD1) — `jet self doctor`: environment self-diagnosis.
 //!
-//! Jet hides a rustc dependency and a build/store cache; when those drift the
+//! Jet hides a rustc dependency and a machine-wide artifact store; when those drift the
 //! errors land far from the cause. `doctor` checks them up front, offline by
 //! default, and offers an actionable fix for each problem. Auto-fixable
 //! problems can be applied with `--fix`. Network checks (the registry) run only
@@ -179,15 +179,49 @@ fn check_native_linker() -> Check {
 
 fn check_caches() -> Vec<Check> {
     let mut out = Vec::new();
-    let build = crate::BuildCache::cache_dir();
-    out.push(cache_check("build cache", build));
-    let runtime = crate::RuntimeCache::cache_root();
-    out.push(runtime_cache_check(runtime));
+    out.push(artifact_store_check());
     let ffi = ffi_cache_dir();
     out.push(cache_check("ffi cache", ffi));
     let store = crate::Store::store_dir();
     out.push(cache_check("package store", store));
     out
+}
+
+fn artifact_store_check() -> Check {
+    let store = match jet_store::Store::from_env() {
+        Ok(store) => store,
+        Err(error) => {
+            return Check::problem(
+                "cache",
+                "artifact store",
+                format!("could not open the machine-wide store: {error}"),
+                "check JET_STORE_DIR and its permissions, then run `jet cache status`",
+                false,
+            );
+        }
+    };
+    match store.status() {
+        Ok(status) => Check::ok(
+            "cache",
+            "artifact store",
+            format!(
+                "{} (footprint {}; cap {}; reserve {}; {} entries; {} live leases)",
+                status.root.display(),
+                format_bytes(status.footprint_bytes),
+                format_bytes(status.limit_bytes),
+                format_bytes(status.reserve_bytes),
+                status.entries.len(),
+                status.live_leases
+            ),
+        ),
+        Err(error) => Check::problem(
+            "cache",
+            "artifact store",
+            format!("could not read the machine-wide store: {error}"),
+            "check JET_STORE_DIR and its permissions, then run `jet cache status`",
+            false,
+        ),
+    }
 }
 
 /// A cache dir is healthy if it exists and is writable, or doesn't exist yet
@@ -212,38 +246,22 @@ fn cache_check(label: &'static str, dir: PathBuf) -> Check {
     }
     Check::ok("cache", label, dir.display().to_string())
 }
-
-fn runtime_cache_check(dir: PathBuf) -> Check {
-    if !dir.exists() {
-        return Check::ok(
-            "cache",
-            "runtime cache",
-            format!(
-                "{} (0 bytes; limit {} bytes)",
-                dir.display(),
-                crate::RuntimeCache::RUNTIME_CACHE_LIMIT_BYTES
-            ),
-        );
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
     }
-    if !dir.is_dir() {
-        return Check::problem(
-            "cache",
-            "runtime cache",
-            format!("{} exists but is not a directory", dir.display()),
-            format!("remove `{}` so Jet can recreate it", dir.display()),
-            true,
-        );
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
     }
-    Check::ok(
-        "cache",
-        "runtime cache",
-        format!(
-            "{} ({} bytes; limit {} bytes)",
-            dir.display(),
-            crate::RuntimeCache::cache_footprint(),
-            crate::RuntimeCache::RUNTIME_CACHE_LIMIT_BYTES
-        ),
-    )
+    if value.fract() == 0.0 || value >= 10.0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 /// PATH sanity: is the running `jet` binary reachable as `jet` on PATH?

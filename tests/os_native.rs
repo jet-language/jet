@@ -548,7 +548,7 @@ fn run_termios_pty_case(
         .args(args)
         .current_dir(&dir)
         .env("NO_COLOR", "1")
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .stdin(Stdio::from(slave.try_clone().unwrap()))

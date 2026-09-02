@@ -32,6 +32,7 @@ use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::module_call_source_return_type_with_args;
 use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::extern_call_return_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListSpreadPart;
@@ -57,6 +58,7 @@ use crate::Codegen::TIR::TOptionProbe;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::TTryConvert;
@@ -333,22 +335,150 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
+        // A field receiver does not persist `recv_type` on the AST method
+        // node. Pre-lower precise/string conversion receivers so the
+        // receiver's checked TIR type can still select the canonical builtin
+        // operation instead of the user-method fallback.
+        let mut call_receiver = lowered_receiver;
+        if call_receiver.is_none()
+            && matches!(method.as_str(), "to_string" | "to_float" | "to_int")
+        {
+            call_receiver = Some(lower_expr(receiver, cx, env));
+        }
+        let receiver_type = call_receiver.as_ref().and_then(|recv| match &recv.ty {
+            Type::String => Some("String".to_string()),
+            Type::Named(name)
+                if matches!(name.as_str(), "Decimal" | "Fraction" | "String") =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        });
+        let dispatch_recv_type = receiver_type.or_else(|| recv_type.clone());
         let method_sig = expr_cache_take_method_sig(call, cx);
-        let lowered = lower_method_call_with_sig(
-            receiver,
-            method,
-            *method_span,
-            owner_type_args,
-            type_args,
-            args,
-            recv_type,
-            resolved_ret.as_ref(),
-            *checked_widen,
-            cx,
-            env,
-            lowered_receiver,
-            method_sig.as_deref(),
+        let precise_method = matches!(
+            (dispatch_recv_type.as_deref(), method.as_str(), args.len()),
+            (
+                Some("Decimal"),
+                "add" | "sub" | "mul" | "div" | "equal",
+                1
+            ) | (Some("Decimal"), "round" | "floor" | "ceil" | "to_string" | "to_float", 0)
+                | (
+                    Some("Fraction"),
+                    "add" | "sub" | "mul" | "div" | "equal",
+                    1
+                )
+                | (
+                    Some("Fraction"),
+                    "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
+                    0
+                )
         );
+        let mut lowered = if precise_method {
+            let recv = call_receiver
+                .take()
+                .unwrap_or_else(|| lower_expr(receiver, cx, env));
+            let mut value_args = vec![recv];
+            value_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+            let ty = match method.as_str() {
+                "to_string" => Type::String,
+                "div" => Type::Named("Fraction".to_string()),
+                "numerator" | "denominator" => Type::Int,
+                "to_float" => Type::Float,
+                "is_zero" | "equal" => Type::Bool,
+                _ => Type::Named(
+                    dispatch_recv_type
+                        .as_deref()
+                        .unwrap_or("Decimal")
+                        .to_string(),
+                ),
+            };
+            TExpr {
+                ty: resolved_ret.clone().unwrap_or(ty),
+                kind: TExprKind::PreciseBuiltin {
+                    type_name: dispatch_recv_type
+                        .clone()
+                        .unwrap_or_else(|| "Decimal".to_string()),
+                    func: method.to_string(),
+                    args: value_args,
+                },
+            }
+        } else if method == "to_float"
+            && args.is_empty()
+            && dispatch_recv_type.as_deref() == Some("String")
+        {
+            let recv = call_receiver
+                .take()
+                .unwrap_or_else(|| lower_expr(receiver, cx, env));
+            TExpr {
+                ty: resolved_ret.clone().unwrap_or_else(|| Type::Result {
+                    ok: Box::new(Type::Float),
+                    err: Box::new(Type::Named("ParseError".to_string())),
+                }),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(recv),
+                    op: TBuiltinOp::ParseFloat,
+                    args: Vec::new(),
+                },
+            }
+        } else {
+            lower_method_call_with_sig(
+                receiver,
+                method,
+                *method_span,
+                owner_type_args,
+                type_args,
+                args,
+                &dispatch_recv_type,
+                resolved_ret.as_ref(),
+                *checked_widen,
+                cx,
+                env,
+                call_receiver,
+                method_sig.as_deref(),
+            )
+        };
+        // D-MAPTYPE1: `shared [K:V]{}` is elaborated to an untyped empty
+        // `MapLit` before TIR lowering. Its `Shared<T>` return still carries
+        // the exact payload, so restore that context before Rust infers `V`.
+        let shared_payload = resolved_ret.as_ref().and_then(|ty| match ty {
+            Type::Shared(inner) => Some((**inner).clone()),
+            _ => None,
+        });
+        if let Some(shared_payload) = shared_payload {
+            let retagged = match &mut lowered.kind {
+                TExprKind::StaticCall { owner, args, .. } => {
+                    if let TStaticOwner::Prelude { path, generics, .. } = owner {
+                        if path == "jet_std::JetShared" {
+                            if let Some(TPreludeArg::Jet(ty)) = generics.first_mut() {
+                                *ty = shared_payload.clone();
+                            }
+                        }
+                    }
+                    args.first_mut()
+                        .map(|arg| {
+                            let empty_collection = matches!(
+                                &arg.value.kind,
+                                TExprKind::MapLit(entries) if entries.is_empty()
+                            ) || matches!(
+                                &arg.value.kind,
+                                TExprKind::ListLit(items) if items.is_empty()
+                            );
+                            if empty_collection {
+                                arg.value.ty = shared_payload.clone();
+                            }
+                            empty_collection
+                        })
+                        .unwrap_or(false)
+                }
+                _ => false,
+            };
+            if retagged {
+                lowered.ty = resolved_ret
+                    .clone()
+                    .unwrap_or_else(|| Type::Shared(Box::new(shared_payload)));
+            }
+        }
         let lowered = lower_method_pre_contracts(call, lowered, cx, env);
         // D-APILABEL1=A: a method whose labels reordered its arguments keeps
         // the same source evaluation order as a free call.
@@ -485,9 +615,138 @@ pub(super) fn lower_or_fallback(
         }
     }
 
-    let value_t = lower_expr(value, cx, env);
-    // `??` removes one carrier only: a Result<Option<T>, E> produces
-    // Option<T>, which a following `??` can unwrap separately.
+    fn lower_fallback(
+        fallback: &OrFallback,
+        result_ty: &Type,
+        cx: &Cx,
+        env: &LowerEnv,
+        fallback_env: &mut LowerEnv,
+    ) -> TOrFallback {
+        match fallback {
+            OrFallback::Value(e) => {
+                let value = lower_expr(e, cx, fallback_env);
+                let value = preserve_typed_list_shape(value, result_ty, cx);
+                TOrFallback::Value(Box::new(value))
+            }
+            OrFallback::Block { body, value, .. } => {
+                let mut stmts = lower_stmts(body, cx, fallback_env);
+                if let Some(value) = value {
+                    let value = lower_expr(value, cx, fallback_env);
+                    let value = preserve_typed_list_shape(value, result_ty, cx);
+                    stmts.push(TStmt::ExprStmt(value));
+                }
+                TOrFallback::Value(Box::new(TExpr {
+                    ty: result_ty.clone(),
+                    kind: TExprKind::InlineBlock(stmts),
+                }))
+            }
+            OrFallback::Return(None, _) => {
+                if matches!(
+                    &env.ret_ty,
+                    Some(Type::Result { ok, .. })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
+                ) {
+                    let ret_ty = env.ret_ty.clone().expect("fallible void return");
+                    let unit = TExpr {
+                        ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                        kind: TExprKind::Unit,
+                    };
+                    TOrFallback::Return(Some(Box::new(TExpr {
+                        ty: ret_ty,
+                        kind: TExprKind::Ok(Box::new(unit)),
+                    })))
+                } else {
+                    TOrFallback::Return(None)
+                }
+            }
+            OrFallback::Return(Some(e), _) => {
+                // A return fallback is checked against the enclosing carrier, so
+                // sema intentionally leaves a direct Jet call unwrapped. Lower
+                // that call through the same traced Try path as ordinary value
+                // propagation before return_value restores the outer Ok.
+                let value = if matches!(e.without_parens(), Expr::Call(..)) {
+                    let wrapped = Expr::Try(e.clone(), e.span(), TryConvert::None, None);
+                    lower_expr(&wrapped, cx, fallback_env)
+                } else {
+                    lower_expr(e, cx, fallback_env)
+                };
+                TOrFallback::Return(Some(Box::new(return_value(value, env, cx))))
+            }
+            OrFallback::Panic { name_span, args } => {
+                let (kind, loc) = lower_panic_stop(name_span, args, cx, fallback_env);
+                let TRequireKind::Panic { msg } = kind else {
+                    unreachable!()
+                };
+                TOrFallback::Panic { msg, loc }
+            }
+            OrFallback::Break(_) => TOrFallback::Break,
+            OrFallback::Continue(_) => TOrFallback::Continue,
+            OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
+            OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
+        }
+    }
+
+    fn lift_value_fallback_to_option(fallback: TOrFallback, payload: &Type) -> TOrFallback {
+        match fallback {
+            TOrFallback::Value(value) => TOrFallback::Value(Box::new(TExpr {
+                ty: Type::Option(Box::new(payload.clone())),
+                kind: TExprKind::Present(value),
+            })),
+            other => other,
+        }
+    }
+
+    // `??` stores the successful payload in a new owning slot. Reuse the
+    // ordinary ownership boundary so a borrowed `?T` parameter is cloned
+    // before the outcome match (otherwise rustc reports E0507).
+    let value_t = lower_owned_expr(value, cx, env);
+    // D-FAILURE-FOUNDATION1=A / D-FAIL-BIND1=A: a mixed `?T !E` carrier has
+    // three routes. First consume its Result route, making an `Err(e)` fallback
+    // carry `Present(fallback)`; then consume the remaining Option route. The
+    // fallback is lowered in both branch environments but only one branch runs,
+    // so `err` is visible on the failure route without evaluating the fallback
+    // twice.
+    let mixed_payload = match &value_t.ty {
+        Type::Result { ok, .. } => match ok.as_ref() {
+            Type::Option(inner) => Some((**inner).clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(payload) = mixed_payload {
+        let option_ty = Type::Option(Box::new(payload.clone()));
+        let mut failure_env = clone_env(env);
+        if let Type::Result { err, .. } = &value_t.ty {
+            failure_env.bind(
+                Syntax::AMBIENT_ERR,
+                ambient_err_local(),
+                Some((**err).clone()),
+            );
+        }
+        let failure_fallback =
+            lower_fallback(fallback, &payload, cx, env, &mut failure_env);
+        let failure_fallback = lift_value_fallback_to_option(failure_fallback, &payload);
+        let after_result = TExpr {
+            ty: option_ty,
+            kind: TExprKind::OrFallback {
+                value: Box::new(value_t),
+                fallback: failure_fallback,
+            },
+        };
+        let mut absence_env = clone_env(env);
+        let absence_fallback =
+            lower_fallback(fallback, &payload, cx, env, &mut absence_env);
+        return TExpr {
+            ty: payload,
+            kind: TExprKind::OrFallback {
+                value: Box::new(after_result),
+                fallback: absence_fallback,
+            },
+        };
+    }
+
+    // `??` removes exactly one carrier. A plain Result or Option reaches this
+    // path; the mixed Result<Option<T>, E> shape was normalized above.
     let result_ty = match &value_t.ty {
         Type::Option(inner) => (**inner).clone(),
         Type::Result { ok, .. } => ok.as_ref().clone(),
@@ -497,7 +756,7 @@ pub(super) fn lower_or_fallback(
     let mut fallback_env = clone_env(env);
     if let Type::Result { err, .. } = &value_t.ty {
         // Only a direct Option has no error carrier. A Result<Option<T>, E>
-        // still exposes its outer E on this first fallback.
+        // mixed carrier is handled above, and its failure branch binds E.
         if !optional_success {
             fallback_env.bind(
                 Syntax::AMBIENT_ERR,
@@ -506,68 +765,7 @@ pub(super) fn lower_or_fallback(
             );
         }
     }
-    let tfallback = match fallback {
-        OrFallback::Value(e) => {
-            let value = lower_expr(e, cx, &mut fallback_env);
-            let value = preserve_typed_list_shape(value, &result_ty, cx);
-            TOrFallback::Value(Box::new(value))
-        }
-        OrFallback::Block { body, value, .. } => {
-            let mut stmts = lower_stmts(body, cx, &mut fallback_env);
-            if let Some(value) = value {
-                let value = lower_expr(value, cx, &mut fallback_env);
-                let value = preserve_typed_list_shape(value, &result_ty, cx);
-                stmts.push(TStmt::ExprStmt(value));
-            }
-            TOrFallback::Value(Box::new(TExpr {
-                ty: result_ty.clone(),
-                kind: TExprKind::InlineBlock(stmts),
-            }))
-        }
-        OrFallback::Return(None, _) => {
-            if matches!(
-                &env.ret_ty,
-                Some(Type::Result { ok, .. })
-                    if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
-            ) {
-                let ret_ty = env.ret_ty.clone().expect("fallible void return");
-                let unit = TExpr {
-                    ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-                    kind: TExprKind::Unit,
-                };
-                TOrFallback::Return(Some(Box::new(TExpr {
-                    ty: ret_ty,
-                    kind: TExprKind::Ok(Box::new(unit)),
-                })))
-            } else {
-                TOrFallback::Return(None)
-            }
-        }
-        OrFallback::Return(Some(e), _) => {
-            // A return fallback is checked against the enclosing carrier, so
-            // sema intentionally leaves a direct Jet call unwrapped. Lower
-            // that call through the same traced Try path as ordinary value
-            // propagation before return_value restores the outer Ok.
-            let value = if matches!(e.without_parens(), Expr::Call(..)) {
-                let wrapped = Expr::Try(e.clone(), e.span(), TryConvert::None, None);
-                lower_expr(&wrapped, cx, &mut fallback_env)
-            } else {
-                lower_expr(e, cx, &mut fallback_env)
-            };
-            TOrFallback::Return(Some(Box::new(return_value(value, env, cx))))
-        }
-        OrFallback::Panic { name_span, args } => {
-            let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
-            let TRequireKind::Panic { msg } = kind else {
-                unreachable!()
-            };
-            TOrFallback::Panic { msg, loc }
-        }
-        OrFallback::Break(_) => TOrFallback::Break,
-        OrFallback::Continue(_) => TOrFallback::Continue,
-        OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
-        OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
-    };
+    let tfallback = lower_fallback(fallback, &result_ty, cx, env, &mut fallback_env);
     TExpr {
         ty: result_ty,
         kind: TExprKind::OrFallback {
@@ -3378,7 +3576,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
                 // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
                 if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-                    if let Some(ft @ Type::Fn { .. }) = cx.fn_types.get(name) {
+                    let fn_value_ty = cx
+                        .fn_types
+                        .get(name)
+                        .or_else(|| cx.fn_source_types.get(name));
+                    if let Some(ft @ Type::Fn { .. }) = fn_value_ty {
                         return in_own_frame(|| {
                             return TExpr {
                                 ty: ft.clone(),
@@ -4815,10 +5017,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     lower_extern_call_arg(a, conv, env, cx)
                                 })
                                 .collect();
-                            // Return type comes from `cx.fn_types` (including extern rust /
-                            // CModule entries registered in Context).
+                            // `Context` records foreign declarations with their
+                            // raw bridge ABI; ordinary `#Import(c)` functions
+                            // retain their effective carrier in `fn_types`.
+                            let return_type = extern_call_return_type(cx, &call.name);
                             let lowered = TExpr {
-                                ty: call_return_type(cx, &call.name),
+                                ty: return_type,
                                 kind: TExprKind::ExternCall {
                                     wrapper,
                                     c_abi,
@@ -5243,7 +5447,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                         }
                     }
-                    match source_arg_order(&call.args) {
+                    let lowered = match source_arg_order(&call.args) {
                         Some(order) => preserve_source_arg_order(
                             lowered,
                             &order,
@@ -5251,6 +5455,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             call.name_span.start as u32,
                         ),
                         None => lowered,
+                    };
+                    if cx.diverging_functions.contains(&call.name) {
+                        let line = crate::Diagnostics::span_line_col(&cx.src, call.name_span.start).0;
+                        let never = Type::Named(Syntax::TYPE_NEVER.to_string());
+                        TExpr {
+                            ty: never.clone(),
+                            kind: TExprKind::InlineBlock(vec![
+                                TStmt::ExprStmt(lowered),
+                                TStmt::ExprStmt(TExpr {
+                                    ty: never,
+                                    kind: TExprKind::Unreachable { line },
+                                }),
+                            ]),
+                        }
+                    } else {
+                        lowered
                     }
                 })
             })
@@ -6693,6 +6913,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }),
         Expr::Ok(inner, _) => in_own_frame(|| {
             let mut t = lower_owned_expr(inner, cx, env);
+            // Sema uses `Ok(...)` to lift an unwrapped value-expected tail into
+            // the callable's effective Result carrier. A function-value call
+            // already has that carrier, so lifting it again would emit
+            // `Ok(Result<...>)` and leave rustc with a nested result. Preserve
+            // the existing carrier and wrap only a raw success value.
+            if env.ret_ty.as_ref() == Some(&t.ty) {
+                return t;
+            }
             if let Some(Type::Result { ok, .. }) = &env.ret_ty {
                 t = preserve_typed_list_shape(t, ok, cx);
                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
@@ -6732,6 +6960,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Try(inner, span, convert, note) => {
             in_own_frame(|| {
                 let inner_t = lower_expr(inner, cx, env);
+                if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
+                    return inner_t;
+                }
                 let note_t = note
                     .as_ref()
                     .map(|note| Box::new(lower_expr(note, cx, env)));

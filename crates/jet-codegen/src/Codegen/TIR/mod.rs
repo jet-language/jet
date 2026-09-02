@@ -1735,6 +1735,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             &module.display,
             None,
             &extern_funcs,
+            &bundle.edition,
         );
         populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
         let type_shapes = collect_type_shapes(&module.items);
@@ -2042,6 +2043,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 &imported.display,
                 None,
                 &extern_funcs,
+                &bundle.edition,
             );
             populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
             // #2252: this pass lowers the module's OWN items under their
@@ -2833,6 +2835,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &module.display,
         None,
         &extern_funcs,
+        &bundle.edition,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let selected = selected_zero_arg_tir_entry(bundle).or_else(|| {
@@ -4931,29 +4934,61 @@ fn collect_cost_expr(
     loop_depth: usize,
     sites: &mut Vec<TCostSite>,
 ) {
-    collect_cost_expr_with_state(expr, function, span, loop_depth, sites, None);
+    collect_cost_expr_with_state_and_context(expr, function, span, loop_depth, sites, None, false);
 }
 
-fn collect_cost_expr_with_state(
+/// Collect an expression whose outcome carrier is consumed by its parent
+/// operation. Nested expressions still use the ordinary retained-value rules.
+fn collect_cost_expr_consumed(
+    expr: &TExpr,
+    function: &str,
+    span: crate::Diagnostics::Span,
+    loop_depth: usize,
+    sites: &mut Vec<TCostSite>,
+) {
+    collect_cost_expr_with_state_and_context(
+        expr,
+        function,
+        span,
+        loop_depth,
+        sites,
+        outcome_cost_state(expr),
+        true,
+    );
+}
+
+
+fn collect_cost_expr_with_state_and_context(
     expr: &TExpr,
     function: &str,
     span: crate::Diagnostics::Span,
     loop_depth: usize,
     sites: &mut Vec<TCostSite>,
     state_override: Option<TCostState>,
+    outcome_consumed: bool,
 ) {
     let expr_span = match &expr.kind {
         TExprKind::CoreCall { source_span, .. } => *source_span,
         _ => span,
     };
     if let Some(fact) = expr.fact_channel().cost {
-        sites.push(TCostSite {
-            function: function.to_string(),
-            span: expr_span,
-            kind: fact.kind,
-            state: state_override.unwrap_or(fact.state),
-            loop_depth,
-        });
+        let state = state_override.unwrap_or(fact.state);
+        // A carrier consumed by `??`, `?`, or a scrutiny node is not retained
+        // across the iteration. Keep an optimizer proof for an available
+        // fast-path operation, but do not project ordinary carrier creation as
+        // a hidden super-linear cost.
+        if !outcome_consumed
+            || fact.kind != TCostKind::OutcomeConstruction
+            || state == TCostState::OptimizerRemoved
+        {
+            sites.push(TCostSite {
+                function: function.to_string(),
+                span: expr_span,
+                kind: fact.kind,
+                state,
+                loop_depth,
+            });
+        }
     }
 
     match &expr.kind {
@@ -4979,10 +5014,10 @@ fn collect_cost_expr_with_state(
                     collect_cost_expr(arg, function, expr_span, loop_depth, sites);
                 }
             }
-            THostCall::CarrierFact { recv, .. }
-            | THostCall::CellGuardProject { recv, .. }
-            | THostCall::OptionProbe { inner: recv, .. }
-            | THostCall::TupleIndex { base: recv, .. } => {
+            THostCall::CarrierFact { recv, .. } | THostCall::OptionProbe { inner: recv, .. } => {
+                collect_cost_expr_consumed(recv, function, expr_span, loop_depth, sites);
+            }
+            THostCall::CellGuardProject { recv, .. } | THostCall::TupleIndex { base: recv, .. } => {
                 collect_cost_expr(recv, function, expr_span, loop_depth, sites);
             }
             THostCall::FixedListIndex { base, index, .. } => {
@@ -5051,7 +5086,6 @@ fn collect_cost_expr_with_state(
         | TExprKind::RangeCheckedCtor { arg, .. }
         | TExprKind::DistinctConvert { arg, .. }
         | TExprKind::Print(arg)
-        | TExprKind::Drop(arg)
         | TExprKind::Close(arg)
         | TExprKind::ResourceNew(arg)
         | TExprKind::DistinctRaw(arg)
@@ -5064,6 +5098,9 @@ fn collect_cost_expr_with_state(
         | TExprKind::ExplicitCopy(arg)
         | TExprKind::MaterializeView(arg) => {
             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::Drop(arg) => {
+            collect_cost_expr_consumed(arg, function, expr_span, loop_depth, sites);
         }
         TExprKind::UnitConvert { arg, rounding, .. } => {
             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
@@ -5119,11 +5156,13 @@ fn collect_cost_expr_with_state(
         | TExprKind::SharedGuardSplit { guard: recv, .. }
         | TExprKind::PtrFromAddr { addr: recv, .. }
         | TExprKind::MathSwizzleRead { recv, .. }
-        | TExprKind::PatternMatches { subj: recv, .. }
         | TExprKind::TaskGroupAll { tasks: recv }
         | TExprKind::TaskGroupRace { tasks: recv }
         | TExprKind::TaskGroupAny { tasks: recv } => {
             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+        }
+        TExprKind::PatternMatches { subj: recv, .. } => {
+            collect_cost_expr_consumed(recv, function, expr_span, loop_depth, sites);
         }
         TExprKind::SharedGuardWait {
             guard,
@@ -5191,7 +5230,7 @@ fn collect_cost_expr_with_state(
         }
         TExprKind::DecodeUnder { segment, inner } => {
             collect_cost_expr(segment, function, expr_span, loop_depth, sites);
-            collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+            collect_cost_expr_consumed(inner, function, expr_span, loop_depth, sites);
         }
         TExprKind::BuiltinMethod { recv, args, .. }
         | TExprKind::ClosureMethod { recv, args, .. }
@@ -5220,20 +5259,13 @@ fn collect_cost_expr_with_state(
             collect_cost_expr(else_value, function, expr_span, loop_depth, sites);
         }
         TExprKind::Try { inner, note, .. } => {
-            collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+            collect_cost_expr_consumed(inner, function, expr_span, loop_depth, sites);
             if let Some(note) = note {
                 collect_cost_expr(note, function, expr_span, loop_depth, sites);
             }
         }
         TExprKind::OrFallback { value, fallback } => {
-            collect_cost_expr_with_state(
-                value,
-                function,
-                expr_span,
-                loop_depth,
-                sites,
-                outcome_cost_state(value),
-            );
+            collect_cost_expr_consumed(value, function, expr_span, loop_depth, sites);
             match fallback {
                 TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
                     collect_cost_expr(value, function, expr_span, loop_depth, sites);
@@ -5249,12 +5281,12 @@ fn collect_cost_expr_with_state(
             }
         }
         TExprKind::OptField { base, .. } => {
-            collect_cost_expr(base, function, expr_span, loop_depth, sites);
+            collect_cost_expr_consumed(base, function, expr_span, loop_depth, sites);
         }
         TExprKind::OptionLift2 { f, a, b } => {
             collect_cost_expr(f, function, expr_span, loop_depth, sites);
-            collect_cost_expr(a, function, expr_span, loop_depth, sites);
-            collect_cost_expr(b, function, expr_span, loop_depth, sites);
+            collect_cost_expr_consumed(a, function, expr_span, loop_depth, sites);
+            collect_cost_expr_consumed(b, function, expr_span, loop_depth, sites);
         }
         TExprKind::HostBorrowCallback { callable, .. } => {
             collect_cost_expr(callable, function, expr_span, loop_depth, sites);
@@ -5317,11 +5349,13 @@ fn collect_cost_cond(
     sites: &mut Vec<TCostSite>,
 ) {
     match cond {
-        TIfCond::Plain(expr)
-        | TIfCond::IfLet { subj: expr, .. }
-        | TIfCond::IsNone { subj: expr }
-        | TIfCond::Matches { subj: expr, .. } => {
+        TIfCond::Plain(expr) => {
             collect_cost_expr(expr, function, span, loop_depth, sites);
+        }
+        TIfCond::IfLet { subj, .. }
+        | TIfCond::IsNone { subj }
+        | TIfCond::Matches { subj, .. } => {
+            collect_cost_expr_consumed(subj, function, span, loop_depth, sites);
         }
         TIfCond::And { left, right } => {
             collect_cost_cond(left, function, span, loop_depth, sites);
@@ -5379,7 +5413,7 @@ fn collect_cost_stmt(
             collect_cost_expr(init, function, span, loop_depth, sites);
         }
         TStmt::RefutableBind { init, fallback, .. } => {
-            collect_cost_expr(init, function, span, loop_depth, sites);
+            collect_cost_expr_consumed(init, function, span, loop_depth, sites);
             collect_cost_stmts(fallback, function, span, loop_depth, sites);
         }
         TStmt::GcEdit {
@@ -5404,7 +5438,9 @@ fn collect_cost_stmt(
                 collect_cost_expr(value, function, span, loop_depth, sites);
             }
         }
-        TStmt::ExprStmt(expr) => collect_cost_expr(expr, function, span, loop_depth, sites),
+        TStmt::ExprStmt(expr) => {
+            collect_cost_expr_consumed(expr, function, span, loop_depth, sites)
+        }
         TStmt::TaskGroup { limit, body, .. } => {
             if let Some(limit) = limit {
                 collect_cost_expr(limit, function, span, loop_depth, sites);
@@ -5474,7 +5510,7 @@ fn collect_cost_stmt(
             else_body,
             ..
         } => {
-            collect_cost_expr(scrutinee, function, span, loop_depth, sites);
+            collect_cost_expr_consumed(scrutinee, function, span, loop_depth, sites);
             for arm in arms {
                 collect_cost_stmts(&arm.body, function, span, loop_depth, sites);
             }
@@ -6059,16 +6095,17 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &JitProgram) -> Vec<Strin
         .iter()
         .zip(reachable.iter().copied())
         .filter_map(|(callable, reachable)| {
-            (reachable && !cost_callable_is_covered(bundle, callable, program)).then(|| {
-                let reason = if callable.foreign {
-                    "foreign callable has no typed TIR body"
-                } else if callable.type_parameterized {
-                    "type-parameterized callable has no complete TIR specialization"
-                } else {
-                    "sema-checked callable is outside typed TIR coverage"
-                };
-                format!("{} ({reason})", callable.label)
-            })
+            (reachable
+                && !callable.foreign
+                && !cost_callable_is_covered(bundle, callable, program))
+                .then(|| {
+                    let reason = if callable.type_parameterized {
+                        "type-parameterized callable has no complete TIR specialization"
+                    } else {
+                        "sema-checked callable is outside typed TIR coverage"
+                    };
+                    format!("{} ({reason})", callable.label)
+                })
         })
         .collect::<Vec<_>>();
     gaps.extend(cost_error_conversion_gaps(
@@ -6169,6 +6206,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &module.display,
                 None,
                 &extern_funcs,
+                &bundle.edition,
             );
             populate_cx_from_bundle(&mut cx, bundle, callable.module);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);
@@ -6701,11 +6739,12 @@ pub enum TExprKind {
         arg: Option<Box<(TExpr, bool)>>,
     },
     /// D-DBDRIVER1: a `DBValue` construction (`DBValue.Int(n)` / `.Float(f)` /
-    /// `.Text(s)` / `.Bool(b)` / `.Null`) — the tagged SQL parameter/column value.
-    /// Same shape as `JSONLit` (a FOREIGN prelude enum, not a user `EnumLit`), kept
-    /// as its own node rather than reusing `JSONLit` because `DBValue` renders to
-    /// a DIFFERENT prelude type (`jet_std::DBValue`, not `jet_std::DataTree`) and
-    /// has no recursive `Array`/`Object`-style payload to special-case.
+    /// `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` / `.Null`) — the tagged SQL
+    /// parameter/column value. Same shape as `JSONLit` (a FOREIGN prelude enum,
+    /// not a user `EnumLit`), kept as its own node rather than reusing `JSONLit`
+    /// because `DBValue` renders to a DIFFERENT prelude type (`jet_std::DBValue`,
+    /// not `jet_std::DataTree`) and has no recursive `Array`/`Object`-style
+    /// payload to special-case.
     DBValueLit {
         variant: String,
         arg: Option<Box<(TExpr, bool)>>,
@@ -8811,11 +8850,13 @@ pub enum THandleOp {
     /// D-DBDRIVER1: `conn.close()` → `{ffi}::jet_db_close((recv).handle)` → `Bool`.
     DBClose,
     /// D-DBDRIVER1: `DBValue` accessor methods (`.int()`/`.float()`/`.text()`/
-    /// `.bool()`/`.is_null()`) → `(recv).<method>()`, same shape as `JSONInt`/….
+    /// `.bool()`/`.blob()`/`.is_null()`) → `(recv).<method>()`, same shape as
+    /// `JSONInt`/….
     DBValueInt,
     DBValueFloat,
     DBValueText,
     DBValueBool,
+    DBValueBlob,
     DBValueIsNull,
     /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call(name, args)` →
     /// `Result<Float, String>`, a homogeneous `[Float]` call across the

@@ -319,7 +319,7 @@ fn run_jet(root: &Path, cache: &Path, label: &str, args: &[&str]) -> (Duration, 
         .args(args)
         .current_dir(root)
         .env("HOME", cache.join("home"))
-        .env("JET_CACHE_DIR", cache.join("jet-cache"))
+        .env("JET_STORE_DIR", cache.join("jet-cache"))
         .env("JETPACK_ROOT", cache.join("jetpack"))
         .env("NO_COLOR", "1")
         .output()

@@ -230,6 +230,7 @@ pub(crate) fn register_imported_struct_shapes(
     module_idx: usize,
 ) {
     let module = &bundle.modules[module_idx];
+    let own_type_names = module_owned_type_names(&module.items);
     let mut imported = Vec::<(usize, String)>::new();
     for import in &module.imports {
         if import.is_c_import().unwrap_or_else(|error| {
@@ -276,6 +277,13 @@ pub(crate) fn register_imported_struct_shapes(
     imported.sort();
     imported.dedup();
     for (target, definition_name) in imported {
+        // A local declaration shadows an imported leaf for bare struct
+        // literals. Do not let the imported shape overwrite the local
+        // identity in `local_type_identities`; qualified `alias.Type`
+        // literals still resolve through `foreign_types`.
+        if own_type_names.contains(&definition_name) {
+            continue;
+        }
         let Some(definition) = bundle.modules[target]
             .items
             .iter()
@@ -693,6 +701,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             )
         }
         "UiNode" => matches!(member, "label" | "width" | "height"),
+        // D-LOGTRACE1=A: Prelude logging records expose plain Rust fields.
+        "LogField" => matches!(member, "key" | "value" | "kind" | "redacted"),
+        "LogSpan" => matches!(member, "id" | "name"),
         // E2-M10: HTTPRequest / HTTPResponse field access.
         "HTTPRequest" | "HTTPResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
@@ -1040,6 +1051,21 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
         // c109 Phase 23: a distinct-type constructor `UserId(x)` yields the distinct
         // type itself (it has no `fn_types` entry). Keeps the call's result type total.
         _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
+        _ => unit_type(),
+    }
+}
+/// Return the ABI return stored for a foreign call.
+///
+/// `Context` keeps `extern rust`/C-module declarations at their raw bridge ABI,
+/// while `#Import(c)` remains an ordinary Jet function with its effective
+/// carrier. Read `fn_types` directly; `fn_source_types` would erase that
+/// distinction by restoring the source spelling for guest imports.
+pub(crate) fn extern_call_return_type(cx: &Cx, name: &str) -> Type {
+    match cx.fn_types.get(name) {
+        Some(Type::Fn { ret, .. }) => ret
+            .as_deref()
+            .map(|ty| cx.expand_type_aliases(ty))
+            .unwrap_or_else(unit_type),
         _ => unit_type(),
     }
 }

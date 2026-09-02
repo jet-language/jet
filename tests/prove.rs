@@ -19,16 +19,15 @@ fn workspace(name: &str) -> PathBuf {
 fn budget_workspace(name: &str) -> PathBuf {
     let root = workspace(name);
     fs::create_dir_all(root.join("src")).unwrap();
-    fs::write(
-        root.join("package.jet"),
-        "name: \"app\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
     // Bare `jet budget check` resolves the canonical `run.jet` entry
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     fs::write(
         root.join("src/run.jet"),
-        r#"module perf.package {
+        r#"package {
+    name: "app"
+}
+
+module perf.app {
     budgets: [Budget{
         name: "public-api",
         scope: .Package,
@@ -204,6 +203,7 @@ fn prove_uses_canonical_package_marker_in_target_identity() {
 #[test]
 fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let root = workspace("replay_round_trip");
+    let store = root.join("store");
     fs::write(
         root.join("main.jet"),
         "use core.time as time\n#Test(\"recorded time\") { observed :: time.now() }\n",
@@ -219,6 +219,7 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
             &format!("--capture={artifact_arg}"),
             "--json",
         ])
+        .env("JET_STORE_DIR", &store)
         .output()
         .unwrap();
     assert_eq!(
@@ -235,14 +236,36 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         "JSON capture leaked stderr: {}",
         String::from_utf8_lossy(&captured.stderr)
     );
+    let captured_report = String::from_utf8_lossy(&captured.stdout);
+    assert!(
+        captured_report.contains("\"inputSha256\":\""),
+        "capture report lost target input hash: {captured_report}"
+    );
+    assert!(
+        captured_report.contains("\"targetTriple\":\""),
+        "capture report lost target triple: {captured_report}"
+    );
     let artifact_bytes = fs::read(&artifact).unwrap();
     assert!(artifact_bytes.starts_with(b"JREPLAY\0"));
-    assert!(String::from_utf8_lossy(&artifact_bytes).contains("\"roots\":[\"Time\"]"));
-    assert!(String::from_utf8_lossy(&artifact_bytes).contains("\"time_site_id\":"));
+    let artifact_text = String::from_utf8_lossy(&artifact_bytes);
+    assert!(artifact_text.contains("\"roots\":[\"Time\"]"));
+    assert!(artifact_text.contains("\"time_site_id\":"));
+    let build_digest = artifact_text
+        .split("\"build_digest\":\"")
+        .nth(1)
+        .and_then(|tail| tail.split('"').next())
+        .expect("replay identity build digest");
+    assert!(
+        build_digest.len() == 64 && build_digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "replay identity build digest is not a SHA-256 hash: {build_digest}"
+    );
+    assert!(artifact_text.contains("\"source_digest\":\""));
+    assert!(artifact_text.contains("\"tir_hash\":\""));
 
     let replayed = Command::new(jet())
         .current_dir(&root)
         .args(["prove", "main.jet", "--replay", &artifact_arg, "--json"])
+        .env("JET_STORE_DIR", &store)
         .output()
         .unwrap();
     assert_eq!(
@@ -270,6 +293,7 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let rejected = Command::new(jet())
         .current_dir(&root)
         .args(["prove", "main.jet", "--replay", &artifact_arg])
+        .env("JET_STORE_DIR", &store)
         .output()
         .unwrap();
     assert_eq!(rejected.status.code(), Some(1));
@@ -961,7 +985,7 @@ fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
     assert!(human.stdout.is_empty());
     assert_eq!(
         String::from_utf8(human.stderr).unwrap(),
-        "Error [E2941]: unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: try `jet prove plain.jet --lens tests`\n"
+        "Error [E2941]: unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: try `jet prove plain.jet --lens tests`\nMore: jet-lang.dev/e/E2941\n"
     );
 
     let machine = Command::new(jet())

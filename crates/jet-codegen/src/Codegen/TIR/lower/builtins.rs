@@ -956,12 +956,12 @@ pub(crate) fn resolve_builtin_op(
         ("has", 1) if is_bag => TBuiltinOp::BagHas,
         ("count", 1) if is_bag => TBuiltinOp::BagCount,
         // D-COLLBREADTH1=A: Queue<T> instance methods.
-        ("push_front", 1) => TBuiltinOp::DequePushFront,
-        ("push_back", 1) => TBuiltinOp::DequePushBack,
-        ("pop_front", 0) => TBuiltinOp::DequePopFront,
-        ("pop_back", 0) => TBuiltinOp::DequePopBack,
-        ("peek_front", 0) => TBuiltinOp::DequePeekFront,
-        ("peek_back", 0) => TBuiltinOp::DequePeekBack,
+        ("push_front", 1) if is_deque => TBuiltinOp::DequePushFront,
+        ("push_back", 1) if is_deque => TBuiltinOp::DequePushBack,
+        ("pop_front", 0) if is_deque => TBuiltinOp::DequePopFront,
+        ("pop_back", 0) if is_deque => TBuiltinOp::DequePopBack,
+        ("peek_front", 0) if is_deque => TBuiltinOp::DequePeekFront,
+        ("peek_back", 0) if is_deque => TBuiltinOp::DequePeekBack,
         ("capacity", 0) if is_deque => TBuiltinOp::DequeCapacity,
         ("delete", 1) if is_deque => TBuiltinOp::DequeDelete,
         _ => return None,
@@ -1018,7 +1018,12 @@ pub(crate) fn resolve_builtin_op(
         }
     };
     if let Some(receiver_borrow) = receiver_borrow {
-        debug_assert_eq!(receiver_borrow, emitted_borrow);
+        let receiver_ty = rty.as_ref();
+        debug_assert_eq!(
+            receiver_borrow,
+            emitted_borrow,
+            "builtin receiver borrow disagreement for {method} on {receiver_ty:?} (op {op:?})"
+        );
     }
     Some(op)
 }

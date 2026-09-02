@@ -2554,7 +2554,11 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         return builtin_method_mutates(inner, method);
     }
     match recv_ty {
-        Type::List(_) => matches!(
+        // An ordinary fallible binding exposes its success payload to the
+        // enclosing function. Keep its mutation contract aligned with the
+        // payload table while pre-sema lowering still sees the carrier.
+        Type::Result { ok, .. } => builtin_method_mutates(ok, method),
+        Type::List(_) | Type::FixedList { .. } => matches!(
             method,
             "push"
                 | "try_push"
@@ -3673,11 +3677,21 @@ pub enum BuiltinReceiverBorrow {
 }
 
 pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverBorrow {
+    fn is_list_receiver(ty: &Type) -> bool {
+        match ty {
+            Type::List(_) | Type::FixedList { .. } => true,
+            Type::Tagged { inner, .. } | Type::Result { ok: inner, .. } => {
+                is_list_receiver(inner)
+            }
+            _ => false,
+        }
+    }
+
     if is_iter_type(recv_ty) {
         BuiltinReceiverBorrow::Move
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
-    } else if (matches!(recv_ty, Type::List(_))
+    } else if (is_list_receiver(recv_ty)
         && matches!(
             method,
             "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "update_first" | "edit_disjoint"
@@ -3699,5 +3713,84 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
         // Ordinary Rust method-call syntax reserves `&mut self`, evaluates
         // arguments, then activates the exclusive borrow.
         BuiltinReceiverBorrow::TwoPhaseWrite
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_mutation_borrows_match_for_growable_and_fixed_lists() {
+        let methods = [
+            ("push", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("try_push", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("try_reserve", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("pop", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("insert", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("remove", BuiltinReceiverBorrow::EagerWrite),
+            ("extend", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("reverse", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("sort", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("sort_by", BuiltinReceiverBorrow::EagerWrite),
+            ("sort_desc", BuiltinReceiverBorrow::EagerWrite),
+            ("sort_by_desc", BuiltinReceiverBorrow::EagerWrite),
+            ("clear", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("update_first", BuiltinReceiverBorrow::EagerWrite),
+            ("split_write", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("get_disjoint_write", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("edit_disjoint", BuiltinReceiverBorrow::EagerWrite),
+        ];
+        let list = Type::List(Box::new(Type::Int));
+        let fixed = Type::FixedList {
+            elem: Box::new(Type::Int),
+            len: crate::AST::Measure::literal("length", 3),
+        };
+        let result = Type::Result {
+            ok: Box::new(list.clone()),
+            err: Box::new(Type::Named("Error".to_string())),
+        };
+        for (label, receiver) in [
+            ("List", &list),
+            ("FixedList", &fixed),
+            ("Result<List>", &result),
+        ] {
+            for &(method, expected) in &methods {
+                assert!(
+                    builtin_method_mutates(receiver, method),
+                    "{label}.{method} is not a mutation"
+                );
+                assert_eq!(
+                    builtin_receiver_borrow(receiver, method),
+                    expected,
+                    "{label}.{method} borrow drifted"
+                );
+            }
+        }
+        let queue_only_methods = [
+            "push_front",
+            "push_back",
+            "pop_front",
+            "pop_back",
+            "peek_front",
+            "peek_back",
+        ];
+        for (label, receiver) in [
+            ("List", &list),
+            ("FixedList", &fixed),
+            ("Result<List>", &result),
+        ] {
+            for method in queue_only_methods {
+                assert!(
+                    !builtin_method_mutates(receiver, method),
+                    "{label}.{method} unexpectedly mutates"
+                );
+                assert_eq!(
+                    builtin_receiver_borrow(receiver, method),
+                    BuiltinReceiverBorrow::Read,
+                    "{label}.{method} borrow drifted"
+                );
+            }
+        }
     }
 }

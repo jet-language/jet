@@ -199,6 +199,17 @@ pub(crate) mod json_rt {
         })
     }
 }
+/// Shared CSV/data query kernel. The resident layer only marshals heap
+/// `DataTree` values; plan parsing and comparison stay in the Prelude.
+pub(crate) mod data_query_rt {
+    pub(crate) mod jet_std {
+        pub(crate) use super::super::json_rt::{
+            datatree_get, render_datatree_json, DataTree, FieldError,
+        };
+    }
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs");
+}
+
 
 /// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
@@ -1646,6 +1657,30 @@ fn jet_jit_csv_decode_trees(text: i64) -> i64 {
         Err(e) => result_err_msg(&e),
     }
 }
+fn jet_jit_csv_query_read(path: i64) -> i64 {
+    let path = clone_string(path);
+    match data_query_rt::jet_data_query_read(&path) {
+        Ok(text) => {
+            let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+            result_ok(handle as u64)
+        }
+        Err(errors) => result_err_fields(errors),
+    }
+}
+
+fn jet_jit_data_query_rows(rows: i64, sql: i64) -> i64 {
+    let Some(json_rt::DataTree::Array(rows)) = read_datatree(rows) else {
+        return result_err_fields(json_rt::FieldError::one(
+            "analytics query needs an array of rows",
+        ));
+    };
+    let sql = clone_string(sql);
+    match data_query_rt::jet_data_query_trees(&rows, &sql) {
+        Ok(selected) => result_ok(alloc_datatree(&json_rt::DataTree::Array(selected)) as u64),
+        Err(errors) => result_err_fields(errors),
+    }
+}
+
 
 fn jet_jit_datatree_field(tree: i64, name: i64) -> i64 {
     let key = clone_string(name);
@@ -2367,6 +2402,8 @@ host_fns! {
     codec_encode: "jet_jit_codec_encode" => jet_jit_codec_encode: sig_binary;
     codec_decode: "jet_jit_codec_decode" => jet_jit_codec_decode: sig_binary;
     csv_decode_trees: "jet_jit_csv_decode_trees" => jet_jit_csv_decode_trees: sig_unary;
+    csv_query_read: "jet_jit_csv_query_read" => jet_jit_csv_query_read: sig_unary;
+    data_query_rows: "jet_jit_data_query_rows" => jet_jit_data_query_rows: sig_binary;
     datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
     datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
     datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;

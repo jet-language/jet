@@ -33,14 +33,7 @@ pub struct LibraryArtifacts {
 /// marker and type decision is made in sema; this function never inspects a
 /// function's AST types itself.
 pub fn library_export_shape(function: &crate::AST::Func) -> Option<LibraryScalar> {
-    crate::Sema::guest_export_signature(function)
-        .and_then(|guest| guest.scalar)
-        .map(|scalar| match scalar {
-            crate::Sema::GuestScalar::Int => LibraryScalar::Int,
-            crate::Sema::GuestScalar::Float => LibraryScalar::Float,
-            crate::Sema::GuestScalar::Bool => LibraryScalar::Bool,
-            crate::Sema::GuestScalar::Text => LibraryScalar::Text,
-        })
+    super::Embedding::export_shape(function)
 }
 
 fn c_symbol(name: &str) -> String {
@@ -48,20 +41,13 @@ fn c_symbol(name: &str) -> String {
 }
 
 fn collect_exports(bundle: &ProgramBundle) -> Vec<LibraryExport> {
-    crate::Sema::guest_export_surface(bundle)
+    super::Embedding::export_surface(bundle)
         .into_iter()
-        .filter_map(|export| {
-            Some(LibraryExport {
-                name: export.name,
-                scalar: match export.scalar? {
-                    crate::Sema::GuestScalar::Int => LibraryScalar::Int,
-                    crate::Sema::GuestScalar::Float => LibraryScalar::Float,
-                    crate::Sema::GuestScalar::Bool => LibraryScalar::Bool,
-                    crate::Sema::GuestScalar::Text => LibraryScalar::Text,
-                },
-                params: export.params.len(),
-                conventions: export.params.into_iter().map(|(convention, _)| convention).collect(),
-            })
+        .map(|export| LibraryExport {
+            name: export.name,
+            scalar: export.scalar,
+            params: export.params.len(),
+            conventions: export.params,
         })
         .collect()
 }
@@ -139,6 +125,7 @@ pub fn emit_library(
         } else {
             call
         };
+        let body = format!("jet_ffi_callback_boundary(|| {{ {body} }})");
         wrappers.push_str(&format!(
             "#[export_name = \"{symbol}\"]\npub extern \"C\" fn {wrapper}({params}) -> {ret} {{ {body} }}\n",
             params = params.join(", "),
@@ -386,20 +373,22 @@ fn JET_LIBRARY_RETURN_TEXT(value: String) -> JetText {
 
 #[export_name = "jet_text_free"]
 pub extern "C" fn JET_LIBRARY_TEXT_FREE(value: JetText) {
-    if value.len == 0 {
-        return;
-    }
-    if value.ptr.is_null()
-        || value.len > isize::MAX as usize
-        || (value.ptr as usize).checked_add(value.len).is_none()
-    {
-        panic!("invalid JetText pointer-length pair");
-    }
-    unsafe {
-        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-            value.ptr as *mut u8,
-            value.len,
-        )));
-    }
+    jet_ffi_callback_boundary(|| {
+        if value.len == 0 {
+            return;
+        }
+        if value.ptr.is_null()
+            || value.len > isize::MAX as usize
+            || (value.ptr as usize).checked_add(value.len).is_none()
+        {
+            panic!("invalid JetText pointer-length pair");
+        }
+        unsafe {
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                value.ptr as *mut u8,
+                value.len,
+            )));
+        }
+    });
 }
 "#;

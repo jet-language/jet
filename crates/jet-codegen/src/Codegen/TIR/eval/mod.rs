@@ -151,7 +151,7 @@ mod cli_boundary {
 }
 
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
@@ -1536,7 +1536,7 @@ pub(super) struct EvalCtx<'a, 'debug> {
     pub(super) fuel: u64,
     pub(super) sink: Option<Arc<Mutex<DevSink>>>,
     #[allow(dead_code)]
-    pub(super) core_imports: &'a HashMap<String, String>,
+    pub(super) core_imports: &'a BTreeMap<String, String>,
     pub(super) globals: HashMap<String, CtValue>,
     /// Runtime-only address identities minted by `core.mem.address_of`. The
     /// Foundation sentry kernel owns their provenance; this map only lets the
@@ -1955,7 +1955,7 @@ struct EvalTaskConfig<'a> {
     source_file: String,
     source_text: String,
     sink: Option<Arc<Mutex<DevSink>>>,
-    core_imports: &'a HashMap<String, String>,
+    core_imports: &'a BTreeMap<String, String>,
     globals: HashMap<String, CtValue>,
     gates: jet_foundation::Policy::GateSet,
     impure_depth: usize,
@@ -4467,7 +4467,7 @@ pub(super) fn capture_is_one_slot(source: &str, place: &str) -> bool {
 }
 
 fn empty_cx() -> Cx {
-    build_cx_items(&[], "", "<eval>", None, &HashMap::new())
+    build_cx_items(&[], "", "<eval>", None, &HashMap::new(), "")
 }
 
 fn seed_fragment_distinct_types(
@@ -4497,7 +4497,7 @@ fn seed_fragment_unit_families(cx: &mut Cx, families: &[UnitFamilyDef]) {
         .cloned()
         .map(Item::UnitFamily)
         .collect::<Vec<_>>();
-    let units = build_cx_items(&items, "", "<eval>", None, &HashMap::new());
+    let units = build_cx_items(&items, "", "<eval>", None, &HashMap::new(), "");
     cx.type_names.extend(units.type_names);
     cx.local_type_names.extend(units.local_type_names);
     cx.distinct_types.extend(units.distinct_types);
@@ -4561,7 +4561,7 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                         }
                     })
                     .collect(),
-                ret: function.return_type.clone().map(Box::new),
+                ret: Some(Box::new(function.effective_return_type())),
                 effect_bound: None,
                 return_view_provenance: None,
                 param_contract: (!function.params.is_empty()).then(|| {
@@ -5039,12 +5039,16 @@ pub fn run_program(
     core_imports: &HashMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
+    let core_imports = core_imports
+        .iter()
+        .map(|(alias, module)| (alias.clone(), module.clone()))
+        .collect::<BTreeMap<_, _>>();
     run_program_with_structs(
         program,
         base_dir,
         sink,
         globals,
-        core_imports,
+        &core_imports,
         gates,
         HashMap::new(),
         HashMap::new(),
@@ -5073,7 +5077,7 @@ pub fn run_program_with_structs(
     base_dir: &Path,
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
-    core_imports: &HashMap<String, String>,
+    core_imports: &BTreeMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
@@ -5096,7 +5100,7 @@ pub fn run_program_with_structs_at_stage(
     base_dir: &Path,
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
-    core_imports: &HashMap<String, String>,
+    core_imports: &BTreeMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
@@ -5122,7 +5126,7 @@ fn run_program_with_structs_at_stage_and_cli(
     base_dir: &Path,
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
-    core_imports: &HashMap<String, String>,
+    core_imports: &BTreeMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
@@ -5248,7 +5252,7 @@ fn run_program_with_structs_on_stack(
     base_dir: &Path,
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
-    core_imports: &HashMap<String, String>,
+    core_imports: &BTreeMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
@@ -5453,7 +5457,7 @@ fn run_named_func_on_program_edition(
             None,
         )
     })?;
-    let core_imports = HashMap::new();
+    let core_imports = BTreeMap::new();
     let task_control = crate::scheduler::jet_scheduler_current_task_control();
     let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
     let prefer_tir_calls =
@@ -5592,7 +5596,7 @@ fn run_bundle_at_stage(
         }
     };
     let mut globals = HashMap::new();
-    let mut core_imports = HashMap::new();
+    let mut core_imports = BTreeMap::new();
     let persist = jet_foundation::Persist::prepare_bundle(bundle);
     for msg in &persist.messages {
         // Dev-tier only: surface reset / migration notes on stderr.
@@ -5758,7 +5762,11 @@ fn eval_expr_hook(
     let funcs = func_refs(&lowered);
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
-    let core_imports = req.core_imports;
+    let core_imports = req
+        .core_imports
+        .iter()
+        .map(|(alias, module)| (alias.clone(), module.clone()))
+        .collect::<BTreeMap<_, _>>();
     let globals = req.globals.clone();
     let gates = req.gates;
     let impure_depth = req.initial_impure_depth;
@@ -5781,7 +5789,7 @@ fn eval_expr_hook(
         source_text: String::new(),
         fuel,
         sink,
-        core_imports,
+        core_imports: &core_imports,
         globals: globals.clone(),
         sentry_places: HashMap::new(),
         next_sentry_allocator: 1,
@@ -5911,7 +5919,11 @@ fn eval_block_hook(
     let funcs = func_refs(&lowered);
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
-    let core_imports = req.core_imports;
+    let core_imports = req
+        .core_imports
+        .iter()
+        .map(|(alias, module)| (alias.clone(), module.clone()))
+        .collect::<BTreeMap<_, _>>();
     let globals = req.globals.clone();
     let gates = req.gates;
     let impure_depth = req.impure_depth;
@@ -5938,7 +5950,7 @@ fn eval_block_hook(
         source_text: String::new(),
         fuel,
         sink,
-        core_imports,
+        core_imports: &core_imports,
         globals: globals.clone(),
         sentry_places: HashMap::new(),
         next_sentry_allocator: 1,
@@ -6023,7 +6035,7 @@ mod tests {
         TCallArg, TExpr, TExprKind, TFunc, TFuncKind, TIfCond, TLocal, TStmt,
     };
     use crate::AST::{AccessConvention, BinOp, Type};
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
     use std::sync::Mutex;
 
@@ -6179,7 +6191,7 @@ mod tests {
 
     fn test_eval_ctx<'a>(
         funcs: HashMap<String, &'a TFunc>,
-        core_imports: &'a HashMap<String, String>,
+        core_imports: &'a BTreeMap<String, String>,
         source_text: &str,
     ) -> EvalCtx<'a, 'static> {
         EvalCtx {
@@ -6267,7 +6279,7 @@ mod tests {
 
         let recurse = recursive_test_func("recurse", "recurse", -1, true);
         let funcs = HashMap::from([("recurse".to_string(), &recurse)]);
-        let core_imports = HashMap::new();
+        let core_imports = BTreeMap::new();
         let mut ctx = test_eval_ctx(funcs, &core_imports, "fn recurse(n: Int) Int -> { ... }");
         let value = ctx
             .run_func(&recurse, vec![CtValue::Int(3)], &mut HashMap::new())
@@ -6291,7 +6303,7 @@ mod tests {
     fn direct_result_carrier_cycle_stops_with_e3012_at_frame_limit() {
         let recurse = recursive_test_func("recurse", "recurse", 1, false);
         let funcs = HashMap::from([("recurse".to_string(), &recurse)]);
-        let core_imports = HashMap::new();
+        let core_imports = BTreeMap::new();
         let mut ctx = test_eval_ctx(
             funcs,
             &core_imports,

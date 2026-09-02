@@ -85,6 +85,13 @@ is_nonnegative_integer() {
     esac
     return 0
 }
+is_pending_peer_contract() {
+    [ "$1" = pending-D-BUILDBENCH1 ] &&
+        [ "$2" = pending:D-BUILDBENCH1 ] &&
+        [ "$3" = 0 ] &&
+        [ "$4" = 0 ]
+}
+
 
 
 MAIN_META_KEYS='version corpus corpus_sha256 manifest_sha256 stage machine target rustc llvm rustc_vv_sha256 rustc_sha256 compiler_sha256 jet_env_sha256 libc_sha256 allocator_sha256 allocator_environment_sha256 hardware_sha256 topology_sha256 toolchain_sha256 kernel governor load1_start_milli load1_peak_milli load1_end_milli memory_bytes profiles backends warmups samples outliers_discarded parity parity_cases peer_contract_sha256 peer_run_id peer_machine peer_target peer_keys peer_metrics peer_count peer_rows'
@@ -184,39 +191,44 @@ is_sha256 "$baseline_peer_contract" || {
     echo "baseline has invalid compiler-speed peer contract digest" >&2
     exit 1
 }
-is_positive_integer "$baseline_peer_count" || {
-    echo "baseline has invalid compiler-speed peer count" >&2
-    exit 1
-}
-is_positive_integer "$baseline_peer_rows" || {
-    echo "baseline has invalid compiler-speed peer coverage count" >&2
-    exit 1
-}
-baseline_named_peer_count=$(printf '%s\n' "$baseline_peer_keys" | awk -F, '
-    {
-        if (NF == 0) invalid = 1
-        for (i = 1; i <= NF; i++) {
-            if (split($i, pair, ":") != 2 ||
-                pair[1] !~ /^[A-Za-z0-9_.-]+$/ ||
-                pair[2] !~ /^[A-Za-z0-9_.-]+$/ ||
-                seen_peer[pair[1]]++) {
-                invalid = 1
+baseline_peer_pending=0
+if is_pending_peer_contract "$baseline_peer_run_id" "$baseline_peer_keys" "$baseline_peer_count" "$baseline_peer_rows"; then
+    baseline_peer_pending=1
+else
+    is_positive_integer "$baseline_peer_count" || {
+        echo "baseline has invalid compiler-speed peer count" >&2
+        exit 1
+    }
+    is_positive_integer "$baseline_peer_rows" || {
+        echo "baseline has invalid compiler-speed peer coverage count" >&2
+        exit 1
+    }
+    baseline_named_peer_count=$(printf '%s\n' "$baseline_peer_keys" | awk -F, '
+        {
+            if (NF == 0) invalid = 1
+            for (i = 1; i <= NF; i++) {
+                if (split($i, pair, ":") != 2 ||
+                    pair[1] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    pair[2] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    seen_peer[pair[1]]++) {
+                    invalid = 1
+                }
+                if (pair[2] == "rust") rust_peer = 1
             }
-            if (pair[2] == "rust") rust_peer = 1
         }
+        END {
+            if (invalid || !rust_peer) exit 1
+            print NF
+        }
+    ') || {
+        echo "baseline has invalid compiler-speed peer declarations" >&2
+        exit 1
     }
-    END {
-        if (invalid || !rust_peer) exit 1
-        print NF
+    [ "$baseline_named_peer_count" -eq "$baseline_peer_count" ] || {
+        echo "baseline peer declaration count mismatch: declared $baseline_peer_count, named $baseline_named_peer_count" >&2
+        exit 1
     }
-') || {
-    echo "baseline has invalid compiler-speed peer declarations" >&2
-    exit 1
-}
-[ "$baseline_named_peer_count" -eq "$baseline_peer_count" ] || {
-    echo "baseline peer declaration count mismatch: declared $baseline_peer_count, named $baseline_named_peer_count" >&2
-    exit 1
-}
+fi
 baseline_peer_contract_expected=$(printf 'jet.compiler-speed.peer.v1\ncorpus_sha256=%s\nmanifest_sha256=%s\ntarget=%s\nmachine=%s\npeers=%s\nmetrics=%s\n' \
     "$baseline_corpus" "$baseline_manifest" "$baseline_target" "$baseline_machine" "$baseline_peer_keys" "$baseline_peer_metrics" | sha256_text)
 [ "$baseline_peer_contract" = "$baseline_peer_contract_expected" ] || {
@@ -392,59 +404,44 @@ for peer_hash in "$current_peer_corpus" "$current_peer_manifest" "$current_peer_
         exit 1
     }
 done
-is_positive_integer "$current_peer_count" || {
-    echo "current report has invalid compiler-speed peer count" >&2
-    exit 1
-}
-is_positive_integer "$current_peer_rows" || {
-    echo "current report has invalid compiler-speed peer coverage count" >&2
-    exit 1
-}
-[ "$current_peer_corpus" = "$current_corpus" ] || {
-    echo "current peer corpus does not match Jet corpus: $current_peer_corpus" >&2
-    exit 1
-}
-[ "$current_peer_manifest" = "$current_manifest" ] || {
-    echo "current peer manifest does not match Jet manifest: $current_peer_manifest" >&2
-    exit 1
-}
-[ "$current_peer_target" = "$current_target" ] || {
-    echo "current peer target does not match Jet target: $current_peer_target" >&2
-    exit 1
-}
-[ "$current_peer_machine" = "$current_machine" ] || {
-    echo "current peer machine does not match Jet machine: $current_peer_machine" >&2
-    exit 1
-}
-[ "$current_peer_metrics" = "$PEER_METRICS" ] || {
-    echo "unsupported compiler-speed peer metrics: $current_peer_metrics" >&2
-    exit 1
-}
-current_named_peer_count=$(printf '%s\n' "$current_peer_keys" | awk -F, '
-    {
-        if (NF == 0) invalid = 1
-        for (i = 1; i <= NF; i++) {
-            if (split($i, pair, ":") != 2 ||
-                pair[1] !~ /^[A-Za-z0-9_.-]+$/ ||
-                pair[2] !~ /^[A-Za-z0-9_.-]+$/ ||
-                seen_peer[pair[1]]++) {
-                invalid = 1
+current_peer_pending=0
+if is_pending_peer_contract "$current_peer_run_id" "$current_peer_keys" "$current_peer_count" "$current_peer_rows"; then
+    current_peer_pending=1
+else
+    is_positive_integer "$current_peer_count" || {
+        echo "current report has invalid compiler-speed peer count" >&2
+        exit 1
+    }
+    is_positive_integer "$current_peer_rows" || {
+        echo "current report has invalid compiler-speed peer coverage count" >&2
+        exit 1
+    }
+    current_named_peer_count=$(printf '%s\n' "$current_peer_keys" | awk -F, '
+        {
+            if (NF == 0) invalid = 1
+            for (i = 1; i <= NF; i++) {
+                if (split($i, pair, ":") != 2 ||
+                    pair[1] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    pair[2] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    seen_peer[pair[1]]++) {
+                    invalid = 1
+                }
+                if (pair[2] == "rust") rust_peer = 1
             }
-            if (pair[2] == "rust") rust_peer = 1
         }
+        END {
+            if (invalid || !rust_peer) exit 1
+            print NF
+        }
+    ') || {
+        echo "current report has invalid compiler-speed peer declarations" >&2
+        exit 1
     }
-    END {
-        if (invalid || !rust_peer) exit 1
-        print NF
+    [ "$current_named_peer_count" -eq "$current_peer_count" ] || {
+        echo "current peer declaration count mismatch: declared $current_peer_count, named $current_named_peer_count" >&2
+        exit 1
     }
-') || {
-    echo "current report has invalid compiler-speed peer declarations" >&2
-    exit 1
-}
-[ "$current_named_peer_count" -eq "$current_peer_count" ] || {
-    echo "current peer declaration count mismatch: declared $current_peer_count, named $current_named_peer_count" >&2
-    exit 1
-}
+fi
 current_peer_contract_expected=$(printf 'jet.compiler-speed.peer.v1\ncorpus_sha256=%s\nmanifest_sha256=%s\ntarget=%s\nmachine=%s\npeers=%s\nmetrics=%s\n' \
     "$current_peer_corpus" "$current_peer_manifest" "$current_peer_target" "$current_peer_machine" "$current_peer_keys" "$current_peer_metrics" | sha256_text)
 [ "$current_peer_contract" = "$current_peer_contract_expected" ] || {
@@ -508,6 +505,178 @@ baseline_field() {
     printf '%s\n' "$baseline_row" \
         | sed 's/.*"'"$field_name"'"://; s/^"//; s/".*//; s/,.*//; s/}.*//'
 }
+json_object_value() {
+    json_object=$1
+    json_field_name=$2
+    printf '%s\n' "$json_object" \
+        | sed -n 's/.*"'"$json_field_name"'":\("[^"]*"\|[0-9][0-9]*\).*/\1/p' \
+        | sed 's/^"//; s/"$//'
+}
+
+baseline_peer_field() {
+    field_peer=$1
+    field_language=$2
+    field_program=$3
+    field_state=$4
+    field_metric=$5
+    field_name=$6
+    baseline_peer_object=$(grep -F \
+        '"peer":"'"$field_peer"'","language":"'"$field_language"'","program":"'"$field_program"'","state":"'"$field_state"'","metric":"'"$field_metric"'"' \
+        "$BASELINE_PEER_ROWS" | head -n1 || true)
+    [ -n "$baseline_peer_object" ] || return 0
+    json_object_value "$baseline_peer_object" "$field_name"
+}
+
+peer_declared() {
+    peer_declarations=$1
+    peer_wanted=$2
+    printf '%s\n' "$peer_declarations" | awk -F, -v wanted="$peer_wanted" '
+        { for (i = 1; i <= NF; i++) if ($i == wanted) found = 1 }
+        END { exit !found }
+    '
+}
+
+check_baseline_peer_rows() {
+    baseline_actual_peer_rows=$(awk 'NF { count++ } END { print count + 0 }' "$BASELINE_PEER_ROWS")
+    [ "$baseline_actual_peer_rows" -eq "$baseline_peer_rows" ] || {
+        echo "baseline peer array row count changed: expected $baseline_peer_rows, got $baseline_actual_peer_rows" >&2
+        exit 1
+    }
+    if [ "$baseline_peer_pending" -eq 1 ]; then
+        echo "baseline peer gate pending D-BUILDBENCH1" >&2
+        return 0
+    fi
+    baseline_peer_keys_seen="$CI_RUN_DIR/baseline.peer.keys"
+    baseline_peer_toolchains="$CI_RUN_DIR/baseline.peer.toolchains"
+    : > "$baseline_peer_keys_seen"
+    : > "$baseline_peer_toolchains"
+    while IFS= read -r baseline_peer_object; do
+        [ -n "$baseline_peer_object" ] || continue
+        baseline_peer_name=$(json_object_value "$baseline_peer_object" peer)
+        baseline_peer_language=$(json_object_value "$baseline_peer_object" language)
+        baseline_peer_program=$(json_object_value "$baseline_peer_object" program)
+        baseline_peer_state=$(json_object_value "$baseline_peer_object" state)
+        baseline_peer_metric=$(json_object_value "$baseline_peer_object" metric)
+        baseline_peer_value=$(json_object_value "$baseline_peer_object" value)
+        baseline_peer_workload=$(json_object_value "$baseline_peer_object" workload_sha256)
+        baseline_peer_source=$(json_object_value "$baseline_peer_object" source_sha256)
+        baseline_peer_expected=$(json_object_value "$baseline_peer_object" expected_sha256)
+        baseline_peer_manifest_row=$(json_object_value "$baseline_peer_object" manifest_sha256)
+        baseline_peer_toolchain=$(json_object_value "$baseline_peer_object" toolchain_sha256)
+        for value in "$baseline_peer_name" "$baseline_peer_language" "$baseline_peer_program" \
+            "$baseline_peer_state" "$baseline_peer_metric" "$baseline_peer_value" "$baseline_peer_workload" \
+            "$baseline_peer_source" "$baseline_peer_expected" "$baseline_peer_manifest_row" "$baseline_peer_toolchain"; do
+            [ -n "$value" ] || {
+                echo "baseline has incomplete compiler-speed peer row" >&2
+                exit 1
+            }
+        done
+        peer_declared "$baseline_peer_keys" "$baseline_peer_name:$baseline_peer_language" || {
+            echo "baseline compiler-speed peer row names undeclared peer: $baseline_peer_name/$baseline_peer_language" >&2
+            exit 1
+        }
+        case "$baseline_peer_program:$baseline_peer_state" in
+            *[!A-Za-z0-9_./:-]*) echo "baseline has invalid compiler-speed peer workload key" >&2; exit 1 ;;
+        esac
+        case "$baseline_peer_metric" in
+            latency_ns|memory_bytes) ;;
+            *) echo "baseline has invalid compiler-speed peer metric: $baseline_peer_metric" >&2; exit 1 ;;
+        esac
+        is_positive_integer "$baseline_peer_value" || {
+            echo "baseline has invalid compiler-speed peer value: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
+            exit 1
+        }
+        for peer_hash in "$baseline_peer_workload" "$baseline_peer_source" "$baseline_peer_expected" \
+            "$baseline_peer_manifest_row" "$baseline_peer_toolchain"; do
+            is_sha256 "$peer_hash" || {
+                echo "baseline has invalid compiler-speed peer input identity" >&2
+                exit 1
+            }
+        done
+        [ "$baseline_peer_manifest_row" = "$baseline_manifest" ] || {
+            echo "baseline compiler-speed peer manifest mismatch: $baseline_peer_program/$baseline_peer_state" >&2
+            exit 1
+        }
+        baseline_peer_row_key=$(printf '%s\t%s\t%s\t%s\t%s' "$baseline_peer_name" "$baseline_peer_language" \
+            "$baseline_peer_program" "$baseline_peer_state" "$baseline_peer_metric")
+        if grep -Fqx -- "$baseline_peer_row_key" "$baseline_peer_keys_seen"; then
+            echo "duplicate baseline compiler-speed peer row: $baseline_peer_row_key" >&2
+            exit 1
+        fi
+        printf '%s\n' "$baseline_peer_row_key" >> "$baseline_peer_keys_seen"
+        printf '%s:%s\t%s\n' "$baseline_peer_name" "$baseline_peer_language" "$baseline_peer_toolchain" >> "$baseline_peer_toolchains"
+        baseline_jet_stage=$(baseline_field "$baseline_peer_program" "$baseline_peer_state" stage)
+        baseline_jet_phases=$(baseline_field "$baseline_peer_program" "$baseline_peer_state" phase_totals)
+        [ -n "$baseline_jet_stage" ] && [ -n "$baseline_jet_phases" ] || {
+            echo "baseline compiler-speed peer row names unknown Jet row: $baseline_peer_program/$baseline_peer_state" >&2
+            exit 1
+        }
+        baseline_jet_workload=$(phase_value "$baseline_jet_phases" workload_sha256)
+        baseline_jet_source=$(phase_value "$baseline_jet_phases" source_sha256)
+        baseline_jet_expected=$(phase_value "$baseline_jet_phases" expected_sha256)
+        [ "$baseline_peer_workload" = "$baseline_jet_workload" ] || {
+            echo "baseline compiler-speed peer workload identity mismatch: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state" >&2
+            exit 1
+        }
+        [ "$baseline_peer_source" = "$baseline_jet_source" ] && [ "$baseline_peer_expected" = "$baseline_jet_expected" ] || {
+            echo "baseline compiler-speed peer input identity mismatch: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state" >&2
+            exit 1
+        }
+        case "$baseline_peer_metric" in
+            latency_ns) baseline_jet_value=$(baseline_field "$baseline_peer_program" "$baseline_peer_state" latency_ns) ;;
+            memory_bytes) baseline_jet_value=$(baseline_field "$baseline_peer_program" "$baseline_peer_state" memory_bytes) ;;
+        esac
+        is_positive_integer "$baseline_jet_value" || {
+            echo "baseline has invalid Jet compiler-speed cell: $baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
+            exit 1
+        }
+        if [ "$baseline_peer_language" = rust ]; then
+            awk -v jet="$baseline_jet_value" -v peer="$baseline_peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }' || {
+                echo "baseline compiler-speed peer loss: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
+                exit 1
+            }
+        else
+            awk -v jet="$baseline_jet_value" -v peer="$baseline_peer_value" 'BEGIN { exit !(jet / peer < 1.00) }' || {
+                echo "baseline compiler-speed peer loss: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
+                exit 1
+            }
+        fi
+    done < "$BASELINE_PEER_ROWS"
+    awk -F "$TAB" '
+        {
+            if (toolchain[$1] == "") toolchain[$1] = $2
+            else if (toolchain[$1] != $2) invalid = 1
+        }
+        END { exit invalid }
+    ' "$baseline_peer_toolchains" || {
+        echo "baseline compiler-speed peer toolchain identity changed within a peer" >&2
+        exit 1
+    }
+    baseline_expected_peer_keys="$CI_RUN_DIR/baseline.expected.peer.keys"
+    baseline_matrix_rows="$CI_RUN_DIR/baseline.matrix.rows"
+    sed 's/],"peers":\[.*//' "$BASELINE" | sed 's/},{/}\n{/g' \
+        | sed -n 's/.*"program":"\([^"]*\)","state":"\([^"]*\)".*/\1\t\2/p' > "$baseline_matrix_rows"
+    awk -F "$TAB" -v declarations="$baseline_peer_keys" '
+        BEGIN {
+            peer_count = split(declarations, peers, ",")
+            metric_count = split("latency_ns,memory_bytes", metrics, ",")
+        }
+        {
+            for (peer_index = 1; peer_index <= peer_count; peer_index++) {
+                split(peers[peer_index], pair, ":")
+                for (metric_index = 1; metric_index <= metric_count; metric_index++)
+                    printf "%s\t%s\t%s\t%s\t%s\n", pair[1], pair[2], $1, $2, metrics[metric_index]
+            }
+        }
+    ' "$baseline_matrix_rows" > "$baseline_expected_peer_keys"
+    sort "$baseline_expected_peer_keys" > "$CI_RUN_DIR/baseline.expected.peer.keys.sorted"
+    sort "$baseline_peer_keys_seen" > "$CI_RUN_DIR/baseline.peer.keys.sorted"
+    cmp "$CI_RUN_DIR/baseline.expected.peer.keys.sorted" "$CI_RUN_DIR/baseline.peer.keys.sorted" || {
+        echo "incomplete baseline compiler-speed peer coverage: peer cells do not exactly match the Jet matrix" >&2
+        exit 1
+    }
+}
+
 
 phase_value() {
     phase_text=$1
@@ -540,6 +709,9 @@ printf '%s\n' "$CURRENT" | awk -v peer_header="$PEER_ROW_HEADER" '
     $0 == peer_header { peer_section = 1; next }
     peer_section { print }
 ' > "$CURRENT_PEER_ROWS"
+BASELINE_PEER_ROWS="$CI_RUN_DIR/baseline.peer.rows"
+sed 's/.*"peers":\[//; s/\].*//' "$BASELINE" \
+    | sed 's/},{/}\n{/g' > "$BASELINE_PEER_ROWS"
 awk -F "$TAB" 'NF != 8 { exit 1 }' "$CURRENT_ROWS" || {
     echo "invalid compiler-speed row format" >&2
     exit 1
@@ -549,22 +721,31 @@ awk -F "$TAB" 'NF != 11 { exit 1 }' "$CURRENT_PEER_ROWS" || {
     exit 1
 }
 expected_rows=$((current_corpus_count * STATE_COUNT))
-baseline_row_count=$(sed 's/},{/}\n{/g' "$BASELINE" \
+baseline_row_count=$(sed 's/],"peers":\[.*//' "$BASELINE" | sed 's/},{/}\n{/g' \
     | awk '/"program":"[^"]*","state":"[^"]*"/ { count++ } END { print count + 0 }')
 [ "$baseline_row_count" -eq "$expected_rows" ] || {
     echo "baseline row count changed: expected $expected_rows, got $baseline_row_count" >&2
     exit 1
 }
-expected_peer_rows=$((current_corpus_count * STATE_COUNT * current_peer_count * 2))
+if [ "$current_peer_pending" -eq 1 ]; then
+    expected_peer_rows=0
+else
+    expected_peer_rows=$((current_corpus_count * STATE_COUNT * current_peer_count * 2))
+fi
 [ "$current_peer_rows" -eq "$expected_peer_rows" ] || {
     echo "peer row count changed: expected $expected_peer_rows, got $current_peer_rows" >&2
     exit 1
 }
-baseline_expected_peer_rows=$((expected_rows * baseline_peer_count * 2))
+if [ "$baseline_peer_pending" -eq 1 ]; then
+    baseline_expected_peer_rows=0
+else
+    baseline_expected_peer_rows=$((expected_rows * baseline_peer_count * 2))
+fi
 [ "$baseline_peer_rows" -eq "$baseline_expected_peer_rows" ] || {
     echo "baseline peer row count changed: expected $baseline_expected_peer_rows, got $baseline_peer_rows" >&2
     exit 1
 }
+check_baseline_peer_rows
 actual_peer_rows=$(wc -l < "$CURRENT_PEER_ROWS" | tr -d '[:space:]')
 [ "$actual_peer_rows" -eq "$expected_peer_rows" ] || {
     echo "checked compiler-speed peer row count changed: expected $expected_peer_rows, got $actual_peer_rows" >&2
@@ -703,6 +884,8 @@ while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory 
     done
 done < "$CURRENT_ROWS"
 
+if [ "$current_peer_pending" -eq 0 ]; then
+
 PEER_KEYS_FILE="$CI_RUN_DIR/current.peer.keys"
 PEER_TOOLCHAINS_FILE="$CI_RUN_DIR/current.peer.toolchains"
 PEER_ROW_COUNT=0
@@ -769,6 +952,31 @@ while IFS="$TAB" read -r peer_name peer_language peer_program peer_state peer_me
         echo "compiler-speed peer manifest mismatch: $peer_name/$peer_program/$peer_state" >&2
         FAIL=1
     }
+    baseline_peer_workload=$(baseline_peer_field "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric" workload_sha256)
+    baseline_peer_source=$(baseline_peer_field "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric" source_sha256)
+    baseline_peer_expected=$(baseline_peer_field "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric" expected_sha256)
+    baseline_peer_manifest_row=$(baseline_peer_field "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric" manifest_sha256)
+    baseline_peer_toolchain=$(baseline_peer_field "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric" toolchain_sha256)
+    for peer_identity in \
+        "workload_sha256:$peer_workload:$baseline_peer_workload" \
+        "source_sha256:$peer_source:$baseline_peer_source" \
+        "expected_sha256:$peer_expected:$baseline_peer_expected" \
+        "manifest_sha256:$peer_manifest_row:$baseline_peer_manifest_row" \
+        "toolchain_sha256:$peer_toolchain:$baseline_peer_toolchain"; do
+        peer_identity_name=${peer_identity%%:*}
+        peer_identity_rest=${peer_identity#*:}
+        peer_identity_current=${peer_identity_rest%%:*}
+        peer_identity_baseline=${peer_identity_rest#*:}
+        [ -n "$peer_identity_baseline" ] || {
+            echo "baseline missing compiler-speed peer identity $peer_identity_name: $peer_name/$peer_program/$peer_state/$peer_metric" >&2
+            FAIL=1
+            continue
+        }
+        [ "$peer_identity_current" = "$peer_identity_baseline" ] || {
+            echo "compiler-speed peer identity changed $peer_identity_name: $peer_name/$peer_program/$peer_state/$peer_metric" >&2
+            FAIL=1
+        }
+    done
     printf '%s:%s\t%s\n' "$peer_name" "$peer_language" "$peer_toolchain" >> "$PEER_TOOLCHAINS_FILE"
     if [ "$peer_language" = rust ]; then
         if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }'; then
@@ -826,10 +1034,15 @@ cmp "$CI_RUN_DIR/expected.peer.keys.sorted" "$CI_RUN_DIR/current.peer.keys.sorte
     echo "checked compiler-speed peer row count changed: expected $expected_peer_rows, got $PEER_ROW_COUNT" >&2
     exit 1
 }
+fi
 
 [ "$ROW_COUNT" -eq "$expected_rows" ] || {
     echo "checked corpus row count changed: expected $expected_rows, got $ROW_COUNT" >&2
     exit 1
 }
 [ "$FAIL" -eq 0 ] || { echo "perf gate FAILED" >&2; exit 1; }
-echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT})"
+if [ "$current_peer_pending" -eq 1 ]; then
+    echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT}, peer gate pending D-BUILDBENCH1)"
+else
+    echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT})"
+fi

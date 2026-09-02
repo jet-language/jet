@@ -325,10 +325,11 @@ pub fn is_data_variant(variant: &str) -> bool {
 }
 
 /// D-DBDRIVER1 (ratified): the tagged SQL parameter/column value. Construct with
-/// `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`; a `[DBValue]`
-/// is the parameterized-query bind list, never a raw SQL string. A dedicated
-/// dynamic-value type (mirrors `Data`'s construction mechanism, D-ENC-DYN1=A+)
-/// — not a user-registrable enum, so it never appears in `match`.
+/// `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` /
+/// `.Null`; a `[DBValue]` is the parameterized-query bind list, never a raw SQL
+/// string. A dedicated dynamic-value type (mirrors `Data`'s construction
+/// mechanism, D-ENC-DYN1=A+) — not a user-registrable enum, so it never appears
+/// in `match`. `Blob` carries a `[U8]` byte sequence without text conversion.
 pub const TYPE_DB_VALUE: &str = "DBValue";
 
 /// D-DBDRIVER1: is `name` the `DBValue` dynamic-value type name?
@@ -338,7 +339,7 @@ pub fn is_db_value_type_name(name: &str) -> bool {
 
 /// D-DBDRIVER1: the variants of `DBValue`.
 pub fn is_db_value_variant(variant: &str) -> bool {
-    matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool")
+    matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool" | "Blob")
 }
 
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.

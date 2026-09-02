@@ -218,7 +218,7 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
             .current_dir(repo())
             .env("NO_COLOR", "1")
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
-            .env("JET_CACHE_DIR", cache.join(mode).join("build"))
+            .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .args(args)
             .output()
             .expect("run structure example tier");
@@ -235,7 +235,7 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
         .current_dir(repo())
         .env("NO_COLOR", "1")
         .env("JET_RUN_CACHE_DIR", cache.join("dev").join("run"))
-        .env("JET_CACHE_DIR", cache.join("dev").join("build"))
+        .env("JET_STORE_DIR", cache.join("dev").join("build"))
         .args(["dev", shown, "--watch=off"])
         .output()
         .expect("run structure example through dev");

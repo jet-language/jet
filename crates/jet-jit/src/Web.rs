@@ -79,6 +79,17 @@ pub(crate) fn serve_app(app: i64) {
 
 fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
     let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
+    if method_name == "facts_json" {
+        return with_rt(|rt| {
+            let app_handle = rt
+                .web
+                .apps
+                .get(app.saturating_sub(1) as usize)
+                .expect("jit app: bad handle")
+                .clone();
+            rt.heap.alloc_string(app_handle.facts_json())
+        });
+    }
     if method_name == "serve" || method_name == "serve_on" {
         // Serving blocks. Keep the resident runtime published, but release its
         // access lock so HTTP worker callbacks can enter Jet one at a time.
@@ -115,10 +126,6 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
             "island" => app_handle.island(),
             "hydration_dev" => app_handle.hydration_dev(),
             "hydration_release" => app_handle.hydration_release(),
-            "facts_json" => {
-                let _ = app_handle.facts_json();
-                app_handle
-            }
             "route" | "page" | "layout" | "action" | "form" | "data" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
                 match method.as_str() {
@@ -283,6 +290,33 @@ fn jet_jit_devserver_serve(server: i64) {
     let _ = server;
 }
 
+fn jet_jit_web_storage_get(key: i64) -> i64 {
+    let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
+    match web_rt::jet_web_storage_get(&key) {
+        Some(value) => with_rt(|rt| rt.heap.alloc_string(value)),
+        None => 0,
+    }
+}
+
+fn jet_jit_web_storage_remove(key: i64) {
+    let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
+    web_rt::jet_web_storage_remove(&key);
+}
+fn jet_jit_web_storage_set(key: i64, value: i64) {
+    let (key, value) = with_rt(|rt| {
+        (
+            rt.heap.clone_string(key).unwrap_or_default(),
+            rt.heap.clone_string(value).unwrap_or_default(),
+        )
+    });
+    web_rt::jet_web_storage_set(&key, &value);
+}
+
+fn jet_jit_web_storage_clear() {
+    web_rt::jet_web_storage_clear();
+}
+
+
 host_fns! {
     struct WebHostFns;
     register: register_web_symbols;
@@ -296,6 +330,10 @@ host_fns! {
         unary.returns.push(AbiParam::new(types::I64));
         let mut unary_void = Signature::new(cc);
         unary_void.params.push(AbiParam::new(types::I64));
+        let nullary_void = Signature::new(cc);
+        let mut binary_void = Signature::new(cc);
+        binary_void.params.push(AbiParam::new(types::I64));
+        binary_void.params.push(AbiParam::new(types::I64));
         let mut binary = Signature::new(cc);
         binary.params.push(AbiParam::new(types::I64));
         binary.params.push(AbiParam::new(types::I64));
@@ -316,6 +354,10 @@ host_fns! {
     app: "jet_jit_web_app" => jet_jit_web_app: nullary;
     page: "jet_jit_web_page" => jet_jit_web_page: binary;
     app_method: "jet_jit_web_app_method" => jet_jit_web_app_method: app_method;
+    storage_get: "jet_jit_web_storage_get" => jet_jit_web_storage_get: unary;
+    storage_remove: "jet_jit_web_storage_remove" => jet_jit_web_storage_remove: unary_void;
+    storage_set: "jet_jit_web_storage_set" => jet_jit_web_storage_set: binary_void;
+    storage_clear: "jet_jit_web_storage_clear" => jet_jit_web_storage_clear: nullary_void;
     devserver_app: "jet_jit_devserver_app" => jet_jit_devserver_app: nullary;
     devserver_for_app: "jet_jit_devserver_for_app" => jet_jit_devserver_for_app: unary;
     devserver_html: "jet_jit_devserver_html" => jet_jit_devserver_html: binary;

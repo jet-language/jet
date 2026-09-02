@@ -136,6 +136,92 @@ fn jet_http_route_path<'a>(path: &'a str) -> Result<Vec<std::borrow::Cow<'a, str
     }
     Ok(decoded)
 }
+fn jet_http_route_validate_path(path: &str) -> Result<(), String> {
+    let path = path.split('?').next().unwrap_or(path);
+    if !path.starts_with('/') {
+        return Err("request path must start with `/`".to_string());
+    }
+    if path == "/" {
+        return Ok(());
+    }
+    for segment in path.split('/').skip(1) {
+        jet_http_route_decode_path_segment(segment)?;
+    }
+    Ok(())
+}
+
+fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or(path);
+    let path_len = if path == "/" {
+        0
+    } else {
+        path.split('/').skip(1).count()
+    };
+    let has_catch_all = matches!(pattern.segments.last(), Some(JetHTTPRouteSegment::CatchAll(_)));
+    let required = pattern.segments.len() - usize::from(has_catch_all);
+    if path_len < required || !has_catch_all && path_len != required {
+        return false;
+    }
+    for (index, candidate) in path.split('/').skip(1).enumerate() {
+        if index >= required {
+            continue;
+        }
+        let Some(segment) = pattern.segments.get(index) else {
+            return false;
+        };
+        if let JetHTTPRouteSegment::Static(expected) = segment {
+            let equal = if candidate.as_bytes().contains(&b'%') {
+                jet_http_route_decode_path_segment(candidate)
+                    .is_ok_and(|decoded| decoded.as_ref() == expected)
+            } else {
+                candidate == expected
+            };
+            if !equal {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn jet_http_route_params_path(
+    pattern: &JetHTTPRoutePattern,
+    path: &str,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let path = path.split('?').next().unwrap_or(path);
+    let mut params = std::collections::BTreeMap::new();
+    let mut segments = path.split('/').skip(1);
+    for segment in &pattern.segments {
+        match segment {
+            JetHTTPRouteSegment::Param(name) => {
+                if let Some(value) = segments.next() {
+                    params.insert(
+                        name.clone(),
+                        jet_http_route_decode_path_segment(value)?.into_owned(),
+                    );
+                }
+            }
+            JetHTTPRouteSegment::CatchAll(name) => {
+                let mut value = String::new();
+                for (offset, segment) in segments.enumerate() {
+                    if offset > 0 {
+                        value.push('/');
+                    }
+                    value.push_str(
+                        jet_http_route_decode_path_segment(segment)?.as_ref(),
+                    );
+                }
+                params.insert(name.clone(), value);
+                break;
+            }
+            JetHTTPRouteSegment::Static(_) => {
+                let _ = segments.next();
+            }
+        }
+    }
+    Ok(params)
+}
+
 
 fn jet_http_route_matches<'a>(
     pattern: &JetHTTPRoutePattern,

@@ -1335,6 +1335,85 @@ pub(crate) fn vault_key_ref_text(handle: i64) -> Option<String> {
         _ => None,
     })
 }
+/// Marshal vault mutation plans and writes through the resident native handle
+/// table for the ambient interpreter. The Prelude owns every mutation rule;
+/// this adapter only selects the erased key carrier and preserves ownership.
+pub(crate) fn vault_prepare_rotate_handle(
+    name: &str,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => Some(
+            runtime::jet_vault_prepare_rotate_impl::<runtime::JetSigningKey>(&name.to_string())
+                .map(|plan| push(CryptoValue::PlanSigning(plan))),
+        ),
+        2 => Some(
+            runtime::jet_vault_prepare_rotate_impl::<runtime::JetX25519SecretKey>(&name.to_string())
+                .map(|plan| push(CryptoValue::PlanX25519(plan))),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_authorize_write_handle(
+    plan: i64,
+    reason: &str,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => with_crypto(plan, |value| match value {
+            CryptoValue::PlanSigning(plan) => {
+                Some(runtime::jet_vault_authorize_write_impl(plan, reason))
+            }
+            _ => None,
+        })
+        .map(|result| result.map(|write| push(CryptoValue::WriteSigning(write)))),
+        2 => with_crypto(plan, |value| match value {
+            CryptoValue::PlanX25519(plan) => {
+                Some(runtime::jet_vault_authorize_write_impl(plan, reason))
+            }
+            _ => None,
+        })
+        .map(|result| result.map(|write| push(CryptoValue::WriteX25519(write)))),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_commit_rotate_handles(
+    write: i64,
+    plan: i64,
+    tag: i64,
+) -> Option<Result<(i64, i64), runtime::JetVaultError>> {
+    match tag {
+        1 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_rotate_impl(write, plan).map(|rotation| {
+                        (
+                            push(CryptoValue::KeyRefSigning(rotation.previous)),
+                            push(CryptoValue::KeyRefSigning(rotation.current)),
+                        )
+                    }),
+                )
+            }
+            _ => None,
+        },
+        2 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_rotate_impl(write, plan).map(|rotation| {
+                        (
+                            push(CryptoValue::KeyRefX25519(rotation.previous)),
+                            push(CryptoValue::KeyRefX25519(rotation.current)),
+                        )
+                    }),
+                )
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);

@@ -1062,6 +1062,10 @@ pub struct Func {
     /// D-OPTGC1=A: sema proved that this source-level bare return is carried by
     /// the compiler-private automatic-root representation.
     pub gc_return: bool,
+    /// D-NEVER1=C: sema's bundle-wide divergence fixed point marks a callable
+    /// whose checked body has no returning path. This is compiler metadata only:
+    /// the fixed-point projection is its sole writer, and codegen never infers it.
+    pub diverges: bool,
     /// Effective shared-policy fact for this function body.
     pub gc_scope: bool,
     /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
@@ -1215,6 +1219,7 @@ impl Func {
             return_view_provenance: None,
             declared_return_view_provenance: None,
             gc_return: false,
+            diverges: false,
             gc_scope: false,
             is_unsafe: false,
             unsafe_reason: None,

@@ -459,13 +459,21 @@ fn entry_from_realized(
         };
         named_outputs.insert(name.clone(), digest);
     }
-    named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
-    let id = super::entry_id(
-        &realized.name,
-        &realized.version,
-        &realized.reference,
-        &realized.out,
-    );
+    let id = if producer.provider == "nix" {
+        super::content_addressed_entry_id(
+            &realized.name,
+            &realized.version,
+            &realized.reference,
+            &realized.envelope.output_hash,
+        )
+    } else {
+        super::entry_id(
+            &realized.name,
+            &realized.version,
+            &realized.reference,
+            &realized.out,
+        )
+    };
     Ok(StoreEntry {
         id,
         name: realized.name.clone(),

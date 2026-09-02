@@ -69,14 +69,8 @@ fn run(args: Args) {
     loop remaining > 0 {
         d01::p0-p1
         d02::p0-p2
-        d03::p0-p3
-        d04::p0-p4
         d12::p1-p2
-        d13::p1-p3
-        d14::p1-p4
-        d23::p2-p3
-        d24::p2-p4
-        d34::p3-p4
+        d03::p0-p3
 
         dx0::F64x4(d01[0],d02[0],d12[0],d03[0])
         dy0::F64x4(d01[1],d02[1],d12[1],d03[1])
@@ -85,6 +79,20 @@ fn run(args: Args) {
         roots0::F64x4(math.sqrt(squared0[0]),math.sqrt(squared0[1]),math.sqrt(squared0[2]),math.sqrt(squared0[3]))
         magnitudes0::dt_vec/(squared0*roots0)
 
+        v0-=d01*F64x4.splat(m1*magnitudes0[0])
+        v1+=d01*F64x4.splat(m0*magnitudes0[0])
+        v0-=d02*F64x4.splat(m2*magnitudes0[1])
+        v2+=d02*F64x4.splat(m0*magnitudes0[1])
+        v0-=d03*F64x4.splat(m3*magnitudes0[3])
+        v3+=d03*F64x4.splat(m0*magnitudes0[3])
+        v1-=d12*F64x4.splat(m2*magnitudes0[2])
+        v2+=d12*F64x4.splat(m1*magnitudes0[2])
+
+        d13::p1-p3
+        d23::p2-p3
+        d04::p0-p4
+        d14::p1-p4
+
         dx1::F64x4(d13[0],d23[0],d04[0],d14[0])
         dy1::F64x4(d13[1],d23[1],d04[1],d14[1])
         dz1::F64x4(d13[2],d23[2],d04[2],d14[2])
@@ -92,45 +100,28 @@ fn run(args: Args) {
         roots1::F64x4(math.sqrt(squared1[0]),math.sqrt(squared1[1]),math.sqrt(squared1[2]),math.sqrt(squared1[3]))
         magnitudes1::dt_vec/(squared1*roots1)
 
+        v1-=d13*F64x4.splat(m3*magnitudes1[0])
+        v3+=d13*F64x4.splat(m1*magnitudes1[0])
+        v2-=d23*F64x4.splat(m3*magnitudes1[1])
+        v3+=d23*F64x4.splat(m2*magnitudes1[1])
+        v0-=d04*F64x4.splat(m4*magnitudes1[2])
+        v4+=d04*F64x4.splat(m0*magnitudes1[2])
+        v1-=d14*F64x4.splat(m4*magnitudes1[3])
+        v4+=d14*F64x4.splat(m1*magnitudes1[3])
+
+        d24::p2-p4
+        d34::p3-p4
         dx2::F64x4(d24[0],d34[0],unit_padding[0],unit_padding[0])
         dy2::F64x4(d24[1],d34[1],unit_padding[1],unit_padding[1])
         dz2::F64x4(d24[2],d34[2],unit_padding[2],unit_padding[2])
         squared2::dx2*dx2+dy2*dy2+dz2*dz2
         roots2::F64x4(math.sqrt(squared2[0]),math.sqrt(squared2[1]),math.sqrt(squared2[2]),math.sqrt(squared2[3]))
         magnitudes2::dt_vec/(squared2*roots2)
-        magnitude01::magnitudes0[0]
-        magnitude02::magnitudes0[1]
-        magnitude12::magnitudes0[2]
-        magnitude03::magnitudes0[3]
-        magnitude13::magnitudes1[0]
-        magnitude23::magnitudes1[1]
-        magnitude04::magnitudes1[2]
-        magnitude14::magnitudes1[3]
-        magnitude24::magnitudes2[0]
-        magnitude34::magnitudes2[1]
 
-        v0-=d01*F64x4.splat(m1*magnitude01)
-        v1+=d01*F64x4.splat(m0*magnitude01)
-        v0-=d02*F64x4.splat(m2*magnitude02)
-        v2+=d02*F64x4.splat(m0*magnitude02)
-        v0-=d03*F64x4.splat(m3*magnitude03)
-        v3+=d03*F64x4.splat(m0*magnitude03)
-        v0-=d04*F64x4.splat(m4*magnitude04)
-        v4+=d04*F64x4.splat(m0*magnitude04)
-
-        v1-=d12*F64x4.splat(m2*magnitude12)
-        v2+=d12*F64x4.splat(m1*magnitude12)
-        v1-=d13*F64x4.splat(m3*magnitude13)
-        v3+=d13*F64x4.splat(m1*magnitude13)
-        v1-=d14*F64x4.splat(m4*magnitude14)
-        v4+=d14*F64x4.splat(m1*magnitude14)
-        v2-=d23*F64x4.splat(m3*magnitude23)
-        v3+=d23*F64x4.splat(m2*magnitude23)
-
-        v2-=d24*F64x4.splat(m4*magnitude24)
-        v4+=d24*F64x4.splat(m2*magnitude24)
-        v3-=d34*F64x4.splat(m4*magnitude34)
-        v4+=d34*F64x4.splat(m3*magnitude34)
+        v2-=d24*F64x4.splat(m4*magnitudes2[0])
+        v4+=d24*F64x4.splat(m2*magnitudes2[0])
+        v3-=d34*F64x4.splat(m4*magnitudes2[1])
+        v4+=d34*F64x4.splat(m3*magnitudes2[1])
 
         p0+=dt_vec*v0
         p1+=dt_vec*v1

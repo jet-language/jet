@@ -465,7 +465,8 @@ pub(crate) fn method_call_in_subset(
         }
     }
     // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
-    // `.Text(s)` / `.Bool(b)` — same shape as the JSON construction just above.
+    // `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` — same shape as the JSON
+    // construction just above.
     if let Expr::Ident(type_name, _) = receiver {
         if !locals.contains(type_name)
             && is_db_value_type_name(type_name)

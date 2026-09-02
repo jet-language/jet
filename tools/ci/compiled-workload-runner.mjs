@@ -330,8 +330,6 @@ function nowNs() {
 const MEASURE_CHILD = String.raw`
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 const command = JSON.parse(process.env.JET_MEASURE_COMMAND);
 const timeoutMs = Number(process.env.JET_MEASURE_TIMEOUT_MS);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -341,28 +339,98 @@ if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
 const started = process.hrtime.bigint();
 let peak = 0;
 let collectorError = "";
-function linuxRss(pid) {
-  const text = fs.readFileSync("/proc/" + pid + "/status", "utf8");
-  const values = [...text.matchAll(/^Vm(?:HWM|RSS):\s+([0-9]+)\s+kB$/gm)].map(match => Number(match[1]) * 1024);
+function rssFromStatus(text) {
+  const values = [...text.matchAll(/^Vm(?:HWM|RSS):\s+([0-9]+)\s+kB$/gm)]
+    .map(match => Number(match[1]) * 1024);
   return values.length ? Math.max(...values) : null;
 }
-function macosRss(pid) {
-  const result = spawnSync("ps", ["-o", "rss=", "-p", String(pid)], { encoding: "utf8" });
-  if (result.error || result.status !== 0) return null;
-  const value = Number(String(result.stdout).trim().split(/\s+/)[0]);
-  return Number.isFinite(value) && value > 0 ? value * 1024 : null;
+function treeRss(rootPid, processes) {
+  const tree = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [pid, processInfo] of processes) {
+      if (!tree.has(pid) && tree.has(processInfo.ppid)) {
+        tree.add(pid);
+        changed = true;
+      }
+    }
+  }
+  let total = 0;
+  let measured = false;
+  for (const pid of tree) {
+    const processInfo = processes.get(pid);
+    if (processInfo?.rss === null || processInfo?.rss === undefined) continue;
+    total += processInfo.rss;
+    measured = true;
+  }
+  return measured ? total : null;
 }
-function windowsRss(pid) {
-  const script = "(Get-Process -Id " + pid + ").PeakWorkingSet64";
+function linuxRss(rootPid) {
+  const processes = new Map();
+  for (const name of fs.readdirSync("/proc")) {
+    if (!/^[0-9]+$/.test(name)) continue;
+    const pid = Number(name);
+    let text;
+    try {
+      text = fs.readFileSync("/proc/" + name + "/status", "utf8");
+    } catch {
+      continue;
+    }
+    const parent = text.match(/^PPid:\s+([0-9]+)$/m);
+    if (!parent) continue;
+    processes.set(pid, { ppid: Number(parent[1]), rss: rssFromStatus(text) });
+  }
+  return treeRss(rootPid, processes);
+}
+function macosRss(rootPid) {
+  const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8" });
+  if (result.error || result.status !== 0) return null;
+  const processes = new Map();
+  for (const line of String(result.stdout).split(/\r?\n/)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length !== 3) continue;
+    const pid = Number(fields[0]);
+    const ppid = Number(fields[1]);
+    const rss = Number(fields[2]) * 1024;
+    if (Number.isInteger(pid) && Number.isInteger(ppid) && Number.isFinite(rss) && rss >= 0) {
+      processes.set(pid, { ppid, rss });
+    }
+  }
+  return treeRss(rootPid, processes);
+}
+function windowsRss(rootPid) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Get-CimInstance Win32_Process | ForEach-Object {",
+    "  $process = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue",
+    "  if ($null -ne $process) { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $process.WorkingSet64 }",
+    "}",
+  ].join("; ");
   for (const shell of ["pwsh", "powershell"]) {
     const result = spawnSync(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
     if (result.error || result.status !== 0) continue;
-    const value = Number(String(result.stdout).trim().split(/\s+/)[0]);
-    if (Number.isFinite(value) && value > 0) return value;
+    const processes = new Map();
+    for (const line of String(result.stdout).split(/\r?\n/)) {
+      const fields = line.trim().split("|");
+      if (fields.length !== 3) continue;
+      const pid = Number(fields[0]);
+      const ppid = Number(fields[1]);
+      const rss = Number(fields[2]);
+      if (Number.isInteger(pid) && Number.isInteger(ppid) && Number.isFinite(rss) && rss >= 0) {
+        processes.set(pid, { ppid, rss });
+      }
+    }
+    const value = treeRss(rootPid, processes);
+    if (value !== null) return value;
   }
   return null;
 }
 function sampleRss(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    collectorError ||= "RSS collector could not identify the probe process";
+    return;
+  }
   try {
     const value = process.platform === "linux" ? linuxRss(pid) :
       process.platform === "darwin" ? macosRss(pid) :
@@ -373,11 +441,7 @@ function sampleRss(pid) {
   }
 }
 
-const useGnuTime = process.platform === "linux";
-const rssFile = useGnuTime ? path.join(os.tmpdir(), "jet-workload-rss-" + process.pid + ".txt") : "";
-const child = spawn(useGnuTime ? "time" : command[0], useGnuTime ? [
-  "-f", "%M", "-o", rssFile, "--", ...command,
-] : command.slice(1), {
+const child = spawn(command[0], command.slice(1), {
   cwd: process.env.JET_MEASURE_CWD,
   env: process.env,
   detached: process.platform !== "win32",
@@ -388,8 +452,8 @@ const stderr = [];
 child.stdout.on("data", chunk => stdout.push(chunk));
 child.stderr.on("data", chunk => stderr.push(chunk));
 child.on("error", error => stderr.push(Buffer.from(String(error))));
-if (!useGnuTime) sampleRss(child.pid);
-const sampler = useGnuTime ? null : setInterval(() => sampleRss(child.pid), 5);
+sampleRss(child.pid);
+const sampler = setInterval(() => sampleRss(child.pid), 5);
 const timeout = setTimeout(() => {
   stderr.push(Buffer.from("measurement timed out after " + timeoutMs + "ms"));
   if (process.platform === "win32") {
@@ -403,17 +467,9 @@ const timeout = setTimeout(() => {
   }
 }, timeoutMs);
 child.on("close", (status, signal) => {
+  sampleRss(child.pid);
   clearTimeout(timeout);
   clearInterval(sampler);
-  if (useGnuTime) {
-    try {
-      peak = Number(fs.readFileSync(rssFile, "utf8").trim()) * 1024;
-    } catch (error) {
-      collectorError = "GNU time RSS collector failed: " + error.message;
-    } finally {
-      fs.rmSync(rssFile, { force: true });
-    }
-  }
   if (peak <= 0) {
     process.stderr.write(collectorError || "RSS collector produced no measurement");
     process.exit(1);
@@ -1520,7 +1576,7 @@ for (const task of manifest) {
     addSamples(taskId, language, "build_time", state.buildValues, "nanoseconds", orderMethod + ";cold-build");
     addSamples(taskId, language, "edit_time", state.editValues, "nanoseconds", orderMethod + ";warmup-then-source-edit-rebuild");
     addSamples(taskId, language, "runtime", state.runtimeValues, "nanoseconds", orderMethod + ";native-run");
-    addSamples(taskId, language, "memory", state.memoryValues, "bytes", orderMethod + ";native-maximum-rss");
+    addSamples(taskId, language, "memory", state.memoryValues, "bytes", orderMethod + ";native-maximum-process-tree-rss");
     addSamples(taskId, language, "artifact_size", state.artifactSizes, "bytes", orderMethod + ";artifact-closure");
     addSamples(taskId, language, "diagnostics", state.diagnosticValues, "count-and-review",
       orderMethod + ";diagnostic-rubric-output-digests=" + state.diagnosticMethods.join("|"));

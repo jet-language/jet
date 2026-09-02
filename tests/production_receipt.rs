@@ -60,7 +60,7 @@ fn production_failure_receipt_is_canonical_redacted_and_tier_stable() {
             .arg("--")
             .arg(input_secret)
             .env("JET_PRODUCTION_USER_DATA", environment_secret)
-            .env("JET_CACHE_DIR", root.join("cache"))
+            .env("JET_STORE_DIR", root.join("cache"))
             .current_dir(&root)
             .output()
             .unwrap();

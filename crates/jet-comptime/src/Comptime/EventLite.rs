@@ -669,6 +669,32 @@ fn eval_method_inner(
             });
             Ok(CtValue::Int(n))
         }
+        ("Hook", "listener_count") => {
+            let hid = handle_id(recv, "Hook")
+                .ok_or_else(|| unsupported("Hook.listener_count", span))?;
+            let n = HOOKS.with(|slot| {
+                let v = slot.borrow();
+                let idx = hid.saturating_sub(1) as usize;
+                v.get(idx)
+                    .and_then(|h| h.as_ref())
+                    .map(|h| h.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+                    .unwrap_or(0)
+            });
+            Ok(CtValue::Int(n))
+        }
+        ("DecisionHook", "listener_count") => {
+            let hid = handle_id(recv, "DecisionHook")
+                .ok_or_else(|| unsupported("DecisionHook.listener_count", span))?;
+            let n = DECISION_HOOKS.with(|slot| {
+                let v = slot.borrow();
+                let idx = hid.saturating_sub(1) as usize;
+                v.get(idx)
+                    .and_then(|h| h.as_ref())
+                    .map(|h| h.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+                    .unwrap_or(0)
+            });
+            Ok(CtValue::Int(n))
+        }
         ("Event", "trace") => {
             let eid = handle_id(recv, "Event").ok_or_else(|| unsupported("Event.trace", span))?;
             let n = EVENTS.with(|slot| {

@@ -189,7 +189,7 @@ fn gate_refusal_names_the_innermost_uncovered_expression() {
 
 #[test]
 fn empty_string_parts_emit_balanced_format_call() {
-    let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());
+    let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new(), "");
     assert_eq!(emit_tir_str(&[], &cx), "format!(\"\").to_string()");
 }
 
@@ -306,7 +306,14 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let cx = build_cx_items(
+            &module.items,
+            src,
+            "test.jet",
+            None,
+            &HashMap::new(),
+            &bundle.edition,
+        );
         let f = module
             .items
             .iter()
@@ -324,7 +331,14 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let cx = build_cx_items(
+            &module.items,
+            src,
+            "test.jet",
+            None,
+            &HashMap::new(),
+            &bundle.edition,
+        );
         let f = module
             .items
             .iter()
@@ -354,6 +368,7 @@ fn default_parameter_call_sites_are_tir_covered() {
             "default_refs.jet",
             None,
             &HashMap::new(),
+            &bundle.edition,
         );
         let function = module
             .items
@@ -1678,12 +1693,11 @@ fn run() {}\n";
         let cx = build_cx(&prog, src, "test.jet");
 
         for name in ["add_one", "make_text"] {
-            let declared = cx
-                .fn_types
+            let source = cx
+                .fn_source_types
                 .get(name)
-                .expect("test declaration must have a function type");
-            let contextual = declared.with_effective_fn_returns();
-            let rendered = crate::Codegen::emit_named_fn_value(&cx, name, &contextual);
+                .expect("test declaration must have a source function type");
+            let rendered = crate::Codegen::emit_named_fn_value(&cx, name, source);
             assert!(
                 rendered.contains(&format!("match __jet_{name}(")),
                 "default-return thunk must unwrap the executable carrier: {rendered}"
@@ -2753,7 +2767,14 @@ fn lower_and_emit_after_sema(src: &str, fn_name: &str) -> (TFunc, String) {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let cx = build_cx_items(
+            &module.items,
+            src,
+            "test.jet",
+            None,
+            &HashMap::new(),
+            &bundle.edition,
+        );
         let function = module
             .items
             .iter()
@@ -3421,7 +3442,7 @@ fn d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path() {
 }
 
 fn optimizer_fact_test_cx() -> Cx {
-    build_cx_items(&[], "", "test.jet", None, &HashMap::new())
+    build_cx_items(&[], "", "test.jet", None, &HashMap::new(), "")
 }
 
 #[test]

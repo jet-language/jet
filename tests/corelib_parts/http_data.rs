@@ -1105,7 +1105,7 @@ fn run() {
         .args(["run", "--trace-tiers", source.to_str().unwrap()])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
-        .env("JET_CACHE_DIR", dir.join("jit-cache"))
+        .env("JET_STORE_DIR", dir.join("jit-cache"))
         .env("JET_RUN_CACHE_DIR", dir.join("jit-run-cache"))
         .output()
         .unwrap();

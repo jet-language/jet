@@ -36,7 +36,7 @@ commands=(
         'explain:Explain a diagnostic code, build fact, generic-module value, or typed cost'
         'env:Open the project development shell'
         'shared-store:Manage the optional shared package broker'
-        'cache:Manage host-owned binary-cache bindings'
+        'cache:Manage the machine-wide artifact store'
         'remote:Manage host-owned remote builders'
         'trust:Review or change trusted authority'
         'image:Build a declared container image'
@@ -75,7 +75,7 @@ flags=(
         '--repo[With merge install-driver\: Git worktree to configure]'
         '--json[Emit machine-readable facts or diagnostics]'
         '--topic[With inspect digest\: Emit one digest topic]'
-        '--to[With publish\: Foreign registry (pypi | npm | maven | nuget)]'
+        '--to[With publish/cache\: Foreign registry, or prune target size]'
         '--list-topics[With inspect digest\: List digest topics]'
         '--kind[With inspect gates/authority\: Filter one gate kind]'
         '--quiet[Suppress non-error status output]'
@@ -104,6 +104,7 @@ flags=(
         '--example[With find\: Search by input/output example]'
         '--lock[With fetch\: Lock a manifest-less script'\''s inline deps instead of fetching a project]'
         '--read-only[With shared-store enroll\: Grant read-only broker access]'
+        '--host[With cache limit\: Host-wide store cap]'
         '--fd[With shared-store broker\: Inherited broker socket descriptor]'
         '-p[With run/dev/debug/check/build/jobs\: Pick a workspace member by name]'
         '--annotated[With new\: Include commented example deps]'
@@ -145,7 +146,6 @@ flags=(
         '--bind[With notebook\: Bind the local HTTP client to this address]'
         '--token[With notebook\: Require this bearer token for clients]'
         '--pure[With eval\: Reject code with side effects]'
-        '--freestanding[With build/run\: Target a system without an operating system]'
         '--offline[With cc/c++\: Reuse only cached signed toolchain data]'
         '--fixtures[With cc/c++ tests\: Use an explicit fixture bundle]'
         '--project-root[With cc/c++\: Scope source paths to a project directory]'
@@ -236,6 +236,7 @@ case $words[2] in
             self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'update:Verify or install a signed Jet toolchain release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' 'exec:Execute one command in an authority-bound workspace' ;;
             env) _values 'action' 'test:Run environment checks in a clean environment' 'hook:Print the shell auto-activation hook' 'sync:Apply typed managed environment files' 'info:Show the typed environment plan' ;;
             shared-store) _values 'action' 'install:Install the optional shared package broker' 'enroll:Grant a user shared-store broker access' 'status:Show shared-store broker configuration' 'broker:Serve one shared-store broker request' ;;
+            cache) _values 'action' 'status:Show machine-wide artifact store usage' 'prune:Prune the artifact store to a target size' 'limit:Set the host-wide artifact store limit' ;;
             os) _values 'action' 'push:Deploy one or more Jetos machines' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;
             gc) _values 'action' 'report:Show values moved into automatic memory management' ;;
             perf) _values 'action' 'run:Run a program and write a .jettrace' 'test:Run tests and write a .jettrace' 'attach:Attach to a running process and write a .jettrace' 'view:Show a .jettrace summary' 'compare:Compare two .jettrace artifacts' 'export:Export a loss-declared projection of a .jettrace' ;;

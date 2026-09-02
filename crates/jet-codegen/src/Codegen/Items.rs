@@ -426,7 +426,9 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
-        for (field, ty) in memo_fields {
+        let mut fields = memo_fields.iter().collect::<Vec<_>>();
+        fields.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (field, ty) in fields {
             let storage = crate::Syntax::memo_storage_name(field);
             let field_ty = cx.struct_field_rust_with_view_lifetime(s, field, ty);
             out.push_str(&format!(
@@ -679,7 +681,9 @@ fn emit_columnar_row_adapter(cx: &Cx, s: &StructDef, out: &mut String) {
     // D-FIELDMEMO1=A: a memo store is hidden storage, not a column, so a
     // gathered record gets a fresh empty one exactly as before.
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
-        for field in memo_fields.keys() {
+        let mut fields = memo_fields.keys().collect::<Vec<_>>();
+        fields.sort_unstable();
+        for field in fields {
             let storage = crate::Syntax::memo_storage_name(field);
             out.push_str(&format!(
                 "            {storage}: {}JetMemo::new(),\n",
@@ -1045,7 +1049,9 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         .map(|f| mangle(&f.name))
         .collect();
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
-        inits.extend(memo_fields.keys().map(|field| {
+        let mut memo_names = memo_fields.keys().collect::<Vec<_>>();
+        memo_names.sort_unstable();
+        inits.extend(memo_names.into_iter().map(|field| {
             format!(
                 "{}: {}JetMemo::new()",
                 crate::Syntax::memo_storage_name(field),
@@ -1095,7 +1101,9 @@ fn emit_struct_patchable(cx: &Cx, s: &StructDef, out: &mut String) {
         ));
     }
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
-        for field in memo_fields.keys() {
+        let mut fields = memo_fields.keys().collect::<Vec<_>>();
+        fields.sort_unstable();
+        for field in fields {
             let storage = crate::Syntax::memo_storage_name(field);
             apply_fields.push(format!("{storage}: {}JetMemo::new()", cx.root_prefix));
         }
@@ -2835,8 +2843,16 @@ fn struct_jet_text_body(s: &StructDef, has_fn_field: bool, method: &str) -> Stri
             if f.redact {
                 format!("({:?}.to_string(), \"[redacted]\".to_string())", f.name)
             } else {
+                // Structural Display keeps string fields quoted, just like Debug.
+                // A top-level String still uses its ordinary unquoted Display; only
+                // the record boundary supplies the structural quoting.
+                let field_method = if matches!(f.ty.without_user_tags(), Type::String) {
+                    "jet_debug"
+                } else {
+                    method
+                };
                 format!(
-                    "({:?}.to_string(), ({}).{method}())",
+                    "({:?}.to_string(), ({}).{field_method}())",
                     f.name,
                     field_self_read(f)
                 )

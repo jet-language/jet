@@ -7,7 +7,7 @@ use crate::Codegen::TIR::THandleOp;
 use crate::Comptime::Builtins::{
     apply_method, apply_mutating, apply_mutating_with_type, exact_big, exact_int_value,
 };
-use crate::Comptime::{CtReport, CtValue, DevSink};
+use crate::Comptime::{apply_core_pure_method, sketch_add, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Type;
 use jet_foundation::Reflection::ReflectionField;
@@ -41,6 +41,33 @@ fn civil_time_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue>
             .unwrap_or(name);
         (name == wanted).then_some(value)
     })
+}
+fn game_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: fields
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    }
+}
+
+fn game_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+    match value {
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value)),
+        _ => None,
+    }
+}
+
+fn game_field_mut<'a>(value: &'a mut CtValue, name: &str) -> Option<&'a mut CtValue> {
+    match value {
+        CtValue::Struct { fields, .. } => fields
+            .iter_mut()
+            .find_map(|(field, value)| (field == name).then_some(value)),
+        _ => None,
+    }
 }
 
 fn duration_ns_value(value: &CtValue) -> Option<i64> {
@@ -426,6 +453,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::DBValueFloat => "DBValueFloat",
         THandleOp::DBValueText => "DBValueText",
         THandleOp::DBValueBool => "DBValueBool",
+        THandleOp::DBValueBlob => "DBValueBlob",
         THandleOp::DBValueIsNull => "DBValueIsNull",
         THandleOp::FileReaderReadLine => "FileReaderReadLine",
         THandleOp::FileWriterWriteLine => "FileWriterWriteLine",
@@ -760,10 +788,12 @@ fn db_value_result(recv: &CtValue, want: &str, span: Span) -> Result<CtValue, Di
         }
         ("text", "Text", [(_, CtValue::Str(s))]) => ok(CtValue::Str(s.clone())),
         ("bool", "Bool", [(_, CtValue::Bool(b))]) => ok(CtValue::Bool(*b)),
+        ("blob", "Blob", [(_, CtValue::Bytes(bytes))]) => ok(CtValue::Bytes(bytes.clone())),
         ("int", _, _) => err(format!("expected an int, got {variant}")),
         ("float", _, _) => err(format!("expected a float, got {variant}")),
         ("text", _, _) => err(format!("expected text, got {variant}")),
         ("bool", _, _) => err(format!("expected a bool, got {variant}")),
+        ("blob", _, _) => err(format!("expected a blob, got {variant}")),
         _ => Err(unsupported("DBValue accessor", span)),
     }
 }
@@ -1193,6 +1223,7 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::DBValueFloat => db_value_result(recv, "float", span),
         THandleOp::DBValueText => db_value_result(recv, "text", span),
         THandleOp::DBValueBool => db_value_result(recv, "bool", span),
+        THandleOp::DBValueBlob => db_value_result(recv, "blob", span),
         THandleOp::DBValueIsNull => db_value_result(recv, "is_null", span),
         // Runtime-tier only (jet-jit ambient); comptime has no SQLite host.
         THandleOp::DBWithPolicy => Err(unsupported("handle `DBWithPolicy`", span)),
@@ -1609,24 +1640,176 @@ pub(super) fn eval_handle_with_type_and_sink(
                         "result" => *value = CtValue::Int(suite.result),
                         _ => {}
                     }
+                    }
                 }
-            }
             Ok(CtValue::Int(status))
         }
-        THandleOp::GameSceneNew => Err(unsupported("handle `GameSceneNew`", span)),
-        THandleOp::GameReplayRecord => Err(unsupported("handle `GameReplayRecord`", span)),
-        THandleOp::GameBackendHeadless => Err(unsupported("handle `GameBackendHeadless`", span)),
-        THandleOp::GameBackendShouldContinue => {
-            Err(unsupported("handle `GameBackendShouldContinue`", span))
+        THandleOp::GameSceneNew => {
+            let CtValue::Str(name) = recv else {
+                return Err(unsupported("GameScene.new name", span));
+            };
+            let assets = game_struct(
+                "GameAssets",
+                vec![("assets", CtValue::List(Vec::new()))],
+            );
+            let input = game_struct(
+                "GameInputMap",
+                vec![("bindings", CtValue::List(Vec::new()))],
+            );
+            Ok(game_struct(
+                "GameScene",
+                vec![
+                    ("name", CtValue::Str(name.clone())),
+                    ("assets", assets.clone()),
+                    ("user_assets", assets),
+                    ("input", input.clone()),
+                    ("user_input", input),
+                    ("components", CtValue::List(Vec::new())),
+                    ("callbacks", CtValue::List(Vec::new())),
+                ],
+            ))
         }
-        THandleOp::GameBackendPresent => Err(unsupported("handle `GameBackendPresent`", span)),
-        THandleOp::GameSceneOnFrame => Err(unsupported("handle `GameSceneOnFrame`", span)),
-        THandleOp::GameSceneComponent => Err(unsupported("handle `GameSceneComponent`", span)),
-        THandleOp::GameSceneQuery => Err(unsupported("handle `GameSceneQuery`", span)),
-        THandleOp::GameAssetsImage => Err(unsupported("handle `GameAssetsImage`", span)),
-        THandleOp::GameAssetsSound => Err(unsupported("handle `GameAssetsSound`", span)),
-        THandleOp::GameInputBind => Err(unsupported("handle `GameInputBind`", span)),
-        THandleOp::GameInputPressed => Err(unsupported("handle `GameInputPressed`", span)),
+        THandleOp::GameReplayRecord => {
+            let CtValue::Str(path) = recv else {
+                return Err(unsupported("Game.Replay.record path", span));
+            };
+            Ok(game_struct("GameReplay", vec![("path", CtValue::Str(path.clone()))]))
+        }
+        THandleOp::GameBackendHeadless => Ok(game_struct(
+            "GameBackend",
+            vec![
+                ("renderer", CtValue::Str("headless".to_string())),
+                ("audio", CtValue::Str("none".to_string())),
+                ("editor", CtValue::Str("none".to_string())),
+                ("frame_budget", CtValue::Int(3)),
+            ],
+        )),
+        THandleOp::GameBackendShouldContinue => Ok(
+            game_field(recv, "frame_budget")
+                .and_then(|value| match value {
+                    CtValue::Int(value) => Some(CtValue::Bool(*value > 0)),
+                    _ => None,
+                })
+                .unwrap_or(CtValue::Bool(true)),
+        ),
+        THandleOp::GameBackendPresent => {
+            if let Some(CtValue::Int(value)) = game_field_mut(recv, "frame_budget") {
+                *value = value.saturating_sub(1);
+            }
+            Ok(CtValue::Unit)
+        }
+        THandleOp::GameSceneOnFrame => {
+            let callback = args
+                .first()
+                .cloned()
+                .ok_or_else(|| unsupported("GameScene.on_frame callback", span))?;
+            let Some(CtValue::List(callbacks)) = game_field_mut(recv, "callbacks") else {
+                return Err(unsupported("GameScene.on_frame receiver", span));
+            };
+            callbacks.push(callback);
+            Ok(CtValue::Unit)
+        }
+        THandleOp::GameSceneComponent => {
+            let Some(CtValue::Str(name)) = args.first() else {
+                return Err(unsupported("GameScene.component name", span));
+            };
+            let Some(CtValue::List(components)) = game_field_mut(recv, "components") else {
+                return Err(unsupported("GameScene.component receiver", span));
+            };
+            if !components.iter().any(|value| value == &CtValue::Str(name.clone())) {
+                components.push(CtValue::Str(name.clone()));
+            }
+            Ok(CtValue::Unit)
+        }
+        THandleOp::GameSceneQuery => {
+            let Some(CtValue::Str(names)) = args.first() else {
+                return Err(unsupported("GameScene.query names", span));
+            };
+            let components = match game_field(recv, "components") {
+                Some(CtValue::List(values)) => values,
+                _ => return Err(unsupported("GameScene.query receiver", span)),
+            };
+            let wanted = names
+                .split(',')
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>();
+            if wanted.iter().all(|name| {
+                components
+                    .iter()
+                    .any(|value| value == &CtValue::Str((*name).to_string()))
+            }) {
+                let row = wanted
+                    .iter()
+                    .map(|name| match *name {
+                        "Position" => "Position{x:0}".to_string(),
+                        "Velocity" => "Velocity{dx:0}".to_string(),
+                        other => format!("{other}{{}}"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Ok(CtValue::List(vec![CtValue::Str(row)]))
+            } else {
+                Ok(CtValue::List(Vec::new()))
+            }
+        }
+        THandleOp::GameAssetsImage | THandleOp::GameAssetsSound => {
+            let Some(CtValue::Str(path)) = args.first() else {
+                return Err(unsupported("Game asset path", span));
+            };
+            if path.contains("missing") {
+                return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
+                    "asset not found: {path}"
+                )))));
+            }
+            let kind = if matches!(op, THandleOp::GameAssetsImage) {
+                "image"
+            } else {
+                "sound"
+            };
+            if let Some(CtValue::List(assets)) = game_field_mut(recv, "assets") {
+                assets.push(game_struct(
+                    "GameAsset",
+                    vec![
+                        ("kind", CtValue::Str(kind.to_string())),
+                        ("path", CtValue::Str(path.clone())),
+                    ],
+                ));
+            }
+            let ty = if kind == "image" { "GameImage" } else { "GameSound" };
+            Ok(CtValue::Present(Box::new(game_struct(
+                ty,
+                vec![("path", CtValue::Str(path.clone()))],
+            ))))
+        }
+        THandleOp::GameInputBind => {
+            let (Some(CtValue::Str(action)), Some(CtValue::Str(key))) =
+                (args.first(), args.get(1))
+            else {
+                return Err(unsupported("GameInputMap.bind arguments", span));
+            };
+            if let Some(CtValue::List(bindings)) = game_field_mut(recv, "bindings") {
+                let pair = game_struct(
+                    "GameBinding",
+                    vec![
+                        ("action", CtValue::Str(action.clone())),
+                        ("key", CtValue::Str(key.clone())),
+                    ],
+                );
+                if !bindings.iter().any(|value| value == &pair) {
+                    bindings.push(pair);
+                }
+            }
+            Ok(CtValue::Unit)
+        }
+        THandleOp::GameInputPressed => {
+            let Some(CtValue::Str(action)) = args.first() else {
+                return Err(unsupported("GameInputSnapshot.pressed action", span));
+            };
+            Ok(CtValue::Bool(
+                matches!(game_field(recv, "pressed"), Some(CtValue::List(values))
+                    if values.iter().any(|value| value == &CtValue::Str(action.clone()))),
+            ))
+        }
         THandleOp::TcpListenerAccept => Err(unsupported("handle `TcpListenerAccept`", span)),
         THandleOp::TcpListenerLocalAddr => Err(unsupported("handle `TcpListenerLocalAddr`", span)),
         THandleOp::TcpStreamRead => Err(unsupported("handle `TcpStreamRead`", span)),
@@ -1802,7 +1985,17 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::LayoutMethod { .. } => Err(unsupported("handle `LayoutMethod`", span)),
         THandleOp::LoadableMethod { method } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::ExpiringMethod { .. } => Err(unsupported("handle `ExpiringMethod`", span)),
-        THandleOp::SketchMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
+        THandleOp::SketchMethod { method, .. } => {
+            if let Some(result) = apply_core_pure_method(recv, method, args, span) {
+                return result;
+            }
+            if let Some(result) = sketch_add(recv, args, span) {
+                let (value, updated) = result?;
+                *recv = updated;
+                return Ok(value);
+            }
+            apply_method(recv, method, args.to_vec(), span)
+        }
         THandleOp::UrlMimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::EmailMethod { method } => {
             crate::Comptime::EmailAdapter::evaluate_method(recv, method, args, span).map_or_else(

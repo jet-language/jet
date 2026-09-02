@@ -501,6 +501,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("DBValue", "float", 0) => THandleOp::DBValueFloat,
         ("DBValue", "text", 0) => THandleOp::DBValueText,
         ("DBValue", "bool", 0) => THandleOp::DBValueBool,
+        ("DBValue", "blob", 0) => THandleOp::DBValueBlob,
         ("DBValue", "is_null", 0) => THandleOp::DBValueIsNull,
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
         ("Plugin", "call", 2) => THandleOp::PluginCall,

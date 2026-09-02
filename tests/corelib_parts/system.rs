@@ -71,12 +71,10 @@ fn run() {
         SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"},
         SQL{"INSERT INTO missing_table VALUES (1)"}
     ]) ?? 0
-    row :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
-    found :: row ?? panic("missing")
+    found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
     missing_id :: 99
-    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"}) ?? panic("missing query")
-    count :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
-    counted :: count ?? panic("missing count")
+    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"})
+    counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
     print(created)
     print(skipped)
     print(failed)
@@ -185,7 +183,7 @@ fn run() {
     ) ?? panic("insert")
     present :: scoped.query_one(
         SQL{"SELECT id, name FROM person WHERE id = 7"}
-    ) ?? panic("present query")
+    )
     if present == {
         .Val(_) -> {
             print("present")
@@ -194,7 +192,7 @@ fn run() {
     }
     absent :: scoped.query_one(
         SQL{"SELECT id, name FROM person WHERE id = 99"}
-    ) ?? panic("absent query")
+    )
     if absent == .None { print("absent") } else { panic("absent row present") }
     _closed :: scoped.close()
 }

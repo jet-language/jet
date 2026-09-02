@@ -2233,7 +2233,7 @@ const JET_NET_SERVICES: &[(&str, i64)] = &[
     ("pop3s", 995),
 ];
 
-fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
+pub(crate) fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
     let key = name.to_ascii_lowercase();
     JET_NET_SERVICES
         .iter()
@@ -2250,7 +2250,7 @@ fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
         })
 }
 
-fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
+pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
     JET_NET_SERVICES
         .iter()
         .find(|(_, p)| *p == port)

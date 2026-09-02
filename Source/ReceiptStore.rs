@@ -506,9 +506,7 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     // Timed invocations must execute the producer so timing and cache
     // diagnostics describe this invocation. The inner content caches remain
     // active; only the whole-invocation receipt replay is disabled.
-    if std::env::var_os("JET_RECEIPT_BYPASS").is_some()
-        || std::env::var_os("JET_TIMING").is_some()
-    {
+    if std::env::var_os("JET_RECEIPT_BYPASS").is_some() {
         return None;
     }
     let verb = participating_verb(argv)?;
@@ -551,10 +549,54 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let status = child.wait().ok()?.code().unwrap_or(1);
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
-    if store.write(&claim, argv, status, &stdout, &stderr).is_ok() {
+    let receipt_stderr = canonicalize_receipt_stderr(verb, &stderr);
+    if store
+        .write(&claim, argv, status, &stdout, &receipt_stderr)
+        .is_ok()
+    {
         let _ = store.remember_context(verb, argv, &claim);
     }
     Some(status)
+}
+
+fn canonicalize_receipt_stderr(verb: &str, stderr: &[u8]) -> Vec<u8> {
+    if verb != "build" {
+        return stderr.to_vec();
+    }
+    let mut canonical = Vec::with_capacity(stderr.len());
+    let mut offset = 0;
+    while offset < stderr.len() {
+        let line_end = stderr[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|index| offset + index)
+            .unwrap_or(stderr.len());
+        let line = &stderr[offset..line_end];
+        let rewritten = find_bytes(line, b"Built ").and_then(|built| {
+            let start = built + b"Built ".len();
+            let timing = find_bytes(&line[start..], b" in ")?;
+            let timing_start = start + timing;
+            let check = find_bytes(&line[timing_start + 4..], b"\xE2\x9C\x93")?;
+            let check_start = timing_start + 4 + check;
+            let mut output = Vec::with_capacity(line.len());
+            output.extend_from_slice(&line[..timing_start]);
+            output.push(b' ');
+            output.extend_from_slice(&line[check_start..]);
+            Some(output)
+        });
+        canonical.extend_from_slice(rewritten.as_deref().unwrap_or(line));
+        if line_end < stderr.len() {
+            canonical.push(b'\n');
+        }
+        offset = line_end.saturating_add(1);
+    }
+    canonical
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 pub fn participating_verb(argv: &[String]) -> Option<&'static str> {

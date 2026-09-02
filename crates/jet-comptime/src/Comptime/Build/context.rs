@@ -1035,6 +1035,7 @@ impl BuildContext {
             probes: self.probes.clone(),
             plugins: self.plugins.clone(),
             generated_modules: self.generated_modules.clone(),
+            compiler_nodes: Vec::new(),
             default,
             fact_contributions: self.fact_contributions.clone(),
         })

@@ -46,7 +46,7 @@ fn have_cargo() -> bool {
     Command::new("cargo").arg("--version").output().is_ok()
 }
 
-/// Run the `jet` binary with its own private `JET_CACHE_DIR` (D-BUILDNORM1=A):
+/// Run the `jet` binary with its own private `JET_STORE_DIR` (D-BUILDNORM1=A):
 /// the native build cache is keyed on the canonical pre-sema AST, so two
 /// tests writing byte-identical script content (as several here deliberately
 /// do, to keep fixtures simple) would otherwise share a cache entry across
@@ -56,7 +56,7 @@ fn jet_cmd(args: &[&str], cwd: &Path) -> std::process::Output {
     Command::new(jet_bin())
         .args(args)
         .current_dir(cwd)
-        .env("JET_CACHE_DIR", cwd.join(".jet-test-cache"))
+        .env("JET_STORE_DIR", cwd.join(".jet-test-cache"))
         .output()
         .expect("jet binary should run")
 }

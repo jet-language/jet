@@ -117,7 +117,35 @@ pub(crate) fn lower_lambda_expecting(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false, None)
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false, None, None)
+}
+/// Lower a lambda for an ordinary Jet function-value slot. The slot's
+/// callable return is already the effective failure carrier, so retain that
+/// return type while adapting a raw successful lambda body to `Ok`/`Present`.
+pub(crate) fn lower_lambda_expecting_callable(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected: &Type,
+) -> TLambda {
+    let Type::Fn {
+        params,
+        ret,
+        ..
+    } = expected
+    else {
+        return lower_lambda_expecting(lam, cx, env, None);
+    };
+    lower_lambda_expecting_with_host_borrow(
+        lam,
+        cx,
+        env,
+        Some(params.as_slice()),
+        None,
+        false,
+        None,
+        ret.as_deref(),
+    )
 }
 
 /// Lower a callback for a native helper whose Rust contract consumes each
@@ -128,7 +156,16 @@ pub(crate) fn lower_lambda_expecting_value(
     env: &LowerEnv,
     expected_params: &[Type],
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), None, true, None)
+    lower_lambda_expecting_with_host_borrow(
+        lam,
+        cx,
+        env,
+        Some(expected_params),
+        None,
+        true,
+        None,
+        None,
+    )
 }
 
 /// Runtime helpers such as `Shared.read` and collection adapters already lend
@@ -149,6 +186,7 @@ pub(crate) fn lower_lambda_expecting_host_borrow(
         Some(write),
         false,
         None,
+        None,
     )
 }
 
@@ -160,6 +198,7 @@ fn lower_lambda_expecting_with_host_borrow(
     host_borrow: Option<bool>,
     by_value: bool,
     shared_body: Option<Arc<[TStmt]>>,
+    expected_return: Option<&Type>,
 ) -> TLambda {
     let param_types: Vec<Type> = lam
         .params
@@ -384,7 +423,7 @@ fn lower_lambda_expecting_with_host_borrow(
             // checked `?` against the enclosing failure carrier, so the
             // closure's successful expression must construct that carrier
             // before rustc sees the closure return type.
-            let lowered = fallible_lambda_value(lowered, lam, env);
+            let lowered = fallible_lambda_value(lowered, lam, env, expected_return);
             body_ty = lowered.ty.clone();
             (
                 emit_tir_expr(&lowered, cx),
@@ -410,8 +449,12 @@ fn lower_lambda_expecting_with_host_borrow(
                 } else {
                     lower_stmts(stmts, cx, &mut lam_env)
                 };
-                if lam.meta.fallible_propagation {
-                    lift_fallible_lambda_returns(&mut lowered, lam, env);
+                if lam.meta.fallible_propagation
+                    || expected_return.is_some_and(|ty| {
+                        matches!(ty, Type::Result { .. } | Type::Option(_))
+                    })
+                {
+                    lift_fallible_lambda_returns(&mut lowered, lam, env, expected_return);
                 }
                 body_ty = lowered_block_return_ty(&lowered);
                 let mut inner = String::new();
@@ -453,11 +496,18 @@ fn lower_lambda_expecting_with_host_borrow(
 /// Lift the successful result of a callback that propagates into its enclosing
 /// failure carrier. The `?` nodes already carry failures out of the callback;
 /// this supplies the matching `Ok`/`Some` on the success path.
-fn fallible_lambda_value(value: TExpr, lam: &Lambda, env: &LowerEnv) -> TExpr {
-    if !lam.meta.fallible_propagation {
+fn fallible_lambda_value(
+    value: TExpr,
+    lam: &Lambda,
+    env: &LowerEnv,
+    expected_return: Option<&Type>,
+) -> TExpr {
+    let carrier = expected_return
+        .or(lam.meta.fallible_carrier.as_ref())
+        .or(env.ret_ty.as_ref());
+    if expected_return.is_none() && !lam.meta.fallible_propagation {
         return value;
     }
-    let carrier = lam.meta.fallible_carrier.as_ref().or(env.ret_ty.as_ref());
     match carrier {
         Some(Type::Result { err, .. }) if !matches!(&value.ty, Type::Result { .. }) => TExpr {
             ty: Type::Result {
@@ -478,8 +528,13 @@ fn fallible_lambda_value(value: TExpr, lam: &Lambda, env: &LowerEnv) -> TExpr {
 /// nested control-flow arm. Every such route belongs to the callback, so a
 /// propagated failure must leave the callback through its own carrier rather
 /// than a raw success value.
-fn lift_fallible_lambda_returns(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &LowerEnv) {
-    lift_fallible_lambda_return_block(stmts, lam, env);
+fn lift_fallible_lambda_returns(
+    stmts: &mut Vec<TStmt>,
+    lam: &Lambda,
+    env: &LowerEnv,
+    expected_return: Option<&Type>,
+) {
+    lift_fallible_lambda_return_block(stmts, lam, env, expected_return);
     if matches!(stmts.last(), Some(TStmt::Return(_))) {
         return;
     }
@@ -491,7 +546,7 @@ fn lift_fallible_lambda_returns(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &Lowe
                 kind: TExprKind::Unit,
             },
         );
-        *value = fallible_lambda_value(return_value, lam, env);
+        *value = fallible_lambda_value(return_value, lam, env, expected_return);
         return;
     }
     stmts.push(TStmt::Return(Some(fallible_lambda_value(
@@ -501,23 +556,34 @@ fn lift_fallible_lambda_returns(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &Lowe
         },
         lam,
         env,
+        expected_return,
     ))));
 }
 
-fn lift_fallible_lambda_return_block(stmts: &mut Vec<TStmt>, lam: &Lambda, env: &LowerEnv) {
+fn lift_fallible_lambda_return_block(
+    stmts: &mut Vec<TStmt>,
+    lam: &Lambda,
+    env: &LowerEnv,
+    expected_return: Option<&Type>,
+) {
     for stmt in stmts {
-        lift_fallible_lambda_return_stmt(stmt, lam, env);
+        lift_fallible_lambda_return_stmt(stmt, lam, env, expected_return);
     }
 }
 
-fn lift_fallible_lambda_return_stmt(stmt: &mut TStmt, lam: &Lambda, env: &LowerEnv) {
+fn lift_fallible_lambda_return_stmt(
+    stmt: &mut TStmt,
+    lam: &Lambda,
+    env: &LowerEnv,
+    expected_return: Option<&Type>,
+) {
     match stmt {
         TStmt::Return(value) => {
             let return_value = value.take().unwrap_or_else(|| TExpr {
                 ty: unit_type(),
                 kind: TExprKind::Unit,
             });
-            *value = Some(fallible_lambda_value(return_value, lam, env));
+            *value = Some(fallible_lambda_value(return_value, lam, env, expected_return));
         }
         TStmt::ContractScope { body, .. }
         | TStmt::TaskGroup { body, .. }
@@ -536,56 +602,60 @@ fn lift_fallible_lambda_return_stmt(stmt: &mut TStmt, lam: &Lambda, env: &LowerE
         | TStmt::Live { body }
         | TStmt::Shield { body }
         | TStmt::ScopeMember { body, .. }
-        | TStmt::Transact { body, .. } => lift_fallible_lambda_return_block(body, lam, env),
-        TStmt::RefutableBind { fallback, .. } => {
-            lift_fallible_lambda_return_block(fallback, lam, env)
+        | TStmt::Transact { body, .. } => {
+            lift_fallible_lambda_return_block(body, lam, env, expected_return)
         }
-        TStmt::GcEdit { stmt, .. } => lift_fallible_lambda_return_stmt(stmt, lam, env),
+        TStmt::RefutableBind { fallback, .. } => {
+            lift_fallible_lambda_return_block(fallback, lam, env, expected_return)
+        }
+        TStmt::GcEdit { stmt, .. } => {
+            lift_fallible_lambda_return_stmt(stmt, lam, env, expected_return)
+        }
         TStmt::CountedLoop {
             init, step, body, ..
         } => {
-            lift_fallible_lambda_return_stmt(init, lam, env);
+            lift_fallible_lambda_return_stmt(init, lam, env, expected_return);
             if let Some(step) = step {
-                lift_fallible_lambda_return_stmt(step, lam, env);
+                lift_fallible_lambda_return_stmt(step, lam, env, expected_return);
             }
-            lift_fallible_lambda_return_block(body, lam, env);
+            lift_fallible_lambda_return_block(body, lam, env, expected_return);
         }
         TStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            lift_fallible_lambda_return_block(then_body, lam, env);
+            lift_fallible_lambda_return_block(then_body, lam, env, expected_return);
             if let Some(else_body) = else_body {
-                lift_fallible_lambda_return_block(else_body, lam, env);
+                lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
             }
         }
         TStmt::EnumMatch {
             arms, else_body, ..
         } => {
             for arm in arms {
-                lift_fallible_lambda_return_block(&mut arm.body, lam, env);
+                lift_fallible_lambda_return_block(&mut arm.body, lam, env, expected_return);
             }
             if let Some(else_body) = else_body {
-                lift_fallible_lambda_return_block(else_body, lam, env);
+                lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
             }
         }
         TStmt::RangeSwitch {
             arms, else_body, ..
         } => {
             for (_, _, body) in arms {
-                lift_fallible_lambda_return_block(body, lam, env);
+                lift_fallible_lambda_return_block(body, lam, env, expected_return);
             }
-            lift_fallible_lambda_return_block(else_body, lam, env);
+            lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
         }
         TStmt::MixedSwitch {
             arms, else_body, ..
         } => {
             for (_, body) in arms {
-                lift_fallible_lambda_return_block(body, lam, env);
+                lift_fallible_lambda_return_block(body, lam, env, expected_return);
             }
             if let Some(else_body) = else_body {
-                lift_fallible_lambda_return_block(else_body, lam, env);
+                lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
             }
         }
         // A reactive body owns a separate closure and therefore has its
@@ -626,7 +696,7 @@ pub(crate) fn lower_lambda_with_shared_block(
     env: &LowerEnv,
     body: Arc<[TStmt]>,
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, None, None, false, Some(body))
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, None, None, false, Some(body), None)
 }
 
 /// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.

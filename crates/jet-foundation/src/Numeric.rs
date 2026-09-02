@@ -1168,12 +1168,13 @@ impl CtDecimal {
             return Err("empty Decimal string".to_string());
         }
         let (negative, digits, scale) = json_decimal_lexeme(s)?;
+        // D-DECIMAL1 / D-TYPE2-DEFAULT1: preserve lexical scale at the
+        // source boundary; arithmetic applies the shared scale rule below.
         Ok(CtDecimal {
             negative,
             digits,
             scale,
-        }
-        .normalize())
+        })
     }
 
     pub fn from_int(value: i64) -> Self {
@@ -1263,16 +1264,23 @@ impl CtDecimal {
         CtBigInt::from_str(&s).unwrap()
     }
 
-    fn from_bigint(v: CtBigInt, scale: u32, negative: bool) -> CtDecimal {
+    /// D-DECIMAL1 / D-TYPE2-DEFAULT1: preserve exact presentation scale.
+    /// Addition and subtraction use the finer operand scale. Multiplication
+    /// starts at the sum of operand scales and trims only exact trailing
+    /// zero places down to that same finer scale.
+    fn from_bigint_preserving_scale(v: CtBigInt, scale: u32, negative: bool) -> CtDecimal {
         let s = v.to_string_rep();
         let body = if s.starts_with('-') { &s[1..] } else { &s };
         let digits: Vec<u8> = body.bytes().map(|b| b - b'0').collect();
         CtDecimal {
-            negative,
+            negative: negative && digits != [0],
             digits,
             scale,
         }
-        .normalize()
+    }
+
+    fn from_bigint(v: CtBigInt, scale: u32, negative: bool) -> CtDecimal {
+        Self::from_bigint_preserving_scale(v, scale, negative).normalize()
     }
 
     pub fn add(&self, other: &CtDecimal) -> CtDecimal {
@@ -1285,14 +1293,18 @@ impl CtDecimal {
             b.negative
         };
         if a.negative == b.negative {
-            CtDecimal::from_bigint(a.to_bigint().add(&b.to_bigint()), a.scale, negative)
+            CtDecimal::from_bigint_preserving_scale(
+                a.to_bigint().add(&b.to_bigint()),
+                a.scale,
+                negative,
+            )
         } else {
             let diff = if a.to_bigint().cmp_abs(&b.to_bigint()) >= 0 {
                 a.to_bigint().sub_abs(&b.to_bigint())
             } else {
                 b.to_bigint().sub_abs(&a.to_bigint())
             };
-            CtDecimal::from_bigint(diff, a.scale, negative)
+            CtDecimal::from_bigint_preserving_scale(diff, a.scale, negative)
         }
     }
 
@@ -1303,9 +1315,20 @@ impl CtDecimal {
     }
 
     pub fn mul(&self, other: &CtDecimal) -> CtDecimal {
-        CtDecimal::from_bigint(
-            self.to_bigint().mul(&other.to_bigint()),
-            self.scale + other.scale,
+        let mut prod = self.to_bigint().mul(&other.to_bigint());
+        let mut scale = self.scale + other.scale;
+        let minimum_scale = self.scale.max(other.scale);
+        while scale > minimum_scale {
+            let (next, remainder) = prod.div_rem_small(10);
+            if remainder != 0 {
+                break;
+            }
+            prod = next;
+            scale -= 1;
+        }
+        CtDecimal::from_bigint_preserving_scale(
+            prod,
+            scale,
             self.negative != other.negative,
         )
     }

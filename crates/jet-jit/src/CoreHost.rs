@@ -244,6 +244,23 @@ mod fs_prelude {
 
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
 }
+mod fs_write_prelude {
+    use super::os_rt::jet_std;
+    use crate::fault_injection::jet_fault_should_fail;
+
+    pub(crate) struct JetStdinReader {
+        inner: std::io::BufReader<std::io::Stdin>,
+    }
+
+    fn jet_std_io_stdin() -> JetStdinReader {
+        JetStdinReader {
+            inner: std::io::BufReader::new(std::io::stdin()),
+        }
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
+}
+
 
 // The resident JIT cannot hand a Rust `Rc` callback to the process signal
 // boundary. TIR gives it one Send-safe record containing a function address and
@@ -1099,6 +1116,24 @@ fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     }
 }
 
+fn jet_jit_fs_append(path: i64, text: i64) -> i64 {
+    let p = clone_string(path);
+    let t = clone_string(text);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
+    use std::io::Write;
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+        .and_then(|mut file| file.write_all(t.as_bytes()))
+    {
+        Ok(()) => result_ok(0),
+        Err(e) => result_err_msg(&format!("append {p}: {e}")),
+    }
+}
+
 fn jet_jit_fs_write_bytes(path: i64, bytes: i64) -> i64 {
     let p = clone_string(path);
     let data = clone_bytes(bytes);
@@ -1577,6 +1612,12 @@ fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
         }
     }
 }
+fn jet_jit_io_binwrite(path: i64, bytes: i64) -> i64 {
+    let path = clone_string(path);
+    let bytes = clone_bytes(bytes);
+    os_rt::marshal_result(fs_write_prelude::jet_std_io_binwrite(&path, &bytes), |_| 0)
+}
+
 
 fn jet_jit_fs_walk(path: i64) -> i64 {
     jet_jit_fs_walk_parallel(path)
@@ -2231,7 +2272,9 @@ host_fns! {
     fs_read: "jet_jit_fs_read" => jet_jit_fs_read: sig_unary_i64;
     fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
+    fs_append: "jet_jit_fs_append" => jet_jit_fs_append: sig_i64_i64_i64;
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
+    io_binwrite: "jet_jit_io_binwrite" => jet_jit_io_binwrite: sig_i64_i64_i64;
     fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
     fs_set_mode: "jet_jit_fs_set_mode" => jet_jit_fs_set_mode: sig_i64_i64_i64;
     fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;

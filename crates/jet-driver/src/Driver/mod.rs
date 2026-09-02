@@ -2275,6 +2275,9 @@ pub struct BuildRun {
 pub struct BuildCompileOutput {
     pub compile: crate::CompileOutput,
     pub build: Option<BuildRun>,
+    /// Static compiler-owned nodes in the same BuildPlan graph. Execution
+    /// durations and cache reasons are persisted by the CLI in jet-store.
+    pub compiler_nodes: Vec<crate::Comptime::Build::BuildPlanNode>,
     /// Final runtime bundle after generated-source staging. Test harnesses
     /// that exercise the same in-process tier path consume this exact bundle.
     pub runtime: Option<crate::AST::ProgramBundle>,
@@ -2285,6 +2288,21 @@ pub struct BuildCompileOutput {
     /// staging populates this from the same in-memory generated graph that its
     /// validators consume.
     pub runtime_effect_facts: Option<crate::Sema::SemIndexEffectFacts>,
+}
+impl BuildCompileOutput {
+    /// Project compiler work into the same plan returned to graph/query users.
+    /// The final runtime bundle is the source of truth after generated-source
+    /// staging; no path outside the project root enters node identity.
+    pub fn attach_compiler_nodes(&mut self) {
+        let Some(bundle) = self.runtime.as_ref() else {
+            return;
+        };
+        let nodes = compiler_nodes_for_bundle(bundle, self.build.as_ref().map(|run| &run.plan));
+        if let Some(build) = self.build.as_mut() {
+            build.plan.set_compiler_nodes(nodes.clone());
+        }
+        self.compiler_nodes = nodes;
+    }
 }
 
 struct BuildFilesystemTransaction {
@@ -2471,6 +2489,19 @@ pub fn query_build_plan(
         .map(|output| output.build.map(|build| build.plan))
 }
 
+/// Compiler-owned graph nodes for `explain-build`. The project-check seam
+/// supplies a final in-memory bundle without executing declared actions.
+pub fn query_build_nodes(
+    file: &str,
+) -> Result<Vec<crate::Comptime::Build::BuildPlanNode>, Vec<Diagnostic>> {
+    compile_bundle_path_build_with_front_end_for_project_check(
+        file,
+        build_query_options(),
+        None,
+    )
+    .map(|output| output.compiler_nodes)
+}
+
 /// Read the one build-fact snapshot produced by the query path. This keeps
 /// `jet explain` on the same build-entry evaluator and contribution resolver
 /// as sema and codegen without executing actions or writing a lock.
@@ -2629,8 +2660,6 @@ impl FrontEndInputs {
 /// the pipeline from here, so the key names the program that is actually
 /// emitted instead of a second, independently reloaded copy of it.
 ///
-/// The `PhaseTimer` starts here and is handed to the second half, so
-/// `jet-timing.json` accounts for the load and sema a build pays for.
 pub struct PreparedBuildFrontEnd {
     /// Semantic identity of a package-wide build entry that lives outside the runtime bundle.
     package_build_fingerprint: Option<String>,
@@ -2647,8 +2676,6 @@ pub struct PreparedBuildFrontEnd {
     runtime_bundle_for_package: Option<crate::AST::ProgramBundle>,
     runtime_source_paths: Vec<std::path::PathBuf>,
     source_closure: Vec<(std::path::PathBuf, String)>,
-    timing: bool,
-    timer: crate::PhaseTiming::PhaseTimer,
 }
 
 impl PreparedBuildFrontEnd {
@@ -2701,13 +2728,6 @@ impl PreparedBuildFrontEnd {
         &self.source_closure
     }
 
-    /// Lap the shared stopwatch, so work a caller does between the two halves
-    /// (hashing the cache key) lands in the same `jet-timing.json` report.
-    pub fn lap(&mut self, phase: &str) {
-        if self.timing {
-            self.timer.lap(phase);
-        }
-    }
 }
 
 /// Run the build front end once, without compiling. The caller computes the
@@ -2944,6 +2964,10 @@ fn compile_bundle_path_build_inner_with_source_closure(
             source_closure,
         )
     })
+    .map(|mut output| {
+        output.attach_compiler_nodes();
+        output
+    })
 }
 
 fn prepared_front_end_mismatch(file: &str) -> Diagnostic {
@@ -2998,21 +3022,12 @@ fn compile_bundle_path_build_on_compiler_stack(
 
 /// Stage one of the build pipeline, run exactly once per invocation.
 ///
-/// Everything the second half needs is returned, including the stopwatch, so
-/// the front end a build pays for is neither repeated nor invisible.
 fn prepare_build_front_end_on_compiler_stack(
     inputs: FrontEndInputs,
     overlay: Option<(&std::path::Path, &str)>,
     source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let file = inputs.file.as_str();
-    // c121: with `JET_TIMING=1` every build writes `jet-timing.json`
-    // (docs/spec/spec.md), and the `CompilerProbe` compile-latency budget
-    // provider reads that report beside `build/jet-timing-backend.json`. This
-    // pipeline laps the same `PhaseTiming` stopwatch, and writes through the
-    // one `PhaseTimer::write_to` mechanism, that the non-build pipeline uses.
-    let timing = crate::PhaseTiming::enabled();
-    let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let direct_package_overlay = if overlay.is_none() {
         package_manifest_build_overlay(file)?
     } else {
@@ -3218,15 +3233,20 @@ fn prepare_build_front_end_on_compiler_stack(
             swap_entry_point(&mut bundle, entry_fn);
         }
     }
-    if timing {
-        // lex + parse + module resolution, including the package build entry
-        timer.lap("parse");
-    }
 
     // Build code is compiler-host code. Target restrictions apply only after
     // the selected runtime program replaces it.
-    let (diags, effect_facts) =
-        crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode);
+    let (diags, effect_facts) = if build_index.is_some() {
+        crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode)
+    } else {
+        crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode)
+    };
+    if std::env::var_os("JET_DEBUG_BUILD_SEMA").is_some() {
+        eprintln!(
+            "build-sema mode={compile_mode:?} build_index={build_index:?} diags={:?}",
+            diags.iter().map(|d| (&d.code, &d.what)).collect::<Vec<_>>()
+        );
+    }
     let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
@@ -3240,9 +3260,6 @@ fn prepare_build_front_end_on_compiler_stack(
             .collect(),
         build_span.is_some(),
     )?;
-    if timing {
-        timer.lap("sema");
-    }
     let mut source_closure = bundle_source_closure(&bundle);
     if let Some(runtime) = runtime_bundle_for_package.as_ref() {
         source_closure.extend(bundle_source_closure(runtime));
@@ -3264,8 +3281,6 @@ fn prepare_build_front_end_on_compiler_stack(
         runtime_bundle_for_package,
         runtime_source_paths,
         source_closure,
-        timing,
-        timer,
     })
 }
 
@@ -3295,8 +3310,6 @@ fn compile_build_from_front_end(
         mut runtime_bundle_for_package,
         runtime_source_paths,
         source_closure,
-        timing,
-        mut timer,
     } = prepared;
     // Capture lock presence before runtime reload can publish any lock update.
     // The first build must bootstrap dependency names once; later builds must
@@ -3858,10 +3871,10 @@ fn compile_build_from_front_end(
 
     // The selected root has produced its plan and every imported build entry was
     // checked but never run. Both are build-only values and must not leak into
-    // runtime codegen, so drop them through the one front-end projection
-    // (`Sema::strip_build_only_entries`, D-BUILDENTRY1). The re-check below runs
-    // the same projection, but only when a build was selected and executed; this
-    // call covers the inspect-only and package-check paths too.
+    // runtime codegen, so drop them through the one front-end projection.
+    //
+    // The re-check below runs the same projection before runtime emission and
+    // for project-check; static graph queries stop before codegen.
     crate::Sema::strip_build_only_entries(&mut bundle);
 
     // The selected target source closure and generated modules are a fresh
@@ -3919,11 +3932,6 @@ fn compile_build_from_front_end(
         let target_diags = crate::Sema::check_target_surface(&bundle, target);
         lints.extend(classify_diagnostics(&bundle, target_diags, false)?);
     }
-    if timing {
-        // Build-entry plan evaluation, generated sources, and the re-check of
-        // the planned program. Near zero when no build entry was selected.
-        timer.lap("build_plan");
-    }
 
     if options.execute {
         if let Some(build_run) = build_run.as_ref() {
@@ -3969,6 +3977,7 @@ fn compile_build_from_front_end(
         return Ok(BuildCompileOutput {
             compile,
             build: build_run,
+            compiler_nodes: Vec::new(),
             runtime: Some(bundle),
             build_facts,
             runtime_effect_facts,
@@ -3994,6 +4003,7 @@ fn compile_build_from_front_end(
                 layer_ceiling: bundle.layer_ceiling,
             },
             build: build_run,
+            compiler_nodes: Vec::new(),
             runtime: None,
             build_facts: bundle.build_facts.clone(),
             runtime_effect_facts: None,
@@ -4005,9 +4015,6 @@ fn compile_build_from_front_end(
         None => crate::FFI::prepare(&bundle),
     }
     .map_err(|diags| diags)?;
-    if timing {
-        timer.lap("ffi");
-    }
     let without_codegen = without_codegen
         && build_run.is_none()
         && ffi.is_none()
@@ -4016,10 +4023,6 @@ fn compile_build_from_front_end(
         && !options.plugin_target
         && options.cross_target.is_none();
     if without_codegen {
-        if timing {
-            timer.metric("rust_bytes", 0);
-            timer.write_to(&bundle.project_root);
-        }
         let build_facts = bundle.build_facts.clone();
         let compile = crate::CompileOutput {
             rust: String::new(),
@@ -4041,6 +4044,7 @@ fn compile_build_from_front_end(
         return Ok(BuildCompileOutput {
             compile,
             build: build_run,
+            compiler_nodes: Vec::new(),
             runtime: Some(bundle),
             build_facts,
             runtime_effect_facts,
@@ -4058,15 +4062,7 @@ fn compile_build_from_front_end(
             )).collect());
         }
     }
-    let rust = if timing {
-        let (rust, phases) =
-            crate::Codegen::emit_bundle_dbg_timed(&bundle, ffi.as_ref(), false, active_os);
-        timer.record_us("tir", phases.tir_us);
-        timer.record_us("emission", phases.emission_us);
-        rust
-    } else {
-        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os)
-    };
+    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os);
     let web = if options.web_target {
         Some(
             crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
@@ -4093,10 +4089,6 @@ fn compile_build_from_front_end(
     } else {
         None
     };
-    if timing {
-        timer.metric("rust_bytes", rust.len() as u128);
-        timer.write_to(&bundle.project_root);
-    }
     let compile = crate::CompileOutput {
         rust,
         lints,
@@ -4118,6 +4110,7 @@ fn compile_build_from_front_end(
     Ok(BuildCompileOutput {
         compile,
         build: build_run,
+        compiler_nodes: Vec::new(),
         runtime: Some(bundle),
         build_facts,
         runtime_effect_facts,
@@ -4135,6 +4128,103 @@ fn bundle_source_closure(
     closure.sort_by(|left, right| left.0.cmp(&right.0));
     closure.dedup_by(|left, right| left.0 == right.0);
     closure
+}
+
+/// Lower a checked bundle's compiler work into the BuildPlan node vocabulary.
+/// Sorting happens before key construction, so identical source trees under
+/// different checkout roots receive identical node keys and ordering.
+/// Lower a checked bundle using the default output stem.
+pub fn compiler_nodes_for_bundle(
+    bundle: &crate::AST::ProgramBundle,
+    plan: Option<&crate::Comptime::Build::BuildPlan>,
+) -> Vec<crate::Comptime::Build::BuildPlanNode> {
+    compiler_nodes_for_bundle_with_outputs(bundle, plan, &[])
+}
+
+/// Lower a checked bundle's compiler work into the BuildPlan node vocabulary.
+/// Sorting happens before key construction, so identical source trees under
+/// different checkout roots receive identical node keys and ordering.
+pub fn compiler_nodes_for_bundle_with_outputs(
+    bundle: &crate::AST::ProgramBundle,
+    plan: Option<&crate::Comptime::Build::BuildPlan>,
+    output_names: &[String],
+) -> Vec<crate::Comptime::Build::BuildPlanNode> {
+    let mut modules = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            let normalized = normalize_project_path(&bundle.project_root, &module.path);
+            let subject = normalized
+                .strip_prefix(&bundle.project_root)
+                .unwrap_or(normalized.as_path())
+                .display()
+                .to_string()
+                .replace('\\', "/");
+            (subject, module.source.as_str())
+        })
+        .collect::<Vec<_>>();
+    modules.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut outputs = BTreeSet::new();
+    outputs.extend(output_names.iter().cloned());
+    if outputs.is_empty() {
+        if let Some(plan) = plan {
+            let selected = plan.default_target().map(|target| target.id());
+            for target in plan.targets().iter().filter(|target| {
+                selected.is_none_or(|selected| target.id == selected)
+            }) {
+                outputs.extend(target.outputs.iter().map(|output| output.as_str().to_string()));
+            }
+        }
+    }
+    if outputs.is_empty() {
+        let fallback = bundle
+            .modules
+            .get(bundle.entry)
+            .and_then(|module| module.path.file_stem())
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or("program");
+        outputs.insert(fallback.to_string());
+    }
+
+    let checks = modules
+        .iter()
+        .map(|(subject, source)| {
+            let digest =
+                crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes()).as_str().to_string();
+            crate::Comptime::Build::BuildPlanNode::new(
+                crate::Comptime::Build::BuildNodeKind::Check,
+                subject.clone(),
+                vec![(subject.clone(), digest)],
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut nodes = checks.clone();
+    for output in outputs {
+        let inputs = checks
+            .iter()
+            .map(|check| (format!("check:{}", check.subject), check.key.clone()))
+            .collect::<Vec<_>>();
+        let compile = crate::Comptime::Build::BuildPlanNode::new(
+            crate::Comptime::Build::BuildNodeKind::Compile,
+            output.clone(),
+            inputs,
+        );
+        let link = crate::Comptime::Build::BuildPlanNode::new(
+            crate::Comptime::Build::BuildNodeKind::Link,
+            output.clone(),
+            vec![(format!("compile:{output}"), compile.key.clone())],
+        );
+        nodes.push(compile);
+        nodes.push(link);
+    }
+    nodes.sort_by(|left, right| {
+        left.kind
+            .cmp(&right.kind)
+            .then_with(|| left.subject.cmp(&right.subject))
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    nodes
 }
 
 fn generated_source_for_path<'a>(
@@ -5864,8 +5954,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
     // absent or unrecognized, e.g. a wasm/web pseudo-target).
     let active_os = crate::Syntax::OSTarget::active(cross_target);
-    let timing = crate::PhaseTiming::enabled();
-    let mut timer = crate::PhaseTiming::PhaseTimer::new();
     if locked {
         crate::Loader::verify_locked_dependency_sources(file)?;
     }
@@ -5894,9 +5982,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
     }
     if web_target {
         bundle.web_partition_enforced = true;
-    }
-    if timing {
-        timer.lap("parse"); // lex + parse + module resolution
     }
     let runnable_output = if library_target {
         None
@@ -5950,9 +6035,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
             "none",
         );
     }
-    if timing {
-        timer.lap("sema");
-    }
     let mut diags = match effect_facts.as_ref() {
         Some(facts) => apply_package_effect_budget(&bundle, facts, diags)?,
         None => diags,
@@ -5972,9 +6054,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    if timing {
-        timer.lap("ffi");
-    }
     if web_target {
         let web_tir_errors: Vec<_> =
             crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
@@ -5993,15 +6072,8 @@ fn compile_bundle_path_opts_on_compiler_stack(
             return Err(web_tir_errors);
         }
     }
-    let rust = if timing {
-        let (rust, phases) =
-            crate::Codegen::emit_bundle_dbg_timed(&bundle, ffi.as_ref(), debug_linemap, active_os);
-        timer.record_us("tir", phases.tir_us);
-        timer.record_us("emission", phases.emission_us);
-        rust
-    } else {
-        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os)
-    };
+    let rust =
+        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
     let web = if web_target {
         Some(
             crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
@@ -6058,10 +6130,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
     let library = library_config
         .as_ref()
         .map(|config| crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings));
-    if timing {
-        timer.metric("rust_bytes", rust.len() as u128);
-        timer.write_to(&bundle.project_root);
-    }
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let resolver = match AuthorityResolver::open(&bundle.project_root) {
         Ok(resolver) => Some(resolver),
@@ -7460,6 +7528,7 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         return_view_provenance: None,
         declared_return_view_provenance: None,
         gc_return: false,
+        diverges: false,
         gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
@@ -7710,4 +7779,5 @@ mod tests {
             "pass `--allow-gpu` for this run, or grant it in package/workspace policy"
         );
     }
+
 }

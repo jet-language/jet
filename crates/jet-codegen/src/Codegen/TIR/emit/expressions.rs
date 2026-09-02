@@ -74,8 +74,9 @@ fn is_raw_pointer_type(ty: &Type) -> bool {
 
 /// D-TYPEDSQL-SINK1=A: lower one checked SQL interpolation hole to its
 /// ordered `DBValue` representation. Primitive values retain their database
-/// type; other printable values use the same `JetShow` text fallback that the
-/// typed-text kernel used before the SQL carrier became typed.
+/// type; byte sequences retain their BLOB type; other printable values use the
+/// same `JetShow` text fallback that the typed-text kernel used before the SQL
+/// carrier became typed.
 fn emit_sql_binding(hole: &TExpr, cx: &Cx) -> String {
     let emitted = emit_tir_expr(hole, cx);
     let value = format!("({emitted})");
@@ -92,6 +93,17 @@ fn emit_sql_binding(hole: &TExpr, cx: &Cx) -> String {
         }
         Type::Bool => format!("{db_value}::Bool({value})"),
         Type::String => format!("{db_value}::Text({value}.clone())"),
+        Type::List(inner)
+            if matches!(
+                inner.as_ref(),
+                Type::IntN {
+                    signed: false,
+                    bits: 8
+                }
+            ) =>
+        {
+            format!("{db_value}::Blob({value}.clone())")
+        }
         _ => format!("{db_value}::Text({value}.jet_show())"),
     }
 }
@@ -3482,7 +3494,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::IterShuffle => format!("{root}jet_iter_shuffle({as_iter})"),
                 TBuiltinOp::IterIsSorted => format!("{root}jet_iter_is_sorted({as_iter})"),
                 TBuiltinOp::IterLastIndexOf => {
-                    format!("{root}jet_iter_last_index_of({as_iter}, {})", a(0))
+                    if recv_is_list {
+                        let needle = mangle_generated("last_index_needle");
+                        format!(
+                            "{{ let {needle} = {}; {root}jet_outcome_of((({recv}).iter().rposition(|x| x == &{needle})).map(|i| i as i64)) }}",
+                            a(0)
+                        )
+                    } else {
+                        format!("{root}jet_iter_last_index_of({as_iter}, {})", a(0))
+                    }
                 }
                 TBuiltinOp::IterAverage { float: false } => {
                     format!("{root}jet_iter_average_int({as_iter})")
@@ -4338,7 +4358,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     _ => None,
                 };
                 if let Some(memo_fields) = owner.and_then(|name| cx.memo_fields.get(name)) {
-                    for field in memo_fields.keys() {
+                    let mut memo_names: Vec<_> = memo_fields.keys().collect();
+                    memo_names.sort_unstable();
+                    for field in memo_names {
                         let storage = crate::Syntax::memo_storage_name(field);
                         parts.push(format!("{storage}: {}JetMemo::new()", cx.root_prefix));
                     }
@@ -4759,9 +4781,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     ListSpreadPart::Spread(list) => {
                         let spread = mangle_generated("spread");
                         let list = emit_tir_expr(list, cx);
+                        // A variadic parameter is borrowed (`&Vec<T>`), and its
+                        // emitted dereference is not an owned value. Clone before
+                        // binding so the spread never moves out of that borrow.
                         s.push_str(&jet_format!(
-                            "let {spread} = ({list}); {jet_prefix}sp.reserve(({spread}).len()); \
-                             {jet_prefix}sp.extend(({spread}).clone()); "
+                            "let {spread} = ({list}).clone(); {jet_prefix}sp.reserve(({spread}).len()); \
+                             {jet_prefix}sp.extend({spread}); "
                         ));
                     }
                 }
@@ -7877,6 +7902,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::DBValueFloat => format!("({}).float()", recv),
                 THandleOp::DBValueText => format!("({}).text()", recv),
                 THandleOp::DBValueBool => format!("({}).bool()", recv),
+                THandleOp::DBValueBlob => format!("({}).blob()", recv),
                 THandleOp::DBValueIsNull => format!("({}).is_null()", recv),
                 // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call*` — a
                 // homogeneous scalar call across the sandboxed Component
@@ -8132,11 +8158,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             let foreign_component = cx
                 .extern_funcs
-                .values()
-                .find_map(|info| {
+                .iter()
+                .filter_map(|(name, info)| {
                     (info.c_abi && info.wrapper.as_str() == wrapper.as_str())
-                        .then(|| info.component.as_deref().unwrap_or("foreign"))
+                        .then_some((name, info.component.as_deref().unwrap_or("foreign")))
                 })
+                .min_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()))
+                .map(|(_, component)| component)
                 .unwrap_or("foreign");
             let foreign_component = escape_rust_str(foreign_component);
             let arg_str = args
@@ -8144,11 +8172,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .map(|a| {
                     let mut s = emit_tir_expr(&a.value, cx);
                     if a.mut_borrow {
-                        // D-FFI-CAP1: `&` is exclusive for this call only. Keep
-                        // the borrow visible at the bridge edge; the Rust wrapper
-                        // owns the one `&mut` contract and no extra value wrapper
-                        // may hide it from the call.
-                        s = format!("&mut ({s})");
+                        // D-FFI-CAP1: validate the exclusive capability through
+                        // the shared sentry before handing it to the bridge.
+                        // The adapter returns the same borrow, so the place is
+                        // evaluated once and remains visible as `&mut` at the
+                        // wrapper call edge.
+                        let borrowed = format!("&mut ({s})");
+                        let check = if is_raw_pointer_type(&a.value.ty) {
+                            "jet_sentry_foreign_ptr_ref"
+                        } else {
+                            "jet_sentry_foreign_ref"
+                        };
+                        s = format!(
+                            "&mut *({root}jet_mem::{check}({borrowed}, {component}))",
+                            root = cx.root_prefix,
+                            component = foreign_component,
+                        );
                     } else {
                         if a.clone {
                             s = format!("({}).clone()", s);
@@ -8174,19 +8213,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let call = format!("{}::{}({})", crate_name, wrapper, arg_str);
-            // Plain foreign declarations use the shared Jet failure carrier,
-            // while the bridge wrapper returns their declared success value.
-            // Preserve an explicitly declared `Result` returned by the bridge;
-            // only lift a bare foreign return into the call's effective carrier.
-            let declared_return = cx.extern_funcs.iter().find_map(|(name, info)| {
-                if info.wrapper.as_str() != wrapper.as_str() {
-                    return None;
-                }
-                let Type::Fn { ret, .. } = cx.fn_types.get(name)? else {
-                    return None;
-                };
-                ret.as_deref()
-            });
+            // A guest-import TIR call may carry Jet's effective Result while its
+            // bridge wrapper returns the declared success value. Foreign Rust/C
+            // declarations stay raw in TIR, so lift only when the call asks for it.
+            // Preserve an explicitly declared Result returned by the bridge.
+            let declared_return = cx
+                .extern_funcs
+                .iter()
+                .filter_map(|(name, info)| {
+                    (info.wrapper.as_str() == wrapper.as_str()).then_some(name)
+                })
+                .filter_map(|name| {
+                    let fn_type = cx
+                        .fn_source_types
+                        .get(name)
+                        .or_else(|| cx.fn_types.get(name))?;
+                    let Type::Fn { ret, .. } = fn_type else {
+                        return None;
+                    };
+                    ret.as_deref().map(|ret| (name, ret))
+                })
+                .min_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()))
+                .map(|(_, ret)| ret);
             let bridge_returns_carrier = declared_return
                 .map(|ty| cx.expand_type_aliases(ty))
                 .is_some_and(|ty| matches!(ty, Type::Result { .. }));

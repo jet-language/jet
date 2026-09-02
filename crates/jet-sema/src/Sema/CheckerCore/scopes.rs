@@ -143,17 +143,19 @@ impl<'a> Checker<'a> {
                 globals.insert(name.to_string(), value.clone());
             }
         }
-        crate::Comptime::evaluate_owned_with_imports_opts(
-            expr,
-            self.ct_funcs,
-            self.ct_externs,
-            self.ct_base_dir,
-            &globals,
-            self.core_imports,
-            self.gates,
-            0,
-        )
-        .ok()
+        jet_foundation::Diagnostics::with_ice_panic_hook_suppressed(|| {
+            crate::Comptime::evaluate_owned_with_imports_opts(
+                expr,
+                self.ct_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                &globals,
+                self.core_imports,
+                self.gates,
+                0,
+            )
+            .ok()
+        })
     }
 
     /// What the checker knows about a name here: the innermost declaration,

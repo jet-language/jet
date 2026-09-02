@@ -1,4 +1,4 @@
-use super::core_types::json_ty;
+use super::core_types::{json_ty, u8_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
@@ -76,10 +76,11 @@ impl<'a> Checker<'a> {
         Some(json)
     }
 
-    /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
-    /// — the tagged SQL parameter/column value construction. Mirrors
-    /// `check_core_json_lit` exactly (same dynamic-value mechanism, SQL-shaped
-    /// variants); `Int` stays `Type::Int` (64-bit), never widened through `Float`.
+    /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` /
+    /// `.Bool(b)` / `.Blob(bytes)` — the tagged SQL parameter/column value
+    /// construction. Mirrors `check_core_json_lit` exactly (same dynamic-value
+    /// mechanism, SQL-shaped variants); `Int` stays `Type::Int` (64-bit), never
+    /// widened through `Float`. `Blob` carries a `[U8]` byte sequence.
     pub(crate) fn check_core_dbvalue_lit(
         &mut self,
         variant: &str,
@@ -93,11 +94,12 @@ impl<'a> Checker<'a> {
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
             "Bool" => vec![Type::Bool],
+            "Blob" => vec![Type::List(Box::new(u8_ty()))],
             _ => {
                 // No typed edit here: this dynamic enum literal exposes
                 // only the whole literal span, so replacement would erase
                 // its type and payload.
-                let candidates = ["Null", "Int", "Float", "Text", "Bool"]
+                let candidates = ["Null", "Int", "Float", "Text", "Bool", "Blob"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect::<Vec<_>>();
@@ -108,7 +110,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", Syntax::TYPE_DB_VALUE, variant),
-                    "`DBValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
+                    "`DBValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool/Blob"
                         .to_string(),
                     fix,
                     Some(span),
@@ -130,7 +132,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DBValue` variant has a fixed payload (Int→64-bit int, Float→float, Text→String, Bool→bool, Null→none)".to_string(),
+                    "each `DBValue` variant has a fixed payload (Int→64-bit int, Float→float, Text→String, Bool→bool, Blob→[U8], Null→none)".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
@@ -138,6 +140,19 @@ impl<'a> Checker<'a> {
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
                 self.expect_core_arg_consuming(variant, i, want, arg);
+                // A DBValue/JSON constructor stores its payload in an owning
+                // enum slot. Copy a live owned local once, matching map-literal
+                // payload semantics without cloning a last-use value.
+                let copy_owned_value = matches!(&arg.expr, crate::AST::Expr::Ident(name, _) if self
+                    .lookup(name)
+                    .is_some_and(|info| {
+                        info.param_conv.is_none()
+                            && !crate::Sema::Diagnostics::type_is_copy(&info.ty)
+                            && self.is_name_live_after(name)
+                    }));
+                if copy_owned_value && self.is_cloneable_type(want) {
+                    self.insert_implicit_copy(&mut arg.expr, want, want);
+                }
             } else {
                 self.infer(&mut arg.expr);
             }

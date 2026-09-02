@@ -138,11 +138,11 @@ mod tests {
 }
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
-    cx.time_tir(|| lower_func_with_web_boundary(f, cx, false))
+    lower_func_with_web_boundary(f, cx, false)
 }
 
 pub(crate) fn lower_error_conv(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
-    cx.time_tir(|| lower_error_conv_inner(conversion, cx))
+    lower_error_conv_inner(conversion, cx)
 }
 
 fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
@@ -199,13 +199,11 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
 /// function and scalar fields only at the external ABI. Sema already proved the
 /// export type legal; this pass only materializes resolved names/types.
 pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
-    cx.time_tir(|| {
-        lower_func_with_web_boundary(
-            f,
-            cx,
-            f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
-        )
-    })
+    lower_func_with_web_boundary(
+        f,
+        cx,
+        f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
+    )
 }
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
@@ -237,11 +235,18 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     let mut web_param_reconstructions = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
-        let param_ty = cx.expand_type_aliases(&if p.variadic {
+        let declared_param_ty = if p.variadic {
             Type::List(Box::new(p.ty.clone()))
         } else {
             p.ty.clone()
-        });
+        };
+        // Function parameters expose their source return spelling to users, but
+        // callable values cross the executable boundary through the shared
+        // Result carrier. Keep TIR on that ABI shape, as sema does in
+        // `func_to_sig`.
+        let param_ty = cx
+            .expand_type_aliases(&declared_param_ty)
+            .with_effective_fn_returns();
         // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
         // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
         // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
@@ -279,17 +284,19 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         }
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
+        let convention = effective_generic_convention(&slot_param, &f.type_params);
+        slot_param.convention = convention;
         let place = param_place_generic(&p.name, &slot_param, &f.type_params);
         bind_resource_param(
             &p.name,
             &param_ty,
-            p.convention,
+            convention,
             cx,
             &mut env,
             &mut resource_param_guards,
             place,
         );
-        params.push((rust_name, param_ty, p.convention));
+        params.push((rust_name, param_ty, convention));
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
@@ -700,11 +707,11 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
         Some(Type::Named(from_ty.to_string())),
     );
     prepare_interrupt_callback_locals(body, cx, &mut env);
-    let tbody = cx.time_tir(|| lower_stmts(body, cx, &mut env));
+    let tbody = lower_stmts(body, cx, &mut env);
     if env.stack_sentry_needed() {
         out.push_str("    let _jet_sentry_frame = crate::jet_mem::jet_sentry_frame();\n");
     }
-    cx.time_emission(|| emit_tir_stmts(&tbody, cx, out, 1));
+    emit_tir_stmts(&tbody, cx, out, 1);
 }
 
 /// Render a Rust generic clause with `Clone` only for type parameters reached by
@@ -779,15 +786,31 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
         _ => {}
     }
 }
+/// Bare generic parameters with the default read convention are owned values
+/// in the source ABI. Explicit write/move conventions remain unchanged.
+fn effective_generic_convention(
+    p: &Param,
+    type_params: &[crate::AST::TypeParam],
+) -> AccessConvention {
+    if p.convention == AccessConvention::Read
+        && matches!(&p.ty, Type::Named(name) if type_params.iter().any(|param| param.name == *name))
+    {
+        AccessConvention::Move
+    } else {
+        p.convention
+    }
+}
+
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.
-/// Generic parameters preserve their declared access convention exactly like
-/// concrete parameters; `&stream: T` therefore dereferences its Rust `&mut T`.
+/// Explicit access conventions stay aligned with the emitted Rust signature.
 pub(crate) fn param_place_generic(
     name: &str,
     p: &Param,
-    _type_params: &[crate::AST::TypeParam],
+    type_params: &[crate::AST::TypeParam],
 ) -> TLocal {
-    param_place(name, p)
+    let mut p = p.clone();
+    p.convention = effective_generic_convention(&p, type_params);
+    param_place(name, &p)
 }
 
 /// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a
@@ -801,16 +824,14 @@ pub(crate) fn param_place_generic(
 /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
-    cx.time_tir(|| {
-        let owner_ty = match cx.struct_type_param_order.get(type_name) {
-            Some(params) if !params.is_empty() => Type::Apply {
-                name: type_name.to_string(),
-                args: params.iter().cloned().map(Type::Named).collect(),
-            },
-            _ => Type::Named(type_name.to_string()),
-        };
-        lower_method_for_owner_inner(f, type_name, owner_ty, cx, false)
-    })
+    let owner_ty = match cx.struct_type_param_order.get(type_name) {
+        Some(params) if !params.is_empty() => Type::Apply {
+            name: type_name.to_string(),
+            args: params.iter().cloned().map(Type::Named).collect(),
+        },
+        _ => Type::Named(type_name.to_string()),
+    };
+    lower_method_for_owner_inner(f, type_name, owner_ty, cx, false)
 }
 
 /// `raw_protocol_return` is supplied by the enclosing generated-trait
@@ -822,7 +843,7 @@ pub(crate) fn lower_method_for_owner(
     cx: &Cx,
     raw_protocol_return: bool,
 ) -> TFunc {
-    cx.time_tir(|| lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return))
+    lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return)
 }
 
 fn lower_method_for_owner_inner(
@@ -881,24 +902,30 @@ fn lower_method_for_owner_inner(
             continue;
         }
         let rust_name = mangle(&p.name);
-        let place = param_place(&p.name, p);
-        // A `Self`-typed param resolves to the owning type for totality.
-        let pty = resolve_self_ty(&p.ty, type_name);
-        let pty = if p.variadic {
-            Type::List(Box::new(pty))
-        } else {
-            pty
-        };
+        // Callable parameters use the effective carrier in TIR. The source
+        // declaration remains available to diagnostics and callback bindings.
+        let mut pty = resolve_self_ty(
+            &p.ty.with_effective_fn_returns(),
+            type_name,
+        );
+        if p.variadic {
+            pty = Type::List(Box::new(pty));
+        }
+        let mut slot_param = p.clone();
+        slot_param.ty = pty.clone();
+        let convention = effective_generic_convention(&slot_param, &f.type_params);
+        slot_param.convention = convention;
+        let place = param_place_generic(&p.name, &slot_param, &f.type_params);
         bind_resource_param(
             &p.name,
             &pty,
-            p.convention,
+            convention,
             cx,
             &mut env,
             &mut resource_param_guards,
             place,
         );
-        params.push((rust_name, pty, p.convention));
+        params.push((rust_name, pty, convention));
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
@@ -996,7 +1023,7 @@ pub(crate) fn lower_trait_method(
     trait_name: &str,
     raw_protocol_return: bool,
 ) -> TFunc {
-    cx.time_tir(|| lower_trait_method_inner(f, type_name, cx, trait_name, raw_protocol_return))
+    lower_trait_method_inner(f, type_name, cx, trait_name, raw_protocol_return)
 }
 
 fn lower_trait_method_inner(
@@ -1007,11 +1034,11 @@ fn lower_trait_method_inner(
     raw_protocol_return: bool,
 ) -> TFunc {
     // D-FAILURE-FOUNDATION1: protocol bodies keep their declared ABI. Encode,
-    // Decode, Display, Debug, Equatable, Comparable, and Close are Rust trait
-    // methods (`String`, `bool`, `Ordering`, and unit — never `Result`), so
-    // projecting an omitted contract onto a hand-written body would emit
-    // `Result<raw, Err>` and violate the trait ABI just as it would for a
-    // compiler-generated body.
+    // Decode, Display, Debug, Equatable, Comparable, Close, and same-type
+    // arithmetic are Rust trait methods (`String`, `bool`, `Ordering`, the
+    // owner type, and unit — never `Result`), so projecting an omitted contract
+    // onto a hand-written body would emit `Result<raw, Err>` and violate the
+    // trait ABI just as it would for a compiler-generated body.
     // Other user trait methods still use the implicit Error carrier.
     let raw_protocol_return = raw_protocol_return
         || matches!(
@@ -1023,6 +1050,10 @@ fn lower_trait_method_inner(
                 | crate::Generics::EQUATABLE
                 | crate::Generics::COMPARABLE
                 | crate::Generics::CLOSE
+                | crate::Generics::ADD
+                | crate::Generics::SUB
+                | crate::Generics::MUL
+                | crate::Generics::DIV
         );
     let declared_return_type = f
         .return_type
@@ -1215,7 +1246,7 @@ pub(crate) fn tir_covers_delegation_method(_f: &Func, _field: &str, _cx: &Cx) ->
 /// no body — the method only forwards to the delegated field with the BARE trait method
 /// name (no `__jet_` mangle, as the trait owns it in Rust).
 pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
-    cx.time_tir(|| lower_delegation_method_inner(f, field, cx))
+    lower_delegation_method_inner(f, field, cx)
 }
 
 fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {

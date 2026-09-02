@@ -449,6 +449,35 @@ impl CoreCallInterpreterRoute {
 /// practical, `tests/core_call_table.rs` is the executable reconciliation.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.task", "timeout"),
+    ("core.crypto.uuid", "v7"),
+    ("core.data", "collect"),
+    ("core.data", "left_join"),
+    ("core.data", "plan"),
+    ("core.data", "sort_by"),
+    ("core.encoding.json", "decode"),
+    ("core.files", "read_at"),
+    ("core.files", "read_bytes"),
+    ("core.game", "run"),
+    ("core.game.raylib", "draw_text"),
+    ("core.game.raylib", "end_drawing"),
+    ("core.game.raylib", "window_should_close"),
+    ("core.log", "span"),
+    ("core.log", "enter"),
+    ("core.log", "close"),
+    ("core.log", "setup"),
+    ("core.net", "getservbyname"),
+    ("core.net", "getservbyport"),
+    ("core.sys", "temp_dir"),
+    ("core.sys", "name"),
+    ("core.sys", "executable"),
+    ("core.sys", "version"),
+    ("core.sys", "getuid"),
+    ("core.sys", "geteuid"),
+    ("core.sys", "getgid"),
+    ("core.sys", "getsid"),
+    ("core.sys", "times"),
+    ("core.sys", "wait"),
+    ("core.testing", "fixture"),
     ("core.files", "rename"),
     ("core.files", "fsync"),
     ("core.files", "symlink"),
@@ -593,6 +622,28 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.http.server", "cors"),
     ("core.http.server", "access_log"),
     ("core.http.server", "request_id"),
+    ("core.files", "write_at"),
+    ("core.files", "write_bytes"),
+    ("core.files", "write_atomic"),
+    ("core.term", "buffered"),
+    ("core.term", "binwrite"),
+    ("core.event", "scope"),
+    ("core.event", "hook"),
+    ("core.event", "decision_hook"),
+    ("core.encoding.csv", "query"),
+    ("core.crypto.vault", "prepare_rotate"),
+    ("core.crypto.vault", "authorize_write"),
+    ("core.crypto.vault", "commit_rotate"),
+    ("core.web.storage.session", "get"),
+    ("core.web.storage.session", "remove"),
+    // D-NETDEP1=A: stream address projections use the ambient network carrier.
+    ("core.net", "tcp_local_addr"),
+    ("core.net", "tcp_peer_addr"),
+    ("core.net", "tcp_local_socket_addr"),
+    ("core.net", "tcp_peer_socket_addr"),
+    // D-HTTPLIB1=A: server binding uses the shared interpreter network carrier.
+    ("core.http.server", "bind"),
+    ("core.data", "query"),
 ];
 
 pub fn core_call_ambient_routes() -> &'static [(&'static str, &'static str)] {
@@ -1016,7 +1067,28 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std::JetEventScope::new",
         true,
         &[],
-    ), // D-EVENT1=D: first-party typed Event/Hook constructors.
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient), // D-EVENT1=D: first-party typed Event/Hook constructors.
+    CoreCallRecord::new(
+        "core.event",
+        "hook",
+        "jet_std::JetHook::new",
+        true,
+        &[false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.event",
+        "decision_hook",
+        "jet_std::JetDecisionHook::new",
+        true,
+        &[false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new(
         "core.event",
         "policy_sync",
@@ -1212,7 +1284,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_fs_write_at",
         true,
         &[true, false, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "fsync", "jet_std_fs_fsync", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
@@ -1221,7 +1294,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_fs_write_atomic",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "temp_dir",
@@ -1285,7 +1359,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[true],
     ),
     CoreCallRecord::new("core.term", "take", "jet_std_io_take", true, &[false]),
-    CoreCallRecord::new("core.term", "buffered", "jet_std_io_buffered", true, &[]),
+    CoreCallRecord::new("core.term", "buffered", "jet_std_io_buffered", true, &[])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "binread", "jet_std_io_binread", true, &[true]),
     CoreCallRecord::new(
         "core.term",
@@ -1293,7 +1368,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_io_binwrite",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new("core.term", "stdin", "jet_std_io_stdin", true, &[]), // D-STDIN1=A: io.stdin() → JetStdinReader handle.
     CoreCallRecord::new("core.term", "stdout", "jet_std_io_stdout", true, &[]),
     CoreCallRecord::new("core.term", "stderr", "jet_std_io_stderr", true, &[]),
@@ -1924,6 +2002,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ), // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms // (`JSON` tree / `[[String]]` / `Map`) keep their existing helpers; the typed // forms route through the Encode/Decode model, distinguished by the lowered arg // type (encode) or the resolved return type (decode). `is_json_value` etc. read // those total facts — codegen never re-infers (I3).
     CoreCallRecord::new(
         "core.encoding.json",
+        "decode",
+        "jet_std_json_decode_lenient",
+        true,
+        &[true],
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.game",
+        "run",
+        "jet_game_run",
+        true,
+        &[true, true, true],
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.encoding.json",
         "events",
         "jet_std_json_events",
         true,
@@ -1956,8 +2052,74 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_ring_csv_rows",
         true,
         &[true, true, false, false],
-    ),
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.encoding.csv",
+        "query",
+        "jet_enc_csv_query",
+        true,
+        &[true, true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.crypto.vault",
+        "prepare_rotate",
+        "jet_vault_prepare_rotate_impl",
+        false,
+        &[true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.crypto.vault",
+        "authorize_write",
+        "jet_vault_authorize_write_impl",
+        false,
+        &[true, true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.crypto.vault",
+        "commit_rotate",
+        "jet_vault_commit_rotate_impl",
+        false,
+        &[false, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.web.storage.session",
+        "get",
+        "jet_web_storage_get",
+        true,
+        &[true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.web.storage.session",
+        "remove",
+        "jet_web_storage_remove",
+        true,
+        &[true],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new("core.data", "count", "jet_data_count", true, &[true]),
+    CoreCallRecord::new("core.data", "query", "jet_data_query_rows", true, &[true, true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
     CoreCallRecord::new("core.compute", "zeros", "jet_compute_zeros", true, &[true]), // D-COMPUTE1=D (#443): Tensor CPU oracle — one Prelude symbol per call.
     CoreCallRecord::new("core.compute", "ones", "jet_compute_ones", true, &[true]),
     CoreCallRecord::new(
@@ -2459,6 +2621,21 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new("core.data", "lazy", "jet_data_lazy", true, &[true]),
     CoreCallRecord::new("core.data", "plan", "jet_data_plan", true, &[true]),
+    CoreCallRecord::new("core.data", "collect", "jet_data_collect", true, &[true])
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.data", "sort_by", "jet_data_sort_by", true, &[true, false])
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.data",
+        "left_join",
+        "jet_data_left_join",
+        true,
+        &[true, true, false, false],
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new(
         "core.data",
         "filter",
@@ -3919,14 +4096,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_db_scope_transaction",
         false,
         &[true, true, true],
-    ),
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new(
         "core.db",
         "migrate",
         "jet_db_scope_migrate",
         false,
         &[true, true, true],
-    ),
+    )
+    .without_direct_aot()
+    .without_direct_jit(),
     CoreCallRecord::new(
         "core.math.random",
         "pick",
@@ -4698,6 +4879,20 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "__display",
         &[],
     ),
+    // D-HTTPLIB1=A: bind has a typed emitter in AOT and a resident host
+    // adapter, so keep its canonical symbol row but disable generic direct
+    // projections in both engines.
+    CoreCallRecord::new(
+        "core.http.server",
+        "bind",
+        "jet_http_server_bind",
+        false,
+        &[true, false],
+    )
+    .with_max_arity(3)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
 ];
 
 /// Build gate for the one Core-call registry. A row may use a typed adapter,

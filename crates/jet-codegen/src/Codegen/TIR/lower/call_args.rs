@@ -1,9 +1,11 @@
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::mangle;
+use crate::Codegen::emit_named_fn_value;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda_expecting;
+use crate::Codegen::TIR::lower_lambda_expecting_callable;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::with_lambda_body_expr_cache;
 use crate::Codegen::TIR::LowerEnv;
@@ -237,6 +239,27 @@ pub(crate) fn lower_call_arg_value(
                 ))),
             }
         }
+        (
+            Expr::Ident(name, _),
+            Some((_, ty @ Type::Fn { .. })),
+        ) if !env.locals.contains_key(name)
+            && !cx.consts.contains_key(name)
+            && cx
+                .fn_types
+                .get(name)
+                .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
+        {
+            TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::FnValue {
+                    kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                        wrapper: emit_named_fn_value(cx, name, ty),
+                        name: Some(name.clone()),
+                        lambda: None,
+                    },
+                },
+            }
+        }
         (Expr::Lambda(lam), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
@@ -254,8 +277,8 @@ pub(crate) fn lower_call_arg_value(
                 })),
             }
         }
-        (Expr::Lambda(lam), Some((_, ty @ Type::Fn { params, .. }))) => {
-            let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+        (Expr::Lambda(lam), Some((_, ty @ Type::Fn { .. }))) => {
+            let tl = lower_lambda_expecting_callable(lam, cx, env, ty);
             TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::Lambda(Box::new(tl)),

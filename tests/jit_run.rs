@@ -1595,6 +1595,182 @@ fn string_is_empty_runs_resident() {
 }
 
 #[test]
+fn core_math_float_predicates_run_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_core_math_float_predicates");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("core_math_float_predicates.jet");
+    fs::write(
+        &file,
+        r#"use core.math as math
+
+fn run() {
+    nan :: Float.NAN
+    inf :: Float.INFINITY
+    finite :: Float{1.5}
+    print(math.is_nan(nan))
+    print(math.is_inf(inf))
+    print(math.is_finite(finite))
+
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("float predicate fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "float predicate fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "float predicate fixture must lower to TIR: {}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "float predicate fixture must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+        panic!("float predicate fixture must compile in resident JIT: {error}")
+    });
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT float predicate fixture failed");
+    let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
+    assert_eq!(expected, "true\ntrue\ntrue\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default resident JIT rejected float predicate fixture: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "float predicate fixture must execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "float predicate fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected float predicate fixture: {diags:?}")
+        }
+    };
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "forced float predicate fixture must use the interpreter"
+    );
+    let reference = (expected, String::new(), 0);
+    assert_eq!(resident, reference, "resident JIT float predicates drifted");
+    assert_eq!(interpreted, reference, "interpreter float predicates drifted");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn data_tree_list_extend_runs_resident_and_snapshots_self_extension() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_data_tree_extend");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("data_tree_extend.jet");
+    fs::write(
+        &file,
+        r#"fn text_value(value: DataTree) String -> {
+    return if value == {
+        .Text(text) -> ~text
+        else -> ""
+    }
+}
+
+fn run() {
+    values := [DataTree]{
+        DataTree.Text("a"),
+        DataTree.Text("b")
+    }
+    other := [DataTree]{
+        DataTree.Text("c"),
+        DataTree.Text("d")
+    }
+    values.extend(other)
+    loop value in values {
+        print(text_value(~value))
+    }
+    values.extend(values)
+    loop value in values {
+        print(text_value(~value))
+    }
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree extend fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "DataTree extend fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "DataTree extend fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+        panic!("DataTree extend fixture must compile in resident JIT: {error}")
+    });
+
+    let expected = "a\nb\nc\nd\na\nb\nc\nd\na\nb\nc\nd\n";
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT DataTree extend fixture failed");
+    assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    assert_eq!(resident, expected);
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, interpreted, "resident JIT and interpreter diverged");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn data_tree_for_in_nested_conditions_run_resident() {
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -1735,6 +1911,82 @@ fn run() {
 }
 
 #[test]
+fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_result_err_try_sort_by");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("result_err_try_sort_by.jet");
+    fs::write(
+        &file,
+        r#"fn epoch_order(epoch: String) Int !Err -> {
+        if epoch == "a" -> return Ok(1)
+        if epoch == "bb" -> return Ok(2)
+    return Ok(3)
+}
+
+        fn run() {
+    epochs := ["ccc", "a", "bb"]
+    epochs.sort_by((epoch: String) -> epoch_order(epoch))
+    loop epoch in epochs {
+        print(epoch)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle =
+        jet::Loader::load_entry(&shown).expect("Result<Int, Err> fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "Result<Int, Err> fixture must type-check: {diagnostics:#?}"
+    );
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(
+        plan.native.contains("run") && !plan.whole_interp,
+        "Result<Int, Err> fixture must select resident `run`: {plan:?}"
+    );
+    assert!(
+        matches!(
+            jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
+            jet_jit::ResidentJitSafety::Covered
+        ),
+        "Result<Int, Err> `run` must be resident-safe"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected fixture: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
+    };
+    let expected = ("a\nbb\nccc\n".to_string(), String::new(), 0);
+    assert_eq!(resident, expected, "resident Result<Int, Err> sort drifted");
+    assert_eq!(interpreted, expected, "interpreter Result<Int, Err> sort drifted");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn data_tree_try_sort_by_desc_closure_runs_resident() {
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -1800,6 +2052,174 @@ fn run() {
 }
 
 #[test]
+fn try_payload_return_survives_exit_block() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_try_payload_return");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("try_payload_return.jet");
+    fs::write(
+        &file,
+        r#"use core.encoding.json as json
+
+fn text_at(tree: DataTree, field: String) String -> {
+    value :: tree.field(~field) ?? panic("missing")
+    return value.text() ?? panic("not text")
+}
+
+fn run() {
+    manifest :: json.parse("{{\"schema\":\"jet.tower.parity.v1\"}}") ?? panic("parse")
+    print(text_at(~manifest, "schema"))
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("try payload fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "try payload fixture must type-check: {diagnostics:#?}"
+    );
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+        panic!("try payload fixture must compile in resident JIT: {error}")
+    });
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("resident JIT rejected fixture: {diags:?}"),
+    };
+    assert_eq!(resident, "jet.tower.parity.v1\n");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("interpreter rejected fixture: {diags:?}"),
+    };
+    assert_eq!(interpreted, "jet.tower.parity.v1\n");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn http_response_header_builder_runs_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_http_response_header_builder");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        r#"name: "fixture"
+version: "0.1.0"
+        authority: { holds: { allow: [IO, Net] } }
+"#,
+    )
+    .unwrap();
+    let file = dir.join("response_header.jet");
+    fs::write(
+        &file,
+        r#"use core.http.server as server
+
+fn run() {
+    response :: server.response(200, "ok")
+        .header("x-a", "one")
+        .header("x-b", "two")
+    print(response.status())
+    print(response.body().text(1024) ?? "invalid")
+    print(response.header("x-a") ?? "missing")
+    print(response.header("x-b") ?? "missing")
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("HTTP response fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "HTTP response fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "HTTP response fixture must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(
+        plan.native.contains("run") && !plan.whole_interp,
+        "HTTP response fixture must select resident run: {plan:?}"
+    );
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+        panic!("HTTP response fixture must compile in resident JIT: {error}")
+    });
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT HTTP response fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    let expected = (
+        String::from_utf8_lossy(&aot.stdout).into_owned(),
+        String::from_utf8_lossy(&aot.stderr).into_owned(),
+        aot.status.code().unwrap_or(-1),
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("resident HTTP response fixture rejected: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "HTTP response fixture must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "HTTP response fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected HTTP response fixture: {diags:?}")
+        }
+    };
+    assert!(
+        !jet_jit::jit_executed_for_test()
+            && !jet_jit::deopt_invoked_for_test()
+            && !jet_jit::fallback_invoked_for_test(),
+        "forced HTTP response proof must execute directly in the interpreter"
+    );
+
+    assert_eq!(resident, expected, "resident HTTP response bytes drifted");
+    assert_eq!(
+        interpreted, expected,
+        "interpreter HTTP response bytes drifted"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn tower_data_tree_helpers_select_resident_tier() {
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -1826,10 +2246,21 @@ fn tower_data_tree_helpers_select_resident_tier() {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|error| panic!("Tower run must compile in resident JIT: {error}"));
     let plan = jet_jit::plan_bundle_tiers(&bundle);
+    // Resident HTTP, filesystem, and hashing adapters remove the old Tower gaps.
+    for name in ["stream_response", "verify_file_hash"] {
+        assert!(
+            plan.rows
+                .iter()
+                .find(|row| row.function == name)
+                .is_some_and(|row| matches!(row.tier, jet_jit::Tier::Native)),
+            "Tower helper `{name}` must run in resident JIT: rows={:?}",
+            plan.rows
+        );
+    }
     let deopt_names: Vec<&str> = plan.deopt.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
         deopt_names,
-        vec!["stream_response", "verify_file_hash"],
+        Vec::<&str>::new(),
         "Tower run has unexpected resident gaps: {:?}",
         plan.deopt
     );
@@ -2031,3 +2462,88 @@ fn nbody_entry_runs_on_resident_jit_without_deopt() {
     assert_eq!(resident, interpreted);
 }
 
+
+#[test]
+fn data_csv_group_mean_keeps_bare_list_handle_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let scratch = common::Scratch::new("jit_data_csv_group_mean");
+    let package = scratch.join("package.jet");
+    fs::write(
+        &package,
+        r#"name: "jit_data_csv_group_mean"
+version: "0.1.0"
+edition: "2026"
+authority: { holds: { allow: [GPU, IO, Mem.Alloc] } }
+"#,
+    )
+    .unwrap();
+    let file = scratch.join("data_csv_group_mean.jet");
+    fs::write(
+        &file,
+        r###"use core.data as data
+
+#Codable
+struct Sample {
+    station: String
+    amplitude: Float
+}
+
+fn run() {
+    rows :: data.csv<Sample>("station,amplitude\nSTA,1.0\nSTA,3.0\nSTB,2.0") ?? panic("csv")
+    groups :: data.group_mean(rows, s -> s.station, s -> s.amplitude)
+    print("rows:{data.count(rows)}")
+    loop group in groups -> print("group:{group.key}:{group.mean}")
+    options :: DataLineOptions{
+        title: "waveform",
+        x_label: "station",
+        y_label: "amplitude",
+        markers: true,
+        reference: None,
+        style: "solid",
+        color: "#7FB2C4",
+        legend: "amplitude"
+    }
+    print(data.line_text(groups, options))
+}
+"###,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("CSV group fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "CSV group fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "CSV group fixture must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("CSV group fixture must compile in resident JIT: {error}"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&file)
+        .env("JET_STORE_DIR", scratch.join("store"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run CSV group fixture");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "CSV group fixture exited nonzero: stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert_eq!(&stdout[..stdout.find('\n').unwrap_or(stdout.len())], "rows:3");
+    assert!(stdout.contains("group:STA:2.0\n"), "group output missing: {stdout:?}");
+    assert!(stdout.contains("group:STB:2.0\n"), "group output missing: {stdout:?}");
+    assert!(
+        !stderr.contains("internal compiler error") && !stderr.contains("bad handle"),
+        "CSV group fixture reported a JIT handle failure: {stderr:?}"
+    );
+}

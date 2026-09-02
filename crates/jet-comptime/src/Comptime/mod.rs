@@ -91,10 +91,11 @@ pub use Interpreter::{
     REPL_FUEL_BUDGET,
 };
 pub use Methods::{
-    apply_core_call, apply_core_call_with_type, apply_core_pure_call, apply_data_line_call,
+    apply_core_call, apply_core_call_with_type, apply_core_pure_call, apply_core_pure_method,
+    apply_data_line_call,
     apply_impure_core_call, apply_impure_core_call_with_type, apply_repl_authorized_core_call,
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
-    eval_regex_replace_all_with,
+    eval_regex_replace_all_with, sketch_add,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
@@ -1780,6 +1781,18 @@ pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
             _ => {}
         }
     }
+    // The fold is speculative: lower only the expression's call closure.
+    // Include methods under the same qualified keys the TIR bridge uses so
+    // method bodies participate in the closure without retaining the module.
+    let mut candidates = refs.clone();
+    for ((owner, name), method) in &methods {
+        candidates
+            .entry(format!("{owner}::{name}"))
+            .or_insert(*method);
+    }
+    let reachable = Purity::reachable_func_names(init, &candidates);
+    refs.retain(|name, _| reachable.contains(name));
+    methods.retain(|(owner, name), _| reachable.contains(&format!("{owner}::{name}")));
     evaluate_with_imports_opts_collecting_structs_and_methods(
         init,
         &refs,

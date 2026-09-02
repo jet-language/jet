@@ -4,8 +4,8 @@ use core.text as text
 use app
 
 fn run() {
-    auth.register_user("alice", "argon2id:demo") ?? return Err("register")
-    sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return Err("login")
+    auth.register_user("alice", "argon2id:demo") ?? return
+    sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return
     show :: auth.session_show(sess)
     print("show:{text.byte_count(show) > 0}")
     print("user:{auth.session_user(sess)}")
@@ -13,12 +13,12 @@ fn run() {
     print("cookie:{text.byte_count(cookie) > 0}")
     id :: auth.session_id(sess)
     print("id:{text.byte_count(id) > 0}")
-    validated :: auth.session_validate(id, 1_700_000_000_001) ?? return Err("validate")
+    validated :: auth.session_validate(id, 1_700_000_000_001) ?? return
     print("validated:{auth.session_user(validated)}")
 
-    auth.register_user("bob@example.com", "argon2id:demo") ?? return Err("register delivery")
-    magic :: auth.magic_link_issue("bob@example.com", 1_700_000_000_000, 600_000) ?? return Err("magic")
-    magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? return Err("consume")
+    auth.register_user("bob@example.com", "argon2id:demo") ?? return
+    magic :: auth.magic_link_issue("bob@example.com", 1_700_000_000_000, 600_000) ?? return
+    magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? return
     print("magic_user:{auth.session_user(magic_sess)}")
 
     if auth.oauth_begin("google") == {

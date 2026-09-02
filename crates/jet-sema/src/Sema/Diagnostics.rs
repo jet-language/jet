@@ -1509,6 +1509,7 @@ pub(crate) fn is_core_error_family_type(name: &str) -> bool {
             | "DBError"
             | "DataError"
             | "EncodingError"
+            | "EmailError"
             | "EnvError"
             | "HTTPError"
             | "IOError"

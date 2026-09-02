@@ -1424,6 +1424,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("HTTPResponse", "status") => Some(Type::Int),
         ("HTTPResponse", "body") => Some(Type::Named("HTTPBody".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
+        // D-LOGTRACE1=A: typed logging values are Prelude structs, so their
+        // published fields are readable like every other core record.
+        ("LogField", "key" | "value" | "kind") => Some(Type::String),
+        ("LogField", "redacted") => Some(Type::Bool),
+        ("LogSpan", "id") => Some(Type::Int),
+        ("LogSpan", "name") => Some(Type::String),
         // D-GAME-*: scene-owned headless game substrate fields.
         ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),

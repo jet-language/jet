@@ -258,7 +258,16 @@ Show shared-store broker configuration
 Serve one shared-store broker request
 .TP
 .B cache
-Manage host-owned binary-cache bindings
+Manage the machine-wide artifact store
+.TP
+.B cache status
+Show machine-wide artifact store usage
+.TP
+.B cache prune
+Prune the artifact store to a target size
+.TP
+.B cache limit
+Set the host-wide artifact store limit
 .TP
 .B remote
 Manage host-owned remote builders
@@ -403,7 +412,7 @@ Emit machine-readable facts or diagnostics
 With inspect digest: Emit one digest topic
 .TP
 .B --to
-With publish: Foreign registry (pypi | npm | maven | nuget)
+With publish/cache: Foreign registry, or prune target size
 .TP
 .B --list-topics
 With inspect digest: List digest topics
@@ -488,6 +497,9 @@ With fetch: Lock a manifest-less script's inline deps instead of fetching a proj
 .TP
 .B --read-only
 With shared-store enroll: Grant read-only broker access
+.TP
+.B --host
+With cache limit: Host-wide store cap
 .TP
 .B --fd
 With shared-store broker: Inherited broker socket descriptor
@@ -611,9 +623,6 @@ With notebook: Require this bearer token for clients
 .TP
 .B --pure
 With eval: Reject code with side effects
-.TP
-.B --freestanding
-With build/run: Target a system without an operating system
 .TP
 .B --offline
 With cc/c++: Reuse only cached signed toolchain data

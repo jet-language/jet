@@ -1,23 +1,48 @@
 use core.[files, time]
+
 #CLI
-struct Args { input: String }
-fn run(args: Args) !IOError -> {
+struct Args {
+    input: String
+}
+
+fn parse_millis(stamp: String) Int !IOError -> {
+    (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
+}
+
+fn bump(counts: &[String:Int], key: String) !IOError {
+    counts[key] = (counts.get(key) ?? 0) + 1
+}
+
+fn run(args: Args) !IOError {
     input :: files.open(~args.input) ?? return
     levels := [String:Int]{}
     errors := [String:Int]{}
-    first := ""; last := ""; first_ms := 0;last_ms := 0
+    first := ""
+    last := ""
+    first_ms := 0
+    last_ms := 0
     loop line in input.lines() {
-        fields :: line.split(" ").to_list()
-        stamp :: fields[0]
-        level :: fields[1]
-        component :: fields[2]
-        millis :: (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
-        if first == "" { first = stamp; first_ms = millis }
-        last = stamp; last_ms = millis
-        levels[level] = (levels.get(level) ?? 0) + 1
-        if level == "ERROR" { errors[component] = (errors.get(component) ?? 0) + 1 }
+        first_fields :: line.split_once(" ") ?? panic("bad line")
+        rest :: first_fields.after
+        second_fields :: rest.split_once(" ") ?? panic("bad line")
+        third_fields :: second_fields.after.split_once(" ") ?? panic("bad line")
+        stamp :: first_fields.before
+        level :: second_fields.before
+        component :: third_fields.before
+        millis :: parse_millis(stamp)
+        if first == "" {
+            first = ~stamp
+            first_ms = millis
+        }
+        last = ~stamp
+        last_ms = millis
+        bump(&levels, level)
+        if level == "ERROR" -> bump(&errors, component)
     }
-    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] -> print("{level} {levels.get(level) ?? 0}")
+    print("DEBUG {levels.get("DEBUG") ?? 0}")
+    print("INFO {levels.get("INFO") ?? 0}")
+    print("WARN {levels.get("WARN") ?? 0}")
+    print("ERROR {levels.get("ERROR") ?? 0}")
     print("top-error-components:")
     loop item in errors.top_n(3) -> print("{item.value} {item.key}")
     print("span {first} .. {last} ({(last_ms - first_ms) / 1000}s)")

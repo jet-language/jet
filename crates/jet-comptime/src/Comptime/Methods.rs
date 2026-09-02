@@ -12,8 +12,11 @@ mod repl_process;
 mod time_deadline_kernel;
 
 pub(crate) use core_calls::as_string;
-pub(super) use core_calls::{apply_core_pure_method, apply_regex_method, as_float, solver_require};
-// I9: the TIR evaluator in jet-codegen calls this fake-data kernel too, so it
+// The TIR evaluator uses the same receiver-level pure kernels as the
+// comptime interpreter; keep these exports at the crate boundary.
+pub use core_calls::{apply_core_pure_method, sketch_add};
+pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
+// I9: the TIR evaluator calls this fake-data kernel too, so it
 // leaves this crate rather than stopping at `pub(super)`.
 pub use core_calls::apply_fake_method;
 /// Public host entry for the TIR evaluator (#777).

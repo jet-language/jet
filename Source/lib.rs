@@ -67,7 +67,6 @@ pub use jet_driver::{
     Parser,
     PascalBind,
     PerlBind,
-    PhaseTiming,
     PhpBind,
     Policy,
     PowerShellBind,
@@ -107,10 +106,8 @@ pub use jet_foundation::Outcome;
 // entirely in the workspace crate.
 pub use jet_repl as REPL;
 pub use jet_repl::{SemanticSymbols, Term};
-pub mod BuildCache;
 pub mod ReceiptStore;
 pub mod RunCache;
-pub mod RuntimeCache;
 pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
 pub mod BudgetProviders;
 pub mod BudgetStore;

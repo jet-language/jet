@@ -2,7 +2,7 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn run() -[Secret]> {
+fn run() -[Secret, IO]> {
     current :: vault.current<crypto.SigningKey>("__core_conformance_commit_wrapped") ?? return
     if current == .Val(reference) -> {
         identity :: crypto.X25519SecretKey.new_random() ?? return
@@ -11,8 +11,8 @@ fn run() -[Secret]> {
         unlock :: vault.KeyUnlock.Recipient(&identity)
         plan :: vault.prepare_import_wrapped<crypto.SigningKey>("__core_conformance_restored", wrapped, unlock) ?? return
         write :: vault.authorize_wrapped_import<crypto.SigningKey>(&plan, "fixed wrapped-import authorization") ?? return
-        result :: vault.commit_import_wrapped<crypto.SigningKey>(^write, ^plan)
-        print(result == .Err(_))
+        result :: vault.commit_import_wrapped<crypto.SigningKey>(^write, ^plan) ?? return
+        print(result)
     } else -> {
         print(true)
     }

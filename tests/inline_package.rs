@@ -272,7 +272,7 @@ fn run_inline_cli(root: &Path, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(args)
         .current_dir(root)
-        .env("JET_CACHE_DIR", root.join(format!(".jet-cache-{sequence}")))
+        .env("JET_STORE_DIR", root.join(format!(".jet-cache-{sequence}")))
         .env("JET_PACKAGE_STORE_DIR", root.join(format!(".jet-store-{sequence}")))
         .env("JETPACK_ROOT", root.join(format!(".jetpack-{sequence}")))
         .env("JETPACK_ENV", "1")

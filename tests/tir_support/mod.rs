@@ -107,7 +107,7 @@ fn jit_run_with_package(
         .arg("run")
         .arg(&jet_path)
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"));
     for (key, value) in vars {
         command.env(key, value);
@@ -130,7 +130,7 @@ pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
@@ -172,7 +172,7 @@ pub fn jit_run_with_env_args(
         .current_dir(&dir)
         // Keep every run out of the shared build cache, which is keyed on the
         // AST hash and would otherwise serve a binary built before this change.
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"));
     for (key, value) in vars {
         command.env(key, value);
@@ -215,7 +215,7 @@ fn interpreter_run_with_package(
         .arg("--interpret")
         .arg(&path)
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
@@ -370,7 +370,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         command
             .arg(&run_source)
             .current_dir(&root)
-            .env("JET_CACHE_DIR", cache.join("cache"))
+            .env("JET_STORE_DIR", cache.join("cache"))
             .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1")
             // The test itself already runs inside scripts/agent/jet-env. Mark
@@ -449,7 +449,7 @@ pub fn assert_example_cli_error_tiers_agree(
         command
             .arg(&relative)
             .current_dir(&root)
-            .env("JET_CACHE_DIR", cache.join("cache"))
+            .env("JET_STORE_DIR", cache.join("cache"))
             .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1");
         let output = command.output().unwrap();
@@ -611,7 +611,7 @@ pub fn build_release_and_run_multi(
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "--release", entry])
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -709,7 +709,7 @@ pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i3
         .args(["run", entry, "--trace-tiers"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
@@ -749,7 +749,7 @@ pub fn run_interpret_multi(
         .args(["run", "--interpret", entry, "--trace-tiers"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
-        .env("JET_CACHE_DIR", dir.join("cache"))
+        .env("JET_STORE_DIR", dir.join("cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();

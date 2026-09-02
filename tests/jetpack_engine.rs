@@ -4757,28 +4757,20 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
 #[cfg(unix)]
 #[test]
 fn env_wizard_detects_remembers_catalog_and_shows_progress() {
-    use std::os::unix::fs::PermissionsExt;
-
     let project = Scratch::new("env-catalog-wizard-project");
     let root = Scratch::new("env-catalog-wizard-root");
     let catalog = project.join("target-nixfeed/feed");
-    fs::create_dir_all(&catalog).unwrap();
-
-    let artifact = project.join("native-tool");
-    fs::write(&artifact, b"#!/bin/sh\necho native catalog\n").unwrap();
-    let mut permissions = fs::metadata(&artifact).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&artifact, permissions).unwrap();
-    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
-    fs::write(
-        catalog.join("recipes-v1.json"),
-        format!(
-            "{{\"schema\":1,\"recipes\":[{{\"name\":\"native-tool\",\"version\":\"1.0.0\",\"kind\":\"prebuilt\",\"url\":\"file://{}\",\"sha256\":\"{}\",\"bin\":\"native-tool\"}}]}}",
-            artifact.display(),
-            digest,
-        ),
-    )
-    .unwrap();
+    common::write_native_catalog(
+        &catalog,
+        &project.path,
+        &[common::NativeCatalogRecipe {
+            name: "native-tool".into(),
+            version: "1.0.0".into(),
+            bin: "native-tool".into(),
+            artifact_name: "native-tool".into(),
+            contents: b"#!/bin/sh\necho native catalog\n".to_vec(),
+        }],
+    );
 
     fs::write(
         project.join("env.jet"),

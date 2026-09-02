@@ -219,12 +219,27 @@
                     $T(r)
                 }
             }
+            impl std::ops::AddAssign for $T {
+                fn add_assign(&mut self, o: $T) {
+                    *self = *self + o;
+                }
+            }
+            impl std::ops::SubAssign for $T {
+                fn sub_assign(&mut self, o: $T) {
+                    *self = *self - o;
+                }
+            }
+            impl std::ops::MulAssign for $T {
+                fn mul_assign(&mut self, o: $T) {
+                    *self = *self * o;
+                }
+            }
         };
     }
     jet_vec_ops!(Vec2, 2);
     jet_vec_ops!(Vec3, 3);
     jet_vec_ops!(Vec4, 4);
-
+    
     macro_rules! jet_mat_ops {
         ($T:ident, $N:literal) => {
             impl std::ops::Add for $T {
@@ -262,6 +277,21 @@
                         }
                     }
                     $T(r)
+                }
+            }
+            impl std::ops::AddAssign for $T {
+                fn add_assign(&mut self, o: $T) {
+                    *self = *self + o;
+                }
+            }
+            impl std::ops::SubAssign for $T {
+                fn sub_assign(&mut self, o: $T) {
+                    *self = *self - o;
+                }
+            }
+            impl std::ops::MulAssign for $T {
+                fn mul_assign(&mut self, o: $T) {
+                    *self = *self * o;
                 }
             }
         };
@@ -311,6 +341,11 @@ macro_rules! jet_lane_show {
                 format!("{}({:?})", stringify!($T), self.0)
             }
         }
+        impl super::JetDisplay for $T {
+            fn jet_display(&self) -> String {
+                self.jet_show()
+            }
+        }
     };
 }
     jet_lane_show!(F32x4);
@@ -337,6 +372,11 @@ macro_rules! jet_lane_show {
     impl super::JetDebug for F64x4 {
         fn jet_debug(&self) -> String {
             format!("{self:?}")
+        }
+    }
+    impl super::JetDisplay for F64x4 {
+        fn jet_display(&self) -> String {
+            self.jet_show()
         }
     }
     jet_lane_show!(I8x16);
@@ -372,6 +412,11 @@ macro_rules! jet_lane_show {
             impl super::JetDebug for $type {
                 fn jet_debug(&self) -> String {
                     format!("{self:?}")
+                }
+            }
+            impl super::JetDisplay for $type {
+                fn jet_display(&self) -> String {
+                    self.jet_show()
                 }
             }
         };

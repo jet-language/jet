@@ -976,12 +976,17 @@ impl<'a> Checker<'a> {
             self.failure_auto_depth -= 1;
         }
         let val_ty = val_ty?;
-        // `??` consumes exactly one carrier. A Result<Option<T>, E> therefore
-        // leaves Option<T> for a second `??` to consume.
+        // D-FAILURE-FOUNDATION1=A: `??` consumes the success-side carrier
+        // exactly once. A `?T !E` return is `Result<Option<T>, E>`, so its
+        // fallback payload is T; the nested Option remains part of the same
+        // success contract rather than leaking as `?T`.
         let optional_success = matches!(&val_ty, Type::Option(_));
         *is_option = optional_success;
         let payload = match &val_ty {
-            Type::Result { ok, .. } => ok.as_ref().clone(),
+            Type::Result { ok, .. } => match ok.as_ref() {
+                Type::Option(inner) => (**inner).clone(),
+                success => success.clone(),
+            },
             Type::Option(inner) => (**inner).clone(),
             other => {
                 self.diags.push(Diagnostic::error(
@@ -1052,6 +1057,7 @@ impl<'a> Checker<'a> {
                 // literal fallback (`x ?? 0` where `x` is `U8?`) elaborates to it.
                 let saved = self.expected_type.clone();
                 self.expected_type = Some(payload.clone());
+                let fallback_diverges = self.expr_diverges(e);
                 let ft = self.infer(e);
                 self.expected_type = saved;
                 let Some(ft) = ft else {
@@ -1062,7 +1068,7 @@ impl<'a> Checker<'a> {
                     self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
                     return None;
                 };
-                if ft != payload {
+                if ft != payload && !fallback_diverges {
                     self.diags.push(Diagnostic::error(
                         "E0405",
                         format!(
@@ -1408,14 +1414,19 @@ impl<'a> Checker<'a> {
         // E0116; use the shared call checker directly here so statement
         // position keeps the call's real result (`Unit` for a valueless call)
         // without inventing a second call path.
+        let expression_diverges = self.expr_diverges(expr);
         if let Expr::Call(call) = expr {
             self.clear_uninit_mut_args(&call.args);
-            return match self.check_call(call, false) {
+            let result = match self.check_call(call, false) {
                 Some(Some(ty)) if ty.is_fallible() => self.auto_propagate_call(expr, Some(ty)),
                 Some(Some(ty)) => Some(ty),
                 Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 None => None,
             };
+            if expression_diverges {
+                self.flow.reachable = false;
+            }
+            return result;
         }
         self.infer(expr)
     }

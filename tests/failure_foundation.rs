@@ -1,6 +1,7 @@
 //! D-FAILURE-FOUNDATION1=A: behavioral contract matrix for the one failure rail.
 
 mod common;
+use std::fs;
 
 #[path = "tir_support/mod.rs"]
 mod tir_support;
@@ -154,9 +155,9 @@ fn optional_success_result(value: Int) ?Int !TestFailure -> {
 }
 
 fn run() {
-    print((optional_success_result(8080) ?? None) ?? 0)
-    print((optional_success_result(0) ?? None) ?? 0)
-    print((optional_success_result(-1) ?? None) ?? 0)
+    print(optional_success_result(8080) ?? 0)
+    print(optional_success_result(0) ?? 0)
+    print(optional_success_result(-1) ?? 0)
 }
 "#,
         "8080\n0\n0\n",
@@ -207,9 +208,12 @@ fn run() {}
 "#,
         ),
     ];
-
+    let scratch = common::Scratch::new("failure-never");
+    let path = scratch.join("failure_never.jet");
+    let shown = path.to_string_lossy().into_owned();
     for (case, source) in cases {
-        let diagnostics = jet::compile_with_path(source, "failure_never.jet")
+        fs::write(&path, source).expect("write !Never fixture");
+        let diagnostics = jet::compile_with_path(source, &shown)
             .expect_err("!Never must reject a reachable failure");
         assert!(
             diagnostics
@@ -219,9 +223,34 @@ fn run() {}
         );
     }
 
+    let empty_path = scratch.join("failure_never_empty.jet");
+    let empty_shown = empty_path.to_string_lossy().into_owned();
+    fs::write(&empty_path, "fn impossible() !Never {}\nfn run() {}\n")
+        .expect("write empty !Never fixture");
     jet::compile_with_path(
         "fn impossible() !Never {}\nfn run() {}\n",
-        "failure_never_empty.jet",
+        &empty_shown,
     )
     .expect("a !Never function with no reachable failure can fall through as success");
+}
+
+#[test]
+fn never_call_in_value_branch_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree(
+        "never_call_in_value_branch",
+        r#"
+fn stop(message: String) {
+    panic(message)
+}
+
+fn load_name(found: Bool) String -> {
+    return if found -> { "Ada" } else -> { stop("name missing") }
+}
+
+fn run() {
+    print(load_name(true))
+}
+"#,
+        "Ada\n",
+    );
 }

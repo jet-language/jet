@@ -31,7 +31,7 @@ struct RegexProgram {
     start: usize,
     anchored_start: bool,
     literal: Option<Vec<u8>>,
-    required_literal: Option<Vec<u8>>,
+    required_literals: Vec<Vec<u8>>,
     // ponytail: one per-regex scratch lock; split per-worker scratch if concurrent matching contends.
     scratch: std::sync::Mutex<RegexScratch>,
 }
@@ -481,6 +481,7 @@ impl JetRegex {
             0,
             false,
             false,
+            false,
             |_run| {
                 count += 1;
                 true
@@ -490,7 +491,7 @@ impl JetRegex {
     }
 
     pub fn is_match(&self, text: &str) -> bool {
-        self.find_span(text).is_some()
+        regex_has_match(&self.program, &self.flags, self.groups, text)
     }
 
     pub fn full_match(&self, text: &str) -> bool {
@@ -516,6 +517,7 @@ impl JetRegex {
             0,
             false,
             false,
+            false,
             |run| {
                 let (start, end) = run.span;
                 out.push(text[start..end].to_string());
@@ -538,17 +540,18 @@ impl JetRegex {
     }
 
     fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-        let run = regex_run(
+        let span = regex_run(
             &self.program,
             &self.flags,
             self.groups,
             text,
             0,
             false,
-            true,
-        )?;
+            false,
+        )?
+        .span;
         let text = std::sync::Arc::<str>::from(text);
-        Some(self.make_match_with_captures(&text, run.span, run.caps))
+        Some(self.make_match(&text, span))
     }
 
     pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
@@ -560,6 +563,7 @@ impl JetRegex {
             self.groups,
             text,
             0,
+            false,
             false,
             false,
             |run| {
@@ -603,6 +607,7 @@ impl JetRegex {
             0,
             false,
             false,
+            false,
             |run| {
                 let (start, end) = run.span;
                 out.push_str(&text[pos..start]);
@@ -644,6 +649,7 @@ impl JetRegex {
                 0,
                 false,
                 false,
+                false,
                 |run| {
                     if limit > 0 && splits >= limit - 1 {
                         return false;
@@ -676,6 +682,7 @@ impl JetRegex {
             self.groups,
             text,
             0,
+            false,
             false,
             false,
             |run| {
@@ -812,7 +819,7 @@ fn jet_regex_compile_uncached(pattern: &str, flags: &RegexFlags) -> Result<JetRe
             insts,
             start: frag.start,
             literal: regex_literal_candidate(&root),
-            required_literal: regex_required_literal(&root),
+            required_literals: regex_required_literals(&root),
         }),
         group_names: std::sync::Arc::from(parser.names.into_boxed_slice()),
         groups: parser.groups,
@@ -1473,6 +1480,30 @@ struct RegexRun {
     caps: Option<Vec<Option<usize>>>,
 }
 
+fn regex_has_match(
+    program: &RegexProgram,
+    flags: &RegexFlags,
+    groups: usize,
+    text: &str,
+) -> bool {
+    let mut found = false;
+    regex_scan(
+        program,
+        flags,
+        groups,
+        text,
+        0,
+        false,
+        false,
+        true,
+        |_run| {
+            found = true;
+            false
+        },
+    );
+    found
+}
+
 fn regex_run(
     program: &RegexProgram,
     flags: &RegexFlags,
@@ -1491,6 +1522,7 @@ fn regex_run(
         start,
         anchored,
         capture,
+        false,
         |run| {
             result = Some(run);
             false
@@ -1512,6 +1544,7 @@ fn regex_scan<F>(
     start: usize,
     anchored: bool,
     capture: bool,
+    stop_on_match: bool,
     mut on_match: F,
 ) where
     F: FnMut(RegexRun) -> bool,
@@ -1525,12 +1558,13 @@ fn regex_scan<F>(
             return;
         }
     }
-    if !flags.case_insensitive && (!program.anchored_start || flags.multiline) {
-        if let Some(literal) = program.required_literal.as_deref() {
-            if regex_find_literal(text.as_bytes(), literal, start).is_none() {
-                return;
-            }
-        }
+    if !flags.case_insensitive
+        && !program.required_literals.is_empty()
+        && !program.required_literals.iter().all(|literal| {
+            regex_find_literal(text.as_bytes(), literal, start).is_some()
+        })
+    {
+        return;
     }
 
     let mut scratch = program.scratch.lock().unwrap();
@@ -1564,6 +1598,17 @@ fn regex_scan<F>(
                 capture,
                 capture_arena,
             );
+        }
+        if stop_on_match {
+            if let Some(found) = scratch.current.matched {
+                let run = RegexRun {
+                    span: (found.start, pos),
+                    caps: None,
+                };
+                drop(scratch);
+                let _ = on_match(run);
+                return;
+            }
         }
         if scratch.current.threads.is_empty() && single_start {
             return;
@@ -1665,6 +1710,17 @@ fn regex_scan<F>(
                 }
             }
             std::mem::swap(current, next);
+        }
+        if stop_on_match {
+            if let Some(found) = scratch.current.matched {
+                let run = RegexRun {
+                    span: (found.start, next_pos),
+                    caps: None,
+                };
+                drop(scratch);
+                let _ = on_match(run);
+                return;
+            }
         }
         if let Some(winner) = winner_start {
             if scratch.current.min_start != Some(winner) {
@@ -1781,14 +1837,14 @@ fn regex_literal_candidate(node: &RegexNode) -> Option<Vec<u8>> {
     (!literal.is_empty()).then(|| literal.into_bytes())
 }
 
-fn regex_required_literal(node: &RegexNode) -> Option<Vec<u8>> {
-    match node {
+fn regex_required_literals(node: &RegexNode) -> Vec<Vec<u8>> {
+    let mut candidates = match node {
         RegexNode::Seq(pieces) => {
-            let mut best = None;
+            let mut candidates = Vec::new();
             let mut run = Vec::new();
             for piece in pieces {
                 if !regex_quant_required(&piece.quant) {
-                    regex_prefer_longer(&mut best, std::mem::take(&mut run));
+                    regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
                     continue;
                 }
                 match (&piece.atom, &piece.quant) {
@@ -1797,50 +1853,73 @@ fn regex_required_literal(node: &RegexNode) -> Option<Vec<u8>> {
                         run.extend(ch.encode_utf8(&mut bytes).as_bytes());
                     }
                     (RegexAtom::Literal(ch), _) => {
-                        regex_prefer_longer(&mut best, std::mem::take(&mut run));
-                        regex_prefer_longer(&mut best, ch.to_string().into_bytes());
+                        regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
+                        regex_push_required_literal(&mut candidates, ch.to_string().into_bytes());
                     }
                     _ => {
-                        regex_prefer_longer(&mut best, std::mem::take(&mut run));
-                        if let Some(literal) = regex_required_atom_literal(&piece.atom) {
-                            regex_prefer_longer(&mut best, literal);
-                        }
+                        regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
+                        candidates.extend(regex_required_atom_literals(&piece.atom));
                     }
                 }
             }
-            regex_prefer_longer(&mut best, run);
-            best
+            regex_push_required_literal(&mut candidates, run);
+            candidates
         }
         RegexNode::Alt(arms) => {
-            let mut arms = arms.iter();
-            let first = regex_required_literal(arms.next()?)?;
-            arms.all(|arm| regex_required_literal(arm).as_deref() == Some(first.as_slice()))
-                .then_some(first)
+            let Some(first) = arms.first() else {
+                return Vec::new();
+            };
+            let mut candidates = regex_required_literals(first);
+            for arm in arms.iter().skip(1) {
+                let arm_candidates = regex_required_literals(arm);
+                candidates.retain(|candidate| {
+                    arm_candidates.iter().any(|other| other == candidate)
+                });
+            }
+            candidates
+        }
+    };
+    candidates.sort_by(|left, right| {
+        regex_required_literal_score(right)
+            .cmp(&regex_required_literal_score(left))
+            .then_with(|| right.len().cmp(&left.len()))
+    });
+    let mut unique = Vec::with_capacity(candidates.len());
+    for candidate in candidates.drain(..) {
+        if !unique.iter().any(|existing| existing == &candidate) {
+            unique.push(candidate);
         }
     }
+    unique
 }
 
-fn regex_required_atom_literal(atom: &RegexAtom) -> Option<Vec<u8>> {
+fn regex_required_atom_literals(atom: &RegexAtom) -> Vec<Vec<u8>> {
     match atom {
-        RegexAtom::Literal(ch) => Some(ch.to_string().into_bytes()),
-        RegexAtom::Group(_, node) => regex_required_literal(node),
+        RegexAtom::Literal(ch) => vec![ch.to_string().into_bytes()],
+        RegexAtom::Group(_, node) => regex_required_literals(node),
         RegexAtom::Any
         | RegexAtom::Class(_)
         | RegexAtom::Start
-        | RegexAtom::End => None,
+        | RegexAtom::End => Vec::new(),
     }
 }
 
-fn regex_prefer_longer(best: &mut Option<Vec<u8>>, candidate: Vec<u8>) {
-    if candidate.is_empty() {
-        return;
+fn regex_push_required_literal(candidates: &mut Vec<Vec<u8>>, candidate: Vec<u8>) {
+    if !candidate.is_empty() {
+        candidates.push(candidate);
     }
-    if best
-        .as_ref()
-        .map_or(true, |current| candidate.len() > current.len())
-    {
-        *best = Some(candidate);
-    }
+}
+
+fn regex_required_literal_score(literal: &[u8]) -> usize {
+    literal
+        .iter()
+        .map(|byte| match byte {
+            b'a'..=b'z' | b'A'..=b'Z' => 3,
+            b'0'..=b'9' => 2,
+            b' ' | b'\t' | b'\r' | b'\n' => 0,
+            _ => 1,
+        })
+        .sum()
 }
 
 fn regex_quant_required(quant: &RegexQuant) -> bool {

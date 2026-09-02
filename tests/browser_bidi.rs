@@ -782,7 +782,7 @@ fn run() {
 
     drop_context :: session.context() ?? panic("drop context")
     drop_page :: drop_context.page() ?? panic("drop page")
-    session.close() ?? return Err("close")
+    session.close() ?? return
 }
 "#
     .replace("__ENDPOINT__", &endpoint);
@@ -1212,6 +1212,11 @@ fn run() {
         .replace("__ENDPOINT__", &endpoint);
         let dir = common::unique_tmp("jet_browser_bidi_dev");
         fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.jet"),
+            "name: \"browser_bidi_dev\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Net] } }\n",
+        )
+        .unwrap();
         let path = dir.join("browser_bidi_dev.jet");
         fs::write(&path, source).unwrap();
 
@@ -1241,6 +1246,11 @@ fn run() {
     fn dev_stdout(source: String, label: &str) -> String {
         let dir = common::unique_tmp(label);
         fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.jet"),
+            "name: \"browser_bidi_dev\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Net] } }\n",
+        )
+        .unwrap();
         let path = dir.join("browser_bidi_dev.jet");
         fs::write(&path, source).unwrap();
         match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
@@ -1345,7 +1355,7 @@ fn run() {
     let source = r#"
 use core.web.browser as browser
 
-fn outcome(endpoint: String) String {
+fn outcome(endpoint: String) String -> {
     session :: browser.connect(endpoint) ?? return "caught"
     session.close() ?? return "close-error"
     return "connected"
@@ -2012,14 +2022,12 @@ fn run() {
     page.goto("https://example.test/app") ?? panic("goto")
 
     page.set_cookie("session", "cookie-SECRET", "example.test") ?? panic("set_cookie")
-    maybe_cookie :: page.cookie("session") ?? panic("cookie")
-    cookie :: maybe_cookie ?? panic("missing cookie")
+    cookie :: page.cookie("session") ?? panic("cookie")
     print(cookie == "cookie-SECRET")
     page.clear_cookies() ?? panic("clear_cookies")
 
     page.storage_set("local", "token", "stored-SECRET") ?? panic("storage_set")
-    maybe_stored :: page.storage_get("local", "token") ?? panic("storage_get")
-    stored :: maybe_stored ?? panic("missing storage")
+    stored :: page.storage_get("local", "token") ?? panic("storage_get")
     print(stored == "stored-SECRET")
     page.storage_clear("local") ?? panic("storage_clear")
     page.storage_set("session", "draft", "x") ?? panic("session set")
@@ -2660,10 +2668,8 @@ fn run() {
     page_left :: left.page() ?? panic("page left")
     page_right :: right.page() ?? panic("page right")
     page_left.set_cookie("session", "SECRET_COOKIE", "https://example.test") ?? panic("set")
-    left_cookie_opt :: page_left.cookie("session") ?? panic("left cookie")
-    left_cookie :: left_cookie_opt ?? panic("missing left")
-    right_cookie_opt :: page_right.cookie("session") ?? panic("right cookie")
-    right_absent :: right_cookie_opt ?? "absent"
+    left_cookie :: page_left.cookie("session") ?? panic("left cookie")
+    right_absent :: page_right.cookie("session") ?? "absent"
     print("cookies:{left_cookie == "SECRET_COOKIE"}:{right_absent == "absent"}")
 
     page_left.close() ?? panic("close left page")

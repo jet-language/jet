@@ -63,7 +63,7 @@ fn concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache() {
                     .arg("run")
                     .arg(&f)
                     .current_dir(&cwd)
-                    .env("JET_CACHE_DIR", &cache)
+                    .env("JET_STORE_DIR", &cache)
                     .output()
                     .expect("spawn jet run")
             })
@@ -89,7 +89,7 @@ fn concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache() {
             .arg("run")
             .arg(f)
             .current_dir(&iso)
-            .env("JET_CACHE_DIR", &cache)
+            .env("JET_STORE_DIR", &cache)
             .output()
             .expect("spawn jet run (verify)");
         assert!(

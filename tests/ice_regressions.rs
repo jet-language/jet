@@ -375,3 +375,106 @@ fn run(args: Args) {
         );
     }
 }
+
+#[test]
+fn b9_core_nominal_values_have_clone_display_and_assignment_support() {
+    assert_compiles(
+        "b9_core_nominal_values",
+        include_str!("ice_regressions/core_nominal_values.jet"),
+    );
+}
+
+#[test]
+fn b10_precise_numeric_methods_on_struct_fields() {
+    assert_compiles(
+        "b10_decimal_field_methods",
+        include_str!("ice_regressions/decimal_field_methods.jet"),
+    );
+}
+
+#[test]
+fn b11_shared_typed_empty_map_keeps_payload_type() {
+    assert_compiles(
+        "b11_shared_typed_empty_map",
+        include_str!("ice_regressions/shared_typed_empty_map.jet"),
+    );
+}
+
+#[test]
+fn b12_c_module_import_keeps_plain_c_return() {
+    let dir = std::env::temp_dir().join(format!("jet_ice_c_module_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let native = dir.join("native");
+    fs::create_dir_all(&native).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"c_module_plain_return\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\n",
+    )
+    .unwrap();
+    assert!(
+        Command::new("ar")
+            .args(["rcs"])
+            .arg(native.join("libanswer.a"))
+            .status()
+            .unwrap()
+            .success(),
+        "C-module fixture needs an archive for its declared local dependency"
+    );
+    let path = dir.join("c_module_import_plain_return.jet");
+    let source = include_str!("ice_regressions/c_module_import_plain_return.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let diagnostics = jet::check_with_path(&shown);
+    assert!(
+        diagnostics.is_empty(),
+        "b12_c_module_import_keeps_plain_c_return: `jet check` rejected fixture:\n{}",
+        jet::render_diagnostics(&shown, source, &diagnostics)
+    );
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "b12_c_module_import_keeps_plain_c_return: compile rejected fixture:\n{}",
+            jet::render_diagnostics(&shown, source, &diags)
+        )
+    });
+    let run = out
+        .rust
+        .split("pub fn __jet_run()")
+        .nth(1)
+        .expect("generated run function");
+    assert!(
+        run.contains("__jet___c_answer::__jet_value()"),
+        "C-module call missing from generated run:\n{run}"
+    );
+    assert!(
+        !run.contains("jet_trace_err(__jet___c_answer::__jet_value()"),
+        "plain C-module return acquired a hidden Result trace wrapper:\n{run}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn b13_c_bridge_call_keeps_declared_return() {
+    let source = include_str!("../examples/features/lowlevel/cbind/run.jet");
+    let shown = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/lowlevel/cbind/run.jet");
+    let shown = shown.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "b13_c_bridge_call_keeps_declared_return: compile rejected fixture:\n{}",
+            jet::render_diagnostics(&shown, source, &diags)
+        )
+    });
+    let run = out
+        .rust
+        .split("pub fn __jet_run()")
+        .nth(1)
+        .expect("generated run function");
+    assert!(
+        run.contains("|| jet_std::jet_int_from_i64("),
+        "C bridge call did not retain its declared integer return:\n{run}"
+    );
+    assert!(
+        !run.contains("|| Ok::<_, JetErr>(jet_std::jet_int_from_i64("),
+        "C bridge call acquired the callable Result carrier:\n{run}"
+    );
+}

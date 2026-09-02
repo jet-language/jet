@@ -14,6 +14,7 @@ use jet::ExitCodes;
 use jet_foundation::Report::render_status_json;
 use jet_foundation::JSON::json_escape;
 
+use jet_store::{ArtifactRestore, Store};
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 struct BuildProgress {
     enabled: bool,
@@ -135,11 +136,13 @@ pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
 }
 
 pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode) {
+    let explain_nodes = command == "explain-build" && args.len() <= 1;
     let (subject, file) = match command {
         "graph" => (None, args.first().map(|s| s.as_str())),
         "query" if args.first().map(|s| s.as_str()) == Some("build") => {
             (None, args.get(1).map(|s| s.as_str()))
         }
+        "explain-build" if explain_nodes => (None, args.first().map(|s| s.as_str())),
         "explain-build" => (
             args.first().map(|s| s.as_str()),
             args.get(1).map(|s| s.as_str()),
@@ -158,6 +161,17 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         exit(ExitCodes::USAGE);
     };
     let src = fs::read_to_string(file).unwrap_or_default();
+    if explain_nodes {
+        let nodes = match jet::Driver::query_build_nodes(file) {
+            Ok(nodes) => nodes,
+            Err(diags) => {
+                report_problems(mode, file, &src, &diags);
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        print_build_nodes(file, &nodes, mode.json);
+        return;
+    }
     let plan = match if command == "query" {
         jet::Driver::evaluate_build_query(file, jet::Driver::BuildQueryExpression::Build)
     } else {
@@ -213,6 +227,7 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
                 "inspect.build",
                 &format!(",\"build\":{payload}")
             )
+
         );
     } else {
         for target in graph.targets {
@@ -220,6 +235,64 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         }
         for action in graph.actions {
             println!("action\t{}\t{}", action.name, action.outputs.join(","));
+        }
+    }
+}
+fn print_build_nodes(
+    file: &str,
+    static_nodes: &[jet::Comptime::Build::BuildPlanNode],
+    json: bool,
+) {
+    let program = build_record_program(file, None);
+    let records = Store::from_env()
+        .ok()
+        .and_then(|store| store.latest_build_record(&program).ok().flatten())
+        .map(|record| record.nodes)
+        .unwrap_or_else(|| {
+            static_nodes
+                .iter()
+                .map(|node| jet_store::BuildNodeRecord {
+                    kind: node.kind.as_str().to_string(),
+                    key: node.key.clone(),
+                    subject: node.subject.clone(),
+                    duration_ms: 0.0,
+                    why_ran: "first-run".to_string(),
+                    inputs: node.inputs.clone(),
+                })
+                .collect()
+        });
+    if json {
+        let nodes = records
+            .iter()
+            .map(|node| {
+                format!(
+                    "{{\"kind\":\"{}\",\"key\":\"{}\",\"subject\":\"{}\",\"duration_ms\":{:.3},\"why_ran\":\"{}\",\"inputs\":{}}}",
+                    json_escape(&node.kind),
+                    json_escape(&node.key),
+                    json_escape(&node.subject),
+                    node.duration_ms,
+                    json_escape(&node.why_ran),
+                    json_strings(&node.inputs),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"{}\",\"nodes\":[{}]}}",
+            json_escape(&program),
+            nodes
+        );
+    } else {
+        for node in records {
+            println!(
+                "{}\t{}\t{}\t{:.3}\t{}\t{}",
+                node.kind,
+                node.key,
+                node.subject,
+                node.duration_ms,
+                node.why_ran,
+                node.inputs.join(","),
+            );
         }
     }
 }
@@ -2194,8 +2267,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         } else {
             None
         };
+    let native_store = Store::from_env().ok();
     debug_native_cache_event(format!(
-        "compile pid={} cmd={} file={} profile={} mode={} key={:?} cwd={} cache_dir={:?}",
+        "compile pid={} cmd={} file={} profile={} mode={} key={:?} cwd={} store_dir={:?}",
         std::process::id(),
         cmd,
         file,
@@ -2205,7 +2279,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         std::env::current_dir()
             .map(|path| path.display().to_string())
             .unwrap_or_default(),
-        std::env::var_os("JET_CACHE_DIR"),
+        native_store.as_ref().map(|store| store.root()),
     ));
 
     // `jet run` short-circuits the whole front end (only the parse inside the
@@ -2224,7 +2298,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     {
         if let Some(ref key) = native_key {
             let out = bin_path(file);
-            if jet::BuildCache::try_copy_cached(key, &out) {
+            if native_store.as_ref().is_some_and(|store| {
+                matches!(store.restore_file(key, &out), Ok(ArtifactRestore::Hit { .. }))
+            }) {
                 let _application_authority = resolve_run_authority_before_execution(
                     file,
                     &src,
@@ -2303,9 +2379,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // and throw the first two bundles away. Run the build pipeline's own first
     // stage here, exactly once: the native cache key is hashed from the bundle
     // this compile then emits, the compile resumes from that bundle instead of
-    // reloading, and the effect summary is projected from its facts. The shared
-    // `PhaseTimer` starts inside it, so `jet-timing.json` accounts for the parse
-    // and sema a build pays for instead of hiding them.
     //
     // A failure here is deliberately dropped: the compile below runs the same
     // stage and reports the real diagnostic through the one problem reporter.
@@ -2348,9 +2421,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             &cache_profile_tag,
             mode_tag,
         );
-        if let Some(prepared) = build_front_end.as_mut() {
-            prepared.lap("cache_key");
-        }
     }
     // D-EFFBUDGET1's summary is a projection of the checked program, so project
     // it from the front end above rather than running a third one for it. Taken
@@ -2418,9 +2488,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             .and_then(|prepared| prepared.emitted_program())
             .is_some_and(native_cacheable_program)
     {
-        native_key
-            .as_ref()
-            .is_some_and(|key| jet::BuildCache::try_copy_cached(key, &bin_path(file)))
+        native_key.as_ref().is_some_and(|key| {
+            native_store.as_ref().is_some_and(|store| {
+                matches!(store.restore_file(key, &bin_path(file)), Ok(ArtifactRestore::Hit { .. }))
+            })
+        })
     } else {
         false
     };
@@ -2824,8 +2896,15 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     );
                     exit(ExitCodes::ICE);
                 });
-                let paths = match build_library(&rust_code, library, config, profile, verbose, mode)
-                {
+                let paths = match build_library(
+                    &rust_code,
+                    library,
+                    config,
+                    profile,
+                    ffi_link.as_ref(),
+                    verbose,
+                    mode,
+                ) {
                     Ok(paths) => paths,
                     Err(LibraryBuildError::GeneratedCode(stderr)) => {
                         eprintln!(
@@ -7849,6 +7928,7 @@ fn library_rustc(
     profile: BuildProfile,
     verbose: bool,
     linker: &crate::NativeLinker::Selection,
+    ffi: Option<&jet::FFI::FfiLink>,
 ) -> Result<(), LibraryBuildError> {
     let mut command = Command::new("rustc");
     command
@@ -7870,8 +7950,18 @@ fn library_rustc(
     if profile.is_release() {
         command.arg("--cfg").arg("jet_release");
     }
-    command.args(config.rustc_args_for_target(false, true));
+    command.args(config.rustc_args_for_target(ffi.is_some(), true));
     command.args(linker.rustc_args());
+    if let Some(link) = ffi {
+        command
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            command
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
     if verbose {
         eprintln!(
             "[build] rustc {} -> {} (linker {})",
@@ -7891,11 +7981,79 @@ fn library_rustc(
     Ok(())
 }
 
+/// Canonicalize the metadata fields in a rustc-produced Unix archive.
+///
+/// Rustc's static-library member order and payloads are already content
+/// addressed by the generated source.  The archive container still records
+/// process metadata, so normalize those fixed-width fields before publishing
+/// the artifact.  This keeps repeated library builds byte-identical without
+/// depending on an external `ar` invocation.
+fn normalize_static_archive(path: &Path) -> Result<(), LibraryBuildError> {
+    const GLOBAL_HEADER: &[u8] = b"!<arch>\n";
+    const MEMBER_HEADER: usize = 60;
+    let mut archive = fs::read(path)?;
+    if !archive.starts_with(GLOBAL_HEADER) {
+        return Err(LibraryBuildError::GeneratedCode(format!(
+            "rustc produced an invalid static archive `{}`",
+            path.display()
+        )));
+    }
+    let mut offset = GLOBAL_HEADER.len();
+    while offset < archive.len() {
+        let end = offset.checked_add(MEMBER_HEADER).ok_or_else(|| {
+            LibraryBuildError::GeneratedCode(format!(
+                "static archive `{}` has an overflowing member header",
+                path.display()
+            ))
+        })?;
+        if end > archive.len() || &archive[offset + 58..end] != b"`\n" {
+            return Err(LibraryBuildError::GeneratedCode(format!(
+                "rustc produced a malformed static archive `{}`",
+                path.display()
+            )));
+        }
+        // GNU archive fields: mtime [16..28], uid [28..34], gid [34..40],
+        // mode [40..48].  Keep the member name and size untouched.
+        for (start, width, value) in [(16, 12, b"0"), (28, 6, b"0"), (34, 6, b"0")] {
+            archive[offset + start..offset + start + width].fill(b' ');
+            archive[offset + start] = value[0];
+        }
+        archive[offset + 40..offset + 48].fill(b' ');
+        archive[offset + 40..offset + 46].copy_from_slice(b"100644");
+        let size = std::str::from_utf8(&archive[offset + 48..offset + 58])
+            .ok()
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .ok_or_else(|| {
+                LibraryBuildError::GeneratedCode(format!(
+                    "static archive `{}` has an invalid member size",
+                    path.display()
+                ))
+            })?;
+        let data_end = end.checked_add(size).ok_or_else(|| {
+            LibraryBuildError::GeneratedCode(format!(
+                "static archive `{}` has an overflowing member payload",
+                path.display()
+            ))
+        })?;
+        if data_end > archive.len() {
+            return Err(LibraryBuildError::GeneratedCode(format!(
+                "static archive `{}` has a truncated member payload",
+                path.display()
+            )));
+        }
+        offset = data_end + (size & 1);
+    }
+    fs::write(path, archive)?;
+    Ok(())
+}
+
+
 fn build_library(
     rust_code: &str,
     artifacts: &jet::Codegen::LibraryArtifacts,
     config: &jet::LibraryExport::LibraryConfig,
     profile: BuildProfile,
+    ffi: Option<&jet::FFI::FfiLink>,
     verbose: bool,
     _mode: OutputMode,
 ) -> Result<LibraryBuildPaths, LibraryBuildError> {
@@ -7940,6 +8098,7 @@ fn build_library(
             profile.clone(),
             verbose,
             &linker,
+            ffi,
         )?;
         if let Some(staticlib_path) = &staged_staticlib {
             library_rustc(
@@ -7949,7 +8108,9 @@ fn build_library(
                 profile.clone(),
                 verbose,
                 &linker,
+                ffi,
             )?;
+            normalize_static_archive(staticlib_path)?;
         }
     }
 
@@ -8097,15 +8258,6 @@ fn build_library(
     })
 }
 
-fn write_backend_timing(timer: &jet::PhaseTiming::PhaseTimer) {
-    let json = timer.to_json();
-    let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), &json);
-    if let Some(dir) = jet::PhaseTiming::output_dir() {
-        let build = dir.join("build");
-        let _ = fs::create_dir_all(&build);
-        let _ = fs::write(build.join("jet-timing-backend.json"), json);
-    }
-}
 
 pub(crate) fn build(
     file: &str,
@@ -8120,7 +8272,7 @@ pub(crate) fn build(
     web: Option<&jet::Codegen::WebArtifacts>,
     plugin: Option<&jet::Codegen::PluginArtifacts>,
     mode: OutputMode,
-    restored_cache: bool,
+    _restored_cache: bool,
     // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
     // the caller from the checked canonical AST, profile, toolchain, manifest,
     // runtime/Core, dependency-interface, instance, and optional Rust FFI bridge
@@ -8136,6 +8288,30 @@ pub(crate) fn build(
             eprintln!("[build] {}", msg);
         }
     };
+    let native_store = Store::from_env().ok();
+    let output_names = bin
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| vec![name.to_string()])
+        .unwrap_or_default();
+    let compiler_nodes = runtime_bundle
+        .map(|bundle| {
+            jet::Driver::compiler_nodes_for_bundle_with_outputs(bundle, None, &output_names)
+        })
+        .unwrap_or_default();
+    let record_program = build_record_program(file, runtime_bundle);
+    let record_key = cache_key.clone().unwrap_or_else(|| {
+        let mut bytes = b"jet.build-record-key.v1\0".to_vec();
+        for node in &compiler_nodes {
+            append_cache_field(&mut bytes, node.kind.as_str());
+            append_cache_field(&mut bytes, &node.subject);
+            append_cache_field(&mut bytes, &node.key);
+        }
+        jet::SHA256::sha256_hex(&bytes)
+    });
+    let previous_record = native_store.as_ref().and_then(|store| {
+        store.latest_build_record(&record_program).ok().flatten()
+    });
 
     let output_authority =
         jet_devserver::WebHost::WebOutputAuthority::open_or_create(Path::new("build"))
@@ -8144,21 +8320,6 @@ pub(crate) fn build(
                 eprintln!("{message}");
                 exit(ExitCodes::USER_ERROR);
             });
-    let mut compile_timer = jet::PhaseTiming::enabled().then(jet::PhaseTiming::PhaseTimer::new);
-    if restored_cache {
-        step("cache hit -> reused cached binary".to_string());
-        if jet::PhaseTiming::enabled() {
-            if let Ok(meta) = std::fs::metadata(&bin) {
-                eprintln!("jet-timing binary_bytes={}", meta.len());
-            }
-        }
-        if let Some(timer) = compile_timer.as_mut() {
-            timer.record_us("backend", 0);
-            timer.record_us("link", 0);
-            write_backend_timing(timer);
-        }
-        return;
-    }
     let rs_name = format!("{}.rs", stem(file));
     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
@@ -8261,27 +8422,24 @@ pub(crate) fn build(
     // Cross-compiled and explicit C-linked builds bypass the host binary cache.
     // Rust FFI bridges are cacheable because their content-addressed identity
     // is folded into the caller's native key.
-    let use_cache = clinks.is_empty() && cross_target.is_none() && cache_key.is_some();
     // D-BUILDNORM1=A: the key is the caller's pre-sema canonical-AST key
     // (D-BUILDPROFILE1's profile tag is already folded into it). Kept only when
     // this build is cacheable.
-    let cache_key = if use_cache { cache_key } else { None };
-    if let Some(ref key) = cache_key {
-        if jet::BuildCache::try_copy_cached(key, &bin) {
+    if let Some(key) = &cache_key {
+        if native_store.as_ref().is_some_and(|store| {
+            matches!(store.restore_file(key, &bin), Ok(ArtifactRestore::Hit { .. }))
+        }) {
             step("cache hit -> reused cached binary".to_string());
-            // c121: still report size on a cache hit so the dashboard always
-            // has a binary-size data point.
-            if jet::PhaseTiming::enabled() {
-                if let Ok(meta) = std::fs::metadata(&bin) {
-                    eprintln!("jet-timing binary_bytes={}", meta.len());
-                }
-            }
-            if let Some(timer) = compile_timer.as_mut() {
-                // A cache hit performs neither backend compilation nor linking.
-                timer.record_us("backend", 0);
-                timer.record_us("link", 0);
-                write_backend_timing(timer);
-            }
+            persist_build_record(
+                native_store.as_ref(),
+                &record_key,
+                &record_program,
+                &compiler_nodes,
+                previous_record.as_ref(),
+                true,
+                0.0,
+                0.0,
+            );
             return;
         }
     }
@@ -8324,15 +8482,14 @@ pub(crate) fn build(
         .collect::<Vec<_>>();
     let cache_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
     // Rust FFI glue can implement runtime traits for foreign types. Keep that
-    // source in one crate until the bridge owns those impls; Rust's orphan rule
-    // correctly rejects moving both the trait and type behind separate externs.
     let prepared_runtime = if ffi_present {
         if verbose {
-            step("runtime cache bypassed (Rust FFI glue)".to_string());
+            step("runtime store bypassed (Rust FFI glue)".to_string());
         }
-        jet::RuntimeCache::PreparedRuntime::inline(rust_code)
-    } else {
-        match jet::RuntimeCache::prepare(
+        jet_store::runtime::PreparedRuntime::inline(rust_code)
+    } else if let Some(store) = native_store.as_ref() {
+        match jet_store::runtime::prepare(
+            store,
             std::ffi::OsStr::new("rustc"),
             rust_code,
             &cache_flags,
@@ -8351,17 +8508,22 @@ pub(crate) fn build(
                 }
                 prepared
             }
-            Err(jet::RuntimeCache::Error::Cache(error)) => {
+            Err(jet_store::runtime::RuntimeError::Cache(error)) => {
                 if verbose {
-                    step(format!("runtime cache bypassed ({error})"));
+                    step(format!("runtime store bypassed ({error})"));
                 }
-                jet::RuntimeCache::PreparedRuntime::inline(rust_code)
+                jet_store::runtime::PreparedRuntime::inline(rust_code)
             }
-            Err(jet::RuntimeCache::Error::Tool(_)) => {
+            Err(jet_store::runtime::RuntimeError::Tool(_)) => {
                 crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
                 exit(ExitCodes::USER_ERROR);
             }
         }
+    } else {
+        if verbose {
+            step("runtime store bypassed (store unavailable)".to_string());
+        }
+        jet_store::runtime::PreparedRuntime::inline(rust_code)
     };
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
@@ -8424,7 +8586,7 @@ pub(crate) fn build(
     // `build/<stem>.rs` — so the private working-dir source name doesn't leak
     // into codegen. Everything here is decided once and replayed per attempt:
     // one rustc invocation over one prepared program.
-    let run_rustc = |prepared: &jet::RuntimeCache::PreparedRuntime| -> std::process::Output {
+    let run_rustc = |prepared: &jet_store::runtime::PreparedRuntime| -> std::process::Output {
         #[cfg(debug_assertions)]
         let rust = if std::env::var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
             format!(
@@ -8483,9 +8645,7 @@ pub(crate) fn build(
     // rustc owns the backend and linker in one production invocation. Keep the
     // receipt explicit: Jet-side backend preparation is separate from the
     // rustc invocation that performs backend code generation and linking.
-    if let Some(timer) = compile_timer.as_mut() {
-        timer.lap("backend");
-    }
+    let rustc_started = Instant::now();
     let mut out = run_rustc(&prepared_runtime);
     // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
     // cost a compile but must never cost a working build. If the thin crate is
@@ -8496,11 +8656,7 @@ pub(crate) fn build(
         if verbose {
             step("runtime cache bypassed (split crate rejected — inline retry)".to_string());
         }
-        out = run_rustc(&jet::RuntimeCache::PreparedRuntime::inline(rust_code));
-    }
-    if let Some(timer) = compile_timer.as_mut() {
-        timer.lap("link");
-        write_backend_timing(timer);
+        out = run_rustc(&jet_store::runtime::PreparedRuntime::inline(rust_code));
     }
 
     if !out.status.success() {
@@ -8542,17 +8698,17 @@ pub(crate) fn build(
 
     step(format!("link       -> {}", bin.display()));
 
-    // Store into the content cache *from the private path* first, so the cache
-    // entry is written from exactly the binary this process just built — never
-    // a copy that a racing process may have already overwritten on the shared
-    // display path (Tower #85 §0). `store_cached` is itself write-tmp-then-rename.
+    // Store into the content cache from the private path first, so the cache
+    // entry is written from exactly the binary this process just built.
     if let Some(key) = cache_key {
-        if let Err(error) = jet::BuildCache::store_cached(&key, &tmp_bin) {
-            let _ = fs::remove_dir_all(&work);
-            crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
-            exit(ExitCodes::USER_ERROR);
+        if let Some(store) = native_store.as_ref() {
+            if let Err(error) = store.publish_file(&key, &tmp_bin) {
+                let _ = fs::remove_dir_all(&work);
+                crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+            step("cache store -> saved binary for next time".to_string());
         }
-        step("cache store -> saved binary for next time".to_string());
     }
     // Then publish the private binary onto the shared, human-readable display
     // path (`build/<stem>`) that `jet run`/`jet build` hand back. A same-dir
@@ -8566,15 +8722,90 @@ pub(crate) fn build(
         }
         let _ = fs::remove_file(&tmp_bin);
     }
+    persist_build_record(
+        native_store.as_ref(),
+        &record_key,
+        &record_program,
+        &compiler_nodes,
+        previous_record.as_ref(),
+        false,
+        rustc_started.elapsed().as_secs_f64() * 1000.0,
+        0.0,
+    );
     // Drop the private working dir (generated `.rs` + rustc intermediates).
     let _ = fs::remove_dir_all(&work);
 
-    // c121: report final binary size when timing is requested. The dashboard
-    // tool captures this `binary_bytes=` line from build stderr.
-    if jet::PhaseTiming::enabled() {
-        if let Ok(meta) = std::fs::metadata(&bin) {
-            eprintln!("jet-timing binary_bytes={}", meta.len());
-        }
+}
+
+fn build_record_program(
+    file: &str,
+    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+) -> String {
+    let input = Path::new(file);
+    let root = runtime_bundle
+        .map(|bundle| bundle.project_root.clone())
+        .or_else(|| {
+            jet::Loader::find_manifest_root(input.parent().unwrap_or_else(|| Path::new(".")))
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+    let path = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        root.join(input)
+    };
+    path.strip_prefix(&root)
+        .unwrap_or(input)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
+fn persist_build_record(
+    store: Option<&Store>,
+    key: &str,
+    program: &str,
+    nodes: &[jet::Comptime::Build::BuildPlanNode],
+    previous: Option<&jet_store::BuildRecord>,
+    cache_hit: bool,
+    compile_duration_ms: f64,
+    link_duration_ms: f64,
+) {
+    if nodes.is_empty() {
+        return;
+    }
+    let nodes = nodes
+        .iter()
+        .map(|node| {
+            let why_ran = if cache_hit {
+                "cached".to_string()
+            } else if previous.is_none() {
+                "first-run".to_string()
+            } else if let Some(input) = node.inputs.first() {
+                format!("input:{input}")
+            } else {
+                "first-run".to_string()
+            };
+            let duration_ms = match node.kind {
+                jet::Comptime::Build::BuildNodeKind::Check => 0.0,
+                jet::Comptime::Build::BuildNodeKind::Compile => compile_duration_ms,
+                jet::Comptime::Build::BuildNodeKind::Link => link_duration_ms,
+            };
+            jet_store::BuildNodeRecord {
+                kind: node.kind.as_str().to_string(),
+                key: node.key.clone(),
+                subject: node.subject.clone(),
+                duration_ms,
+                why_ran,
+                inputs: node.inputs.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let Some(store) = store else {
+        return;
+    };
+    let record = jet_store::BuildRecord::new(program.to_string(), nodes);
+    if store.build_record(key).ok().flatten().is_none() {
+        let _ = store.publish_build_record(key, &record);
     }
 }
 

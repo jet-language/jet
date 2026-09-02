@@ -137,6 +137,7 @@ mod production_path {
         let peer_contract =
             "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183";
         let mut runs = String::new();
+        let mut peers = String::new();
         for state in states {
             let (stage, profile, backend, linker, linker_identity, cache_state, cache_policy) =
                 if state.starts_with("jit-") {
@@ -193,11 +194,22 @@ mod production_path {
             runs.push_str(&format!(
                 r#"{{"program":"fixture.jet","state":"{state}","stage":"{stage}","latency_ns":100,"memory_bytes":100,"variance_pct":0,"stdout_sha256":"{output_hash}","stderr_sha256":"{error_hash}","phase_totals":"{phase}"}}"#
             ));
+            for (peer, language, value) in [("rustc", "rust", 100), ("cxx", "cxx", 101)] {
+                for metric in ["latency_ns", "memory_bytes"] {
+                    if !peers.is_empty() {
+                        peers.push(',');
+                    }
+                    peers.push_str(&format!(
+                        r#"{{"peer":"{peer}","language":"{language}","program":"fixture.jet","state":"{state}","metric":"{metric}","value":{value},"workload_sha256":"{workload_hash}","source_sha256":"{source_hash}","expected_sha256":"{expected_hash}","manifest_sha256":"{manifest_hash}","toolchain_sha256":"{toolchain_hash}"}}"#
+                    ));
+                }
+            }
         }
         let corpus_hash =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         format!(
-            r#"{{"schema":"jet.compiler-speed","version":4,"corpus_sha256":"{corpus_hash}","manifest_sha256":"{manifest_hash}","stage":"matrix","peer_version":1,"peer_contract_sha256":"{peer_contract}","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"}},"machine":{{"allocator_source_sha256":"{allocator_hash}","allocator_environment_sha256":"{allocator_environment_hash}","arch":"x86_64","compiler_sha256":"{compiler_hash}","cpus":2,"governor":"governor","hardware_sha256":"{hardware_hash}","hostname":"fixture","kernel":"kernel","libc_sha256":"{libc_hash}","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"{rustc_vv_hash}","target":"target","toolchain_sha256":"{toolchain_hash}","topology_sha256":"{topology_hash}","jet_env_sha256":"{jet_env_hash}","llvm":"llvm","rustc_sha256":"{rustc_hash}"}},"budgets":{{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1}},"outliers_discarded":0,"runs":[{runs}]}}"#
+            r#"{{"schema":"jet.compiler-speed","version":4,"corpus_sha256":"{corpus_hash}","manifest_sha256":"{manifest_hash}","stage":"matrix","peer_version":1,"peer_contract_sha256":"{peer_contract}","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"}},"machine":{{"allocator_source_sha256":"{allocator_hash}","allocator_environment_sha256":"{allocator_environment_hash}","arch":"x86_64","compiler_sha256":"{compiler_hash}","cpus":2,"governor":"governor","hardware_sha256":"{hardware_hash}","hostname":"fixture","kernel":"kernel","libc_sha256":"{libc_hash}","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"{rustc_vv_hash}","target":"target","toolchain_sha256":"{toolchain_hash}","topology_sha256":"{topology_hash}","jet_env_sha256":"{jet_env_hash}","llvm":"llvm","rustc_sha256":"{rustc_hash}"}},"budgets":{{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1}},"outliers_discarded":0,"runs":[{runs}],"peers":[{peers}]}}
+"#
         )
     }
 
@@ -460,7 +472,9 @@ mod production_path {
             let output = Command::new(jet())
                 .args(&args)
                 .current_dir(&scratch.path)
-                .env("JET_CACHE_DIR", scratch.join("run-cache"))
+                .env("JET_STORE_DIR", scratch.join("store"))
+                .env("JET_STORE_CAP_BYTES", "21474836480")
+                .env("JET_STORE_RESERVE_BYTES", "2147483648")
                 .env("JET_RUN_CACHE_DIR", scratch.join("jit-cache"))
                 .env("NO_COLOR", "1")
                 .output()
@@ -506,8 +520,9 @@ mod production_path {
             .env("RUSTC_LINKER", &real_linker)
             .env("JET_TEST_REAL_RUSTC", &real_rustc)
             .env("JET_TEST_RUSTC_LOG", &rustc_log)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
-            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -562,8 +577,13 @@ mod production_path {
             Command::new(jet())
                 .args(args)
                 .current_dir(&scratch.path)
-                .env("JET_CACHE_DIR", scratch.join(&format!("{tag}-build-cache")))
-                .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tag}-run-cache")))
+                .env("JET_STORE_DIR", scratch.path.join(format!("{tag}-store")))
+                .env("JET_STORE_CAP_BYTES", "21474836480")
+                .env("JET_STORE_RESERVE_BYTES", "2147483648")
+                .env(
+                    "JET_RUN_CACHE_DIR",
+                    scratch.path.join(format!("{tag}-run-cache")),
+                )
                 .env("NO_COLOR", "1")
                 .output()
                 .unwrap()
@@ -738,6 +758,19 @@ mod production_path {
                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         })
     }
+    fn cache_key(log: &str) -> String {
+        log.lines()
+            .flat_map(str::split_whitespace)
+            .find_map(|part| {
+                let value = part.strip_prefix("key=")?;
+                (value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+                .then(|| value.to_owned())
+            })
+            .expect("native cache log has a build key")
+    }
 
     fn has_corelib_identity(line: &str) -> bool {
         line.contains("corelib=/* jet-corelib-r10 ")
@@ -750,8 +783,9 @@ mod production_path {
         Command::new(jet())
             .args(["build", "main.jet", "--profile=debug", "--verbose"])
             .current_dir(&scratch.path)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
-            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
             .env("JET_RUNTIME_CACHE_STATS", "1")
             .env(
                 "JET_DEBUG_NATIVE_CACHE_LOG",
@@ -766,9 +800,9 @@ mod production_path {
         Command::new(jet())
             .args(["build", "main.jet", "--profile=release", "--verbose"])
             .current_dir(&scratch.path)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
-            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
-            .env("JET_TIMING", "1")
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
             .env("JET_RECEIPT_BYPASS", "1")
             .env("NO_COLOR", "1")
             .output()
@@ -816,8 +850,9 @@ mod production_path {
             .env("RUSTC_LINKER", &real_linker)
             .env("JET_TEST_REAL_RUSTC", &real_rustc)
             .env("JET_TEST_RUSTC_LOG", &rustc_log)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
-            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -876,7 +911,8 @@ mod production_path {
     fn production_build_is_reproducible_across_checkout_paths() {
         let left = Scratch::new("compiler-speed-repro-left");
         let right = Scratch::new("compiler-speed-repro-right");
-        let package = "name: \"deterministic_build\"\nversion: \"0.1.0\"\n";
+        let package =
+            "name: \"deterministic_build\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n";
         let source = "fn run() { print(\"deterministic-build\") }\n";
         for scratch in [&left, &right] {
             fs::create_dir_all(scratch.join("src")).unwrap();
@@ -887,8 +923,7 @@ mod production_path {
             Command::new(jet())
                 .args(["run", "--release", "src/main.jet"])
                 .current_dir(&scratch.path)
-                .env("JET_CACHE_DIR", scratch.join("build-cache"))
-                .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+                .env("JET_STORE_DIR", scratch.join("build-cache"))
                 .env("JET_RECEIPT_BYPASS", "1")
                 .env("NO_COLOR", "1")
                 .output()
@@ -930,7 +965,7 @@ mod production_path {
         let left = Scratch::new("compiler-speed-c-link-left");
         let right = Scratch::new("compiler-speed-c-link-right");
         let package =
-            "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\n";
+            "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
         let source = "use c.answer as answer\n#Import module c.answer { fn value() I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n";
         for scratch in [&left, &right] {
             fs::create_dir_all(scratch.join("native")).unwrap();
@@ -990,8 +1025,9 @@ mod production_path {
                 .env("PATH", prepend_path(&tools))
                 .env("JET_TEST_REAL_RUSTC", &real_rustc)
                 .env("JET_TEST_RUSTC_LOG", log)
-                .env("JET_CACHE_DIR", scratch.join("build-cache"))
-                .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+                .env("JET_STORE_DIR", scratch.join("store"))
+                .env("JET_STORE_CAP_BYTES", "21474836480")
+                .env("JET_STORE_RESERVE_BYTES", "2147483648")
                 .env("JET_RECEIPT_BYPASS", "1")
                 .env("NO_COLOR", "1")
                 .output()
@@ -1069,8 +1105,9 @@ mod production_path {
             .args(["build", "main.jet", "--profile=debug"])
             .current_dir(&scratch.path)
             .env("RUSTC_LINKER", &missing_linker)
-            .env("JET_CACHE_DIR", scratch.join("build-cache"))
-            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -1128,8 +1165,8 @@ fn run() {
         assert_eq!(first.status.code(), Some(0));
         assert_eq!(first.stdout, b"first\ntrue\n");
         assert!(
-            String::from_utf8_lossy(&cold.stderr).contains("jet-runtime-cache store"),
-            "cold build did not expose a runtime object store:\n{}",
+            String::from_utf8_lossy(&cold.stderr).contains("[build] runtime   ->"),
+            "cold build did not report its runtime-store decision:\n{}",
             String::from_utf8_lossy(&cold.stderr)
         );
 
@@ -1144,13 +1181,33 @@ fn run() {
                 }),
             "native cache log did not expose relevant runtime/Core digests:\n{cache_log}"
         );
+        let cache_key = cache_key(&cache_log);
+        let store = jet_store::Store::new(scratch.join("store")).unwrap();
+        let initial_status = store.status().unwrap();
+        assert!(
+            initial_status
+                .entries
+                .iter()
+                .any(|entry| entry.kind == jet_store::EntryKind::Blob),
+            "cold build did not publish a blob to the machine-wide store"
+        );
+        assert!(
+            initial_status
+                .entries
+                .iter()
+                .any(|entry| entry.kind == jet_store::EntryKind::Action),
+            "cold build did not publish an action record to the machine-wide store"
+        );
+        let binary_digest = jet::SHA256::sha256_hex(&fs::read(scratch.join("build/main")).unwrap());
+        let cached_bin = initial_status
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.kind == jet_store::EntryKind::Blob && entry.key == binary_digest
+            })
+            .map(|entry| entry.path.clone())
+            .expect("cold build published a final binary blob");
 
-        let cached_bin = fs::read_dir(scratch.join("build-cache"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path().join("bin"))
-            .find(|path| path.is_file())
-            .expect("cold build published a final binary cache entry");
         let unchanged = build(&scratch);
         assert_eq!(
             unchanged.status.code(),
@@ -1186,8 +1243,9 @@ fn run() {
             String::from_utf8_lossy(&final_repaired.stderr)
         );
         assert!(
-            String::from_utf8_lossy(&final_repaired.stderr).contains("jet-runtime-cache hit"),
-            "final cache repair did not reach the warm runtime cache:\n{}",
+            String::from_utf8_lossy(&final_repaired.stderr)
+                .contains("cache store -> saved binary"),
+            "final cache repair did not republish the binary:\n{}",
             String::from_utf8_lossy(&final_repaired.stderr)
         );
         let final_repaired_output = Command::new(scratch.join("build/main"))
@@ -1209,11 +1267,12 @@ fn run() {
             "repaired final binary was not reusable:\n{}",
             String::from_utf8_lossy(&repaired_cache_hit.stderr)
         );
-        let cache_log = fs::read_to_string(scratch.join("native-cache.log")).unwrap();
         assert!(
-            cache_log.contains("verify-digest-mismatch")
-                && cache_log.contains("copy-unverified"),
-            "final cache corruption was not visible in the cache log:\n{cache_log}"
+            matches!(
+                store.lookup_artifact(&cache_key).unwrap(),
+                jet_store::ArtifactLookup::Hit(_)
+            ),
+            "repaired final binary was not readable from the machine-wide store"
         );
 
         fs::write(
@@ -1241,29 +1300,17 @@ fn run() {
         assert_eq!(changed.status.code(), Some(0));
         assert_eq!(changed.stdout, b"changed\ntrue\n");
         assert!(
-            String::from_utf8_lossy(&warm.stderr).contains("jet-runtime-cache hit"),
-            "changed program did not reuse the stdlib object:\n{}",
-            String::from_utf8_lossy(&warm.stderr)
+            store
+                .status()
+                .unwrap()
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == jet_store::EntryKind::Blob)
+                .count()
+                >= 2,
+            "changed build did not retain distinct binary blobs in the machine-wide store"
         );
 
-        let runtime_rlib = fs::read_dir(scratch.join("runtime-cache"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path().join("libjet_runtime.rlib"))
-            .find(|path| path.is_file())
-            .expect("cold build published a runtime object");
-        let core_rlib = fs::read_dir(scratch.join("runtime-cache"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path().join("libjet_runtime_core.rlib"))
-            .find(|path| path.is_file())
-            .expect("cold build published a Core object");
-        assert_ne!(
-            runtime_rlib.parent(),
-            core_rlib.parent(),
-            "runtime and Core objects must have independent cache entries"
-        );
-        fs::write(&runtime_rlib, b"corrupt runtime object").unwrap();
         fs::write(
             scratch.join("main.jet"),
             r#"use core.math as math
@@ -1289,8 +1336,8 @@ fn run() {
         assert_eq!(repaired_output.status.code(), Some(0));
         assert_eq!(repaired_output.stdout, b"repaired\ntrue\n");
         assert!(
-            String::from_utf8_lossy(&repaired.stderr).contains("jet-runtime-cache store"),
-            "corrupt cache was not repaired visibly:\n{}",
+            String::from_utf8_lossy(&repaired.stderr).contains("cache store -> saved binary"),
+            "changed cache object was not stored visibly:\n{}",
             String::from_utf8_lossy(&repaired.stderr)
         );
     }
@@ -1371,4 +1418,97 @@ fn run() {
             "edited source must not reuse the prior release artifact:\n{edited_stderr}"
         );
     }
+    fn cache_cli(scratch: &Scratch, args: &[&str]) -> std::process::Output {
+        Command::new(jet())
+            .args(args)
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_STORE_CAP_BYTES", "21474836480")
+            .env("JET_STORE_RESERVE_BYTES", "2147483648")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn cache_cli_status_prune_limit_and_doctor_snapshots() {
+        let scratch = Scratch::new("compiler-speed-store-cli");
+        let store_root = scratch.join("store");
+        let store = jet_store::Store::new(&store_root).unwrap();
+        store.publish_blob(&vec![0u8; 2048]).unwrap();
+
+        let status = cache_cli(&scratch, &["cache", "status"]);
+        assert_eq!(
+            status.status.code(),
+            Some(0),
+            "cache status failed:\n{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(status.stdout).unwrap(),
+            format!(
+                "store      {}\n\
+                 limit      20 GiB (JET_STORE_CAP_BYTES)\n\
+                 reserve    keep 2 GiB free on that filesystem\n\
+                 used       2 KiB · 1 blobs · 0 records · 0 ThinLTO caches\n\
+                 leases     0 live\n\
+                 tiers      local\n",
+                store_root.display()
+            )
+        );
+
+        let prune = cache_cli(&scratch, &["cache", "prune", "--to", "1K"]);
+        assert_eq!(
+            prune.status.code(),
+            Some(0),
+            "cache prune failed:\n{}",
+            String::from_utf8_lossy(&prune.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(prune.stdout).unwrap(),
+            "prune      2 KiB -> 0 B (target 1 KiB)\n\
+             removed    1 entries · freed 2 KiB\n\
+             pinned     0 B\n"
+        );
+
+        let limit = cache_cli(&scratch, &["cache", "limit", "--host", "4G"]);
+        assert_eq!(
+            limit.status.code(),
+            Some(0),
+            "cache limit failed:\n{}",
+            String::from_utf8_lossy(&limit.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(limit.stdout).unwrap(),
+            format!(
+                "host limit 4 GiB (persisted)\nstore      {}\n",
+                store_root.display()
+            )
+        );
+
+        let limited_status = cache_cli(&scratch, &["cache", "status"]);
+        assert_eq!(
+            String::from_utf8(limited_status.stdout).unwrap(),
+            format!(
+                "store      {}\n\
+                 limit      4 GiB (host policy)\n\
+                 reserve    keep 2 GiB free on that filesystem\n\
+                 used       0 B · 0 blobs · 0 records · 0 ThinLTO caches\n\
+                 leases     0 live\n\
+                 tiers      local\n",
+                store_root.display()
+            )
+        );
+
+        let doctor = cache_cli(&scratch, &["self", "doctor"]);
+        let doctor_stdout = String::from_utf8_lossy(&doctor.stdout);
+        assert!(
+            doctor_stdout.contains(&format!(
+                "artifact store: {} (footprint 0 B; cap 4 GiB; reserve 2 GiB; 0 entries; 0 live leases)",
+                store_root.display()
+            )),
+            "doctor lost the artifact-store footprint row:\n{doctor_stdout}"
+        );
+    }
+
 }

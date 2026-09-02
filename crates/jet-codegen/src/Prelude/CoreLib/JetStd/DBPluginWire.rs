@@ -1,12 +1,12 @@
 // ── core.db: the tagged SQL parameter/column value (D-DBDRIVER1) ───────────
 // `DBValue` mirrors `JSON`'s dynamic-value construction mechanism
-// (`DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`) but is
-// SQL-shaped: `Int` keeps the full 64-bit width SQLite integers carry (never
-// routed through `f64`, which would lose precision above 2^53). A `Row` is
-// `Map<String, DBValue>` — the built-in `Map` type already gives `.get`/
-// `.keys`/`.values`, so no separate nominal `Row` type is needed (I8).
-// Keep the Rust carrier behind one adapter alias so generated callers never
-// depend on the backing map implementation.
+// (`DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` /
+// `.Null`) but is SQL-shaped: `Int` keeps the full 64-bit width SQLite integers
+// carry (never routed through `f64`, which would lose precision above 2^53).
+// `Blob` carries an exact `[U8]` sequence. A `Row` is `Map<String, DBValue>` —
+// the built-in `Map` type already gives `.get`/`.keys`/`.values`, so no separate
+// nominal `Row` type is needed (I8). Keep the Rust carrier behind one adapter
+// alias so generated callers never depend on the backing map implementation.
 pub(super) type JetDBRow = super::JetMap<String, DBValue>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +16,7 @@ pub enum DBValue {
     Float(f64),
     Text(String),
     Bool(bool),
+    Blob(Vec<u8>),
 }
 
 /// D-TYPEDSQL-SINK1=A: checked SQL is one value containing template text and
@@ -42,6 +43,7 @@ fn render_db_value(v: &DBValue) -> String {
         DBValue::Float(f) => f.to_string(),
         DBValue::Text(s) => s.clone(),
         DBValue::Bool(b) => b.to_string(),
+        DBValue::Blob(bytes) => format!("{bytes:?}"),
     }
 }
 
@@ -72,6 +74,12 @@ impl DBValue {
         match self {
             DBValue::Bool(b) => Ok(*b),
             _ => Err(format!("expected a bool, got {}", render_db_value(self))),
+        }
+    }
+    pub fn blob(&self) -> Result<Vec<u8>, String> {
+        match self {
+            DBValue::Blob(bytes) => Ok(bytes.clone()),
+            _ => Err(format!("expected a blob, got {}", render_db_value(self))),
         }
     }
 }
@@ -739,10 +747,22 @@ fn jet_db_apply_policy_inner(
 // in Source/Prelude/DB.rs). A value is `<tag><decimal-length>:<payload-bytes>`;
 // a list is a decimal item count + `:` + that many back-to-back items. Every
 // length is a byte count, so arbitrary text — including an "injection-looking"
-// literal — round-trips exactly with no escaping.
+// literal — round-trips exactly with no escaping. `Blob` payloads use an ASCII
+// hexadecimal envelope so arbitrary bytes remain lossless across the String
+// boundary.
 // parity: guard tests/corelib.rs::core_db_implements_driver_trait
 fn db_encode_tagged(tag: char, payload: &str) -> String {
     format!("{tag}{}:{payload}", payload.len())
+}
+
+fn db_hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 pub fn jet_db_encode_params(params: &Vec<DBValue>) -> String {
@@ -756,6 +776,7 @@ pub fn jet_db_encode_params(params: &Vec<DBValue>) -> String {
             DBValue::Float(f) => db_encode_tagged('F', &f.to_string()),
             DBValue::Text(s) => db_encode_tagged('T', s),
             DBValue::Bool(b) => db_encode_tagged('B', if *b { "1" } else { "0" }),
+            DBValue::Blob(bytes) => db_encode_tagged('X', &db_hex_encode(bytes)),
         });
     }
     out
@@ -802,6 +823,23 @@ fn db_read_tagged(bytes: &[u8], pos: &mut usize) -> Result<(char, String), Strin
     Ok((tag, payload))
 }
 
+fn db_hex_decode(payload: &str) -> Result<Vec<u8>, String> {
+    if payload.len() % 2 != 0 {
+        return Err("database blob value has odd hexadecimal length".to_string());
+    }
+    let mut bytes = Vec::with_capacity(payload.len() / 2);
+    for pair in payload.as_bytes().chunks_exact(2) {
+        let high = (pair[0] as char)
+            .to_digit(16)
+            .ok_or_else(|| "database blob value is not hexadecimal".to_string())?;
+        let low = (pair[1] as char)
+            .to_digit(16)
+            .ok_or_else(|| "database blob value is not hexadecimal".to_string())?;
+        bytes.push(((high << 4) | low) as u8);
+    }
+    Ok(bytes)
+}
+
 fn db_decode_value(tag: char, payload: &str) -> Result<DBValue, String> {
     match tag {
         'N' if payload.is_empty() => Ok(DBValue::Null),
@@ -824,6 +862,7 @@ fn db_decode_value(tag: char, payload: &str) -> Result<DBValue, String> {
             "1" => Ok(DBValue::Bool(true)),
             _ => Err("database boolean value is invalid".to_string()),
         },
+        'X' => db_hex_decode(payload).map(DBValue::Blob),
         'N' => Err("database null value has a non-empty payload".to_string()),
         _ => Err("database wire contains an unknown value tag".to_string()),
     }
@@ -974,6 +1013,7 @@ pub fn jet_db_migration_checksum(steps: &Vec<SQL>) -> String {
                 DBValue::Float(value) => format!("F{value}"),
                 DBValue::Text(value) => format!("T{value}"),
                 DBValue::Bool(value) => format!("B{}", if *value { 1 } else { 0 }),
+                DBValue::Blob(value) => format!("X{}", db_hex_encode(value)),
             };
             for b in encoded.as_bytes() {
                 hash ^= *b as u64;

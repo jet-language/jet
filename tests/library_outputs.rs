@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 mod common;
 use common::{have_rustc, Scratch};
@@ -53,6 +53,8 @@ fn run_jet_with_pid(root: &Path, args: &[&str]) -> (u32, Output) {
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap_or_else(|error| panic!("jet {:?} could not start: {error}", args));
     let pid = child.id();
@@ -242,6 +244,17 @@ fn library_build_load_and_foreign_call_are_one_surface() {
         .join("examples/features/packages/library_loadable");
     let scratch = Scratch::new("library-loadable");
     copy_tree(&fixture, &scratch.path);
+    let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
+    assert!(package.contains("outputs: {"));
+    fs::write(
+        scratch.path.join("package.jet"),
+        package.replacen(
+            "outputs: {",
+            "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {",
+            1,
+        ),
+    )
+    .unwrap();
     let expected = expected_output();
 
     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
@@ -423,7 +436,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     );
     let panic_text = compiler_text(&panic);
     assert!(
-        panic_text.contains("foreign panic"),
+        panic_text.contains("Stop [E3001]: `panic: foreign panic 0`"),
         "panic did not report a runtime panic:\n{panic_text}"
     );
 
@@ -537,6 +550,17 @@ fn component_build_load_and_foreign_call_are_one_surface() {
         .join("examples/features/packages/library_loadable");
     let scratch = Scratch::new("component-loadable");
     copy_tree(&fixture, &scratch.path);
+    let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
+    assert!(package.contains("outputs: {"));
+    fs::write(
+        scratch.path.join("package.jet"),
+        package.replacen(
+            "outputs: {",
+            "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {",
+            1,
+        ),
+    )
+    .unwrap();
 
     let build = run_jet(&scratch.path, &["build", "--target=sandbox", "library.jet"]);
     assert!(
@@ -705,9 +729,12 @@ fn library_output_selection_is_named_and_fail_closed() {
 
     let missing = jet::compile_library(&source, Some("missing"))
         .expect_err("missing Library output accepted");
-    assert!(missing.iter().any(|error| {
-        error.code == "E1341" && error.what.contains("Library output `missing`")
-    }));
+    assert!(
+        missing.iter().any(|error| {
+            error.code == "E1341" && error.what.contains("library output `missing`")
+        }),
+        "missing named Library diagnostic: {missing:?}"
+    );
 
     let non_library = jet::compile_library(&source, Some("app"))
         .expect_err("non-Library output accepted");

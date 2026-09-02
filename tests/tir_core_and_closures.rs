@@ -27,16 +27,16 @@ fn core_math_path_crypto_calls() {
     let src = "\
 use core.math as math
 use core.crypto as crypto
-fn calc(a: Float) Float {
+fn calc(a: Float) Float -> {
     r :: math.sqrt(a)
     f :: math.floor(r)
     c :: math.ceil(r)
     return (f + c)
 }
-fn make_path(a: String, b: String) String {
+fn make_path(a: String, b: String) String -> {
     return Path.from(a).join(b).to_string()
 }
-fn hash(s: String) String {
+fn hash(s: String) String -> {
     return crypto.sha256(s.bytes()).hex()
 }
 fn run() {
@@ -95,7 +95,7 @@ fn core_files_read_with_fallback() {
     }
     let src = "\
 use core.files as fs
-fn read_or(p: String) String {
+fn read_or(p: String) String -> {
     return (fs.read(~p) ?? \"missing\")
 }
 fn run() {
@@ -157,7 +157,7 @@ fn core_files_absolute_path_read_matches_every_tier() {
             .arg("--")
             .args(["plan", "--json", "--offline"])
             .current_dir(&repo)
-            .env("JET_CACHE_DIR", cache_root.join(format!("cache-{mode}")))
+            .env("JET_STORE_DIR", cache_root.join(format!("cache-{mode}")))
             .env("JETPACK_DOGFOOD_ROOT", &dogfood_root)
             .env(
                 "JETPACK_PROJECT_ROOT",
@@ -204,7 +204,7 @@ fn closure_collection_methods() {
         return;
     }
     let src = "\
-fn calc() Int {
+fn calc() Int -> {
     base := 10
     nums := [1, 2, 3, 4, 5]
     squares := nums.map((n: Int) -> (n * n))
@@ -237,7 +237,7 @@ fn refined_collection_types_survive_tir_chains() {
         return;
     }
     let src = "\
-fn use_float(value: Float) Float {
+fn use_float(value: Float) Float -> {
     return value + 0.25
 }
 fn run() {
@@ -272,10 +272,10 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
         .collect::<Vec<_>>()
         .join(", ");
     let src = format!(
-        "fn double(n: Int) Int {{ return n * 2 }}\n\
-         fn one() Int {{ return 1 }}\n\
-         fn add_item(acc: Int, n: Int) Int {{ return acc + n }}\n\
-         fn merge_decimal(left: Int, right: Int) Int {{ return left * 10000 + right }}\n\
+        "fn double(n: Int) Int -> {{ return n * 2 }}\n\
+         fn one() Int -> {{ return 1 }}\n\
+         fn add_item(acc: Int, n: Int) Int -> {{ return acc + n }}\n\
+         fn merge_decimal(left: Int, right: Int) Int -> {{ return left * 10000 + right }}\n\
          fn run() {{\n\
              values :: [Int]{{ {values} }}\n\
              offset :: 1\n\
@@ -351,22 +351,22 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
     for (method, callback, call) in [
         (
             "map",
-            "fn callback(n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"map-low\") }\n    if n == 65 { assert(false, \"map-high\") }\n    return n\n}\n",
+            "fn callback(n: Int) Int -> {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"map-low\") }\n    if n == 65 { assert(false, \"map-high\") }\n    return n\n}\n",
             "ignored :: values.para_map(callback)",
         ),
         (
             "filter",
-            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"filter-low\") }\n    if n == 65 { assert(false, \"filter-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) Bool -> {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"filter-low\") }\n    if n == 65 { assert(false, \"filter-high\") }\n    return true\n}\n",
             "ignored :: values.para_filter(callback)",
         ),
         (
             "partition",
-            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"partition-low\") }\n    if n == 65 { assert(false, \"partition-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) Bool -> {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"partition-low\") }\n    if n == 65 { assert(false, \"partition-high\") }\n    return true\n}\n",
             "ignored :: values.para_partition(callback)",
         ),
         (
             "fold",
-            "fn step(acc: Int, n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"fold-low\") }\n    if n == 65 { assert(false, \"fold-high\") }\n    return acc + n\n}\n",
+            "fn step(acc: Int, n: Int) Int -> {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"fold-low\") }\n    if n == 65 { assert(false, \"fold-high\") }\n    return acc + n\n}\n",
             "ignored :: values.para_fold(() -> 0, step, (left: Int, right: Int) -> left + right)",
         ),
     ] {
@@ -403,8 +403,8 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
         .join(", ");
     let src = format!(
         "use core.time as time\n\
-         #Pre(n != 65, \"contract-high\") fn checked(n: Int) Int {{ return n }}\n\
-         fn callback(n: Int) Int {{\n\
+         #Pre(n != 65, \"contract-high\") fn checked(n: Int) Int -> {{ return n }}\n\
+         fn callback(n: Int) Int -> {{\n\
              if n == 0 {{ print(\"worker-0-start\") }}\n\
              if n == 64 {{ print(\"worker-1-start\") }}\n\
              if n == 128 {{ print(\"worker-2-complete\") }}\n\
@@ -449,7 +449,7 @@ fn parallel_collection_adapters_work_in_imported_modules() {
             ),
             (
                 "worker.jet",
-                "pub fn double_all(values: [Int]) [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
+                "pub fn double_all(values: [Int]) [Int] -> {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
             ),
         ],
     );
@@ -483,7 +483,7 @@ fn fnmut_each_closure() {
         return;
     }
     let src = "\
-fn calc() Int {
+fn calc() Int -> {
     nums := [1, 2, 3, 4]
     total := 0
     nums.each((n: Int) -> { total = (total + n) })
@@ -506,7 +506,7 @@ fn sort_by_closure() {
         return;
     }
     let src = "\
-fn calc() Int {
+fn calc() Int -> {
     nums := [3, 1, 2]
     nums.sort_by((n: Int) -> n)
     return nums[0]
@@ -534,6 +534,42 @@ fn run() {
 }
 ";
     assert_tiers_agree("tir_infallible_sort_by", src, "[1, 2, 3]|[3, 2, 1]\n");
+}
+
+/// Fallible sort evaluates each key once in source order and leaves the
+/// receiver untouched when the callback fails.
+#[test]
+fn try_sort_by_is_atomic_and_tier_stable() {
+    let src = "\
+fn sort_key(n: Int) String !Never -> \"{n}\"
+fn stopping_sort_key(n: Int, seen: &String) String !Err -> {
+    seen += \"{n}\"
+    if n == 1 { return Err(\"stop\", code: \"E_SORT\") }
+    return \"{n}\"
+}
+fn run() {
+    ascending := [3, 1, 2]
+    ascending.sort_by((n: Int) -> sort_key(n))
+    descending := [3, 1, 2]
+    descending.sort_by_desc((n: Int) -> sort_key(n))
+
+    values := [3, 1, 2]
+    seen := \"\"
+    recovered :: values.sort_by((n: Int) -> stopping_sort_key(n, &seen)) ?? {
+        print(\"{err.code}:{err.message}\")
+        \"recovered\"
+    }
+    print(\"{ascending}|{descending}\")
+    print(seen)
+    print(values)
+    print(recovered)
+}
+";
+    assert_tiers_agree(
+        "tir_try_sort_by",
+        src,
+        "E_SORT:stop\n[1, 2, 3]|[3, 2, 1]\n31\n[3, 1, 2]\nrecovered\n",
+    );
 }
 
 /// Stable partition and sort keep equal-key values in source order on every
@@ -565,7 +601,7 @@ fn fn_typed_param_call_routes_through_tir() {
         return;
     }
     let src = "\
-fn apply(f: fn(Int) Int, x: Int) Int {
+fn apply(f: fn(Int) Int, x: Int) Int -> {
     return f(x)
 }
 fn run() {
@@ -587,13 +623,13 @@ fn block_lambda_preserves_value_tail_and_void_behavior() {
         return;
     }
     let src = "\
-fn apply(f: fn(Int) Int, x: Int) Int {
+fn apply(f: fn(Int) Int, x: Int) Int -> {
     return f(x)
 }
 fn visit(f: fn(Int), x: Int) {
     f(x)
 }
-fn plus_one(x: Int) Int {
+fn plus_one(x: Int) Int -> {
     return x + 1
 }
 fn run() {
@@ -622,19 +658,19 @@ fn numeric_width_conversions() {
         return;
     }
     let src = "\
-fn widen(red: U8) I64 {
+fn widen(red: U8) I64 -> {
     return I64.from_u8(red)
 }
-fn narrow(channel: I32) U8 {
+fn narrow(channel: I32) U8 -> {
     return U8.from_i32(channel) ?? 255
 }
-fn to_real(x: Int) Float {
+fn to_real(x: Int) Float -> {
     return Float.from_int(x)
 }
-fn truncate(x: Float) U8 {
+fn truncate(x: Float) U8 -> {
     return U8.from_float(x) ?? 255
 }
-fn narrow_float(x: Float) F32 !String {
+fn narrow_float(x: Float) F32 !Err -> {
     return F32.from_float(x)
 }
 fn run() {
@@ -663,13 +699,13 @@ fn numeric_predicates_and_bits() {
         return;
     }
     let src = "\
-fn bits(flags: U8) Int {
+fn bits(flags: U8) Int -> {
     return flags.count_ones()
 }
-fn finite(f: Float) Bool {
+fn finite(f: Float) Bool -> {
     return f.is_finite()
 }
-fn show(n: I32) String {
+fn show(n: I32) String -> {
     return n.to_string()
 }
 fn run() {
@@ -701,10 +737,10 @@ trait Shape {
 struct Circle {
     radius: Float
     impl Shape {
-        fn area(self) Float {
+        fn area(self) Float -> {
             return ((3.0 * self.radius) * self.radius)
         }
-        fn name(self) String {
+        fn name(self) String -> {
             return \"circle\"
         }
     }
@@ -713,14 +749,14 @@ struct Square {
     side: Float
 }
 impl Square.Shape {
-    fn area(self) Float {
+    fn area(self) Float -> {
         return (self.side * self.side)
     }
-    fn name(self) String {
+    fn name(self) String -> {
         return \"square\"
     }
 }
-fn describe(s: Shape) String {
+fn describe(s: Shape) String -> {
     return \"{s.name()}: {s.area()}\"
 }
 fn run() {
@@ -747,15 +783,15 @@ trait Measure {
 struct Counter {
     bonus: Int
     impl Measure {
-        fn measure(self, text: String) Int {
+        fn measure(self, text: String) Int -> {
             return text.len() + self.bonus
         }
     }
 }
-fn apply_measure(counter: Measure, text: String) Int {
+fn apply_measure(counter: Measure, text: String) Int -> {
     return inspect(counter) + counter.measure(text)
 }
-fn inspect<T>(value: T) Int {
+fn inspect<T>(value: T) Int -> {
     return 1
 }
 fn run() {
@@ -783,7 +819,7 @@ fn explicit_else_block_with_inner_if_not_flattened() {
         return;
     }
     let src = "\
-fn pick(a: Int, b: Int) Int {
+fn pick(a: Int, b: Int) Int -> {
     if a > b {
         return a
     } else {
@@ -816,10 +852,10 @@ fn fn_typed_values() {
         return;
     }
     let src = "\
-fn apply_twice(f: fn(Int) Int, x: Int) Int {
+fn apply_twice(f: fn(Int) Int, x: Int) Int -> {
     return f(f(x))
 }
-fn double(x: Int) Int {
+fn double(x: Int) Int -> {
     return (x * 2)
 }
 fn run() {
@@ -845,10 +881,10 @@ fn fn_value_call_through_local() {
         return;
     }
     let src = "\
-fn calc(f: fn(Int) Int) Int {
+fn calc(f: fn(Int) Int) Int -> {
     return f(10)
 }
-fn inc(x: Int) Int {
+fn inc(x: Int) Int -> {
     return (x + 1)
 }
 fn run() {
@@ -895,10 +931,10 @@ fn tasks_spawn_closure_core_call() {
         return;
     }
     let src = "\
-fn compute() Int {
+fn compute() Int -> {
     return 21
 }
-fn launch() Int {
+fn launch() Int -> {
     t :: task compute()
     return t.join() ?? 0
 }
@@ -929,7 +965,7 @@ fn handle_methods_file_writer() {
         "\
 use core.files as files
 use core.files as fs
-fn write_file(path: String, text: String) Int {{
+fn write_file(path: String, text: String) Int -> {{
     w := files.create(~path) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()

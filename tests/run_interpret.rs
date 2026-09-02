@@ -126,7 +126,7 @@ fn argv_agrees_on_every_native_tier() {
             .args(args)
             .current_dir(&dir)
             .env("JET_RUN_CACHE_DIR", cache.join(label).join("run"))
-            .env("JET_CACHE_DIR", cache.join(label).join("build"))
+            .env("JET_STORE_DIR", cache.join(label).join("build"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("{label} should start: {error}"));
@@ -175,7 +175,7 @@ fn argv_agrees_on_every_native_tier() {
     let build = Command::new(jet())
         .args(["build", "main.jet", "--quiet"])
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", cache.join("aot-build"))
+        .env("JET_STORE_DIR", cache.join("aot-build"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -266,7 +266,7 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
             .arg("main.jet")
             .current_dir(&dir)
             .env("JET_RUN_CACHE_DIR", cache.join("run"))
-            .env("JET_CACHE_DIR", cache.join("build"))
+            .env("JET_STORE_DIR", cache.join("build"))
             .env("NO_COLOR", "1");
         command.output().unwrap()
     };
@@ -313,7 +313,7 @@ fn c_extern_calls_match_aot_and_interpreter() {
             .arg("run.jet")
             .current_dir(&project)
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
-            .env("JET_CACHE_DIR", cache.join(mode).join("build"))
+            .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .env("NO_COLOR", "1")
             .env("JETPACK_ENV", "1")
             .output()
@@ -375,7 +375,7 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
             .arg(example)
             .current_dir(&root)
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
-            .env("JET_CACHE_DIR", cache.join(mode).join("build"))
+            .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .env("NO_COLOR", "1")
             .output()
             .expect("jet run")

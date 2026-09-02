@@ -4,9 +4,5 @@ use core.net.ws as ws
 
 fn run() {
     request :: http_client.request("GET", "http://127.0.0.1/")
-    result :: ws.upgrade(request)
-    print(result == {
-        .Ok(_) -> false
-        .Err(_) -> true
-    })
+    print(ws.upgrade(request) ? ok -> false ! error -> true)
 }

@@ -2907,14 +2907,10 @@ fn main() {
             }
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
         }
-        // D-JPK-CACHECONFIG1=D: cache roles and mirrors are host-owned by
-        // Jetpack. The compiler front door forwards the exact argv.
+        // D-JPK-CACHECONFIG1=D: cache status, pruning, and host limits are
+        // artifact-store CLI operations owned by CmdStatus.
         "cache" => {
-            exit(EngineDispatch::dispatch(
-                jet::Syntax::JETPACK_BINARY_NAME,
-                "cache",
-                &raw,
-            ));
+            exit(CmdStatus::run_cache(&raw[1..], mode.json));
         }
         "shared-store" => {
             exit(EngineDispatch::dispatch(
@@ -2965,7 +2961,11 @@ fn main() {
     // resolver below; declared here so its borrow outlives `target`.
     let bare_member_flag = flag_value(&raw, "-p");
     let named_build_entry = match args.get(1) {
-        Some(f) if cmd == "build" && checked_explicit_file(Path::new(f.as_str())).is_none() => {
+        Some(f)
+            if cmd == "build"
+                && !Path::new(f.as_str()).is_dir()
+                && checked_explicit_file(Path::new(f.as_str())).is_none() =>
+        {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             match resolve_named_build_member(&cwd, f) {
                 Ok(entry) => entry,

@@ -2,11 +2,14 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn run() -[Secret]> {
+fn run() -[Secret, IO]> {
+    observe := (_value: ()) -> true
     current :: vault.current<crypto.SigningKey>("__core_conformance_lifecycle") ?? return
     if current == .Val(reference) -> {
-        result :: vault.prepare_retire<crypto.SigningKey>(&reference, "fixed retire reason")
-        print(result == .Err(_))
+        plan :: vault.prepare_retire<crypto.SigningKey>(&reference, "fixed retire reason") ?? return
+        write :: vault.authorize_write(&plan, "fixed prepare-retire authorization") ?? return
+        done :: vault.commit_retire<crypto.SigningKey>(^write, ^plan) ?? return
+        print(observe(done))
     } else -> {
         print(true)
     }

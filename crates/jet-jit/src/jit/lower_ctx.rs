@@ -574,6 +574,7 @@ impl LowerCtx<'_, '_> {
             let var = self
                 .vars
                 .get(&key)
+                .or_else(|| self.vars.get(outer))
                 .copied()
                 .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
             Ok(self.b.use_var(var))
@@ -650,6 +651,67 @@ impl LowerCtx<'_, '_> {
         &self,
         row: &jet_foundation::Syntax::CoreCallRecord,
     ) -> Option<FuncId> {
+        if row.module == "core.net" {
+            let host = match row.member {
+                "socket_addr" => self.host.net_http.socket_addr,
+                "socket_to_string" => self.host.net_http.socket_to_string,
+                "socket_host" => self.host.net_http.socket_host,
+                "socket_port" => self.host.net_http.socket_port_typed,
+                "tcp_listen" => self.host.net_http.tcp_listen_str,
+                "tcp_listen_addr" => self.host.net_http.tcp_listen_addr,
+                "tcp_accept" => self.host.net_http.tcp_accept,
+                "tcp_connect" => self.host.net_http.tcp_connect,
+                "tcp_close" => self.host.net_http.tcp_close,
+                "tcp_local_addr" => self.host.net_http.tcp_stream_local_addr,
+                "tcp_peer_addr" => self.host.net_http.tcp_stream_peer_addr,
+                "tcp_local_socket_addr" => self.host.net_http.tcp_stream_local_socket_addr,
+                "tcp_peer_socket_addr" => self.host.net_http.tcp_stream_peer_socket_addr,
+                "listener_local_socket_addr" => self.host.net_http.listener_local_socket_addr,
+                "set_timeout" => self.host.net_http.set_timeout,
+                "set_read_timeout" => self.host.net_http.set_read_timeout,
+                "set_write_timeout" => self.host.net_http.set_write_timeout,
+                "nodelay" => self.host.net_http.nodelay,
+                "set_nodelay" => self.host.net_http.set_nodelay,
+                "ttl" => self.host.net_http.ttl,
+                "set_ttl" => self.host.net_http.set_ttl,
+                "socket_type" => self.host.net_http.socket_type,
+                "sendfile" => self.host.net_http.sendfile,
+                "dns_ptr" => self.host.net_http.dns_ptr,
+                "dns_aaaa" => self.host.net_http.dns_aaaa,
+                "dns_aaaa_at" => self.host.net_http.dns_aaaa_at,
+                "dns_srv" => self.host.net_http.dns_srv,
+                "dns_srv_at" => self.host.net_http.dns_srv_at,
+                "dns_srv_target" => self.host.net_http.dns_srv_target,
+                "dns_srv_port" => self.host.net_http.dns_srv_port,
+                "dns_srv_priority" => self.host.net_http.dns_srv_priority,
+                "dns_srv_weight" => self.host.net_http.dns_srv_weight,
+                "getservbyname" => self.host.net_http.getservbyname,
+                "getservbyport" => self.host.net_http.getservbyport,
+                "tcp_reply" => self.host.net_http.tcp_reply,
+                "udp_bind" => self.host.net_http.udp_bind,
+                "udp_local_addr" => self.host.net_http.udp_local_addr,
+                "udp_set_timeout" => self.host.net_http.udp_set_timeout,
+                "udp_send_bytes_to" => self.host.net_http.udp_send_bytes_to,
+                "udp_send_to" => self.host.net_http.udp_send_to,
+                "udp_send_bytes_to_deadline" => self.host.net_http.udp_send_bytes_to_deadline,
+                "udp_receive" => self.host.net_http.udp_receive,
+                "udp_receive_deadline" => self.host.net_http.udp_receive_deadline,
+                "udp_packet_data" => self.host.net_http.udp_packet_data,
+                "udp_packet_addr" => self.host.net_http.udp_packet_addr,
+                "udp_packet_bytes" => self.host.net_http.udp_packet_bytes,
+                "udp_packet_original_len" => self.host.net_http.udp_packet_original_len,
+                "udp_packet_truncated" => self.host.net_http.udp_packet_truncated,
+                "unix_listen" => self.host.net_http.unix_listen,
+                "unix_accept" => self.host.net_http.unix_accept,
+                "unix_connect" => self.host.net_http.unix_connect,
+                "unix_read" => self.host.net_http.unix_read,
+                "unix_write" => self.host.net_http.unix_write,
+                "unix_write_all_bytes" => self.host.net_http.unix_write_all_bytes,
+                "unix_close" => self.host.net_http.unix_close,
+                _ => return row.jit_symbol_candidates().into_iter().find_map(|symbol| self.host.lookup(&symbol)),
+            };
+            return Some(host);
+        }
         row.jit_symbol_candidates()
             .into_iter()
             .find_map(|symbol| self.host.lookup(&symbol))
@@ -750,12 +812,15 @@ impl LowerCtx<'_, '_> {
     }
 
     /// A tail expression whose value can never be read: sema proved the arm
-    /// unreachable (E0307 exhaustive dispatch), or `Todo` stops the program
-    /// before the merge is reached.
+    /// unreachable (E0307 exhaustive dispatch), `Todo` stops the program, or
+    /// its `Never` type marks the branch as divergent.
     fn is_dead_edge_tail(expr: &TExpr) -> bool {
         matches!(
             &expr.kind,
             TExprKind::Unreachable { .. } | TExprKind::Todo { .. }
+        ) || matches!(
+            &expr.ty,
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER
         )
     }
     fn current_block_terminated(&self) -> bool {
@@ -844,12 +909,28 @@ impl LowerCtx<'_, '_> {
         let arg_values = self.marshal_host_args(row.symbol.name(), &params, arg_values)?;
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
         let call = self.b.ins().call(host_ref, &arg_values);
+        let never = matches!(
+            ret_ty,
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER
+        );
+        let value = if never {
+            Some(self.b.ins().iconst(types::I8, 0))
+        } else {
+            None
+        };
         self.emit_trap_check()?;
-        Ok(Some(
+        if never {
+            // The trap check's fallthrough is unreachable for a Never host.
+            // Fill it so Cranelift can switch blocks without exposing a
+            // verifier-only continuation to the enclosing expression.
+            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+            self.dead = true;
+        }
+        Ok(Some(value.unwrap_or_else(|| {
             clif_ty(ret_ty)
                 .map(|_| self.b.inst_results(call)[0])
-                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)),
-        ))
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0))
+        })))
     }
 
     fn is_range_ty(ty: &Type) -> bool {
@@ -3119,6 +3200,86 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(merge);
         Ok(self.b.block_params(merge)[0])
     }
+    /// Typed `csv.query<T>` follows the same path as `csv.decode<T>`:
+    /// file text → Prelude CSV DataTrees → generated `T` decoder → encoded
+    /// DataTrees → shared Prelude query kernel → generated `T` decoder.
+    fn lower_typed_csv_query(
+        &mut self,
+        path: &TExpr,
+        sql: &TExpr,
+        elem_ty: &Type,
+    ) -> Result<Value, String> {
+        let path_v = self.lower_expr(path)?;
+        let sql_v = self.lower_expr(sql)?;
+        let source_r = self.call_host(self.host.encoding.csv_query_read, &[path_v]);
+        let source_ok = self.call_host(self.host.result_is_ok, &[source_r]);
+        let source_good = self.b.create_block();
+        let source_bad = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(source_ok, source_good, &[], source_bad, &[]);
+
+        self.b.switch_to_block(source_bad);
+        self.b.seal_block(source_bad);
+        self.b.ins().jump(merge, &[source_r]);
+
+        self.b.switch_to_block(source_good);
+        self.b.seal_block(source_good);
+        let text = self.result_payload(source_r, &Type::String)?;
+        let trees_r = self.call_host(self.host.encoding.csv_decode_trees, &[text]);
+        let trees_ok = self.call_host(self.host.result_is_ok, &[trees_r]);
+        let trees_good = self.b.create_block();
+        let trees_bad = self.b.create_block();
+        self.b.ins().brif(trees_ok, trees_good, &[], trees_bad, &[]);
+
+        self.b.switch_to_block(trees_bad);
+        self.b.seal_block(trees_bad);
+        self.b.ins().jump(merge, &[trees_r]);
+
+        self.b.switch_to_block(trees_good);
+        self.b.seal_block(trees_good);
+        let tree_list = self.result_payload(
+            trees_r,
+            &Type::List(Box::new(Type::Named("DataTree".into()))),
+        )?;
+        let decoded = self.lower_datatree_decode_list_items(tree_list, elem_ty)?;
+        let decoded_ok = self.call_host(self.host.result_is_ok, &[decoded]);
+        let decoded_good = self.b.create_block();
+        let decoded_bad = self.b.create_block();
+        self.b.ins().brif(decoded_ok, decoded_good, &[], decoded_bad, &[]);
+
+        self.b.switch_to_block(decoded_bad);
+        self.b.seal_block(decoded_bad);
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(decoded_good);
+        self.b.seal_block(decoded_good);
+        let list_ty = Type::List(Box::new(elem_ty.clone()));
+        let typed_list = self.result_payload(decoded, &list_ty)?;
+        let encoded = self.lower_serde_encode_value(typed_list, &list_ty)?;
+        let queried = self.call_host(self.host.encoding.data_query_rows, &[encoded, sql_v]);
+        let queried_ok = self.call_host(self.host.result_is_ok, &[queried]);
+        let queried_good = self.b.create_block();
+        let queried_bad = self.b.create_block();
+        self.b.ins().brif(queried_ok, queried_good, &[], queried_bad, &[]);
+
+        self.b.switch_to_block(queried_bad);
+        self.b.seal_block(queried_bad);
+        self.b.ins().jump(merge, &[queried]);
+
+        self.b.switch_to_block(queried_good);
+        self.b.seal_block(queried_good);
+        let queried_tree = self.result_payload(queried, &Type::Named("DataTree".into()))?;
+        let one = self.b.ins().iconst(types::I64, 1);
+        let queried_list = self.call_host(self.host.struct_get_i64, &[queried_tree, one]);
+        let decoded_selected = self.lower_datatree_decode_list_items(queried_list, elem_ty)?;
+        self.b.ins().jump(merge, &[decoded_selected]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
 
     /// Erase `#Numeric` / unit-family distinct wrappers to Int/Float for arith,
     /// print, and string interp — values already live as the base ABI. A Core
@@ -6813,6 +6974,19 @@ impl LowerCtx<'_, '_> {
                         )?;
                         return Ok(());
                     }
+                    if var2.is_none()
+                        && matches!(&collection.ty, Type::Named(name) if name == "HTTPBodyChunks")
+                    {
+                        self.lower_encoding_reader_for_in(
+                            label,
+                            var,
+                            source,
+                            step.as_ref(),
+                            body,
+                            "HTTPBodyChunks",
+                        )?;
+                        return Ok(());
+                    }
                     // D-SOA-TIER1=A: `columnar` is deliberately NOT consulted
                     // for the list walk below. This tier holds a columnar list as
                     // its logical rows, so iteration IS the plain list walk and
@@ -7794,6 +7968,10 @@ impl LowerCtx<'_, '_> {
             "JSONReader" | "CBORReader" => Type::Named("DataEvent".to_string()),
             "JSONLReader" | "XMLReader" => Type::Named("DataTree".to_string()),
             "CSVReader" => Type::Named("CSVRow".to_string()),
+            "HTTPBodyChunks" => Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
             _ => {
                 return Err(format!(
                     "jit encoding reader type unsupported: {reader_type}"
@@ -7806,6 +7984,7 @@ impl LowerCtx<'_, '_> {
             "CSVReader" => self.host.stream.csv_reader_next,
             "XMLReader" => self.host.stream.xml_reader_next,
             "CBORReader" => self.host.stream.cbor_reader_next,
+            "HTTPBodyChunks" => self.host.net_http.http_body_chunks_next,
             _ => unreachable!("encoding reader type checked above"),
         };
         let reader = self.lower_expr(source)?;
@@ -8510,10 +8689,10 @@ impl LowerCtx<'_, '_> {
             "filter" if args.len() == 2 => self.lower_data_filter(&args[0], &args[1]),
             "sort_by" if args.len() == 2 => self.lower_data_sort_by(&args[0], &args[1], ty),
             "group_count" if args.len() == 2 => in_own_frame(|| -> Result<Value, String> {
-                self.lower_data_group(&args[0], &args[1], None, 0)
+                self.lower_data_group(&args[0], &args[1], None, 0, ty)
             }),
             "group_sum" if args.len() == 3 => in_own_frame(|| -> Result<Value, String> {
-                self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1)
+                self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1, ty)
             }),
             "group_mean" if args.len() == 3 => in_own_frame(|| -> Result<Value, String> {
                 if matches!(
@@ -8523,7 +8702,7 @@ impl LowerCtx<'_, '_> {
                 {
                     self.lower_data_stream_group_mean(&args[0], &args[1], &args[2])
                 } else {
-                    self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1)
+                    self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1, ty)
                 }
             }),
             "describe" if args.len() == 1 => in_own_frame(|| -> Result<Value, String> {
@@ -8550,7 +8729,14 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.data.line_svg
                     };
-                    Ok(self.call_host(host_id, &[groups, options]))
+                    let rendered = self.call_host(host_id, &[groups, options]);
+                    // Data hosts use one checked Result ABI for both package
+                    // editions; pre-2027 line renderers still promise String.
+                    if matches!(ty, Type::Result { .. }) {
+                        Ok(rendered)
+                    } else {
+                        self.result_payload(rendered, &Type::String)
+                    }
                 })
             }
             "table" if args.len() == 1 => {
@@ -9097,12 +9283,17 @@ impl LowerCtx<'_, '_> {
     }
 
     /// Extract key (+ optional float value) columns via lambdas, then host-reduce.
+    ///
+    /// The JIT host keeps one checked Result ABI for both package editions.
+    /// Older data syntax still has a bare list type, so unwrap that carrier
+    /// before the list reaches the next resident operation.
     fn lower_data_group(
         &mut self,
         rows: &TExpr,
         key_fn: &TExpr,
         value_fn: Option<&TExpr>,
         mode: i64,
+        ty: &Type,
     ) -> Result<Value, String> {
         let keys = self.lower_iter_map_filter(rows, std::slice::from_ref(key_fn), false)?;
         let values = if let Some(vf) = value_fn {
@@ -9113,7 +9304,15 @@ impl LowerCtx<'_, '_> {
             self.call_host(self.host.coll.list_new, &[])
         };
         let mode_v = self.b.ins().iconst(types::I64, mode);
-        Ok(self.call_host(self.host.data.group_reduce, &[keys, values, mode_v]))
+        let grouped = self.call_host(self.host.data.group_reduce, &[keys, values, mode_v]);
+        if matches!(ty, Type::Result { .. }) {
+            Ok(grouped)
+        } else {
+            self.result_payload(
+                grouped,
+                &Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+            )
+        }
     }
 
     fn lower_data_filter(&mut self, rows: &TExpr, pred: &TExpr) -> Result<Value, String> {
@@ -9771,7 +9970,15 @@ impl LowerCtx<'_, '_> {
                 match kind {
                     TIR::TOptionProbe::Unwrap => self.lower_expr(inner),
                     TIR::TOptionProbe::IsSome => {
-                        Err("jit option presence probe needs a resident option value".to_string())
+                        let Type::Option(option_inner) = &inner.ty else {
+                            return Err(format!(
+                                "jit option presence probe needs an Option value: {:?}",
+                                inner.ty
+                            ));
+                        };
+                        let result_abi = self.uses_result_option_abi(inner);
+                        let value = self.lower_expr(inner)?;
+                        Ok(self.option_present_flag(value, option_inner, result_abi))
                     }
                     TIR::TOptionProbe::Field(field) => {
                         Err(format!("jit option field probe unsupported: {field}"))
@@ -10124,6 +10331,18 @@ impl LowerCtx<'_, '_> {
                 let value = self.lower_expr(hole)?;
                 Ok(dbvalue_pack(self, 3, value))
             }
+            Type::List(inner)
+                if matches!(
+                    inner.as_ref(),
+                    Type::IntN {
+                        signed: false,
+                        bits: 8
+                    }
+                ) =>
+            {
+                let value = self.lower_expr(hole)?;
+                Ok(dbvalue_pack(self, 5, value))
+            }
             _ => {
                 let value = self.lower_text(hole, JitTextMode::Display)?;
                 Ok(dbvalue_pack(self, 3, value))
@@ -10260,6 +10479,9 @@ impl LowerCtx<'_, '_> {
                 Ok(value)
             }
             Type::Apply { name, .. } if name == "KeyRef" => {
+                Ok(self.call_host(self.host.crypto.vault_key_ref_show, &[value]))
+            }
+            Type::Named(name) if name == "KeyRef" => {
                 Ok(self.call_host(self.host.crypto.vault_key_ref_show, &[value]))
             }
             Type::Named(name) => self.lower_text_named_value(value, &ty, name, mode),
@@ -11230,6 +11452,47 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(merge);
         Ok(self.b.block_params(merge)[0])
     }
+    /// Core host rows return the shared Result arena even when sema has already
+    /// projected their source expression to the payload type. Match the module
+    /// call adapter at this ABI boundary instead of leaking the result handle.
+    fn lower_core_result_value(
+        &mut self,
+        carrier: Value,
+        ok_ty: &Type,
+    ) -> Result<Value, String> {
+        self.emit_trap_check()?;
+        let payload_clif = if matches!(ok_ty, Type::Named(name) if name == "Unit")
+            || matches!(ok_ty, Type::Tuple(fields) if fields.is_empty())
+        {
+            types::I8
+        } else {
+            self.meta
+                .clif_ty(ok_ty)
+                .or_else(|| clif_ty(ok_ty))
+                .ok_or_else(|| format!("jit Core Result payload unsupported: {ok_ty:?}"))?
+        };
+        let is_ok = self.call_host(self.host.result_is_ok, &[carrier]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, payload_clif);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.emit_lexical_exit(Some(carrier), false, self.shield_depth)?;
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(carrier, ok_ty)?;
+        self.track_compute_value(payload, ok_ty)?;
+        self.b.ins().jump(merge, &[payload]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
 
     fn lower_fn_call(
         &mut self,
@@ -14392,7 +14655,7 @@ impl LowerCtx<'_, '_> {
             ("core.service", "tree" | "tree_show") => Some(1),
             ("core.service" | "core.services", "runtime") => Some(2),
             (
-                "core.services",
+                "core.service" | "core.services",
                 "restart_one_for_one"
                 | "restart_one_for_all"
                 | "restart_rest_for_one"
@@ -15358,10 +15621,18 @@ impl LowerCtx<'_, '_> {
                                     self.host.core.fs_read_bytes,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
-                                "binwrite" if args.len() == 2 => (
-                                    self.host.core.fs_write_atomic,
-                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                                ),
+"binwrite" if args.len() == 2 => {
+    let path = self.lower_expr(&args[0])?;
+    let path = if matches!(&args[0].ty, Type::Named(name) if name == "Path") {
+        self.call_host(self.host.core.path_to_string, &[path])
+    } else {
+        path
+    };
+    (
+        self.host.core.io_binwrite,
+        vec![path, self.lower_expr(&args[1])?],
+    )
+},
                                 _ => {
                                     return Err(format!(
                                         "jit core call unsupported: {module}.{method}"
@@ -15582,8 +15853,48 @@ impl LowerCtx<'_, '_> {
                                     self.host.net_http.tcp_listen_addr,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
+                                "tcp_accept" if args.len() == 1 => (
+                                    self.host.net_http.tcp_accept,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tcp_close" if args.len() == 1 => (
+                                    self.host.net_http.tcp_close,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tcp_local_addr" if args.len() == 1 => (
+                                    self.host.net_http.tcp_stream_local_addr,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tcp_peer_addr" if args.len() == 1 => (
+                                    self.host.net_http.tcp_stream_peer_addr,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tcp_local_socket_addr" if args.len() == 1 => (
+                                    self.host.net_http.tcp_stream_local_socket_addr,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tcp_peer_socket_addr" if args.len() == 1 => (
+                                    self.host.net_http.tcp_stream_peer_socket_addr,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
                                 "tcp_connect" if args.len() == 1 => (
                                     self.host.net_http.tcp_connect,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tls_connect" if args.len() == 2 => (
+                                    self.host.net_http.tls_client,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "tls_read" if args.len() == 1 => (
+                                    self.host.net_http.tls_read,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "tls_write" if args.len() == 2 => (
+                                    self.host.net_http.tls_write_text,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "tls_close" if args.len() == 1 => (
+                                    self.host.net_http.tls_close,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
                                 "tcp_shutdown" if args.len() == 2 => (
@@ -15614,6 +15925,14 @@ impl LowerCtx<'_, '_> {
                                     self.host.net_http.set_timeout,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
+                                "set_read_timeout" if args.len() == 2 => (
+                                    self.host.net_http.set_read_timeout,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "set_write_timeout" if args.len() == 2 => (
+                                    self.host.net_http.set_write_timeout,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
                                 "nodelay" if args.len() == 1 => {
                                     (self.host.net_http.nodelay, vec![self.lower_expr(&args[0])?])
                                 }
@@ -15641,6 +15960,58 @@ impl LowerCtx<'_, '_> {
                                 "dns_ptr" if args.len() == 2 => (
                                     self.host.net_http.dns_ptr,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "dns_txt" if args.len() == 2 => (
+                                    self.host.net_http.dns_txt,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "dns_txt_at" if args.len() == 3 => (
+                                    self.host.net_http.dns_txt_at,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
+                                "dns_aaaa" if args.len() == 2 => (
+                                    self.host.net_http.dns_aaaa,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "dns_aaaa_at" if args.len() == 3 => (
+                                    self.host.net_http.dns_aaaa_at,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
+                                "dns_srv" if args.len() == 2 => (
+                                    self.host.net_http.dns_srv,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "dns_srv_at" if args.len() == 3 => (
+                                    self.host.net_http.dns_srv_at,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
+                                "dns_srv_target" if args.len() == 1 => (
+                                    self.host.net_http.dns_srv_target,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "dns_srv_port" if args.len() == 1 => (
+                                    self.host.net_http.dns_srv_port,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "dns_srv_priority" if args.len() == 1 => (
+                                    self.host.net_http.dns_srv_priority,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "dns_srv_weight" if args.len() == 1 => (
+                                    self.host.net_http.dns_srv_weight,
+                                    vec![self.lower_expr(&args[0])?],
                                 ),
                                 "getservbyname" if args.len() == 1 => (
                                     self.host.net_http.getservbyname,
@@ -15678,6 +16049,14 @@ impl LowerCtx<'_, '_> {
                                         self.lower_expr(&args[2])?,
                                     ],
                                 ),
+                                "udp_send_to" if args.len() == 3 => (
+                                    self.host.net_http.udp_send_to,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
                                 "udp_receive" if args.len() == 2 => (
                                     self.host.net_http.udp_receive,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -15690,8 +16069,16 @@ impl LowerCtx<'_, '_> {
                                     self.host.net_http.ready_writable,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
+                                "udp_packet_data" if args.len() == 1 => (
+                                    self.host.net_http.udp_packet_data,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
                                 "udp_packet_bytes" if args.len() == 1 => (
                                     self.host.net_http.udp_packet_bytes,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "udp_packet_addr" if args.len() == 1 => (
+                                    self.host.net_http.udp_packet_addr,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
                                 "udp_packet_original_len" if args.len() == 1 => (
@@ -15739,6 +16126,53 @@ impl LowerCtx<'_, '_> {
                             let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                             let call = self.b.ins().call(host_ref, &arg_vals);
                             let v = self.b.inst_results(call)[0];
+                            if matches!(
+                                method.as_str(),
+                                "tcp_listen"
+                                    | "tcp_listen_addr"
+                                    | "tcp_accept"
+                                    | "tcp_connect"
+                                    | "tcp_close"
+                                    | "tcp_local_addr"
+                                    | "tcp_peer_addr"
+                                    | "tcp_local_socket_addr"
+                                    | "tcp_peer_socket_addr"
+                                    | "tcp_shutdown"
+                                    | "listener_local_socket_addr"
+                                    | "socket_addr"
+                                    | "set_timeout"
+                                    | "set_read_timeout"
+                                    | "set_write_timeout"
+                                    | "nodelay"
+                                    | "set_nodelay"
+                                    | "ttl"
+                                    | "set_ttl"
+                                    | "sendfile"
+                                    | "dns_ptr"
+                                    | "dns_aaaa"
+                                    | "dns_aaaa_at"
+                                    | "dns_srv"
+                                    | "dns_srv_at"
+                                    | "getservbyname"
+                                    | "getservbyport"
+                                    | "tcp_reply"
+                                    | "udp_bind"
+                                    | "udp_local_addr"
+                                    | "udp_set_timeout"
+                                    | "udp_send_bytes_to"
+                                    | "udp_send_to"
+                                    | "udp_receive"
+                                    | "unix_listen"
+                                    | "unix_accept"
+                                    | "unix_connect"
+                                    | "unix_read"
+                                    | "unix_write"
+                                    | "unix_write_all_bytes"
+                                    | "unix_close"
+                            ) && !matches!(&expr.ty, Type::Result { .. } | Type::Option(_))
+                            {
+                                return self.lower_core_result_value(v, &expr.ty);
+                            }
                             return if matches!(expr.ty, Type::Bool) {
                                 Ok(self.b.ins().ireduce(types::I8, v))
                             } else {
@@ -15756,21 +16190,46 @@ impl LowerCtx<'_, '_> {
                                     self.host.net_http.http_response,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
-                                "bind" if args.len() == 2 => (
+                                "serve"
+                                    if args.len() == 2
+                                        || (args.len() == 3
+                                            && matches!(args[2].ty, Type::Option(_))) =>
+                                {
+                                    (
+                                        self.host.net_http.http_serve,
+                                        vec![
+                                            self.lower_expr(&args[0])?,
+                                            self.lower_expr(&args[1])?,
+                                        ],
+                                    )
+                                }
+                                "bind"
+                                    if args.len() == 2
+                                        || (args.len() == 3
+                                            && matches!(args[2].ty, Type::Option(_))) =>
+                                (
                                     self.host.net_http.http_server_bind,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
-                                "serve_once_listener" if args.len() == 2 => (
-                                    self.host.net_http.http_serve_once_listener,
+                                "serve_once" if args.len() == 2 => (
+                                    self.host.net_http.http_serve_once,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "request_id" if args.len() == 1 => (
                                     self.host.net_http.http_request_id,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
+                                "access_log" if args.len() == 2 => (
+                                    self.host.net_http.http_server_access_log,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
                                 "sse" if args.len() == 1 => (
                                     self.host.net_http.http_sse,
                                     vec![self.lower_expr(&args[0])?],
+                                ),
+                                "static_file" if args.len() == 2 => (
+                                    self.host.net_http.http_static_file,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "static_file_range" if args.len() == 3 => (
                                     self.host.net_http.http_static_file_range,
@@ -16072,6 +16531,20 @@ impl LowerCtx<'_, '_> {
                                     }
                                 }
                             }
+                            // Typed `csv.query<T>` reads and decodes rows before
+                            // handing the encoded DataTree array to the shared
+                            // Prelude query kernel.
+                            if method == "query" && args.len() == 2 {
+                                if let Type::Result { ok, .. } = &expr.ty {
+                                    if let Type::List(elem) = ok.as_ref() {
+                                        return self.lower_typed_csv_query(
+                                            &args[0],
+                                            &args[1],
+                                            elem,
+                                        );
+                                    }
+                                }
+                            }
                             // `csv.to_string` has two shapes: the dynamic `[[String]]` rows
                             // form, and the typed `[T]` Codable form AOT renders through
                             // `jet_enc_csv_to_string`. Only rows may reach the rows host —
@@ -16132,7 +16605,29 @@ impl LowerCtx<'_, '_> {
                                     let limits = self.lower_expr(&args[1])?;
                                     let delimiter = self.lower_expr(&args[2])?;
                                     let header = self.lower_expr(&args[3])?;
+                                    let header = match self.b.func.dfg.value_type(header) {
+                                        ty if ty == types::I8 || ty == types::I32 => {
+                                            self.b.ins().uextend(types::I64, header)
+                                        }
+                                        ty if ty == types::I64 => header,
+                                        ty => {
+                                            return Err(format!(
+                                                "jit csv reader header ABI unsupported: {ty:?}"
+                                            ))
+                                        }
+                                    };
                                     let skip_blank = self.lower_expr(&args[4])?;
+                                    let skip_blank = match self.b.func.dfg.value_type(skip_blank) {
+                                        ty if ty == types::I8 || ty == types::I32 => {
+                                            self.b.ins().uextend(types::I64, skip_blank)
+                                        }
+                                        ty if ty == types::I64 => skip_blank,
+                                        ty => {
+                                            return Err(format!(
+                                                "jit csv reader skip_blank ABI unsupported: {ty:?}"
+                                            ))
+                                        }
+                                    };
                                     (
                                         self.host.stream.csv_reader,
                                         vec![file, limits, delimiter, header, skip_blank],
@@ -16742,8 +17237,11 @@ impl LowerCtx<'_, '_> {
                             let a0 = self.lower_expr(&args[0])?;
                             self.b.ins().call(host_ref, &[a0]);
                             // Host sets exit_code + trap; unwind to epilogue like rich panic.
+                            let value = self.b.ins().iconst(types::I8, 0);
                             self.emit_trap_check()?;
-                            return Ok(self.b.ins().iconst(types::I8, 0));
+                            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+                            self.dead = true;
+                            return Ok(value);
                         });
                     }
                     if module == "core.process" {
@@ -17933,6 +18431,9 @@ impl LowerCtx<'_, '_> {
                                     self.host.math_extra.significand,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
+                                "log10" if args.len() == 1 => {
+                                    (self.host.math_extra.log10, vec![self.lower_expr(&args[0])?])
+                                }
                                 "logb" if args.len() == 1 => {
                                     (self.host.math_extra.logb, vec![self.lower_expr(&args[0])?])
                                 }
@@ -18752,6 +19253,10 @@ impl LowerCtx<'_, '_> {
                                         self.lower_expr(&args[2])?,
                                     ],
                                 ),
+                                "row_value" if args.len() == 2 => (
+                                    self.host.db.row_value,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
                                 "row_int" if args.len() == 2 => (
                                     self.host.db.row_int,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -19106,6 +19611,49 @@ impl LowerCtx<'_, '_> {
                             let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                             let call = self.b.ins().call(host_ref, &arg_vals);
                             return Ok(self.b.inst_results(call)[0]);
+                        });
+                    }
+                    if matches!(
+                        module.as_str(),
+                        "core.web.storage.local" | "core.web.storage.session"
+                    ) {
+                        return in_own_frame(|| -> Result<Value, String> {
+                            match (method.as_str(), args.len()) {
+                                ("get", 1) => {
+                                    let key = self.lower_expr(&args[0])?;
+                                    Ok(self.call_host(self.host.web.storage_get, &[key]))
+                                }
+                                ("remove", 1) => {
+                                    let key = self.lower_expr(&args[0])?;
+                                    let host = self.module.declare_func_in_func(
+                                        self.host.web.storage_remove,
+                                        self.b.func,
+                                    );
+                                    self.b.ins().call(host, &[key]);
+                                    Ok(self.b.ins().iconst(types::I8, 0))
+                                }
+                                ("set", 2) => {
+                                    let key = self.lower_expr(&args[0])?;
+                                    let value = self.lower_expr(&args[1])?;
+                                    let host = self.module.declare_func_in_func(
+                                        self.host.web.storage_set,
+                                        self.b.func,
+                                    );
+                                    self.b.ins().call(host, &[key, value]);
+                                    Ok(self.b.ins().iconst(types::I8, 0))
+                                }
+                                ("clear", 0) => {
+                                    let host = self.module.declare_func_in_func(
+                                        self.host.web.storage_clear,
+                                        self.b.func,
+                                    );
+                                    self.b.ins().call(host, &[]);
+                                    Ok(self.b.ins().iconst(types::I8, 0))
+                                }
+                                _ => Err(format!(
+                                    "jit core call unsupported: {module}.{method}"
+                                )),
+                            }
                         });
                     }
                     if module == "core.web" || module == "core.web.devserver" {
@@ -20110,11 +20658,18 @@ impl LowerCtx<'_, '_> {
                         .meta
                         .target_return(&key)
                         .is_some_and(|ret| matches!(ret, Type::Result { .. }));
+                    // D-OPERATOR-ABI1: user operator hooks return their raw owner
+                    // value, not the shared failure carrier. Use the same metadata-
+                    // aware resident ABI check as calls and bindings; the plain
+                    // helper has no distinct-type table and otherwise can fall
+                    // through to a zero placeholder for an opaque result slot.
                     let result = if returns_result {
                         self.lower_call_result(carrier, &expr.ty)?
                     } else {
                         self.emit_trap_check()?;
-                        clif_ty(&expr.ty)
+                        self.meta
+                            .clif_ty(&expr.ty)
+                            .or_else(|| clif_ty(&expr.ty))
                             .map(|_| carrier)
                             .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0))
                     };
@@ -21223,6 +21778,7 @@ impl LowerCtx<'_, '_> {
                     "Float" => 2,
                     "Text" => 3,
                     "Bool" => 4,
+                    "Blob" => 5,
                     _ => return Err(format!("jit DBValue lit `DBValue::{variant}`")),
                 };
                 match arg.as_ref() {
@@ -25797,7 +26353,9 @@ impl LowerCtx<'_, '_> {
             THandleOp::CBORWriterFinish => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.stream.cbor_writer_finish, &[recv_val]))
             }),
-            THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdinReadLine => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.io.readline, &[]))
+            }),
             THandleOp::StdoutWrite => in_own_frame(|| -> Result<Value, String> {
                 let text = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.io.stdout_write, &[recv_val, text]))
@@ -26888,7 +27446,7 @@ impl LowerCtx<'_, '_> {
                     };
                     match method.as_str() {
                         "add" if sketch == "TDigest" && args.len() == 1 => {
-                            let v = self.lower_expr(&args[0])?;
+                            let v = self.lower_as_f64(&args[0])?;
                             let host = self
                                 .module
                                 .declare_func_in_func(self.host.sketch.add_f64, self.b.func);
@@ -26912,7 +27470,7 @@ impl LowerCtx<'_, '_> {
                             Ok(self.call_host(self.host.sketch.count1, &[recv_val, key]))
                         }
                         "quantile" if args.len() == 1 => {
-                            let q = self.lower_expr(&args[0])?;
+                            let q = self.lower_as_f64(&args[0])?;
                             Ok(self.call_host(self.host.sketch.quantile, &[recv_val, q]))
                         }
                         "sample" if args.is_empty() => {
@@ -27120,6 +27678,23 @@ impl LowerCtx<'_, '_> {
                         }
                         ("HTTPResponse", "cookies") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_resp_cookies, &[recv_val]))
+                        }
+                        ("HTTPBody", "chunks") if args.len() <= 1 => {
+                            let max_chunk = if let Some(arg) = args.first() {
+                                self.lower_expr(arg)?
+                            } else {
+                                self.b.ins().iconst(types::I64, 65536)
+                            };
+                            Ok(self.call_host(
+                                self.host.net_http.http_body_chunks,
+                                &[recv_val, max_chunk],
+                            ))
+                        }
+                        ("HTTPBodyChunks", "next") if args.is_empty() => {
+                            Ok(self.call_host(
+                                self.host.net_http.http_body_chunks_next,
+                                &[recv_val],
+                            ))
                         }
                         ("HTTPBody", "text") if args.len() == 1 => {
                             let limit = self.lower_expr(&args[0])?;
@@ -27375,6 +27950,23 @@ impl LowerCtx<'_, '_> {
                             let call = self.b.ins().call(host, &[recv_val, trailers]);
                             Ok(self.b.inst_results(call)[0])
                         }
+                        ("HTTPBody", "chunks") if args.len() <= 1 => {
+                            let max_chunk = if let Some(arg) = args.first() {
+                                self.lower_expr(arg)?
+                            } else {
+                                self.b.ins().iconst(types::I64, 65536)
+                            };
+                            Ok(self.call_host(
+                                self.host.net_http.http_body_chunks,
+                                &[recv_val, max_chunk],
+                            ))
+                        }
+                        ("HTTPBodyChunks", "next") if args.is_empty() => {
+                            Ok(self.call_host(
+                                self.host.net_http.http_body_chunks_next,
+                                &[recv_val],
+                            ))
+                        }
                         ("HTTPBody", "text") if args.len() == 1 => {
                             let limit = self.lower_expr(&args[0])?;
                             Ok(self
@@ -27403,6 +27995,14 @@ impl LowerCtx<'_, '_> {
                         }
                         ("HTTPResponse", "body") if args.is_empty() => {
                             Ok(self.call_host(self.host.net_http.http_resp_body, &[recv_val]))
+                        }
+                        ("HTTPResponse", "header") if args.len() == 2 => {
+                            let name = self.lower_expr(&args[0])?;
+                            let value = self.lower_expr(&args[1])?;
+                            Ok(self.call_host(
+                                self.host.net_http.http_server_response_header,
+                                &[recv_val, name, value],
+                            ))
                         }
                         ("HTTPServer", "local_addr") if args.is_empty() => {
                             let host = self.module.declare_func_in_func(
@@ -27747,6 +28347,9 @@ impl LowerCtx<'_, '_> {
             }),
             THandleOp::DBValueBool => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.db.dbvalue_bool, &[recv_val]))
+            }),
+            THandleOp::DBValueBlob => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.db.dbvalue_blob, &[recv_val]))
             }),
             THandleOp::DBValueIsNull => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.db.dbvalue_is_null, &[recv_val]))
@@ -29655,23 +30258,19 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print, &[val]);
                         return Ok(());
                     }
-                    // Two different facts arrive here wearing the same type, and
-                    // only one of them is printable-nothing.
+                    // Two different facts arrive here wearing the same type,
+                    // and only one of them is printable-nothing.
                     //
-                    // `builtin_result_ty`
-                    // (crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs)
+                    // `builtin_result_ty` (crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs)
                     // collapses "the sema return table has no row for this
                     // receiver/method/arity" into the same `Unit` it uses for a
                     // genuinely void method. It types exactly the method-shaped
-                    // nodes, so a `Unit` on one of those is a lookup miss — the
-                    // `JoinSep` arm above is one such miss, recovered by hand.
-                    // Printing nothing for the next one is a wrong answer no
-                    // output-only check can see, so refuse and let the interpreter
-                    // print it: a deopt is falsifiable, silence is not.
-                    //
-                    // A `Unit` on any other node is a real void value, which sema
-                    // admits to `print` (`is_unit_type`, Sema/calls/direct_calls.rs)
-                    // and which prints nothing. That case is preserved.
+                    // nodes, so a `Unit` on one of those is a lookup miss —
+                    // the `JoinSep` arm above is one such miss, recovered by
+                    // hand. Printing nothing for the next one is a wrong
+                    // answer no output-only check can see, so refuse and let
+                    // the interpreter print it: a deopt is falsifiable,
+                    // silence is not.
                     if matches!(
                         &inner.kind,
                         TExprKind::BuiltinMethod { .. } | TExprKind::ClosureMethod { .. }
@@ -29680,6 +30279,14 @@ impl LowerCtx<'_, '_> {
                              builtin return table resolved no type for this receiver"
                             .to_string());
                     }
+                    // A real Unit displays as an empty line in every other
+                    // tier. Use the same string-print host so line framing
+                    // remains shared with ordinary display values.
+                    let empty = self.call_host(self.host.str_begin, &[]);
+                    let print = self
+                        .module
+                        .declare_func_in_func(self.host.print_str, self.b.func);
+                    self.b.ins().call(print, &[empty]);
                     return Ok(());
                 }
                 if matches!(

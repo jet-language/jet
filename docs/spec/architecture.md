@@ -24,6 +24,19 @@ jet-codegen ──► boring Rust source
                                     speaks to users — see R5)
 ```
 
+### Build graph and compiler nodes
+
+The checked compiler publishes one `BuildPlan` graph. It contains declared
+actions and compiler-owned `check`, `compile`, and `link` nodes. Each compiler
+node has a logical subject, content-digest inputs, and a SHA-256 content key.
+Keys and ordering do not contain checkout-specific paths.
+
+Build execution records durations and cache reasons in the store under the
+content key. `jet inspect explain-build <file.jet>` reads the latest immutable
+and emits the nodes in graph order. The JSON form is
+`jet.explain-build/v1`; text output contains one node per line. The compiler
+owns node identity and dependencies, while the store owns run evidence.
+
 ### Typed IR (TIR) — the codegen seam
 
 Codegen does not read the AST plus side registries; it lowers the checked AST to a
@@ -105,6 +118,24 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
+
+### Machine-wide artifact store
+
+D-BUILD-STORE1=E defines `crates/jet-store` as the one machine-wide artifact
+store for compiler and runtime reuse. It owns content-addressed blobs, action
+records, ThinLTO entries,
+checksummed last-use metadata, atomic publication, digest verification, live
+leases, pruning, and capacity admission. The default cap is the smaller of
+20 GiB and 10% of the filesystem that contains the store. A 2 GiB free-space
+reserve is checked before each write. A stricter host cap is persisted in the
+store's host policy and applies to every project on that machine.
+
+The root `jet` binary is only a command surface over this API. `jet cache status`
+reports the store root, footprint, effective cap, reserve, entries, leases, and
+tiers. `jet cache prune --to <size>` performs an explicit LRU prune, while
+`jet cache limit --host <size>` changes the host policy. These commands do not
+implement filesystem or eviction rules themselves. `jet self doctor` reads the
+same status and reports one artifact-store row.
 
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.

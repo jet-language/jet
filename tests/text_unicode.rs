@@ -445,7 +445,7 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
             .arg(&example)
             .current_dir(root)
             .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
-            .env("JET_CACHE_DIR", scratch.join(&format!("{tier}-build")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("spawn Unicode audit {tier} tier: {error}"));

@@ -6,9 +6,11 @@
 //! is machine-specific; proof details and content-derived Core fingerprints
 //! remain byte-exact.
 
+use jet_foundation::JSON::{json_get, json_str, parse, JSONValue};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::Instant;
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/project_check/fixtures")
@@ -43,6 +45,98 @@ fn run_uncached(name: &str, args: &[&str]) -> Output {
         .env("TERM", "dumb")
         .output()
         .unwrap_or_else(|error| panic!("jet {} {name} failed to start: {error}", args[0]))
+}
+
+fn scratch_root(name: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before Unix epoch")
+        .as_nanos();
+    let base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".cache/jet-test-scratch"))
+        .unwrap_or_else(|| PathBuf::from(".cache/jet-test-scratch"));
+    let root = base.join(format!(
+        "project-check-{name}-{}-{stamp}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create project-check scratch root");
+    root
+}
+
+fn copy_receipt_fixture(root: &Path) {
+    for relative in [
+        "workspace.jet",
+        ".jet/lock",
+        "packages/app/package.jet",
+        "packages/app/entry.jet",
+        "packages/app/app/main.jet",
+        "packages/app/.jet/lock",
+        "packages/app/.jet/generated/input.jet",
+    ] {
+        let source = fixture("receipt_invalidation").join(relative);
+        let destination = root.join(relative);
+        fs::create_dir_all(
+            destination
+                .parent()
+                .unwrap_or_else(|| panic!("fixture destination has no parent")),
+        )
+        .expect("create copied fixture parent");
+        fs::copy(&source, &destination).unwrap_or_else(|error| {
+            panic!(
+                "copy receipt fixture {} -> {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        });
+    }
+}
+
+fn run_project_check(dir: &Path, receipt_dir: &Path, args: &[&str]) -> Output {
+    Command::new(jet_bin())
+        .args(args)
+        .current_dir(dir)
+        .env("JET_RECEIPT_DIR", receipt_dir)
+        .env_remove("JET_RECEIPT_BYPASS")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .unwrap_or_else(|error| panic!("jet check in {} failed to start: {error}", dir.display()))
+}
+
+fn assert_project_check_passed(output: &Output, context: &str) {
+    assert!(
+        output.status.success(),
+        "{context} failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn receipt_replayed(output: &Output) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("ok: check current")
+}
+
+fn machine_rows(output: &Output) -> Vec<JSONValue> {
+    assert_project_check_passed(output, "machine project check");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report = parse(stdout.trim()).unwrap_or_else(|error| {
+        panic!("project check --json emitted invalid JSON: {error}\n{stdout}")
+    });
+    assert_eq!(
+        json_get(&report, "contract").and_then(json_str),
+        Some("jet.check/v1"),
+        "project check machine contract changed"
+    );
+    assert!(
+        matches!(json_get(&report, "elapsed_ms"), Some(JSONValue::Number(milliseconds)) if *milliseconds >= 0),
+        "project check machine result must record elapsed_ms"
+    );
+    match json_get(&report, "rows") {
+        Some(JSONValue::Array(rows)) => rows.clone(),
+        other => panic!("project check machine rows must be an array, got {other:?}"),
+    }
 }
 
 fn scrub_fixture_path(text: &str, dir: &Path) -> String {
@@ -342,7 +436,6 @@ fn extension_optional_check_replays_receipt() {
             .current_dir(&dir)
             .env("JET_RECEIPT_DIR", &receipt_dir)
             .env_remove("JET_RECEIPT_BYPASS")
-            .env_remove("JET_TIMING")
             .env("NO_COLOR", "1")
             .output()
             .expect("extension-optional project check failed to start")
@@ -369,6 +462,147 @@ fn extension_optional_check_replays_receipt() {
         "extension-optional invocation did not replay its receipt:\n{}",
         String::from_utf8_lossy(&second.stderr)
     );
-
     let _ = fs::remove_dir_all(&receipt_dir);
 }
+
+#[test]
+fn project_check_receipt_tracks_entry_and_authority_changes() {
+    let root = scratch_root("receipt-invalidation");
+    copy_receipt_fixture(&root);
+    let package_root = root.join("packages/app");
+    let receipt_dir = root.join("receipts");
+    let check = || run_project_check(&package_root, &receipt_dir, &["check"]);
+
+    let first = check();
+    assert_project_check_passed(&first, "initial receipt project check");
+    let replay = check();
+    assert_project_check_passed(&replay, "unchanged receipt project check");
+    assert!(
+        receipt_replayed(&replay),
+        "unchanged project check did not replay its receipt:\n{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+
+    let candidate = package_root.join("run.jet");
+    fs::write(&candidate, "fn run() { print(\"candidate\") }\n")
+        .expect("write higher-priority entry candidate");
+    let candidate_check = check();
+    assert_project_check_passed(&candidate_check, "entry-candidate project check");
+    assert!(
+        !receipt_replayed(&candidate_check),
+        "new entry candidate reused stale receipt:\n{}",
+        String::from_utf8_lossy(&candidate_check.stderr)
+    );
+    fs::remove_file(&candidate).expect("remove higher-priority entry candidate");
+
+    let mutations = [
+        (
+            "workspace",
+            root.join("workspace.jet"),
+            "module workspace {\n    members: [\"packages/app\"]\n}\n",
+        ),
+        (
+            "output",
+            package_root.join("package.jet"),
+            "name: \"receipt-probe\"\nversion: \"0.1.0\"\noutputs: { release_alt: .Executable{ entry: app.launch } }\ndefaults: { run: release_alt }\n",
+        ),
+        ("lock", root.join(".jet/lock"), "workspace-lock-v2\n"),
+        (
+            "generated",
+            package_root.join(".jet/generated/input.jet"),
+            "fn generated_input_v2() {}\n",
+        ),
+    ];
+    for (label, path, replacement) in mutations {
+        let original = fs::read(&path)
+            .unwrap_or_else(|error| panic!("read {label} fixture {}: {error}", path.display()));
+        let mutation_receipt_dir = root.join(format!("receipts-{label}"));
+        let mutation_check =
+            || run_project_check(&package_root, &mutation_receipt_dir, &["check"]);
+
+        let baseline = mutation_check();
+        assert_project_check_passed(&baseline, &format!("baseline {label} project check"));
+        let baseline_replay = mutation_check();
+        assert_project_check_passed(
+            &baseline_replay,
+            &format!("unchanged baseline {label} project check"),
+        );
+        assert!(
+            receipt_replayed(&baseline_replay),
+            "unchanged baseline {label} check did not replay its receipt:\n{}",
+            String::from_utf8_lossy(&baseline_replay.stderr)
+        );
+
+        fs::write(&path, replacement)
+            .unwrap_or_else(|error| panic!("mutate {label} fixture {}: {error}", path.display()));
+        let changed = mutation_check();
+        assert_project_check_passed(&changed, &format!("changed {label} project check"));
+        assert!(
+            !receipt_replayed(&changed),
+            "{label} change reused stale receipt:\n{}",
+            String::from_utf8_lossy(&changed.stderr)
+        );
+
+        fs::write(&path, original)
+            .unwrap_or_else(|error| panic!("restore {label} fixture {}: {error}", path.display()));
+        let _ = fs::remove_dir_all(mutation_receipt_dir);
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn project_check_json_rows_are_versioned_and_warm_stable() {
+    let scratch = scratch_root("json-warm");
+    let receipt_dir = scratch.join("receipts");
+    let dir = fixture("entry_resolution");
+
+    let cold_started = Instant::now();
+    let cold = run_project_check(&dir, &receipt_dir, &["check", "--json"]);
+    let cold_us = cold_started.elapsed().as_micros();
+    let cold_rows = machine_rows(&cold);
+
+    let warm_started = Instant::now();
+    let warm = run_project_check(&dir, &receipt_dir, &["check", "--json"]);
+    let warm_us = warm_started.elapsed().as_micros();
+    let warm_rows = machine_rows(&warm);
+    assert!(
+        receipt_replayed(&warm),
+        "warm project check did not replay its receipt:\n{}",
+        String::from_utf8_lossy(&warm.stderr)
+    );
+
+    assert_eq!(cold_rows, warm_rows, "warm check changed machine proof rows");
+    assert_eq!(cold_rows.len(), 4, "machine output must expose all proof rows");
+    for (name, diagnostic) in [
+        ("entry resolution", "E2389"),
+        ("module graph", "E2390"),
+        ("Core closure", "E2391"),
+        ("tier lowering", "E2392"),
+    ] {
+        let row = cold_rows
+            .iter()
+            .find(|row| json_get(row, "name").and_then(json_str) == Some(name))
+            .unwrap_or_else(|| panic!("machine output omitted {name} row"));
+        assert_eq!(
+            json_get(row, "status").and_then(json_str),
+            Some("proven"),
+            "machine output did not prove {name}"
+        );
+        assert_eq!(
+            json_get(row, "diagnostic").and_then(json_str),
+            Some(diagnostic),
+            "machine output changed diagnostic code for {name}"
+        );
+    }
+    assert!(
+        cold_us > 0 && warm_us > 0,
+        "warm canary must record positive wall-clock cost: cold={cold_us}us warm={warm_us}us"
+    );
+    eprintln!(
+        "project-check warm canary: contract=jet.check/v1 cone=D-DEVR-CONE1 rows={} cold_us={cold_us} warm_us={warm_us} rows_stable=true",
+        cold_rows.len()
+    );
+    let _ = fs::remove_dir_all(scratch);
+}
+

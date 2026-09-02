@@ -760,7 +760,7 @@ pub fn quarantine_invalid_entry(
     expectation: &CacheExpectation,
 ) -> std::io::Result<()> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let expected_id = entry_id(&entry.name, &entry.version, &entry.reference, &entry.out);
+        let expected_id = super::expected_entry_id(entry);
         if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
@@ -776,12 +776,7 @@ pub fn quarantine_invalid_entry(
         {
             return Ok(());
         }
-        let current_expected_id = entry_id(
-            &current.name,
-            &current.version,
-            &current.reference,
-            &current.out,
-        );
+        let current_expected_id = super::expected_entry_id(&current);
         if current.id != current_expected_id {
             return Err(std::io::Error::other("invalid cache record identity"));
         }

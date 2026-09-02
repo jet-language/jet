@@ -23,23 +23,11 @@ fn run() {
 
 fn posix_control() {
     #Unsafe("POSIX process and pipe control for the core.sys surface") {
-        pg :: os.getpgid(0)
-        if pg == {
-            .Ok(v) -> { print(v >= 0) }
-            .Err(_) -> { print(false) }
-        }
+        pg :: os.getpgid(0) ?? -1
+        print(pg >= 0)
 
-        setpg :: os.setpgid(0, 0)
-        if setpg == {
-            .Ok(_) -> { print(true) }
-            .Err(_) -> { print(false) }
-        }
-
-        setpgrp :: os.setpgrp()
-        if setpgrp == {
-            .Ok(_) -> { print(true) }
-            .Err(_) -> { print(false) }
-        }
+        print(os.setpgid(0, 0) ? _ok -> true ! _error -> false)
+        print(os.setpgrp() ? _ok -> true ! _error -> false)
 
         old :: os.umask(18)
         _ :: os.umask(old)
@@ -49,36 +37,22 @@ fn posix_control() {
         print(true)
 
         prio :: os.getpriority(0) ?? 0
-        setprio :: os.setpriority(0, prio)
-        if setprio == {
-            .Ok(_) -> { print(true) }
-            .Err(_) -> { print(false) }
-        }
+        print(os.setpriority(0, prio) ? _ok -> true ! _error -> false)
 
-        killed :: os.kill(os.pid(), 0)
-        if killed == {
-            .Ok(_) -> { print(true) }
-            .Err(_) -> { print(false) }
-        }
+        print(os.kill(os.pid(), 0) ? _ok -> true ! _error -> false)
 
-        piped :: os.pipe()
-        if piped == {
-            .Ok(fds) -> {
-                print(fds.len() == 2)
-                os.close_fd(fds[0])
-                os.close_fd(fds[1])
-            }
-            .Err(_) -> { print(false) }
+        os.pipe() ? fds -> {
+            print(fds.len() == 2)
+            os.close_fd(fds[0])
+            os.close_fd(fds[1])
+        } ! _error -> {
+            print(false)
         }
 
         // Prefer `os.temp_dir` so default `jet run` stays I9-parity without
         // needing `files.temp_dir` host coverage.
         path :: "{os.temp_dir()}/jet-os-fifo-{os.pid()}"
-        fifo :: os.mkfifo(path, 420)
-        if fifo == {
-            .Ok(_) -> { print(true) }
-            .Err(_) -> { print(false) }
-        }
-        _ :: files.remove(path)
+        print(os.mkfifo(path, 420) ? _ok -> true ! _error -> false)
+        files.remove(path).drop("remove temporary FIFO")
     }
 }

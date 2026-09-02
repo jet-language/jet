@@ -79,8 +79,8 @@ pub fn jet_reader_read_u8_fast(r: &mut JetReader) -> Option<u8> {
 #[inline(always)]
 pub fn jet_reader_region_bounds(r: &JetReader, count: i64) -> Option<(usize, usize)> {
     let count = usize::try_from(count).ok()?;
-    let end = r.pos.checked_add(count)?;
-    (end <= r.buf.len()).then_some((r.pos, end))
+    let remaining = r.buf.len().checked_sub(r.pos)?;
+    (count <= remaining).then_some((r.pos, r.pos + count))
 }
 
 #[inline(always)]

@@ -23,7 +23,7 @@ fn run() {
         print(msg)
     }
     // Prove the table survived the "injection": still exactly 2 rows.
-    count_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"}) ?? panic("count failed")
+    count_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if count_opt == .Val(count_row) {
         n_val :: count_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")
@@ -34,7 +34,7 @@ fn run() {
     temporary :: "temporary"
     _ins3 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
     _rolledback :: scoped.rollback()
-    after_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"}) ?? panic("count failed")
+    after_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if after_opt == .Val(after_row) {
         n_val :: after_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")

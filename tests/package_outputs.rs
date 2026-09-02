@@ -124,6 +124,35 @@ fn outputs_block_drives_jet_build_aot() {
 }
 
 #[test]
+fn jet_build_accepts_an_explicit_package_directory() {
+    if !common::have_rustc() {
+        eprintln!(
+            "note: skipping jet_build_accepts_an_explicit_package_directory (need rustc)"
+        );
+        return;
+    }
+    let scratch = common::Scratch::new("build-package-directory");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"directory_build\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\ndefaults: { run: app }\n",
+    )
+    .unwrap();
+    fs::write(scratch.join("run.jet"), "fn run() {}\n").unwrap();
+
+    let build = Command::new(jet_bin())
+        .arg("build")
+        .arg(&scratch.path)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("explicit package directory should build");
+    assert!(
+        build.status.success(),
+        "jet build <directory> failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+}
+
+#[test]
 fn nested_outputs_entry_invokes_leaf_on_every_run_tier() {
     let dir = nested_example_dir();
     assert!(!dir.join("runner.jet").is_file());
@@ -393,8 +422,8 @@ fn nested_output_failures_keep_the_package_diagnostic() {
     run_case("escaping", "use \"../../outside/main\" as app\n", &[]);
 }
 
-/// The negative half of the proof: copy the fixture but drop `outputs:` from
-/// `package.jet`, keeping the same `entry.jet` + `service/module.jet` layout.
+/// The negative half of the proof: copy the fixture's service module but drop
+/// `outputs:` from `package.jet` and do not copy its `entry.jet` carrier.
 /// There is no canonical `run.jet`, so entry resolution must fail. If this
 /// ever starts resolving without `outputs:`, the fixture above would stop
 /// proving anything.
@@ -412,15 +441,13 @@ fn entry_resolution_requires_the_outputs_block() {
     fs::create_dir_all(dir.join("service")).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"outputs_build_demo\"\nversion: \"0.1.0\"\n",
+        "name: \"outputs_build_demo\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
     )
     .unwrap();
-    fs::copy(example_dir().join("entry.jet"), dir.join("entry.jet")).unwrap();
-    fs::copy(
-        example_dir().join("service/module.jet"),
-        dir.join("service/module.jet"),
-    )
-    .unwrap();
+    let module = fs::read_to_string(example_dir().join("service/module.jet"))
+        .unwrap()
+        .replace("pub fn run()", "pub fn service_run()");
+    fs::write(dir.join("service/module.jet"), module).unwrap();
 
     let out = Command::new(jet_bin())
         .arg("run")
@@ -744,7 +771,7 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
 /// The actions declare no capabilities, so this package reaches graph
 /// validation without an `#Impure` gate or an execution grant, and the cycle
 /// is rejected before any action is spawned.
-const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) BuildPlan {
+const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) BuildPlan -> {
     alpha :: b.action("alpha", ["gamma.stamp"], ["alpha.stamp"], ["sh", "-c", "true"], [])
     beta :: b.action("beta", ["alpha.stamp"], ["beta.stamp"], ["sh", "-c", "true"], [])
     gamma :: b.action("gamma", ["beta.stamp"], ["gamma.stamp"], ["sh", "-c", "true"], [])

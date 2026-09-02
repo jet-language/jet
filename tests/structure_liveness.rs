@@ -145,7 +145,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
             .current_dir(repo())
             .env("NO_COLOR", "1")
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
-            .env("JET_CACHE_DIR", cache.join(mode).join("build"))
+            .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .args(args)
             .output()
             .expect("run liveness example tier");

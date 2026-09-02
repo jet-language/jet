@@ -104,16 +104,13 @@ fn progress_return_ty(args: &[TExpr]) -> Type {
         _ => unit_type(),
     }
 }
-/// Imported C functions execute through the hidden bridge, whose call edge
-/// carries Jet's ordinary `Result` failure ABI even though their source
-/// declarations retain the C success type. Keep that carrier in TIR so emit
-/// remains a dumb projection of the already-resolved call shape.
-fn imported_extern_call_type(c_abi: bool, declared: Type) -> Type {
-    if c_abi {
-        jet_foundation::AST::FailureContract::from_return_type(Some(&declared)).effective_type()
-    } else {
-        declared
-    }
+/// Imported foreign functions preserve their source-declared bridge ABI.
+///
+/// C wrappers stop through the runtime boundary for conversion failures; they
+/// do not return the callable's implicit `Result<_, JetErr>` carrier.  A
+/// declared `Result` remains a carrier because it is part of the bridge ABI.
+fn imported_extern_call_type(_c_abi: bool, declared: Type) -> Type {
+    declared
 }
 use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::http_client_static_op;
@@ -2523,17 +2520,21 @@ fn lower_method_call_impl(
         }
     }
     // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
-    // `.Text(s)` / `.Bool(b)` (the gate proved the receiver is `DBValue` and
-    // `method` a `DBValue` variant). Same shape as the `Data` construction above.
+    // `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` (the gate proved the receiver
+    // is `DBValue` and `method` a `DBValue` variant). Same shape as the `Data`
+    // construction above.
     if let Expr::Ident(type_name, _) = receiver {
         if !env.locals.contains_key(type_name)
             && is_db_value_type_name(type_name)
             && is_db_value_variant(method)
         {
             return in_own_frame(|| {
-                let arg = args
-                    .first()
-                    .map(|a| Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone)));
+                let arg = args.first().map(|a| {
+                    Box::new((
+                        lower_owned_expr(&a.expr, cx, env),
+                        a.flags.implicit_clone,
+                    ))
+                });
                 return TExpr {
                     ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
                     kind: TExprKind::DBValueLit {
@@ -3590,10 +3591,16 @@ fn lower_method_call_impl(
                 } else {
                     recv_t
                 };
-                // D-ITERTOOLS1=A: `tir_recv_jet_ty` is None for list literals, so a
-                // chain like `[…].flatten().to_list()` can mis-resolve `to_list` as
-                // SetToList. Prefer the lowered receiver type.
+                // D-ITERTOOLS1=A: `tir_recv_jet_ty` is None for list literals and
+                // fallible String call receivers, so a chain like
+                // `[…].flatten().to_list()` or `text()?.split(",")` can
+                // mis-resolve its builtin from the partial AST type. Prefer the
+                // lowered receiver type.
                 let op = match (&op, method) {
+                    (
+                        TBuiltinOp::IterSplit { .. },
+                        "split",
+                    ) if matches!(&recv_t.ty, Type::String) => TBuiltinOp::Split,
                     (
                         TBuiltinOp::SetToList
                         | TBuiltinOp::SortedSetToList
@@ -4760,10 +4767,20 @@ fn lower_method_call_impl(
         );
         return lower_expr(&operator, cx, env);
     }
-    // D-APPROX1=A: a sketch method (gate shape d8).
-    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
+    // D-APPROX1=A: a sketch method (gate shape d8). Sema normally persists the
+    // nominal receiver in `recv_type`; comptime fragments can retain the same
+    // concrete receiver only in the environment. Derive that name from the
+    // checked receiver type as the fallback so all engines select one sketch
+    // operation rather than the generic method/math fallback.
+    let sketch = recv_type.clone().or_else(|| {
+        let Type::Named(name) = tir_recv_jet_ty(receiver, env)? else {
+            return None;
+        };
+        is_sketch_type(Some(name.as_str())).then_some(name)
+    });
+    if is_sketch_type(sketch.as_deref()) && is_sketch_method_name(sketch.as_deref(), method) {
         return in_own_frame(|| {
-            let sketch = recv_type.as_deref().unwrap_or("").to_string();
+            let sketch = sketch.as_deref().unwrap_or("").to_string();
             let recv_t = lower_expr(receiver, cx, env);
             let result_ty = match (sketch.as_str(), method) {
                 ("HyperLogLog", "add")

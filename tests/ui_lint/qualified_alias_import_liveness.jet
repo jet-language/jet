@@ -1,7 +1,12 @@
 use core.compute.solve as solve
 use core.files as files
+use core.http.client as http_client
+use core.http.client as unused_http_client
 
 fn run() {
+    response :: http_client.get("https://example.com") ?? panic("get")
+    print("status={response.status()}")
+
     solver := solve.Solver.new(42)
     wins := 0
     loop key in 1..3 {

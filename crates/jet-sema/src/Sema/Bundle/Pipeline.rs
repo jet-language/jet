@@ -634,6 +634,7 @@ fn check_bundle_opts_for_output_inner(
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
                 exact_int_reachable: std::cell::Cell::new(false),
+                diverging_functions: HashSet::new(),
                 funcs: HashMap::new(),
                 registry: builtin_type_registry(),
                 consts: HashMap::new(),
@@ -2376,6 +2377,11 @@ fn check_bundle_opts_for_output_inner(
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
         state.items = module.items.clone();
         state.fact_registry = final_fact_registry.clone();
+    }
+    let diverging_functions = super::Validation::collect_diverging_functions(&states);
+    super::Validation::project_divergence_facts(bundle, &diverging_functions);
+    for state in &mut states {
+        state.diverging_functions = diverging_functions.clone();
     }
 
     complete_bundle_check(

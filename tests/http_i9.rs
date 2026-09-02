@@ -1101,12 +1101,11 @@ fn hostile_chunked_body_deadline_ends_request_on_both_dev_tiers() {
                 r#"
 use core.http.server as server
 use core.net as net
-use core.tasks as tasks
 
 fn run() !(HTTPError | NetError | TaskFailure) {{
     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
     mux :: server.mux()
-    mux.post("/", (req: HTTPRequest) -> {{
+    mux.post("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {{
         body :: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     }})

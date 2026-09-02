@@ -1803,6 +1803,19 @@ pub(crate) fn int_literal_spelling(src: &str, span: Span, n: i64, raw: Option<&s
     }
 }
 
+/// S34/S67: preserve a source float's exponent, radix-independent digit
+/// separators, and trailing `.0`. Sema-created Float nodes have no raw
+/// spelling, so those continue through the canonical numeric formatter.
+pub(crate) fn float_literal_spelling(
+    _src: &str,
+    _span: Span,
+    value: f64,
+    raw: Option<&str>,
+) -> String {
+    raw.map(str::to_owned)
+        .unwrap_or_else(|| fmt_float(value))
+}
+
 fn fmt_float(v: f64) -> String {
     if v.fract() == 0.0 && v.is_finite() {
         format!("{:.1}", v)

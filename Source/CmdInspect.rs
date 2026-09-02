@@ -28,6 +28,7 @@ pub(crate) struct CheckProjection {
 }
 
 const CHECK_RESULT_SCHEMA_VERSION: u32 = 1;
+const CHECK_RESULT_CONTRACT: &str = "jet.check/v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CheckScope {
@@ -977,6 +978,11 @@ fn push_proof_row(
     rows.push(row);
 }
 
+/// Emit the versioned machine contract for `jet check --json`.
+///
+/// `contract` identifies the result shape and `rows` contains one deterministic
+/// row per selected output and proof class. `elapsed_ms` measures the complete
+/// check projection, including the proof rows.
 pub(crate) fn check_result_json(check: &CheckResult) -> String {
     let rows = check
         .proof_rows
@@ -994,7 +1000,8 @@ pub(crate) fn check_result_json(check: &CheckResult) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"status\":\"passed\",\"schema_version\":{},\"scope\":\"{}\",\"elapsed_ms\":{},\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}},\"proof\":[{}]}}",
+        "{{\"status\":\"passed\",\"contract\":\"{}\",\"schema_version\":{},\"scope\":\"{}\",\"elapsed_ms\":{},\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}},\"rows\":[{}]}}",
+        CHECK_RESULT_CONTRACT,
         CHECK_RESULT_SCHEMA_VERSION,
         scope_name(check.scope),
         check.elapsed_ms,

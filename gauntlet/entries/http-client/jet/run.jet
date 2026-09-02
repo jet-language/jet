@@ -1,24 +1,33 @@
-use core.[encoding.json, http.client]
+use core.encoding.json as json
+use core.http.client as http_client
 
-struct Item { id: Int, name: String, qty: Int }
-struct Listing { items: [Item] }
+struct Item {
+    id: Int
+    name: String
+    qty: Int
+}
+
+struct Listing {
+    items: [Item]
+}
 
 #CLI
 struct Args {
     base: String
 }
 
-fn run(args: Args) !(HTTPError | [FieldError]) -> {
+fn run(args: Args) !(HTTPError | [FieldError]) {
     base :: args.base
-    listing :: json.decode<Listing>(client.get("{base}/items").body().text(1048576))
+    listing_response :: http_client.get("{base}/items") ?? panic("GET failed")
+    listing :: json.decode<Listing>(listing_response.text()) ?? panic("decode failed")
     print("items {listing.items.len()}")
 
     loop id in [2, 5, 99] {
-        response :: client.get("{base}/items/{id}")
+        response :: http_client.get("{base}/items/{id}") ?? panic("GET failed")
         if {
             response.status() == 404 -> print("item {id} missing")
             else -> {
-                item :: json.decode<Item>(response.body().text(1048576))
+                item :: json.decode<Item>(response.text()) ?? panic("decode failed")
                 print("item {item.id} {item.name} qty={item.qty}")
             }
         }

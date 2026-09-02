@@ -644,6 +644,13 @@ fn lower_spawn_function(
 }
 
 fn block_has_valued_return(stmts: &[TStmt]) -> bool {
+    if matches!(
+        stmts.last(),
+        Some(TStmt::ExprStmt(expr))
+            if !matches!(&expr.ty, Type::Named(name) if name == "Unit")
+    ) {
+        return true;
+    }
     let mut work = TirWorklist::from_reversed(stmts.iter());
     while let Some(stmt) = work.pop() {
         match stmt {
@@ -675,6 +682,14 @@ fn block_has_valued_return(stmts: &[TStmt]) -> bool {
         }
     }
     false
+}
+
+fn split_callable_block_tail(stmts: &[TStmt]) -> (&[TStmt], Option<&TExpr>) {
+    match stmts.split_last() {
+        Some((TStmt::ExprStmt(expr), prefix))
+        | Some((TStmt::Return(Some(expr)), prefix)) => (prefix, Some(expr)),
+        _ => (stmts, None),
+    }
 }
 
 pub(crate) fn lower_callable_lambda(
@@ -1413,21 +1428,39 @@ fn lower_callable_lambda_with_env(
                 }
             }
             TLambdaBody::Block(stmts) => {
-                lctx.lower_stmts(stmts)?;
+                let (prefix, tail) = split_callable_block_tail(stmts);
+                lctx.lower_stmts(prefix)?;
                 if !lctx.dead {
-                    if lam.ret.is_some() {
+                    if let Some(tail) = tail {
+                        let value = lctx.lower_expr(tail)?;
+                        if lam.ret.is_some() {
+                            lctx.emit_lexical_exit(Some(value), false, lctx.shield_depth)?;
+                        } else {
+                            lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
+                        }
+                    } else if lam.ret.is_some() {
                         return Err("jit callable block missing return".to_string());
+                    } else {
+                        lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                     }
-                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
             TLambdaBody::SharedBlock(stmts) => {
-                lctx.lower_stmts(&stmts[..])?;
+                let (prefix, tail) = split_callable_block_tail(&stmts[..]);
+                lctx.lower_stmts(prefix)?;
                 if !lctx.dead {
-                    if lam.ret.is_some() {
+                    if let Some(tail) = tail {
+                        let value = lctx.lower_expr(tail)?;
+                        if lam.ret.is_some() {
+                            lctx.emit_lexical_exit(Some(value), false, lctx.shield_depth)?;
+                        } else {
+                            lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
+                        }
+                    } else if lam.ret.is_some() {
                         return Err("jit callable block missing return".to_string());
+                    } else {
+                        lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                     }
-                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
         }

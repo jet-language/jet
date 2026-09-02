@@ -20,6 +20,8 @@ enum NetHttpHandle {
     TLSClientIdentity(JetTLSClientIdentity),
     TLSStream(Arc<Mutex<JetTLSStream>>),
     SocketAddr(JetSocketAddr),
+    IPAddr(JetIpAddr),
+    DNSSrv(JetDNSSrv),
     UdpSocket(Arc<JetUDPSocket>),
     NetReady(Arc<JetNetReady>),
     UDPPacket(JetUDPPacket),
@@ -31,6 +33,7 @@ enum NetHttpHandle {
     HTTPRequest(JetHTTPRequest),
     HTTPResponse(JetHTTPResponse),
     HTTPBody(JetHTTPBody),
+    HTTPBodyChunks(JetHTTPBodyChunks),
     HTTPHeaders(JetHTTPHeaders),
     HTTPMethod(JetHTTPMethod),
     HTTPStatus(JetHTTPStatus),
@@ -87,6 +90,14 @@ fn with_handle<R>(handle: i64, f: impl FnOnce(&NetHttpHandle) -> Option<R>) -> O
     let v = lock_handles();
     let idx = handle.saturating_sub(1) as usize;
     v.get(idx).and_then(|s| s.as_ref()).and_then(f)
+}
+fn with_handle_mut<R>(
+    handle: i64,
+    f: impl FnOnce(&mut NetHttpHandle) -> Option<R>,
+) -> Option<R> {
+    let mut v = lock_handles();
+    let idx = handle.saturating_sub(1) as usize;
+    v.get_mut(idx).and_then(|s| s.as_mut()).and_then(f)
 }
 
 fn take_handle(handle: i64) -> Option<NetHttpHandle> {
@@ -421,7 +432,7 @@ fn marshal_net_error(error: JetNetError) -> (i64, CtValue) {
     (packed, value)
 }
 
-fn net_error_value(error: JetNetError) -> CtValue {
+pub(crate) fn net_error_value(error: JetNetError) -> CtValue {
     marshal_net_error(error).1
 }
 
@@ -639,6 +650,10 @@ fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
     })
 }
 
+fn wrap_bound_http_handler(callable: i64) -> Option<JetHTTPHandler> {
+    resident_http_callable(callable).map(|_| wrap_http_handler(callable))
+}
+
 fn wrap_http_zero_handler(callable: i64) -> JetHTTPHandler {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
         return invalid_http_handler();
@@ -736,6 +751,141 @@ fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
         Err(e) => net_err(e),
     }
 }
+fn jet_jit_net_tcp_stream_local_addr(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp local address", "TcpStream");
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_local_addr(&guard) {
+        Ok(address) => result_ok_handle(alloc_string(address)),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_stream_peer_addr(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp peer address", "TcpStream");
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_peer_addr(&guard) {
+        Ok(address) => result_ok_handle(alloc_string(address)),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_stream_local_socket_addr(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp local address", "TcpStream");
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_local_socket_addr(&guard) {
+        Ok(address) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(address))),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_stream_peer_socket_addr(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp peer address", "TcpStream");
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_peer_socket_addr(&guard) {
+        Ok(address) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(address))),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_set_read_timeout(stream: i64, ms: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("set_read_timeout", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_set_read_timeout(&mut guard, ms))
+}
+
+fn jet_jit_net_set_write_timeout(stream: i64, ms: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("set_write_timeout", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_set_write_timeout(&mut guard, ms))
+}
+
+fn jet_jit_net_dns_aaaa(name: i64, ms: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_aaaa(&name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_aaaa_at(server: i64, name: i64, ms: i64) -> i64 {
+    let server = clone_string(server);
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_aaaa_at(&server, &name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_srv(name: i64, ms: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_srv(&name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::DNSSrv).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_srv_at(server: i64, name: i64, ms: i64) -> i64 {
+    let server = clone_string(server);
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_srv_at(&server, &name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::DNSSrv).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_srv_target(srv: i64) -> i64 {
+    with_handle(srv, |handle| match handle {
+        NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_target(srv)),
+        _ => None,
+    })
+    .map(alloc_string)
+    .unwrap_or_else(|| alloc_string(String::new()))
+}
+
+fn jet_jit_net_dns_srv_port(srv: i64) -> i64 {
+    with_handle(srv, |handle| match handle {
+        NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_port(srv)),
+        _ => None,
+    })
+    .unwrap_or(0)
+}
+
+fn jet_jit_net_dns_srv_priority(srv: i64) -> i64 {
+    with_handle(srv, |handle| match handle {
+        NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_priority(srv)),
+        _ => None,
+    })
+    .unwrap_or(0)
+}
+
+fn jet_jit_net_dns_srv_weight(srv: i64) -> i64 {
+    with_handle(srv, |handle| match handle {
+        NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_weight(srv)),
+        _ => None,
+    })
+    .unwrap_or(0)
+}
+
 
 fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
@@ -810,6 +960,23 @@ fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
         Err(e) => net_err(e),
     }
 }
+fn jet_jit_net_dns_txt(name: i64, ms: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_txt(&name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_strings(rows)),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_txt_at(server: i64, name: i64, ms: i64) -> i64 {
+    let server = clone_string(server);
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_txt_at(&server, &name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_strings(rows)),
+        Err(error) => net_err(error),
+    }
+}
+
 
 fn jet_jit_net_getservbyname(name: i64) -> i64 {
     let name = clone_string(name);
@@ -879,6 +1046,23 @@ fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -> i64 {
         Err(e) => net_err(e),
     }
 }
+fn jet_jit_net_udp_send_to(socket: i64, data: i64, addr: i64) -> i64 {
+    let data = clone_string(data);
+    let Some(addr) = with_handle(addr, |h| match h {
+        NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+        _ => None,
+    }) else {
+        return net_invalid("udp_send", "SocketAddr");
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return net_invalid("udp_send", "UdpSocket");
+    };
+    match jet_net_udp_send_to(&socket, &data, &addr) {
+        Ok(n) => result_ok(n as u64),
+        Err(e) => net_err(e),
+    }
+}
+
 
 fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
@@ -927,6 +1111,15 @@ fn jet_jit_net_udp_receive_deadline(
         Err(e) => net_err(e),
     }
 }
+fn jet_jit_net_udp_packet_data(packet: i64) -> i64 {
+    let data = with_handle(packet, |h| match h {
+        NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_data(p)),
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(data)
+}
+
 
 fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
     match with_handle(packet, |h| match h {
@@ -955,6 +1148,16 @@ fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
         .unwrap_or(false),
     )
 }
+fn jet_jit_net_udp_packet_addr(packet: i64) -> i64 {
+    with_handle(packet, |handle| match handle {
+        NetHttpHandle::UDPPacket(packet) => {
+            Some(push_handle(NetHttpHandle::SocketAddr(jet_net_udp_packet_addr(packet))))
+        }
+        _ => None,
+    })
+    .unwrap_or(0)
+}
+
 
 #[cfg(unix)]
 fn jet_jit_net_unix_listen(path: i64) -> i64 {
@@ -1471,6 +1674,10 @@ fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i6
         Err(error) => io_err(error),
     }
 }
+fn jet_jit_net_tls_read(stream: i64) -> i64 {
+    jet_jit_tls_read_text(stream, 8192)
+}
+
 
 fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
@@ -1636,15 +1843,24 @@ fn jet_jit_http_mux_new() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
 }
 
-fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
+fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, callable: i64) -> i64 {
     let method = clone_string(method);
     let pattern = clone_string(pattern);
-    let handler = wrap_http_handler(fn_ptr);
+    let handler = with_handle(callable, |handle| match handle {
+        NetHttpHandle::HTTPHandler(handler) => Some(Arc::clone(handler)),
+        _ => None,
+    })
+    .or_else(|| wrap_bound_http_handler(callable));
+    let Some(handler) = handler else {
+        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid resident HTTP handler"));
+        return 0;
+    };
     if let Some(mux) = http_mux(mux) {
         jet_http_mux_add_handler(&mux, &method, &pattern, handler);
     }
     0
 }
+
 
 fn jet_jit_http_mux_add_zero(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
     let method = clone_string(method);
@@ -1661,6 +1877,15 @@ fn jet_jit_http_response(status: i64, body: i64) -> i64 {
     push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
         status, &body,
     )))
+}
+
+fn jet_jit_http_server_response_header(response: i64, name: i64, value: i64) -> i64 {
+    let name = clone_string(name);
+    let value = clone_string(value);
+    match runtime_http_server_response_header(response, name, value) {
+        Ok(response) => response,
+        Err(_) => 0,
+    }
 }
 
 fn jet_jit_http_req_body(req: i64) -> i64 {
@@ -1754,6 +1979,33 @@ fn jet_jit_http_body_bytes(body: i64, limit: i64) -> i64 {
         Some(Ok(bytes)) => result_ok_handle(alloc_bytes(&bytes)),
         Some(Err(e)) => http_err(e),
         None => result_err("invalid HTTPBody".into()),
+    }
+}
+fn http_option_bits(value: Option<i64>) -> u64 {
+    value
+        .map(|value| (value as u64).wrapping_add(1))
+        .unwrap_or(0)
+}
+
+fn jet_jit_http_body_chunks(body: i64, max_chunk: i64) -> i64 {
+    match with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_chunks(body, max_chunk)),
+        _ => None,
+    }) {
+        Some(chunks) => push_handle(NetHttpHandle::HTTPBodyChunks(chunks)),
+        None => 0,
+    }
+}
+
+fn jet_jit_http_body_chunks_next(chunks: i64) -> i64 {
+    match with_handle_mut(chunks, |handle| match handle {
+        NetHttpHandle::HTTPBodyChunks(chunks) => Some(chunks.next()),
+        _ => None,
+    }) {
+        Some(Some(Ok(bytes))) => result_ok(http_option_bits(Some(alloc_bytes(&bytes)))),
+        Some(Some(Err(error))) => http_err(error),
+        Some(None) => result_ok(0),
+        None => result_err("invalid HTTPBodyChunks".into()),
     }
 }
 
@@ -2303,6 +2555,20 @@ fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
         Err(e) => result_err(e),
     }
 }
+fn jet_jit_http_serve_once(addr: i64, mux: i64) -> i64 {
+    match runtime_http_serve_once(clone_string(addr), mux) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(error),
+    }
+}
+
+
+fn jet_jit_http_serve(addr: i64, mux: i64) -> i64 {
+    match runtime_http_serve(clone_string(addr), mux) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(error),
+    }
+}
 
 fn jet_jit_ws_upgrade(req: i64) -> i64 {
     match with_handle(req, |h| match h {
@@ -2386,6 +2652,17 @@ fn jet_jit_ws_message_text(msg: i64) -> i64 {
 type HTTPClosureFn = unsafe extern "C" fn(i64, i64) -> i64;
 type HTTPMiddlewareFn = unsafe extern "C" fn(i64) -> i64;
 type HTTPMiddlewareWithEnvFn = unsafe extern "C" fn(i64, i64) -> i64;
+
+fn list_of_handles(rows: Vec<NetHttpHandle>) -> i64 {
+    let handles = rows.into_iter().map(push_handle).collect::<Vec<_>>();
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for handle in handles {
+            let _ = rt.heap.list_push_int(list, handle);
+        }
+        list
+    })
+}
 
 fn list_of_strings(rows: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -2625,6 +2902,15 @@ fn jet_jit_http_static_file_range(req: i64, path: i64, mime: i64) -> i64 {
     }
 }
 
+fn jet_jit_http_static_file(path: i64, mime: i64) -> i64 {
+    let path = clone_string(path);
+    let mime = clone_string(mime);
+    match jet_http_srv_static_file(&path, &mime) {
+        Ok(response) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(response))),
+        Err(error) => result_err(error),
+    }
+}
+
 fn jet_jit_http_client_request_new(method: i64, url: i64) -> i64 {
     let method = clone_string(method);
     let url = clone_string(url);
@@ -2751,6 +3037,15 @@ fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
         None => list_of_strings(Vec::new()),
     }
 }
+fn jet_jit_http_server_access_log(req: i64, status: i64) -> i64 {
+    let text = with_handle(req, |h| match h {
+        NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_access_log(r, status)),
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(text)
+}
+
 
 host_fns! {
     struct NetHttpHostFns;
@@ -2801,6 +3096,20 @@ host_fns! {
     tcp_listen_str: "jet_jit_net_tcp_listen_str" => jet_jit_net_tcp_listen_str: sig1;
     tcp_listen_addr: "jet_jit_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
     tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
+    tcp_stream_local_addr: "jet_jit_net_tcp_stream_local_addr" => jet_jit_net_tcp_stream_local_addr: sig1;
+    tcp_stream_peer_addr: "jet_jit_net_tcp_stream_peer_addr" => jet_jit_net_tcp_stream_peer_addr: sig1;
+    tcp_stream_local_socket_addr: "jet_jit_net_tcp_stream_local_socket_addr" => jet_jit_net_tcp_stream_local_socket_addr: sig1;
+    tcp_stream_peer_socket_addr: "jet_jit_net_tcp_stream_peer_socket_addr" => jet_jit_net_tcp_stream_peer_socket_addr: sig1;
+    set_read_timeout: "jet_jit_net_set_read_timeout" => jet_jit_net_set_read_timeout: sig2;
+    set_write_timeout: "jet_jit_net_set_write_timeout" => jet_jit_net_set_write_timeout: sig2;
+    dns_aaaa: "jet_jit_net_dns_aaaa" => jet_jit_net_dns_aaaa: sig2;
+    dns_aaaa_at: "jet_jit_net_dns_aaaa_at" => jet_jit_net_dns_aaaa_at: sig3;
+    dns_srv: "jet_jit_net_dns_srv" => jet_jit_net_dns_srv: sig2;
+    dns_srv_at: "jet_jit_net_dns_srv_at" => jet_jit_net_dns_srv_at: sig3;
+    dns_srv_target: "jet_jit_net_dns_srv_target" => jet_jit_net_dns_srv_target: sig1;
+    dns_srv_port: "jet_jit_net_dns_srv_port" => jet_jit_net_dns_srv_port: sig1;
+    dns_srv_priority: "jet_jit_net_dns_srv_priority" => jet_jit_net_dns_srv_priority: sig1;
+    dns_srv_weight: "jet_jit_net_dns_srv_weight" => jet_jit_net_dns_srv_weight: sig1;
     listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr2" => jet_jit_net_listener_local_socket_addr: sig1;
     set_timeout: "jet_jit_net_set_timeout" => jet_jit_net_set_timeout: sig2;
     nodelay: "jet_jit_net_nodelay" => jet_jit_net_nodelay: sig1;
@@ -2810,6 +3119,8 @@ host_fns! {
     socket_type: "jet_jit_net_socket_type" => jet_jit_net_socket_type: sig1;
     sendfile: "jet_jit_net_sendfile" => jet_jit_net_sendfile: sig2;
     dns_ptr: "jet_jit_net_dns_ptr" => jet_jit_net_dns_ptr: sig2;
+    dns_txt: "jet_jit_net_dns_txt" => jet_jit_net_dns_txt: sig2;
+    dns_txt_at: "jet_jit_net_dns_txt_at" => jet_jit_net_dns_txt_at: sig3;
     getservbyname: "jet_jit_net_getservbyname" => jet_jit_net_getservbyname: sig1;
     getservbyport: "jet_jit_net_getservbyport" => jet_jit_net_getservbyport: sig1;
     tcp_reply: "jet_jit_net_tcp_reply" => jet_jit_net_tcp_reply: sig3;
@@ -2817,12 +3128,15 @@ host_fns! {
     udp_local_addr: "jet_jit_net_udp_local_addr" => jet_jit_net_udp_local_addr: sig1;
     udp_set_timeout: "jet_jit_net_udp_set_timeout" => jet_jit_net_udp_set_timeout: sig2;
     udp_send_bytes_to: "jet_jit_net_udp_send_bytes_to" => jet_jit_net_udp_send_bytes_to: sig3;
+    udp_send_to: "jet_jit_net_udp_send_to" => jet_jit_net_udp_send_to: sig3;
     udp_send_bytes_to_deadline: "jet_jit_net_udp_send_bytes_to_deadline" => jet_jit_net_udp_send_bytes_to_deadline: sig4;
     udp_receive: "jet_jit_net_udp_receive" => jet_jit_net_udp_receive: sig2;
     udp_receive_deadline: "jet_jit_net_udp_receive_deadline" => jet_jit_net_udp_receive_deadline: sig3;
+    udp_packet_data: "jet_jit_net_udp_packet_data" => jet_jit_net_udp_packet_data: sig1;
     udp_packet_bytes: "jet_jit_net_udp_packet_bytes" => jet_jit_net_udp_packet_bytes: sig1;
     udp_packet_original_len: "jet_jit_net_udp_packet_original_len" => jet_jit_net_udp_packet_original_len: sig1;
     udp_packet_truncated: "jet_jit_net_udp_packet_truncated" => jet_jit_net_udp_packet_truncated: sig1;
+    udp_packet_addr: "jet_jit_net_udp_packet_addr" => jet_jit_net_udp_packet_addr: sig1;
     unix_listen: "jet_jit_net_unix_listen" => jet_jit_net_unix_listen: sig1;
     unix_accept: "jet_jit_net_unix_accept" => jet_jit_net_unix_accept: sig1;
     unix_connect: "jet_jit_net_unix_connect" => jet_jit_net_unix_connect: sig1;
@@ -2850,6 +3164,7 @@ host_fns! {
     tls_read_bytes: "jet_jit_tls_read_bytes" => jet_jit_tls_read_bytes: sig2;
     tls_read_bytes_deadline: "jet_jit_tls_read_bytes_deadline" => jet_jit_tls_read_bytes_deadline: sig3;
     tls_read_text: "jet_jit_tls_read_text" => jet_jit_tls_read_text: sig2;
+    tls_read: "jet_jit_net_tls_read" => jet_jit_net_tls_read: sig1;
     tls_write_bytes: "jet_jit_tls_write_bytes" => jet_jit_tls_write_bytes: sig2;
     tls_write_all_bytes: "jet_jit_tls_write_all_bytes" => jet_jit_tls_write_all_bytes: sig2;
     tls_write_all_bytes_deadline: "jet_jit_tls_write_all_bytes_deadline" => jet_jit_tls_write_all_bytes_deadline: sig3;
@@ -2866,6 +3181,8 @@ host_fns! {
     http_mux_add: "jet_jit_http_mux_add" => jet_jit_http_mux_add: sig4;
     http_mux_add_zero: "jet_jit_http_mux_add_zero" => jet_jit_http_mux_add_zero: sig4;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
+    http_server_response_header: "jet_jit_http_server_response_header" => jet_jit_http_server_response_header: sig3;
+    http_server_access_log: "jet_jit_http_server_access_log" => jet_jit_http_server_access_log: sig2;
     http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
     http_req_method: "jet_jit_http_req_method" => jet_jit_http_req_method: sig1;
     http_req_path: "jet_jit_http_req_path" => jet_jit_http_req_path: sig1;
@@ -2875,6 +3192,8 @@ host_fns! {
     http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
     http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
+    http_body_chunks: "jet_jit_http_body_chunks" => jet_jit_http_body_chunks: sig2;
+    http_body_chunks_next: "jet_jit_http_body_chunks_next" => jet_jit_http_body_chunks_next: sig1;
     http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;
     http_body_copy_to: "jet_jit_http_body_copy_to" => jet_jit_http_body_copy_to: sig3;
     http_nominal_static: "jet_jit_http_nominal_static" => jet_jit_http_nominal_static: sig7;
@@ -2887,7 +3206,9 @@ host_fns! {
     http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
     http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
     http_client_resp_body: "jet_jit_http_client_resp_body" => jet_jit_http_client_resp_body: sig1;
+    http_serve: "jet_jit_http_serve" => jet_jit_http_serve: sig2;
     http_resp_text: "jet_jit_http_resp_text" => jet_jit_http_resp_text: sig1;
+    http_serve_once: "jet_jit_http_serve_once" => jet_jit_http_serve_once: sig2;
     http_resp_text_with_limit: "jet_jit_http_resp_text_with_limit" => jet_jit_http_resp_text_with_limit: sig2;
     http_server_bind: "jet_jit_http_server_bind" => jet_jit_http_server_bind: sig2;
     http_server_local_addr: "jet_jit_http_server_local_addr" => jet_jit_http_server_local_addr: sig1;
@@ -2907,6 +3228,7 @@ host_fns! {
     http_req_body_len: "jet_jit_http_req_body_len" => jet_jit_http_req_body_len: sig1;
     http_req_under_limit: "jet_jit_http_req_under_limit" => jet_jit_http_req_under_limit: sig2;
     http_sse: "jet_jit_http_sse" => jet_jit_http_sse: sig1;
+    http_static_file: "jet_jit_http_static_file" => jet_jit_http_static_file: sig2;
     http_static_file_range: "jet_jit_http_static_file_range" => jet_jit_http_static_file_range: sig3;
     http_client_request_new: "jet_jit_http_client_request_new" => jet_jit_http_client_request_new: sig2;
     http_client_request_body: "jet_jit_http_client_request_body" => jet_jit_http_client_request_body: sig2;
@@ -3183,6 +3505,33 @@ fn net_ct_handle(type_name: &str, handle: i64) -> CtValue {
         fields: fields.unwrap_or_else(|| vec![("handle".to_string(), CtValue::Int(handle))]),
     }
 }
+fn net_ct_handle_list(type_name: &str, handles: Vec<i64>) -> CtValue {
+    CtValue::List(
+        handles
+            .into_iter()
+            .map(|handle| net_ct_handle(type_name, handle))
+            .collect(),
+    )
+}
+
+fn net_ct_ip_list(rows: Vec<JetIpAddr>) -> CtValue {
+    net_ct_handle_list(
+        "IPAddr",
+        rows.into_iter()
+            .map(|row| push_handle(NetHttpHandle::IPAddr(row)))
+            .collect(),
+    )
+}
+
+fn net_ct_dns_srv_list(rows: Vec<JetDNSSrv>) -> CtValue {
+    net_ct_handle_list(
+        "DNSSrv",
+        rows.into_iter()
+            .map(|row| push_handle(NetHttpHandle::DNSSrv(row)))
+            .collect(),
+    )
+}
+
 
 pub(crate) fn runtime_net_socket_addr(host: String, port: i64) -> CtValue {
     match jet_net_socket_addr(&host, port) {
@@ -3863,6 +4212,29 @@ pub(crate) fn runtime_unix_stream_read_io(stream: i64, limit: i64) -> CtValue {
         Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
     }
 }
+#[cfg(unix)]
+pub(crate) fn runtime_unix_close(stream: i64) -> CtValue {
+    let Some(stream) = unix_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "unix close",
+            "UnixStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_unix_close(&mut stream) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn runtime_unix_close(_stream: i64) -> CtValue {
+    CtValue::failed(Box::new(net_error_value(net_invalid_error(
+        "unix close",
+        "UnixStream",
+    ))))
+}
+
 
 pub(crate) fn runtime_tls_stream_read_io(stream: i64, limit: i64) -> CtValue {
     let Some(stream) = tls_stream(stream) else {
@@ -4053,6 +4425,27 @@ pub(crate) fn runtime_tcp_stream_close(stream: i64) -> CtValue {
         Err(error) => CtValue::failed(Box::new(net_error_value(error))),
     }
 }
+pub(crate) fn runtime_tcp_reply(stream: i64, status: String, body: String) -> CtValue {
+    let Some(NetHttpHandle::TcpStream(stream)) = take_handle(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp reply",
+            "TcpStream",
+        ))));
+    };
+    let Ok(stream) = Arc::try_unwrap(stream)
+        .map(|mutex| mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
+    else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp reply",
+            "TcpStream",
+        ))));
+    };
+    match jet_net_tcp_reply(stream, &status, &body) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
 
 pub(crate) fn runtime_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> CtValue {
     let Some(interest) = net_ready_interest(interest) else {
@@ -4105,6 +4498,126 @@ pub(crate) fn runtime_tcp_stream_peer_addr(stream: i64) -> CtValue {
         Err(error) => CtValue::failed(Box::new(net_error_value(error))),
     }
 }
+pub(crate) fn runtime_tcp_stream_local_socket_addr(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp local address",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_local_socket_addr(&stream) {
+        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(address)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_peer_socket_addr(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp peer address",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_peer_socket_addr(&stream) {
+        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(address)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_dns_aaaa(name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_aaaa(&name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(net_ct_ip_list(rows))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_dns_aaaa_at(server: String, name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_aaaa_at(&server, &name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(net_ct_ip_list(rows))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+pub(crate) fn runtime_net_dns_txt(name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_txt(&name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(CtValue::List(
+            rows.into_iter().map(CtValue::Str).collect(),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_dns_txt_at(server: String, name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_txt_at(&server, &name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(CtValue::List(
+            rows.into_iter().map(CtValue::Str).collect(),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+
+pub(crate) fn runtime_net_dns_srv(name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_srv(&name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(net_ct_dns_srv_list(rows))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_dns_srv_at(server: String, name: String, ms: i64) -> CtValue {
+    match jet_net_dns_result(jet_net_dns_srv_at(&server, &name, ms), &name) {
+        Ok(rows) => CtValue::Present(Box::new(net_ct_dns_srv_list(rows))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_dns_srv_target(srv: i64) -> CtValue {
+    CtValue::Str(
+        with_handle(srv, |handle| match handle {
+            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_target(srv)),
+            _ => None,
+        })
+        .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn runtime_net_dns_srv_port(srv: i64) -> CtValue {
+    CtValue::Int(
+        with_handle(srv, |handle| match handle {
+            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_port(srv)),
+            _ => None,
+        })
+        .unwrap_or(0),
+    )
+}
+
+pub(crate) fn runtime_net_dns_srv_priority(srv: i64) -> CtValue {
+    CtValue::Int(
+        with_handle(srv, |handle| match handle {
+            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_priority(srv)),
+            _ => None,
+        })
+        .unwrap_or(0),
+    )
+}
+
+pub(crate) fn runtime_net_dns_srv_weight(srv: i64) -> CtValue {
+    CtValue::Int(
+        with_handle(srv, |handle| match handle {
+            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_weight(srv)),
+            _ => None,
+        })
+        .unwrap_or(0),
+    )
+}
+
 
 pub(crate) fn runtime_udp_bind(address: String) -> CtValue {
     match jet_net_udp_bind(&address) {
@@ -4769,6 +5282,27 @@ pub(crate) fn runtime_http_body_bytes(
     })
     .ok_or_else(|| "invalid HTTPBody".to_string())
 }
+pub(crate) fn runtime_http_body_chunks(body: i64, max_chunk: i64) -> Result<i64, String> {
+    let chunks = with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_chunks(body, max_chunk)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBody".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPBodyChunks(chunks)))
+}
+
+pub(crate) fn runtime_http_body_chunks_next(
+    chunks: i64,
+) -> Result<Option<Result<Vec<u8>, CtValue>>, String> {
+    with_handle_mut(chunks, |handle| match handle {
+        NetHttpHandle::HTTPBodyChunks(chunks) => {
+            Some(chunks.next().map(|item| item.map_err(http_error_value)))
+        }
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBodyChunks".to_string())
+}
+
 
 pub(crate) fn runtime_http_body_text(
     body: i64,

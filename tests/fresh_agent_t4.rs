@@ -89,7 +89,7 @@ fn run_tier(scratch: &Scratch, command_args: &[&str]) -> Output {
         .args(command_args)
         .args(["run.jet", "--", "report.tsv"])
         .current_dir(&scratch.path)
-        .env("JET_CACHE_DIR", scratch.path.join("cache"))
+        .env("JET_STORE_DIR", scratch.path.join("cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run T4 Jet fixture")

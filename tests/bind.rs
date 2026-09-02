@@ -179,7 +179,7 @@ fn assert_generated_project(
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--trace-tiers", "main.jet"])
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("run-cache"))
+        .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -211,7 +211,7 @@ fn assert_generated_project(
     let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--trace-tiers", "--interpret", "main.jet"])
         .current_dir(&dir)
-        .env("JET_CACHE_DIR", dir.join("interpreter-cache"))
+        .env("JET_STORE_DIR", dir.join("interpreter-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

@@ -13,10 +13,10 @@ fn uses_raw_protocol_return(
     implementation_generated: bool,
     function_generated: bool,
 ) -> bool {
-    // D-FAILURE-FOUNDATION1: these traits are raw Rust trait ABIs (String,
-    // bool, Ordering, DataTree) — never the implicit Outcome carrier. A
-    // wrapped body would violate the trait signature for user and derived
-    // impls alike (rustc E0053/E0308 behind I2).
+    // D-FAILURE-FOUNDATION1: these traits are raw Rust protocol ABIs (String,
+    // bool, Ordering, DataTree, and same-type arithmetic) — never the implicit
+    // Outcome carrier. A wrapped body would violate the protocol signature for
+    // user and derived impls alike (rustc E0053/E0308 behind I2).
     trait_name.is_some_and(|name| matches!(
         name,
         crate::Generics::DISPLAY
@@ -25,6 +25,10 @@ fn uses_raw_protocol_return(
             | crate::Generics::DECODE
             | crate::Generics::EQUATABLE
             | crate::Generics::COMPARABLE
+            | crate::Generics::ADD
+            | crate::Generics::SUB
+            | crate::Generics::MUL
+            | crate::Generics::DIV
     )) || implementation_generated && function_generated
 }
 
@@ -1436,6 +1440,7 @@ pub(crate) fn check_module_bodies(
                     return_view_provenance: None,
                     declared_return_view_provenance: None,
                     gc_return: false,
+                    diverges: false,
                     gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
@@ -1582,6 +1587,7 @@ pub(crate) fn check_module_bodies(
                     return_view_provenance: None,
                     declared_return_view_provenance: None,
                     gc_return: false,
+                    diverges: false,
                     gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
@@ -2029,6 +2035,7 @@ fn check_func_body_bundle_scoped(
     }
     let mut ck = Checker {
         funcs: &st.funcs,
+        diverging_functions: &st.diverging_functions,
         registry: &st.registry,
         effect_facts,
         consts: &st.consts,
@@ -2761,4 +2768,292 @@ pub(super) fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagno
         "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
         Some(span),
     ))
+}
+/// D-NEVER1=C: compute one bundle-wide fixed point of user functions whose
+/// execution has no returning path. The result is a sema fact only; it is
+/// copied into each module state before body checking and never becomes a type.
+pub(super) fn collect_diverging_functions(
+    states: &[ModuleState],
+) -> std::collections::HashSet<String> {
+    let mut diverging = std::collections::HashSet::new();
+    loop {
+        let mut changed = false;
+        for state in states {
+            for item in &state.items {
+                match item {
+                    Item::Func(function) => {
+                        if body_definitely_diverges(&function.body, &diverging, state)
+                            && diverging.insert(function.name.clone())
+                        {
+                            changed = true;
+                        }
+                    }
+                    Item::CodeModule(module) => {
+                        let Some(body) = &module.body else {
+                            continue;
+                        };
+                        for inner in body {
+                            let Item::Func(function) = inner else {
+                                continue;
+                            };
+                            if body_definitely_diverges(&function.body, &diverging, state) {
+                                let name =
+                                    jet_foundation::Names::member_name(&module.name, &function.name);
+                                if diverging.insert(name) {
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if !changed {
+            return diverging;
+        }
+    }
+}
+/// Publish the fixed-point result on bundle functions for downstream lowering.
+/// This is the sole semantic writer of `Func::diverges`; parser and synthetic
+/// constructors only initialize the compiler-metadata bit to `false`.
+pub(super) fn project_divergence_facts(
+    bundle: &mut crate::AST::ProgramBundle,
+    diverging: &std::collections::HashSet<String>,
+) {
+    for module in &mut bundle.modules {
+        for item in &mut module.items {
+            match item {
+                Item::Func(function) => {
+                    function.diverges = diverging.contains(&function.name);
+                }
+                Item::CodeModule(code_module) => {
+                    let Some(body) = &mut code_module.body else {
+                        continue;
+                    };
+                    for inner in body {
+                        let Item::Func(function) = inner else {
+                            continue;
+                        };
+                        let name = jet_foundation::Names::member_name(
+                            &code_module.name,
+                            &function.name,
+                        );
+                        function.diverges = diverging.contains(&name);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+
+fn body_definitely_diverges(
+    body: &[Stmt],
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> bool {
+    body.iter()
+        .any(|stmt| stmt_definitely_diverges(stmt, diverging, state))
+}
+
+fn stmt_definitely_diverges(
+    stmt: &Stmt,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> bool {
+    match stmt {
+        Stmt::Expr(expr) => expr_definitely_diverges(expr, diverging, state),
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => else_body.as_ref().is_some_and(|body| {
+            arms.iter()
+                .all(|arm| body_definitely_diverges(&arm.body, diverging, state))
+                && body_definitely_diverges(body, diverging, state)
+        }),
+        Stmt::Loop { body, .. } => !loop_body_has_break(body),
+        Stmt::While { cond, body, .. } => {
+            matches!(cond.without_parens(), Expr::Bool(true, _))
+                && !loop_body_has_break(body)
+        }
+        Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::AuthorityScope { body, .. }
+        | Stmt::ComptimeIf {
+            then_body: body, ..
+        }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. } => body_definitely_diverges(body, diverging, state),
+        _ => false,
+    }
+}
+
+fn loop_body_has_break(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::Break(_)
+        | Stmt::BreakValue(_, _)
+        | Stmt::BreakLabel(_, _)
+        | Stmt::BreakLabelValue(_, _, _, _) => true,
+        Stmt::Loop { .. }
+        | Stmt::For { .. }
+        | Stmt::CountedLoop { .. }
+        | Stmt::While { .. } => false,
+        Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::AuthorityScope { body, .. }
+        | Stmt::ComptimeIf {
+            then_body: body, ..
+        }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. } => loop_body_has_break(body),
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter().any(|arm| loop_body_has_break(&arm.body))
+                || else_body.as_ref().is_some_and(|body| loop_body_has_break(body))
+        }
+        _ => false,
+    })
+}
+
+fn expr_definitely_diverges(
+    expr: &Expr,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> bool {
+    match expr.without_parens() {
+        Expr::Todo { .. } | Expr::NoElse(_) => true,
+        Expr::Call(call) => {
+            call.name == Syntax::BUILTIN_PANIC
+                || diverging.contains(&call.name)
+                || call.args
+                    .iter()
+                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            core_call_diverges(state, receiver, method)
+                || expr_definitely_diverges(receiver, diverging, state)
+                || args
+                    .iter()
+                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
+        }
+        Expr::If {
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            (body_definitely_diverges(then_body, diverging, state)
+                || expr_definitely_diverges(then_value, diverging, state))
+                && (body_definitely_diverges(else_body, diverging, state)
+                    || expr_definitely_diverges(else_value, diverging, state))
+        }
+        Expr::Try(inner, ..)
+        | Expr::Paren(inner, _)
+        | Expr::Tainted(inner, ..)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Place(inner, _, _) => expr_definitely_diverges(inner, diverging, state),
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            expr_definitely_diverges(inner, diverging, state)
+        }
+        Expr::Binary(_, left, right, _) => {
+            expr_definitely_diverges(left, diverging, state)
+                || expr_definitely_diverges(right, diverging, state)
+        }
+        Expr::Field(base, ..) | Expr::OptField { base, .. } => {
+            expr_definitely_diverges(base, diverging, state)
+        }
+        Expr::ListLit(items, _) => items
+            .iter()
+            .any(|item| expr_definitely_diverges(item, diverging, state)),
+        Expr::MapLit(items, _) => items.iter().any(|(key, value)| {
+            expr_definitely_diverges(key, diverging, state)
+                || expr_definitely_diverges(value, diverging, state)
+        }),
+        Expr::Index { base, index, .. } | Expr::Range { start: base, end: index, .. } => {
+            expr_definitely_diverges(base, diverging, state)
+                || expr_definitely_diverges(index, diverging, state)
+        }
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            expr_definitely_diverges(base, diverging, state)
+                || expr_definitely_diverges(start, diverging, state)
+                || expr_definitely_diverges(end, diverging, state)
+                || range
+                    .as_deref()
+                    .is_some_and(|expr| expr_definitely_diverges(expr, diverging, state))
+        }
+        Expr::CompareChain { operands, .. } => operands
+            .iter()
+            .any(|operand| expr_definitely_diverges(operand, diverging, state)),
+        Expr::StructLit { fields, .. } => fields.iter().any(|(_, _, value)| {
+            expr_definitely_diverges(value, diverging, state)
+        }),
+        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
+            EnumLitArg::Positional(expr) => expr_definitely_diverges(expr, diverging, state),
+            EnumLitArg::Named { expr, .. } => expr_definitely_diverges(expr, diverging, state),
+        }),
+        Expr::OrFallback { value, .. } => expr_definitely_diverges(value, diverging, state),
+        Expr::CallValue { callee, args, .. } => {
+            expr_definitely_diverges(callee, diverging, state)
+                || args
+                    .iter()
+                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
+        }
+        Expr::PtrFromAddr { addr, .. } => expr_definitely_diverges(addr, diverging, state),
+        _ => false,
+    }
+}
+
+fn core_call_diverges(state: &ModuleState, receiver: &Expr, method: &str) -> bool {
+    let Expr::Ident(alias, _) = receiver.without_parens() else {
+        return false;
+    };
+    let Some(module) = state.core_imports.get(alias) else {
+        return false;
+    };
+    crate::Sema::CheckerCoreLib::core_call_signature(module, method)
+        .and_then(|(_, ret)| ret)
+        .is_some_and(|ret| matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER))
 }

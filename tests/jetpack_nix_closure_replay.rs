@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 mod common;
 use common::Scratch;
@@ -154,6 +155,53 @@ fn nix_lock_receipt_follows_complete_closure_identity() {
     .unwrap();
     let lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
     assert_eq!(lock.packages[0].receipt, None);
+}
+
+#[test]
+fn locked_nix_missing_bundle_reports_registered_diagnostic_before_store_mutation() {
+    let project = Scratch::new("nix-lock-missing-bundle-project");
+    let root = Scratch::new("nix-lock-missing-bundle-root");
+    fs::write(
+        project.join("env.jet"),
+        "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.pkg] }\n}\n",
+    )
+    .unwrap();
+
+    let output = cas_digest('6');
+    let closure = valid_nix_closure(&output);
+    let envelope = lock_envelope(&output, &jetpack::Envelope::host_platform());
+    jetpack::Lock::record_nix_realization(
+        &project.path,
+        "pkg",
+        "1.0.0",
+        "pkg@default",
+        &output,
+        closure,
+        envelope,
+    )
+    .unwrap();
+
+    let home = Scratch::new("nix-lock-missing-bundle-home");
+    let command = Command::new(common::jetpack_bin())
+        .args(["env", "--offline", "--no-color", "--trust", "--", "true"])
+        .current_dir(&project.path)
+        .env_clear()
+        .env("PATH", "/usr/bin")
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&command.stderr);
+    assert!(!command.status.success(), "missing lock bytes must fail");
+    assert!(stderr.contains("E1350"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("project Nix CAS bundle") || stderr.contains("locked Nix"),
+        "stderr must name the lock-bound replay: {stderr}"
+    );
+    assert!(
+        !root.join("hangar/objects").exists(),
+        "missing lock bytes must fail before Hangar mutation"
+    );
 }
 
 #[cfg(unix)]
@@ -585,6 +633,79 @@ fn nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_the
     )
     .unwrap();
     let nix_entry = replayed.metadata().clone();
+    let warm = jetpack::Store::realize_verified(
+        &destination_roots,
+        &jetpack::Provider::Ctx {
+            fixtures: None,
+            store_dir: &destination.path,
+            offline: true,
+            project_dir: Some(&project.path),
+            nix_index: None,
+            nix_roots: Some(&destination_roots),
+        },
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+    )
+    .unwrap();
+    let mut expected_entry = nix_entry.clone();
+    expected_entry.realized_at = 0;
+    expected_entry.last_used_at = 0;
+    let mut warm_entry = warm.metadata().clone();
+    warm_entry.realized_at = 0;
+    warm_entry.last_used_at = 0;
+    assert_eq!(warm_entry, expected_entry, "warm replay changed lock identity");
+
+    let copied_project = Scratch::new("nix-cas-copied-project");
+    let copied_bundle_dir = copied_project.join(".jet/nix-cas");
+    fs::create_dir_all(&copied_bundle_dir).unwrap();
+    fs::copy(
+        project.join(".jet/lock"),
+        copied_project.join(".jet/lock"),
+    )
+    .unwrap();
+    fs::copy(
+        bundle_dir.join(&bundle_digest),
+        copied_bundle_dir.join(&bundle_digest),
+    )
+    .unwrap();
+    let copied_destination = Scratch::new("nix-cas-copied-destination");
+    let copied_roots = jetpack::Store::Roots {
+        root: copied_destination.path.clone(),
+        dev_mode: false,
+    };
+    let copied_replayed = jetpack::Store::realize_verified(
+        &copied_roots,
+        &jetpack::Provider::Ctx {
+            fixtures: None,
+            store_dir: &copied_destination.path,
+            offline: true,
+            project_dir: Some(&copied_project.path),
+            nix_index: None,
+            nix_roots: Some(&copied_roots),
+        },
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+    )
+    .unwrap();
+    let mut copied_identity = copied_replayed.metadata().clone();
+    copied_identity.out.clear();
+    copied_identity.bin.clear();
+    copied_identity.rlib.clear();
+    let mut expected_identity = expected_entry.clone();
+    expected_identity.out.clear();
+    expected_identity.bin.clear();
+    expected_identity.rlib.clear();
+    // Hangar paths are intentionally root-local; every identity field must
+    // remain equal when the lock and project CAS bundle move together.
+    assert_eq!(
+        copied_identity, expected_identity,
+        "copied repository changed locked replay identity"
+    );
+
 
     let (exported, _) =
         jetpack::Store::export_nix_cas_bundle(&destination_roots, &nix_entry.reference).unwrap();

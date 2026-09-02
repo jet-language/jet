@@ -733,7 +733,7 @@ fn emit_owned_snapshot_params(tir: &TFunc, cx: &Cx, out: &mut String, indent: us
 /// recomputed — there is no `expr_jet_ty` / `operand_is_integer` call anywhere.
 
 pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
-    cx.time_emission(|| emit_tir_func_inner(tir, cx, out));
+    emit_tir_func_inner(tir, cx, out);
 }
 
 fn emit_tir_func_inner(tir: &TFunc, cx: &Cx, out: &mut String) {

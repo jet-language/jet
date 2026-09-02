@@ -53,7 +53,7 @@ fn user_story_suite_matches_expected_output() {
             .current_dir(&root)
             .env("JETPACK_ENV", "1")
             .env_remove("JETPACK_ENV_DIR")
-            .env("JET_CACHE_DIR", &cache)
+            .env("JET_STORE_DIR", &cache)
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("run {}: {error}", program.display()));

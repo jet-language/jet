@@ -1060,7 +1060,8 @@ fn xml_edges() String -> {
     root_name :: xml.expanded_name(root) ?? panic("root name")
     children :: xml.content(root) ?? panic("content")
     book_name :: xml.expanded_name(children[0]) ?? panic("book name")
-    id :: (xml.attribute(children[0], "id") ?? panic("attribute")) ?? "missing"
+    attribute :: xml.attribute(children[0], "id")
+    id :: attribute ?? "missing"
     return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
 }"#,
             ),

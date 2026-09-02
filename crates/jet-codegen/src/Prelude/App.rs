@@ -269,6 +269,21 @@ source.onmessage = () => location.reload();
             super::jet_app_http_serve(mux, port, dev);
         }
     }
+    // Native resident runs have no browser storage. Keep the same explicit
+    // no-op contract as the AOT core.web.storage surface.
+    pub fn jet_web_storage_get(_key: &String) -> Option<String> {
+        None
+    }
+
+    pub fn jet_web_storage_remove(_key: &String) {}
+
+    pub fn jet_web_storage_set(_key: &String, _value: &String) {}
+
+    pub fn jet_web_storage_clear() {}
+
 }
 
-pub use jet_app_impl::{jet_app, jet_web_page, JetApp, JetWebPage};
+pub use jet_app_impl::{
+    jet_app, jet_web_page, jet_web_storage_clear, jet_web_storage_get, jet_web_storage_remove,
+    jet_web_storage_set, JetApp, JetWebPage,
+};

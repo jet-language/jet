@@ -668,6 +668,7 @@ fn typed_sql_value(template: String, params: Vec<CtValue>) -> CtValue {
 
 fn ct_sql_binding(
     value: &CtValue,
+    ty: &Type,
     span: crate::Diagnostics::Span,
 ) -> Result<CtValue, crate::Diagnostics::Diagnostic> {
     let db_value = |variant: &str, value: Option<CtValue>| CtValue::Enum {
@@ -686,6 +687,25 @@ fn ct_sql_binding(
         )),
         CtValue::Bool(value) => Ok(db_value("Bool", Some(CtValue::Bool(*value)))),
         CtValue::Str(value) => Ok(db_value("Text", Some(CtValue::Str(value.clone())))),
+        CtValue::List(_)
+            if matches!(
+                ty,
+                Type::List(inner)
+                    if matches!(
+                        inner.as_ref(),
+                        Type::IntN {
+                            signed: false,
+                            bits: 8
+                        }
+                    )
+            ) =>
+        {
+            // Match the AOT emitter: a typed `[U8]` SQL hole is a BLOB, not
+            // the textual rendering of a generic list.
+            let bytes = jet_foundation::Prelude::jet_as_bytes(value, span)
+                .map_err(|_| unsupported("DBValue Blob parameter", span))?;
+            Ok(db_value("Blob", Some(CtValue::Bytes(bytes))))
+        }
         _ => {
             let rendered = crate::Comptime::render_typed_holes(std::slice::from_ref(value), span)?
                 .into_iter()
@@ -7054,6 +7074,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 for a in args {
                     argv.push(self.eval_expr_child(a, scope)?);
                 }
+                // D-HTTP-CHUNKS1=A: AOT gives `HTTPBody.chunks()` its
+                // default 64 KiB through the Prelude call. Preserve that
+                // ABI in the evaluator before the ambient runtime bridge.
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::HTTPClientMethod { kind, method }
+                        | crate::Codegen::TIR::THandleOp::HTTPServerMethod { kind, method }
+                        if kind == "HTTPBody" && method == "chunks"
+                ) && argv.is_empty()
+                {
+                    argv.push(CtValue::Int(65_536));
+                }
                 if matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::AllocAlloc
@@ -8721,9 +8753,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                     &literal_refs,
                                     shown,
                                 );
-                            let params = values
+                            let params = holes
                                 .iter()
-                                .map(|value| ct_sql_binding(value, self.span()))
+                                .zip(values.iter())
+                                .map(|(hole, value)| ct_sql_binding(value, &hole.ty, self.span()))
                                 .collect::<Result<Vec<_>, _>>()?;
                             Ok(typed_sql_value(template, params))
                         }

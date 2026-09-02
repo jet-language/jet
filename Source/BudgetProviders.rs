@@ -5,6 +5,7 @@
 //! same binary decoder and limit checker before evidence reaches evaluation.
 
 use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson, Rational};
+use jet_foundation::EncodingJson::{parse_json, Value as JsonValue};
 use jet_foundation::PerformanceBudget::{
     Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile,
 };
@@ -1261,7 +1262,6 @@ fn compile_latency_samples(
             ));
         }
         reset_compile_cache(&edit_trial)?;
-        clear_compile_timing(&edit_trial)?;
         run_compile_child(
             &edit_trial.join(relative_entry),
             &edit_trial,
@@ -1306,7 +1306,6 @@ fn compile_latency_samples(
             if mode == "Clean" {
                 reset_compile_cache(scratch)?;
             }
-            clear_compile_timing(scratch)?;
             run_compile_child(&scratch_entry, scratch, target, profile)?;
         }
     }
@@ -1329,9 +1328,8 @@ fn compile_latency_samples(
             if mode == "Clean" {
                 reset_compile_cache(scratch)?;
             }
-            clear_compile_timing(scratch)?;
             let child = run_compile_child(&scratch_entry, scratch, target, profile)?;
-            (child, read_compile_phases(scratch, backend)?)
+            (child, read_compile_phases(scratch, &scratch_entry)?)
         };
         peak_rss_bytes = peak_rss_bytes.max(child.peak_rss_bytes);
         let elapsed_ns = child.process_cpu_ns;
@@ -1510,12 +1508,11 @@ fn compile_edit_trial(
         }
         restore_compile_cache(warm, trial)?;
         apply_unified_patch(trial, patch).map_err(ProviderFailure::malformed)?;
-        clear_compile_timing(trial)?;
         let entry = trial.join(relative_entry);
         let child = run_compile_child(&entry, trial, target, profile)?;
         Ok((
             child,
-            read_compile_phases(trial, CompileBackend::for_profile(profile))?,
+            read_compile_phases(trial, &entry)?,
         ))
     })();
     result
@@ -1768,24 +1765,6 @@ fn copy_cache_tree(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn clear_compile_timing(root: &Path) -> Result<(), ProviderFailure> {
-    for path in [
-        root.join("jet-timing.json"),
-        root.join("build/jet-timing-backend.json"),
-    ] {
-        match std::fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(ProviderFailure::operation(
-                    FailureClass::Execution,
-                    format!("cannot clear compile timing artifact: {error}"),
-                ))
-            }
-        }
-    }
-    Ok(())
-}
 
 fn apply_unified_patch(root: &Path, patch: &str) -> Result<(), String> {
     if !safe_relative_path(patch) {
@@ -1957,16 +1936,6 @@ fn run_compile_child(
             format!("cannot identify resident Jet compiler: {error}"),
         )
     })?;
-    // The child runs in the workload copy, so a relative cache root has to be
-    // resolved against this process's directory before it is handed over.
-    let runtime_cache = crate::RuntimeCache::cache_root();
-    let runtime_cache = if runtime_cache.is_absolute() {
-        runtime_cache
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(&runtime_cache))
-            .unwrap_or(runtime_cache)
-    };
     let mut command = Command::new(executable);
     command
         .arg(match backend {
@@ -1975,20 +1944,8 @@ fn run_compile_child(
         })
         .arg(entry)
         .current_dir(root)
-        .env("JET_TIMING", "1")
-        .env("JET_TIMING_DIR", root)
-        // The build cache is project-scoped so `Clean` really recompiles the
-        // workload, and `reset_compile_cache` wipes it between trials.
-        .env("JET_CACHE_DIR", root.join(".jet-compile-cache"))
-        // The `jet_runtime` rlib is a *toolchain* artifact, keyed on the
-        // runtime source plus rustc identity, so a user's clean project build
-        // reuses it. Left to fall back on `JET_CACHE_DIR`, the per-trial reset
-        // deleted it too and every sample recompiled the whole runtime crate —
-        // work no compile-latency budget is measuring, and far more than one
-        // build's allowance. Pin it to the cache root this process resolved so
-        // the samples share it; the report already pins `compiler_digest` and
-        // `core_digest`, so reuse cannot smuggle in a different runtime.
-        .env("JET_RUNTIME_CACHE_DIR", &runtime_cache)
+        // Keep compiler artifacts in one store per workload copy.
+        .env("JET_STORE_DIR", root.join(".jet-store"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -2024,20 +1981,6 @@ fn run_compile_child(
         match wait4_process(child.id(), true) {
             Ok(Some(usage)) if usage.status == 0 => {
                 peak_rss_bytes = peak_rss_bytes.max(usage.peak_rss_bytes);
-                let required = match backend {
-                    CompileBackend::JitCranelift => vec!["jet-timing.json"],
-                    CompileBackend::AotRustc => {
-                        vec!["jet-timing.json", "build/jet-timing-backend.json"]
-                    }
-                };
-                let missing = required
-                    .iter()
-                    .filter(|rel| !root.join(rel).is_file())
-                    .copied()
-                    .collect::<Vec<_>>();
-                if !missing.is_empty() {
-                    return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("compile timing artifact {} is unavailable after a successful child compile", missing.join(" and "))));
-                }
                 #[cfg(target_os = "linux")]
                 if peak_rss_bytes == 0 {
                     return Err(ProviderFailure::operation(
@@ -2090,73 +2033,155 @@ fn running_executable() -> std::io::Result<PathBuf> {
 
 fn read_compile_phases(
     root: &Path,
-    backend: CompileBackend,
+    entry: &Path,
 ) -> Result<Vec<(String, u128)>, ProviderFailure> {
-    let mut phases = BTreeMap::<String, u128>::new();
-    let paths = match backend {
-        CompileBackend::JitCranelift => vec![root.join("jet-timing.json")],
-        CompileBackend::AotRustc => vec![
-            root.join("jet-timing.json"),
-            root.join("build/jet-timing-backend.json"),
-        ],
-    };
-    for path in paths {
-        let bytes = std::fs::read(&path).map_err(|error| {
+    let executable = running_executable().map_err(|error| {
+        ProviderFailure::operation(
+            FailureClass::Execution,
+            format!("cannot identify resident Jet compiler: {error}"),
+        )
+    })?;
+    let output = Command::new(executable)
+        .arg("explain-build")
+        .arg(entry)
+        .arg("--json")
+        .current_dir(root)
+        .env("JET_STORE_DIR", root.join(".jet-store"))
+        .env("NO_COLOR", "1")
+        .output()
+        .map_err(|error| {
             ProviderFailure::operation(
                 FailureClass::Unavailable,
-                format!(
-                    "compile timing artifact `{}` is unavailable: {error}",
-                    path.display()
-                ),
+                format!("cannot read explain-build record: {error}"),
             )
         })?;
-        let value = CanonicalJson::parse_canonical(&bytes).map_err(ProviderFailure::malformed)?;
-        let CanonicalJson::Object(fields) = value else {
+    if !output.status.success() {
+        return Err(ProviderFailure::operation(
+            FailureClass::Unavailable,
+            format!(
+                "explain-build failed with status {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ));
+    }
+    let text = String::from_utf8(output.stdout)
+        .map_err(|_| ProviderFailure::malformed("explain-build output is not UTF-8"))?;
+    let value = parse_json(text.trim(), true)
+        .map_err(|error| ProviderFailure::malformed(format!("explain-build output is invalid: {}", error.message)))?;
+    let record = match &value {
+        JsonValue::Object(fields) => fields
+            .iter()
+            .find(|(name, _)| name == "build")
+            .map(|(_, value)| value)
+            .unwrap_or(&value),
+        _ => &value,
+    };
+    let JsonValue::Object(fields) = record else {
+        return Err(ProviderFailure::malformed(
+            "explain-build record is not an object",
+        ));
+    };
+    let Some((_, JsonValue::Text(schema))) =
+        fields.iter().find(|(name, _)| name == "schema")
+    else {
+        return Err(ProviderFailure::malformed(
+            "explain-build record has no schema",
+        ));
+    };
+    if schema != "jet.explain-build/v1" {
+        return Err(ProviderFailure::malformed(
+            "explain-build record has an unsupported schema",
+        ));
+    }
+    if !matches!(
+        fields.iter().find(|(name, _)| name == "program"),
+        Some((_, JsonValue::Text(program))) if !program.is_empty()
+    ) {
+        return Err(ProviderFailure::malformed(
+            "explain-build record has no program",
+        ));
+    }
+    let Some((_, JsonValue::Array(nodes))) = fields.iter().find(|(name, _)| name == "nodes") else {
+        return Err(ProviderFailure::malformed(
+            "explain-build record has no nodes",
+        ));
+    };
+    let mut phases = BTreeMap::<String, u128>::new();
+    for node in nodes {
+        let JsonValue::Object(node) = node else {
             return Err(ProviderFailure::malformed(
-                "compile timing artifact is not an object",
+                "explain-build node is not an object",
             ));
         };
-        let Some(CanonicalJson::Array(entries)) = fields.get("phases") else {
+        let Some((_, JsonValue::Text(kind))) = node.iter().find(|(name, _)| name == "kind") else {
             return Err(ProviderFailure::malformed(
-                "compile timing artifact has no phases",
+                "explain-build node has no kind",
             ));
         };
-        for entry in entries {
-            let CanonicalJson::Object(entry) = entry else {
-                return Err(ProviderFailure::malformed(
-                    "compile timing phase is not an object",
-                ));
-            };
-            let Some(CanonicalJson::String(name)) = entry.get("name") else {
-                return Err(ProviderFailure::malformed(
-                    "compile timing phase has no name",
-                ));
-            };
-            if name == "rust_bytes" {
-                continue;
-            }
-            let Some(CanonicalJson::Integer(us)) = entry.get("us") else {
-                return Err(ProviderFailure::malformed(
-                    "compile timing phase has no duration",
-                ));
-            };
-            let ns = us
-                .parse::<u128>()
-                .map_err(|_| {
-                    ProviderFailure::malformed("compile timing duration is not an unsigned integer")
-                })?
-                .checked_mul(1_000)
-                .ok_or_else(|| ProviderFailure::malformed("compile timing duration overflowed"))?;
-            let slot = phases.entry(name.clone()).or_default();
-            *slot = slot
-                .checked_add(ns)
-                .ok_or_else(|| ProviderFailure::malformed("compile phase total overflowed"))?;
+        if !matches!(kind.as_str(), "check" | "compile" | "link") {
+            return Err(ProviderFailure::malformed(
+                "explain-build node has an unsupported kind",
+            ));
         }
+        for field in ["key", "subject", "why_ran"] {
+            if !matches!(
+                node.iter().find(|(name, _)| name == field),
+                Some((_, JsonValue::Text(value))) if !value.is_empty()
+            ) {
+                return Err(ProviderFailure::malformed(format!(
+                    "explain-build node has no {field}"
+                )));
+            }
+        }
+        let Some((_, JsonValue::Array(inputs))) = node.iter().find(|(name, _)| name == "inputs") else {
+            return Err(ProviderFailure::malformed(
+                "explain-build node has no inputs",
+            ));
+        };
+        if inputs.iter().any(|value| !matches!(value, JsonValue::Text(_))) {
+            return Err(ProviderFailure::malformed(
+                "explain-build node inputs are not strings",
+            ));
+        }
+        let Some((_, duration)) = node.iter().find(|(name, _)| name == "duration_ms") else {
+            return Err(ProviderFailure::malformed(
+                "explain-build node has no duration",
+            ));
+        };
+        let duration_ms = match duration {
+            JsonValue::Float(value) => *value,
+            JsonValue::Int(value) => *value as f64,
+            JsonValue::Number(value) => value.parse::<f64>().map_err(|_| {
+                ProviderFailure::malformed("explain-build node duration is not a number")
+            })?,
+            _ => {
+                return Err(ProviderFailure::malformed(
+                    "explain-build node duration is not a number",
+                ))
+            }
+        };
+        if !duration_ms.is_finite() || duration_ms < 0.0 {
+            return Err(ProviderFailure::malformed(
+                "explain-build node duration is invalid",
+            ));
+        }
+        let nanos = duration_ms * 1_000_000.0;
+        if nanos > u64::MAX as f64 {
+            return Err(ProviderFailure::malformed(
+                "explain-build node duration overflowed",
+            ));
+        }
+        let nanos = nanos.round() as u128;
+        let total = phases.entry(kind.clone()).or_default();
+        *total = total
+            .checked_add(nanos)
+            .ok_or_else(|| ProviderFailure::malformed("compile phase total overflowed"))?;
     }
     if phases.is_empty() {
         return Err(ProviderFailure::operation(
             FailureClass::Unavailable,
-            "compile timing artifacts contained no phase totals",
+            "explain-build record contained no nodes",
         ));
     }
     Ok(phases.into_iter().collect())
@@ -3267,41 +3292,6 @@ mod tests {
         };
         let failure = compiler_latency_provider(&request, &cancellation).unwrap_err();
         assert_eq!(failure.class, FailureClass::Incompatible);
-        let _ = std::fs::remove_dir_all(root);
-    }
-    #[test]
-    fn compiler_probe_rejects_partial_timing_artifacts() {
-        let root = temporary("partial-timing");
-        std::fs::create_dir_all(root.join("build")).unwrap();
-        let missing = read_compile_phases(&root, CompileBackend::AotRustc).unwrap_err();
-        assert_eq!(missing.class, FailureClass::Unavailable);
-        assert!(missing.reason.contains("unavailable"), "{}", missing.reason);
-        std::fs::write(
-            root.join("jet-timing.json"),
-            "{\"phases\":[{\"name\":\"sema\",\"us\":1}]}\n",
-        )
-        .unwrap();
-        let partial = read_compile_phases(&root, CompileBackend::AotRustc).unwrap_err();
-        assert_eq!(partial.class, FailureClass::Unavailable);
-        assert!(
-            partial.reason.contains("jet-timing-backend.json"),
-            "{}",
-            partial.reason
-        );
-        std::fs::write(
-            root.join("build/jet-timing-backend.json"),
-            "{\"phases\":[{\"name\":\"backend\",\"us\":1},{\"name\":\"link\",\"us\":2}]}\n",
-        )
-        .unwrap();
-        let phases = read_compile_phases(&root, CompileBackend::AotRustc).unwrap();
-        assert_eq!(
-            phases,
-            vec![
-                ("backend".into(), 1_000u128),
-                ("link".into(), 2_000u128),
-                ("sema".into(), 1_000u128)
-            ]
-        );
         let _ = std::fs::remove_dir_all(root);
     }
 

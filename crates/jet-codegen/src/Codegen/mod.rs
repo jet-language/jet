@@ -16,8 +16,7 @@ use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
 use crate::AST::{Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef, Type};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
@@ -156,7 +155,6 @@ pub mod test_report {
 }
 
 pub(crate) use CModule::*;
-pub use Context::CodegenPhaseTiming;
 pub(crate) use Context::*;
 pub use Embedding::{export_shape, export_surface, ExportFunction, ExportScalar};
 pub(crate) use Imports::*;
@@ -175,8 +173,8 @@ pub use Web::{
 /// Build the interpreter's bundle-wide Core alias map from the same import
 /// resolver used by AOT and JIT lowering. In particular, member-list imports
 /// such as `use core.math.[abs, min]` must not fall back to a second policy.
-pub fn core_imports_for_bundle(bundle: &ProgramBundle) -> HashMap<String, String> {
-    let mut imports = HashMap::new();
+pub fn core_imports_for_bundle(bundle: &ProgramBundle) -> BTreeMap<String, String> {
+    let mut imports = BTreeMap::new();
     for module_idx in 0..bundle.modules.len() {
         for (alias, module) in core_import_map(bundle, module_idx) {
             imports.entry(alias).or_insert(module);
@@ -549,7 +547,7 @@ fn push_comparable_primitive_impls(out: &mut String) {
 /// Open the cached-runtime block. Everything from here to `CACHED_RUNTIME_END`
 /// is decided by build facts alone — never by user source text — so the native
 /// builder compiles it once into a content-addressed rlib and links it
-/// (`Source/RuntimeCache.rs`).
+/// (`jet_store::runtime`).
 fn push_cached_runtime_begin(out: &mut String, link: Option<&FfiLink>) {
     if link.is_some() {
         push_ffi_reporter(out, link);
@@ -1752,6 +1750,7 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
         // Vetted region: OsExtra carries POSIX `unsafe` at crate root (not only
@@ -1785,6 +1784,7 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
     }
     if needs_data_fmt {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataQuery.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
     }
     if needs_data {
@@ -5259,32 +5259,15 @@ pub fn emit_bundle_dbg(
     debug_linemap: bool,
     active_os: Syntax::OSTarget,
 ) -> String {
-    emit_bundle_dbg_inner(bundle, link, debug_linemap, active_os, None)
+    emit_bundle_dbg_inner(bundle, link, debug_linemap, active_os)
 }
 
-pub fn emit_bundle_dbg_timed(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    debug_linemap: bool,
-    active_os: Syntax::OSTarget,
-) -> (String, CodegenPhaseTiming) {
-    let phase_timing = Rc::new(PhaseTimes::default());
-    let rust = emit_bundle_dbg_inner(
-        bundle,
-        link,
-        debug_linemap,
-        active_os,
-        Some(Rc::clone(&phase_timing)),
-    );
-    (rust, phase_timing.snapshot())
-}
 
 fn emit_bundle_dbg_inner(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
     debug_linemap: bool,
     active_os: Syntax::OSTarget,
-    phase_timing: Option<Rc<PhaseTimes>>,
 ) -> String {
     // D-DATAFLOW1 / D-REL3: fixed_sigs and edition-gated helpers read the TLS
     // package edition. Keep codegen on the same edition sema checked.
@@ -5337,8 +5320,8 @@ fn emit_bundle_dbg_inner(
                 &module.display,
                 link,
                 &extern_funcs,
+                &bundle.edition,
             );
-            cx.phase_timing = phase_timing.clone();
             populate_cx_module_facts(&mut cx, bundle, i);
             cx.foreign_undos = bundle_foreign_undos(bundle, i);
             apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
@@ -5397,8 +5380,8 @@ fn emit_bundle_dbg_inner(
             &entry.display,
             link,
             &extern_funcs,
+            &bundle.edition,
         );
-        cx.phase_timing = phase_timing.clone();
         populate_cx_module_facts(&mut cx, bundle, bundle.entry);
         cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
         apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
@@ -5655,6 +5638,7 @@ fn emit_bundle_tests_cov_inner(
             &module.display,
             link,
             &extern_funcs,
+            &bundle.edition,
         );
         populate_cx_module_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle, i);
@@ -5712,6 +5696,7 @@ fn emit_bundle_tests_cov_inner(
         &entry.display,
         link,
         &extern_funcs,
+        &bundle.edition,
     );
     populate_cx_module_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
@@ -5936,6 +5921,7 @@ pub fn emit_bundle_fuzz(
             &module.display,
             link,
             &extern_funcs,
+            &bundle.edition,
         );
         populate_cx_module_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle, i);
@@ -5990,6 +5976,7 @@ pub fn emit_bundle_fuzz(
         &entry.display,
         link,
         &extern_funcs,
+        &bundle.edition,
     );
     populate_cx_module_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);

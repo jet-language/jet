@@ -494,7 +494,7 @@ pub fn add_generated_rust(
     generated: &str,
     has_rust_ffi: bool,
     rustc_flags: &[&str],
-) -> jet::RuntimeCache::PreparedRuntime {
+) -> jet_store::runtime::PreparedRuntime {
     let flags = rustc_flags
         .iter()
         .map(|flag| std::ffi::OsString::from(*flag))
@@ -519,13 +519,29 @@ pub fn add_generated_rust(
          user program. Run Jet tests with `jet test`, or hook the generated `main` for \
          an inspection probe."
     );
+    let store_root = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".jet-store");
+    let store = jet_store::Store::open(
+        jet_store::StoreConfig::new(store_root)
+            .with_cap_bytes(20 * 1024 * 1024 * 1024)
+            .with_reserve_bytes(0),
+    )
+    .expect("open isolated jet store");
     let prepared = if has_rust_ffi {
-        jet::RuntimeCache::PreparedRuntime::inline(generated)
+        jet_store::runtime::PreparedRuntime::inline(generated)
     } else {
-        match jet::RuntimeCache::prepare(std::ffi::OsStr::new("rustc"), generated, &flags, &[]) {
+        match jet_store::runtime::prepare(
+            &store,
+            std::ffi::OsStr::new("rustc"),
+            generated,
+            &flags,
+            &[],
+        ) {
             Ok(prepared) => prepared,
-            Err(jet::RuntimeCache::Error::Cache(_)) => {
-                jet::RuntimeCache::PreparedRuntime::inline(generated)
+            Err(jet_store::runtime::RuntimeError::Cache(_)) => {
+                jet_store::runtime::PreparedRuntime::inline(generated)
             }
             Err(error) => panic!("cached runtime build failed: {error}"),
         }
@@ -574,6 +590,70 @@ impl Scratch {
     pub fn join(&self, p: &str) -> PathBuf {
         self.path.join(p)
     }
+}
+
+/// One deterministic prebuilt used by a local native-catalog fixture.
+///
+/// The helper owns the exact artifact bytes and writes the same `recipes-v1`
+/// shape used by the catalog tests. Keeping this writer here prevents suites
+/// from quietly growing incompatible recipe fixtures.
+pub struct NativeCatalogRecipe {
+    pub name: String,
+    pub version: String,
+    pub bin: String,
+    pub artifact_name: String,
+    pub contents: Vec<u8>,
+}
+
+/// Write a local native catalog and its file-backed artifacts.
+pub fn write_native_catalog(
+    catalog: &Path,
+    artifact_root: &Path,
+    recipes: &[NativeCatalogRecipe],
+) {
+    fs::create_dir_all(catalog).expect("create native catalog directory");
+    fs::create_dir_all(artifact_root).expect("create native catalog artifact directory");
+    let mut records = Vec::with_capacity(recipes.len());
+    for recipe in recipes {
+        assert!(
+            !recipe.artifact_name.is_empty()
+                && !recipe.artifact_name.contains('/')
+                && !recipe.artifact_name.contains('\\'),
+            "native catalog artifact name must be one path component"
+        );
+        let artifact = artifact_root.join(&recipe.artifact_name);
+        fs::write(&artifact, &recipe.contents).expect("write native catalog artifact");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mut permissions = fs::metadata(&artifact)
+                .expect("stat native catalog artifact")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&artifact, permissions)
+                .expect("make native catalog artifact executable");
+        }
+        let digest = jetpack::SHA256::sha256_file_hex(&artifact)
+            .expect("hash native catalog artifact");
+        let url = format!("file://{}", artifact.display());
+        records.push(format!(
+            "{{\"name\":\"{}\",\"version\":\"{}\",\"kind\":\"prebuilt\",\"url\":\"{}\",\"sha256\":\"{}\",\"bin\":\"{}\"}}",
+            jet_foundation::JSON::json_escape(&recipe.name),
+            jet_foundation::JSON::json_escape(&recipe.version),
+            jet_foundation::JSON::json_escape(&url),
+            digest,
+            jet_foundation::JSON::json_escape(&recipe.bin),
+        ));
+    }
+    records.sort_unstable();
+    fs::write(
+        catalog.join("recipes-v1.json"),
+        format!(
+            "{{\"schema\":1,\"recipes\":[{}]}}",
+            records.join(",")
+        ),
+    )
+    .expect("write native catalog recipes");
 }
 
 impl Drop for Scratch {

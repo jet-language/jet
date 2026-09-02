@@ -2,22 +2,22 @@
 use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient key")
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
     plaintext :: [U8]{0x73, 0x61, 0x66, 0x65}
     aad :: [U8]{0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74}
-    sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? return Err("seal")
-    opened :: crypto.open(recipient, sealed, aad) ?? return Err("open")
+    sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? return
+    opened :: crypto.open(recipient, sealed, aad) ?? return
     print(opened == plaintext)
     recipient_text :: recipient.public_key().text()
-    parsed_recipient :: crypto.X25519PublicKey.from_text(recipient_text) ?? return Err("public key text")
+    parsed_recipient :: crypto.X25519PublicKey.from_text(recipient_text) ?? return
     print(parsed_recipient.bytes() == recipient.public_key().bytes())
-    signing :: crypto.SigningKey.new_random() ?? return Err("signing key")
-    signature :: crypto.sign(signing, plaintext) ?? return Err("sign")
-    verified :: crypto.verify(signing.public_key(), plaintext, signature) ?? return Err("verify")
+    signing :: crypto.SigningKey.new_random() ?? return
+    signature :: crypto.sign(signing, plaintext) ?? return
+    verified :: crypto.verify(signing.public_key(), plaintext, signature) ?? return
     print(verified)
     password :: crypto.Secret.from_text("correct horse battery staple")
-    stored :: crypto.password_hash(password) ?? return Err("password hash")
-    verified_password :: crypto.password_verify(password, stored) ?? return Err("password verify")
+    stored :: crypto.password_hash(password) ?? return
+    verified_password :: crypto.password_verify(password, stored) ?? return
     print(verified_password)
     print(crypto.sha256(plaintext).hex())
 }

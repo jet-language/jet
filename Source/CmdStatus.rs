@@ -66,6 +66,361 @@ pub(crate) fn run_status(args: &[String], json: bool) -> i32 {
     let rows = rows_from_receipts(&store, &receipts, &target_path, &target);
     render(&target, &rows, String::new(), json)
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CacheOption {
+    To,
+    Host,
+}
+
+enum CacheRequest {
+    Status,
+    Prune { target_bytes: u64 },
+    Limit { limit_bytes: u64 },
+}
+
+/// Run the machine-wide artifact-store commands.
+pub(crate) fn run_cache(args: &[String], json: bool) -> i32 {
+    let request = match parse_cache_request(args) {
+        Ok(request) => request,
+        Err(message) => return cache_usage_error(message, json),
+    };
+    match request {
+        CacheRequest::Status => run_cache_status(json),
+        CacheRequest::Prune { target_bytes } => run_cache_prune(target_bytes, json),
+        CacheRequest::Limit { limit_bytes } => run_cache_limit(limit_bytes, json),
+    }
+}
+
+fn parse_cache_request(args: &[String]) -> Result<CacheRequest, String> {
+    let mut command = None;
+    let mut option: Option<(CacheOption, String)> = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        match arg {
+            "--json" | "--quiet" | "--no-color" => {
+                index += 1;
+                continue;
+            }
+            "--color" => {
+                if args.get(index + 1).is_none() {
+                    return Err("`jet cache --color` needs auto, always, or never".to_string());
+                }
+                index += 2;
+                continue;
+            }
+            _ if arg.starts_with("--color=") => {
+                index += 1;
+                continue;
+            }
+            "--to" | "--host" => {
+                let kind = if arg == "--to" {
+                    CacheOption::To
+                } else {
+                    CacheOption::Host
+                };
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("`jet cache {arg}` needs a size"))?;
+                if option
+                    .replace((kind, value.clone()))
+                    .is_some()
+                {
+                    return Err("`jet cache` accepts one size option".to_string());
+                }
+                index += 2;
+                continue;
+            }
+            _ if arg.starts_with("--to=") || arg.starts_with("--host=") => {
+                let kind = if arg.starts_with("--to=") {
+                    CacheOption::To
+                } else {
+                    CacheOption::Host
+                };
+                let value = arg
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
+                if option
+                    .replace((kind, value.to_string()))
+                    .is_some()
+                {
+                    return Err("`jet cache` accepts one size option".to_string());
+                }
+                index += 1;
+                continue;
+            }
+            _ if arg.starts_with('-') => {
+                return Err(format!("unknown `jet cache` flag `{arg}`"));
+            }
+            _ => {
+                if command.replace(arg).is_some() {
+                    return Err("`jet cache` accepts one command".to_string());
+                }
+                index += 1;
+            }
+        }
+    }
+
+    let command = command.ok_or_else(|| "missing `jet cache` command".to_string())?;
+    match (command, option) {
+        ("status", None) => Ok(CacheRequest::Status),
+        ("status", Some(_)) => Err("`jet cache status` does not take a size option".to_string()),
+        ("prune", Some((CacheOption::To, value))) => Ok(CacheRequest::Prune {
+            target_bytes: parse_cache_size(&value)?,
+        }),
+        ("prune", Some((CacheOption::Host, _))) => {
+            Err("`jet cache prune` requires `--to <size>`".to_string())
+        }
+        ("prune", None) => Err("`jet cache prune` requires `--to <size>`".to_string()),
+        ("limit", Some((CacheOption::Host, value))) => Ok(CacheRequest::Limit {
+            limit_bytes: parse_cache_size(&value)?,
+        }),
+        ("limit", Some((CacheOption::To, _))) => {
+            Err("`jet cache limit` requires `--host <size>`".to_string())
+        }
+        ("limit", None) => Err("`jet cache limit` requires `--host <size>`".to_string()),
+        (other, _) => Err(format!("`{other}` isn't a jet cache command")),
+    }
+}
+
+fn parse_cache_size(value: &str) -> Result<u64, String> {
+    jet_store::parse_size(value).map_err(|error| format!("invalid cache size `{value}`: {error}"))
+}
+
+fn run_cache_status(json: bool) -> i32 {
+    let store = match jet_store::Store::from_env() {
+        Ok(store) => store,
+        Err(error) => return cache_store_error("open the machine-wide store", error, json),
+    };
+    let status = match store.status() {
+        Ok(status) => status,
+        Err(error) => return cache_store_error("read the machine-wide store", error, json),
+    };
+    render_cache_status(&store, &status, json);
+    jet::ExitCodes::OK
+}
+
+fn run_cache_prune(target_bytes: u64, json: bool) -> i32 {
+    let store = match jet_store::Store::from_env() {
+        Ok(store) => store,
+        Err(error) => return cache_store_error("open the machine-wide store", error, json),
+    };
+    let report = match store.prune_to(target_bytes) {
+        Ok(report) => report,
+        Err(error) => return cache_store_error("prune the machine-wide store", error, json),
+    };
+    if json {
+        let payload = CanonicalJson::object([
+            ("after_bytes".into(), json_integer(report.after_bytes)),
+            ("before_bytes".into(), json_integer(report.before_bytes)),
+            ("blocked".into(), CanonicalJson::Bool(report.blocked)),
+            (
+                "freed_bytes".into(),
+                json_integer(report.before_bytes.saturating_sub(report.after_bytes)),
+            ),
+            (
+                "pinned_bytes".into(),
+                json_integer(report.pinned_bytes),
+            ),
+            (
+                "removed_entries".into(),
+                json_integer(report.removed.len() as u64),
+            ),
+            ("target_bytes".into(), json_integer(report.target_bytes)),
+        ])
+        .expect("cache prune keys are unique");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "cache.prune",
+                &format!(",\"cache\":{}", canonical_json_text(payload)),
+            )
+        );
+    } else {
+        let freed = report.before_bytes.saturating_sub(report.after_bytes);
+        println!(
+            "prune      {} -> {} (target {})",
+            format_size(report.before_bytes),
+            format_size(report.after_bytes),
+            format_size(report.target_bytes)
+        );
+        println!(
+            "removed    {} entries · freed {}",
+            report.removed.len(),
+            format_size(freed)
+        );
+        println!("pinned     {}", format_size(report.pinned_bytes));
+        if report.blocked {
+            println!("result     target blocked by live leases");
+        }
+    }
+    jet::ExitCodes::OK
+}
+
+fn run_cache_limit(limit_bytes: u64, json: bool) -> i32 {
+    let store = match jet_store::Store::from_env() {
+        Ok(store) => store,
+        Err(error) => return cache_store_error("open the machine-wide store", error, json),
+    };
+    if let Err(error) = store.set_host_limit(Some(limit_bytes)) {
+        return cache_store_error("set the host store limit", error, json);
+    }
+    if json {
+        let payload = CanonicalJson::object([
+            ("host_limit_bytes".into(), json_integer(limit_bytes)),
+            (
+                "root".into(),
+                CanonicalJson::String(store.root().display().to_string()),
+            ),
+        ])
+        .expect("cache limit keys are unique");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "cache.limit",
+                &format!(",\"cache\":{}", canonical_json_text(payload)),
+            )
+        );
+    } else {
+        println!("host limit {} (persisted)", format_size(limit_bytes));
+        println!("store      {}", store.root().display());
+    }
+    jet::ExitCodes::OK
+}
+
+fn render_cache_status(store: &jet_store::Store, status: &jet_store::StoreStatus, json: bool) {
+    let blobs = entry_count(status, jet_store::EntryKind::Blob);
+    let records = entry_count(status, jet_store::EntryKind::Action);
+    let lto = entry_count(status, jet_store::EntryKind::Lto);
+    if json {
+        let available = status
+            .available_bytes
+            .map(json_integer)
+            .unwrap_or(CanonicalJson::Null);
+        let payload = CanonicalJson::object([
+            ("available_bytes".into(), available),
+            ("blobs".into(), json_integer(blobs as u64)),
+            ("entries".into(), json_integer(status.entries.len() as u64)),
+            ("footprint_bytes".into(), json_integer(status.footprint_bytes)),
+            (
+                "host_limit_bytes".into(),
+                status
+                    .host_limit_bytes
+                    .map(json_integer)
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            ("limit_bytes".into(), json_integer(status.limit_bytes)),
+            ("live_leases".into(), json_integer(status.live_leases as u64)),
+            ("records".into(), json_integer(records as u64)),
+            ("reserve_bytes".into(), json_integer(status.reserve_bytes)),
+            (
+                "root".into(),
+                CanonicalJson::String(status.root.display().to_string()),
+            ),
+            ("tiers".into(), CanonicalJson::Array(status.tiers.iter().cloned().map(CanonicalJson::String).collect())),
+            ("thinlto_caches".into(), json_integer(lto as u64)),
+        ])
+        .expect("cache status keys are unique");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "cache.status",
+                &format!(",\"cache\":{}", canonical_json_text(payload)),
+            )
+        );
+        return;
+    }
+
+    let limit_source = if status.host_limit_bytes.is_some() {
+        "host policy"
+    } else if store.config().cap_bytes().is_some() {
+        "JET_STORE_CAP_BYTES"
+    } else {
+        "adaptive rule"
+    };
+    println!("store      {}", status.root.display());
+    println!(
+        "limit      {} ({limit_source})",
+        format_size(status.limit_bytes)
+    );
+    println!(
+        "reserve    keep {} free on that filesystem",
+        format_size(status.reserve_bytes)
+    );
+    println!(
+        "used       {} · {} blobs · {} records · {} ThinLTO caches",
+        format_size(status.footprint_bytes),
+        blobs,
+        records,
+        lto
+    );
+    println!("leases     {} live", status.live_leases);
+    println!("tiers      {}", status.tiers.join(" · "));
+}
+
+fn entry_count(status: &jet_store::StoreStatus, kind: jet_store::EntryKind) -> usize {
+    status.entries.iter().filter(|entry| entry.kind == kind).count()
+}
+
+fn json_integer(value: u64) -> CanonicalJson {
+    CanonicalJson::Integer(value.to_string())
+}
+
+fn canonical_json_text(value: CanonicalJson) -> String {
+    String::from_utf8(value.bytes())
+        .expect("canonical JSON is UTF-8")
+        .trim_end_matches('\n')
+        .to_string()
+}
+
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if value.fract() == 0.0 || value >= 10.0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn cache_usage_error(message: String, json: bool) -> i32 {
+    crate::emit_cli_report(
+        "E2102",
+        message,
+        "`jet cache` has one read-only status command and two explicit mutations".to_string(),
+        "run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`"
+            .to_string(),
+        json,
+    );
+    jet::ExitCodes::USAGE
+}
+
+fn cache_store_error(operation: &str, error: jet_store::StoreError, json: bool) -> i32 {
+    crate::emit_cli_report(
+        "E2105",
+        format!("could not {operation}: {error}"),
+        "cache commands use one machine-wide store with atomic, verified entries".to_string(),
+        "check the JET_STORE_DIR path and permissions, then retry the cache command".to_string(),
+        json,
+    );
+    jet::ExitCodes::USER_ERROR
+}
+
 
 fn rows_from_receipts(
     store: &jet::ReceiptStore::ReceiptStore,

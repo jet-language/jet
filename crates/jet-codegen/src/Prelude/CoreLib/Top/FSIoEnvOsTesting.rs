@@ -136,59 +136,6 @@ fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_s
     out.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(out)
 }
-fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
-    use std::io::{Read, Seek, SeekFrom};
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    let mut f = std::fs::File::open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
-    f.seek(SeekFrom::Start(offset.max(0) as u64))
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
-    let mut buf = vec![0u8; len.max(0) as usize];
-    let n = f
-        .read(&mut buf)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
-    buf.truncate(n);
-    Ok(buf)
-}
-fn jet_std_fs_write_at(
-    path: &String,
-    offset: i64,
-    bytes: &Vec<u8>,
-) -> Result<(), jet_std::IOError> {
-    use std::io::{Seek, SeekFrom, Write};
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
-    f.seek(SeekFrom::Start(offset.max(0) as u64))
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
-    f.write_all(bytes)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
-}
-fn jet_std_fs_write_atomic(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    jet_path_write_atomic(&jet_path_from(path), bytes)
-}
 fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOError> {
     let path = jet_temp_path(prefix);
     if jet_fault_should_fail("FS.Write") {
@@ -432,17 +379,11 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
 // #1480: readline / read_until / take moved to
 // IoLineStream.rs so the JIT host can `include!` the same Prelude source.
 
-fn jet_std_io_buffered() -> JetStdinReader {
-    jet_std_io_stdin()
-}
 
 fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
     jet_std_fs_read_bytes(path)
 }
 
-fn jet_std_io_binwrite(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-    jet_std_fs_write_bytes(path, bytes)
-}
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
 struct JetStdout;

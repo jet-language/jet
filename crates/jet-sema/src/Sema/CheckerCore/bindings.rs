@@ -1140,7 +1140,7 @@ impl<'a> Checker<'a> {
             // pattern match here that a stray `(...)` could dodge.)
             let globals = self.current_ct_globals().into_owned();
             let mut mutated = std::collections::HashMap::new();
-            let folded =
+            let folded = jet_foundation::Diagnostics::with_ice_panic_hook_suppressed(|| {
                 crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
                     &b.init,
                     self.ct_funcs,
@@ -1152,7 +1152,8 @@ impl<'a> Checker<'a> {
                     0,
                     self.items,
                     Some(&mut mutated),
-                );
+                )
+            });
             let changed = Self::ct_mutated_names(&globals, &mutated);
             if !changed.is_empty() {
                 // The initializer advanced a receiver. Baking either side

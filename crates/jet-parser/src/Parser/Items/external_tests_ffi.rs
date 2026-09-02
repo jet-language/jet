@@ -569,7 +569,7 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
-            functions.push(self.extern_fn()?);
+            functions.push(self.extern_fn(false)?);
         }
         self.expect(TokKind::RBrace, "to close the extern block")?;
         let end = self.toks[self.pos - 1].span.end;
@@ -581,7 +581,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
+    pub(super) fn extern_fn(
+        &mut self,
+        allow_closing_brace: bool,
+    ) -> Result<crate::AST::ExternFn, Diagnostic> {
         let (abi, undo, close) = if matches!(self.peek().kind, TokKind::Hash) {
             let markers = self.parse_attached_marker_sequence(
                 crate::Policy::RuleSite::Function,
@@ -718,8 +721,12 @@ impl<'a> Parser<'a> {
             "the Rust path must be one piece of quoted text",
             "write: = \"crate::function\"",
         )?;
-        self.expect(TokKind::Semi, "after the foreign path")?;
-        let end = self.toks[self.pos - 1].span.end;
+        let end = if allow_closing_brace && matches!(self.peek().kind, TokKind::RBrace) {
+            rust_path_span.end
+        } else {
+            self.expect(TokKind::Semi, "after the foreign path")?;
+            self.toks[self.pos - 1].span.end
+        };
         Ok(crate::AST::ExternFn {
             abi,
             name,

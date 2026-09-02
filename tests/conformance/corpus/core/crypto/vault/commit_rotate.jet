@@ -2,9 +2,9 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn run() -[Secret]> {
+fn run() -[Secret, IO]> {
     plan :: vault.prepare_rotate<crypto.SigningKey>("__core_conformance_rotate") ?? return
     write :: vault.authorize_write(&plan, "fixed rotate authorization") ?? return
-    result :: vault.commit_rotate(^write, ^plan)
-    print(result == .Err(_))
+    result :: vault.commit_rotate(^write, ^plan) ?? return
+    print(result.current)
 }

@@ -322,7 +322,26 @@ pub(super) fn reachable_owned_funcs(
     init: &Expr,
     funcs: &HashMap<String, Func>,
 ) -> HashMap<String, Func> {
-    fn known_name(name: &str, funcs: &HashMap<String, Func>) -> Option<String> {
+    let reachable_names = reachable_func_names(init, funcs);
+    reachable_names
+        .into_iter()
+        .filter_map(|name| funcs.get(&name).cloned().map(|function| (name, function)))
+        .collect()
+}
+
+/// Names in the call closure rooted at `init`.
+///
+/// This is separate from [`reachable_owned_funcs`] so callers that already
+/// hold borrowed functions can prune their lowering table without cloning the
+/// entire module first.
+pub(super) fn reachable_func_names<F>(
+    init: &Expr,
+    funcs: &HashMap<String, F>,
+) -> HashSet<String>
+where
+    F: Borrow<Func>,
+{
+    fn known_name<F>(name: &str, funcs: &HashMap<String, F>) -> Option<String> {
         if funcs.contains_key(name) {
             return Some(name.to_string());
         }
@@ -331,31 +350,34 @@ pub(super) fn reachable_owned_funcs(
             .filter(|qualified| funcs.contains_key(qualified))
     }
 
+    fn expression_func_name<F>(expr: &Expr, funcs: &HashMap<String, F>) -> Option<String> {
+        match expr {
+            Expr::Call(call) => known_name(&call.name, funcs),
+            Expr::Ident(name, _) => known_name(name, funcs),
+            Expr::MethodCall {
+                method,
+                recv_type: Some(owner),
+                ..
+            } => {
+                let qualified = format!("{owner}::{method}");
+                known_name(&qualified, funcs)
+            }
+            _ => None,
+        }
+    }
+
     let mut roots = BTreeSet::new();
-    walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| match expr {
-        Expr::Call(call) => {
-            if let Some(name) = known_name(&call.name, funcs) {
-                roots.insert(name);
-            }
+    walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| {
+        if let Some(name) = expression_func_name(expr, funcs) {
+            roots.insert(name);
         }
-        Expr::Ident(name, _) => {
-            if let Some(name) = known_name(name, funcs) {
-                roots.insert(name);
-            }
-        }
-        _ => {}
     });
 
     let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
     for (name, function) in funcs {
-        for statement in &function.body {
+        for statement in &function.borrow().body {
             walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| {
-                let dependency = match expr {
-                    Expr::Call(call) => known_name(&call.name, funcs),
-                    Expr::Ident(name, _) => known_name(name, funcs),
-                    _ => None,
-                };
-                if let Some(dependency) = dependency {
+                if let Some(dependency) = expression_func_name(expr, funcs) {
                     reverse.entry(dependency).or_default().insert(name.clone());
                 }
             });
@@ -366,18 +388,16 @@ pub(super) fn reachable_owned_funcs(
         .into_iter()
         .map(|root| (root, BTreeSet::from(["reachable".to_string()])))
         .collect();
-    let reachable_names = jet_foundation::Facts::project_reachability(
+    jet_foundation::Facts::project_reachability(
         &reverse,
         [jet_foundation::Facts::ReachabilityRow::new(
             "reachable",
             seeds,
         )],
     )
-    .nodes_with("reachable", "reachable");
-    reachable_names
-        .into_iter()
-        .filter_map(|name| funcs.get(&name).cloned().map(|function| (name, function)))
-        .collect()
+    .nodes_with("reachable", "reachable")
+    .into_iter()
+    .collect()
 }
 
 fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {

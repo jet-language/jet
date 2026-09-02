@@ -168,13 +168,17 @@ pub fn emit_plugin(
                     crate::AST::AccessConvention::Move => format!("p{i}"),
                 })
                 .collect();
+            let call = format!(
+                "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+                mangle(&export.name),
+                call_args.join(", ")
+            );
             wrapper_fns.push_str(&format!(
-                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} {plugin_return_text}({callee}({call_args})) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ {plugin_post_text}(ret_ptr) }}\n",
+                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} jet_ffi_callback_boundary(|| {{ {plugin_return_text}({call}) }}) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ {plugin_post_text}(ret_ptr) }}\n",
                 wrapper_name = wrapper_name,
                 rust_params = rust_params.join(", "),
                 locals = locals.join(" "),
-                callee = mangle(&export.name),
-                call_args = call_args.join(", "),
+                call = call,
                 post_name = mangle(&format!("plugin_post_{}", export.name)),
                 plugin_return_text = plugin_return_text,
                 plugin_post_text = plugin_post_text,
@@ -204,14 +208,18 @@ pub fn emit_plugin(
                     }
                 })
                 .collect();
+            let call = format!(
+                "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+                mangle(&export.name),
+                call_args.join(", ")
+            );
             wrapper_fns.push_str(&format!(
-                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {locals} {callee}({call_args}) }}\n",
+                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {locals} jet_ffi_callback_boundary(|| {{ {call} }}) }}\n",
                 wrapper_name = wrapper_name,
                 rust_params = rust_params.join(", "),
                 ret = scalar.rust_ty(),
                 locals = locals.join(" "),
-                callee = mangle(&export.name),
-                call_args = call_args.join(", "),
+                call = call,
             ));
         }
     }
@@ -222,6 +230,12 @@ pub fn emit_plugin(
     );
 
     let mut guest_rust = String::from(whole_program_rust);
+    // Sandbox guests use the ordinary Prelude's Time implementation too; add
+    // the complete wasm TZif closure that browser emission already embeds.
+    guest_rust.push_str(
+        &super::Web::wasm_time_zone_prelude()
+            .expect("component guest timezone prelude must be readable"),
+    );
     guest_rust.push_str(
         "\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n",
     );

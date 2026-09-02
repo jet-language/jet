@@ -617,6 +617,7 @@ impl BuildPlan {
                     targets: ownership.targets,
                 })
                 .collect(),
+            nodes: self.compiler_nodes.clone(),
         }
     }
 

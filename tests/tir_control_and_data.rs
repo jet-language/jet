@@ -1680,6 +1680,34 @@ fn run() {
     assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
+/// `[U8]` values returned by byte-buffer APIs use the evaluator's compact byte
+/// carrier. Iteration must expose each byte as the same integer value as AOT.
+#[test]
+fn byte_buffer_for_in_uses_compact_carrier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    bytes :: Bytes.from([65, 66, 67]).to_bytes()
+    total := 0
+    loop byte in bytes {
+        print(byte)
+        total += byte
+    }
+    loop (index, byte) in bytes, 2 {
+        print("{index}:{byte}")
+    }
+    print(total)
+}
+"#;
+    assert_tiers_agree(
+        "tir_byte_buffer_for_in",
+        src,
+        "65\n66\n67\n0:65\n2:67\n198\n",
+    );
+}
+
 /// D-RANGE-EXCL1=C: half-open `..<` excludes the end and is empty when start >= end.
 #[test]
 fn range_loops_exclusive() {
@@ -2432,4 +2460,50 @@ fn run() {
         !ordered.contains("__jet___switch_subject.clone()"),
         "branch dispatch must not clone its subject: {ordered}"
     );
+}
+
+/// D-OPERATOR-ABI1 / I9: user arithmetic hooks use the same raw owner-value
+/// ABI for AOT, resident JIT, and the forced TIR interpreter. Assignment
+/// compound syntax must route through the same `Add` hook as binary `+`.
+#[test]
+fn user_arithmetic_hooks_preserve_values_on_all_tiers() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Money { cents: Int }
+
+impl Money.Add {
+    fn add(self, rhs: Money) Money -> {
+        return Money{ cents: self.cents + rhs.cents }
+    }
+}
+impl Money.Sub {
+    fn sub(self, rhs: Money) Money -> {
+        return Money{ cents: self.cents - rhs.cents }
+    }
+}
+impl Money.Mul {
+    fn mul(self, rhs: Money) Money -> {
+        return Money{ cents: self.cents * rhs.cents }
+    }
+}
+impl Money.Div {
+    fn div(self, rhs: Money) Money -> {
+        return Money{ cents: self.cents /% rhs.cents }
+    }
+}
+
+fn run() {
+    base :: Money{ cents: 8 }
+    add :: base + Money{ cents: 2 }
+    sub :: base - Money{ cents: 2 }
+    mul :: base * Money{ cents: 2 }
+    div :: base / Money{ cents: 2 }
+    compound := Money{ cents: 8 }
+    compound += Money{ cents: 2 }
+    print("{add.cents} {sub.cents} {mul.cents} {div.cents} {compound.cents}")
+}
+"#;
+    assert_tiers_agree("tir_user_arithmetic_hooks", src, "10 6 16 4 10\n");
 }

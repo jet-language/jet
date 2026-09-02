@@ -1774,12 +1774,19 @@ fn split_callback_parts<'a>(
 
 /// The AOT Reader-region fast path is a use-site optimization for the same
 /// sema-resolved fixed-width/immediate-outcome capability published by the
-/// operation table. It admits one direct fixed-width load per range iteration
-/// and rejects every unknown body shape; omission costs speed, never safety.
+/// operation table. It admits fixed-width loads over a proven region, or a
+/// fixed-width prefix before an ordinary variable tail; omission costs speed.
+struct ReaderRegionRead {
+    name: String,
+    read: TReaderFixedWidth,
+    offset: usize,
+}
+
 struct ReaderRegionPlan {
     reader: TLocal,
-    read_name: String,
-    read: TReaderFixedWidth,
+    reads: Vec<ReaderRegionRead>,
+    width: usize,
+    tail_start: usize,
 }
 
 /// `InlineRange<Int>` is a checked refinement of the same `i64` carrier as
@@ -1913,7 +1920,17 @@ fn reader_region_expr_safe(expr: &TExpr, reader: &TLocal) -> bool {
     }
 }
 
-fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bool {
+fn reader_region_read_matches(init: &TExpr, name: &str, plan: &ReaderRegionPlan) -> bool {
+    reader_region_read_root(init).is_some_and(|(candidate, read)| {
+        same_local(&candidate, &plan.reader)
+            && plan
+                .reads
+                .iter()
+                .any(|entry| entry.name == name && entry.read == read)
+    })
+}
+
+fn reader_region_stmt_safe(stmt: &TStmt, plan: &ReaderRegionPlan) -> bool {
     match stmt {
         TStmt::SourceSpan(_) | TStmt::LineMarker(_) => true,
         TStmt::Let {
@@ -1922,11 +1939,8 @@ fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bo
             gc_promotion,
             gc_transferred,
             ..
-        } if name == read_name => {
-            reader_region_read_root(init)
-                .is_some_and(|(candidate, _)| same_local(&candidate, reader))
-                && gc_promotion.is_none()
-                && !*gc_transferred
+        } if reader_region_read_matches(init, name, plan) => {
+            gc_promotion.is_none() && !*gc_transferred
         }
         TStmt::Let {
             name,
@@ -1935,53 +1949,92 @@ fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bo
             gc_transferred,
             ..
         } => {
-            mangle(name) != reader.rust_name()
+            mangle(name) != plan.reader.rust_name()
                 && gc_promotion.is_none()
                 && !*gc_transferred
-                && reader_region_expr_safe(init, reader)
+                && reader_region_expr_safe(init, &plan.reader)
         }
-        TStmt::ExprStmt(expr) => reader_region_expr_safe(expr, reader),
+        TStmt::ExprStmt(expr) => reader_region_expr_safe(expr, &plan.reader),
         TStmt::Assign { place, value, .. } => {
             let place_safe = match place {
-                TPlace::Local(local) => !local.deref && !same_local(local, reader),
-                TPlace::Expr(expr) => reader_region_expr_safe(expr, reader),
+                TPlace::Local(local) => !local.deref && !same_local(local, &plan.reader),
+                TPlace::Expr(expr) => reader_region_expr_safe(expr, &plan.reader),
             };
-            place_safe && reader_region_expr_safe(value, reader)
+            place_safe && reader_region_expr_safe(value, &plan.reader)
         }
         _ => false,
     }
 }
 
 fn reader_region_plan(body: &[TStmt]) -> Option<ReaderRegionPlan> {
-    let mut candidate = None;
+    let mut reader = None;
+    let mut reads = Vec::new();
     for stmt in body {
-        if let Some((read_name, reader, read)) = reader_region_read_stmt(stmt) {
-            if candidate.is_some() {
-                return None;
-            }
-            candidate = Some((read_name.to_string(), reader, read));
+        let Some((name, candidate, read)) = reader_region_read_stmt(stmt) else {
+            continue;
+        };
+        if reader
+            .as_ref()
+            .is_some_and(|existing| !same_local(existing, &candidate))
+        {
+            return None;
+        }
+        if reader.is_none() {
+            reader = Some(candidate);
+        }
+        if reads.iter().any(|entry: &ReaderRegionRead| entry.name == name) {
+            return None;
+        }
+        let offset = reads
+            .last()
+            .map_or(0, |entry: &ReaderRegionRead| entry.offset + entry.read.width());
+        reads.push(ReaderRegionRead {
+            name: name.to_string(),
+            read,
+            offset,
+        });
+    }
+    let reader = reader?;
+    if reads.is_empty() {
+        return None;
+    }
+    let width = reads
+        .last()
+        .map(|entry| entry.offset + entry.read.width())?;
+    let mut plan = ReaderRegionPlan {
+        reader,
+        reads,
+        width,
+        tail_start: body.len(),
+    };
+    for (index, stmt) in body.iter().enumerate() {
+        if !reader_region_stmt_safe(stmt, &plan) {
+            plan.tail_start = index;
+            break;
         }
     }
-    let (read_name, reader, read) = candidate?;
-    if !body
+    if body[plan.tail_start..]
         .iter()
-        .all(|stmt| reader_region_stmt_safe(stmt, &reader, &read_name))
+        .any(|stmt| reader_region_read_stmt(stmt).is_some())
     {
         return None;
     }
-    Some(ReaderRegionPlan {
-        reader,
-        read_name,
-        read,
-    })
+    Some(plan)
 }
 
-fn reader_region_load(read: TReaderFixedWidth, chunk: &str) -> String {
-    read.emit_load(|offset| {
-        if read.width() == 1 {
+
+fn reader_region_load(
+    read: TReaderFixedWidth,
+    chunk: &str,
+    offset: usize,
+    scalar_chunk: bool,
+) -> String {
+    read.emit_load(|byte_offset| {
+        let index = offset + byte_offset;
+        if scalar_chunk && index == 0 {
             chunk.to_string()
         } else {
-            format!("{chunk}[{offset}]")
+            format!("{chunk}[{index}]")
         }
     })
 }
@@ -2005,15 +2058,28 @@ fn emit_reader_region_stmts(
             gc_transferred,
         } = stmt
         {
-            if name == &plan.read_name
+            if reader_region_read_matches(init, name, plan)
                 && gc_promotion.is_none()
                 && !*gc_transferred
-                && reader_region_read_root(init)
-                    .is_some_and(|(reader, _)| same_local(&reader, &plan.reader))
             {
+                let Some((_, read)) = reader_region_read_root(init) else {
+                    unreachable!("Reader plan match must retain its fixed-width read");
+                };
+                let Some(entry) = plan
+                    .reads
+                    .iter()
+                    .find(|entry| entry.name == *name && entry.read == read)
+                else {
+                    unreachable!("Reader plan match must retain its read entry");
+                };
                 let pad = "    ".repeat(indent);
                 let ty_clause = emit_let_ty_clause(let_ty, cx);
-                let value = reader_region_load(plan.read, chunk);
+                let value = reader_region_load(
+                    entry.read,
+                    chunk,
+                    entry.offset,
+                    plan.reads.len() == 1 && plan.width == 1,
+                );
                 out.push_str(&format!(
                     "{}{} {}{} = {};\n",
                     pad,
@@ -2028,6 +2094,7 @@ fn emit_reader_region_stmts(
         emit_tir_stmt(stmt, cx, out, indent, active_deferred_closes);
     }
 }
+
 
 fn emit_reader_region_range(
     label: &Option<String>,
@@ -2058,13 +2125,15 @@ fn emit_reader_region_range(
     // The bound proof runs after the range length is evaluated. Keep that
     // evaluation outside the fast form unless it is itself unable to observe
     // or mutate the reader; otherwise the fallback's source-order semantics
-    // would be changed even though the loop body is safe.
+    // would be changed even though the loop body was safe.
     if !reader_region_expr_safe(end, &plan.reader) {
         return false;
     }
     let pad = "    ".repeat(indent);
     let inner_pad = "    ".repeat(indent + 1);
     let body_pad = "    ".repeat(indent + 2);
+    let fast_pad = "    ".repeat(indent + 3);
+    let fast_body_pad = "    ".repeat(indent + 4);
     let start = emit_expr_with_cleanups(start, cx, active_deferred_closes);
     let end = emit_expr_with_cleanups(end, cx, active_deferred_closes);
     let reader = plan.reader.rust_place();
@@ -2076,88 +2145,156 @@ fn emit_reader_region_range(
     let lbl = tir_label_prefix(label);
     let loop_var = mangle(var);
     let unused_index = var == "_";
-    let width = plan.read.width();
-    let region_bounds = if width == 1 {
-        format!(
-            "{}jet_reader_region_bounds(&{}, {})",
-            cx.root_prefix, reader, region_count
-        )
-    } else {
-        format!(
-            "({}).checked_mul({}).and_then(|bytes| {}jet_reader_region_bounds(&{}, bytes))",
-            region_count, width, cx.root_prefix, reader
-        )
-    };
-    let item_iter = if width == 1 {
-        "iter().copied()".to_string()
-    } else {
-        format!("chunks_exact({width})")
-    };
+    let width = plan.width;
 
     out.push_str(&format!("{}{{\n", pad));
     out.push_str(&format!("{}let {} = {};\n", inner_pad, region_count, end));
-    out.push_str(&format!(
-        "{}if let Some(({}, {})) = {} {{\n",
-        inner_pad,
-        region_start,
-        region_end,
-        region_bounds,
-    ));
-    // The bounds proof creates one immutable slice view. Keep that view as the
-    // loop's only input so the hot read is a plain slice iteration; the cursor
-    // remains available for the one post-loop commit below.
-    out.push_str(&format!(
-        "{}let {} = &({}).buf[{}..{}];\n",
-        body_pad, region_slice, reader, region_start, region_end
-    ));
-    if unused_index {
+    if plan.tail_start < body.len() {
+        // A fixed-width prefix can still be proven without pretending that the
+        // rest of the record is fixed. Commit that prefix before the ordinary
+        // tail so variable-length `take` operations keep source-order errors.
+        let region_bounds = format!(
+            "{}jet_reader_region_bounds(&{}, {})",
+            cx.root_prefix, reader, width
+        );
         out.push_str(&format!(
-            "{}{}for {} in {}.{} {{\n",
-            body_pad, lbl, region_chunk, region_slice, item_iter
+            "{}{}for {} in ({}..{}) {{\n",
+            body_pad, lbl, loop_var, start, region_count
         ));
+        emit_scalar_loop_barrier(
+            cx,
+            out,
+            indent + 3,
+            (!unused_index).then_some(loop_var.as_str()),
+        );
+        out.push_str(&format!(
+            "{}if let Some(({}, {})) = {} {{\n",
+            fast_pad, region_start, region_end, region_bounds
+        ));
+        out.push_str(&format!(
+            "{}let {} = &({}).buf[{}..{}];\n",
+            fast_body_pad, region_slice, reader, region_start, region_end
+        ));
+        emit_reader_region_stmts(
+            &body[..plan.tail_start],
+            &plan,
+            &region_slice,
+            cx,
+            out,
+            indent + 4,
+            active_deferred_closes,
+        );
+        out.push_str(&format!(
+            "{}{}.pos = {};\n",
+            fast_body_pad, reader, region_end
+        ));
+        emit_tir_stmts_nested(
+            &body[plan.tail_start..],
+            cx,
+            out,
+            indent + 4,
+            active_deferred_closes,
+        );
+        out.push_str(&format!("{}}} else {{\n", fast_pad));
+        emit_tir_stmts_nested(body, cx, out, indent + 4, active_deferred_closes);
+        out.push_str(&format!("{}}}\n", fast_pad));
+        out.push_str(&format!("{}}}\n", body_pad));
     } else {
+        let region_bounds = if width == 1 {
+            format!(
+                "{}jet_reader_region_bounds(&{}, {})",
+                cx.root_prefix, reader, region_count
+            )
+        } else {
+            format!(
+                "({}).checked_mul({}).and_then(|bytes| {}jet_reader_region_bounds(&{}, bytes))",
+                region_count, width, cx.root_prefix, reader
+            )
+        };
+        let scalar_chunk = plan.reads.len() == 1 && width == 1;
+        let item_iter = if scalar_chunk {
+            "iter().copied()".to_string()
+        } else {
+            format!("chunks_exact({width})")
+        };
+
         out.push_str(&format!(
-            "{}{}for ({}, {}) in ({}..{}).zip({}.{}) {{\n",
-            body_pad,
-            lbl,
-            loop_var,
-            region_chunk,
-            start,
-            region_count,
-            region_slice,
-            item_iter
+            "{}if let Some(({}, {})) = {} {{\n",
+            inner_pad, region_start, region_end, region_bounds
         ));
+        // The bounds proof creates one immutable slice view. Keep that view as
+        // the loop's only input so the hot read is a plain slice iteration; the
+        // cursor remains available for the one post-loop commit below.
+        out.push_str(&format!(
+            "{}let {} = &({}).buf[{}..{}];\n",
+            body_pad, region_slice, reader, region_start, region_end
+        ));
+        if scalar_chunk && unused_index {
+            out.push_str(&format!(
+                "{}{}for {} in {}.{} {{\n",
+                body_pad, lbl, region_chunk, region_slice, item_iter
+            ));
+        } else if scalar_chunk {
+            out.push_str(&format!(
+                "{}{}for ({}, {}) in ({}..{}).zip({}.{}) {{\n",
+                body_pad,
+                lbl,
+                loop_var,
+                region_chunk,
+                start,
+                region_count,
+                region_slice,
+                item_iter
+            ));
+        } else if unused_index {
+            out.push_str(&format!(
+                "{}{}for {} in {}.{} {{\n",
+                body_pad, lbl, region_chunk, region_slice, item_iter
+            ));
+        } else {
+            out.push_str(&format!(
+                "{}{}for ({}, {}) in ({}..{}).zip({}.{}) {{\n",
+                body_pad,
+                lbl,
+                loop_var,
+                region_chunk,
+                start,
+                region_count,
+                region_slice,
+                item_iter
+            ));
+        }
+        emit_scalar_loop_barrier(
+            cx,
+            out,
+            indent + 3,
+            (!unused_index).then_some(loop_var.as_str()),
+        );
+        emit_reader_region_stmts(
+            body,
+            &plan,
+            &region_chunk,
+            cx,
+            out,
+            indent + 3,
+            active_deferred_closes,
+        );
+        out.push_str(&format!("{}}}\n", body_pad));
+        // The region proof excludes reader observers, aliases, and early exits
+        // from the body. Commit the cursor once after the direct slice has been
+        // consumed; keeping this write out of the loop is what lets the hot
+        // load stay a plain bounded slice iteration.
+        out.push_str(&format!("{}{}.pos = {};\n", inner_pad, reader, region_end));
+        out.push_str(&format!("{}}} else {{\n", inner_pad));
+        out.push_str(&format!(
+            "{}{}for {} in ({}..{}) {{\n",
+            body_pad, lbl, loop_var, start, region_count
+        ));
+        emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
+        emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
+        out.push_str(&format!("{}}}\n", body_pad));
+        out.push_str(&format!("{}}}\n", inner_pad));
     }
-    emit_scalar_loop_barrier(
-        cx,
-        out,
-        indent + 3,
-        (!unused_index).then_some(loop_var.as_str()),
-    );
-    emit_reader_region_stmts(
-        body,
-        &plan,
-        &region_chunk,
-        cx,
-        out,
-        indent + 3,
-        active_deferred_closes,
-    );
-    out.push_str(&format!("{}}}\n", body_pad));
-    // The region proof excludes reader observers, aliases, and early exits from
-    // the body. Commit the cursor once after the direct slice has been consumed;
-    // keeping this write out of the loop is what lets the hot load stay a plain
-    // bounded slice iteration.
-    out.push_str(&format!("{}{}.pos = {};\n", inner_pad, reader, region_end));
-    out.push_str(&format!("{}}} else {{\n", inner_pad));
-    out.push_str(&format!(
-        "{}{}for {} in ({}..{}) {{\n",
-        body_pad, lbl, loop_var, start, region_count
-    ));
-    emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
-    emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
-    out.push_str(&format!("{}}}\n", body_pad));
-    out.push_str(&format!("{}}}\n", inner_pad));
     out.push_str(&format!("{}}}\n", pad));
     true
 }
@@ -2554,29 +2691,16 @@ fn emit_ascii_whitespace_scan(
         "{body_pad}    if {is_final} {{ {final_fallback} }} else {{ {loop_fallback} }}\n"
     ));
     out.push_str(&format!("{body_pad}}}\n"));
-    out.push_str(&format!("{body_pad}if {is_final} {{\n"));
-    emit_tir_stmt_with_collection_proof(
-        plan.final_count.total,
-        cx,
-        out,
-        indent + 3,
-        active_deferred_closes,
-        None,
-        None,
-        None,
-    );
-    out.push_str(&format!("{body_pad}}} else {{\n"));
     emit_tir_stmt_with_collection_proof(
         plan.loop_count.total,
         cx,
         out,
-        indent + 3,
+        indent + 2,
         active_deferred_closes,
         None,
         None,
         None,
     );
-    out.push_str(&format!("{body_pad}}}\n"));
     out.push_str(&format!("{pad}    }});\n{pad}}}\n"));
 }
 
@@ -4316,7 +4440,7 @@ fn emit_tir_stmt_with_collection_proof(
                                 format!("({}).iter().cloned()", collection_str)
                             };
                             out.push_str(&jet_format!(
-                                "{}{}for ({jet_prefix}i, {jet_prefix}item) in {}{} .enumerate() {{\n",
+                                "{}{}for ({jet_prefix}i, {jet_prefix}item) in {}.enumerate(){} {{\n",
                                 pad, lbl, iter_form, stride_suffix
                             ));
                             out.push_str(&jet_format!(

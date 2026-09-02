@@ -224,12 +224,18 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(return_type) = &f.return_type {
+            if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_NEVER) {
+                self.diags.push(Diagnostic::from_row(
+                    "E2422",
+                    &[],
+                    Some(f.return_type_span.unwrap_or(f.name_span)),
+                ));
             // D-CONC-GROUP1=A: parameter positions admit a group; the return
             // position stays banned, and it teaches with the E1110 family
             // instead of falling through to a bare "no such type" (E0119).
             // Returning the handle would let a child outlive the scope that
             // joins it, which is the one thing the ban exists to stop.
-            if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+            } else if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
                 self.diags.push(Diagnostic::error(
                     "E1110",
                     "`Group` cannot be returned".to_string(),
@@ -273,7 +279,11 @@ impl<'a> Checker<'a> {
             // outliving its scope.
             let taskgroup_parameter =
                 matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
-            if !skip_type_check && !taskgroup_parameter {
+            let never_parameter =
+                matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_NEVER);
+            if never_parameter {
+                self.diags.push(Diagnostic::from_row("E2422", &[], Some(p.ty_span)));
+            } else if !skip_type_check && !taskgroup_parameter {
                 let pty = self.resolve_type(p.ty.clone());
                 self.check_declared_type(&pty, p.ty_span);
             }
@@ -1569,6 +1579,7 @@ pub(crate) fn synthesize_delegation_method(
         return_view_provenance: None,
         declared_return_view_provenance: None,
         gc_return: false,
+        diverges: false,
         gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
@@ -1654,6 +1665,7 @@ pub(crate) fn synthesize_default_method(
         return_view_provenance: None,
         declared_return_view_provenance: None,
         gc_return: false,
+        diverges: false,
         gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,

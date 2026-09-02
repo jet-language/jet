@@ -1061,6 +1061,10 @@ pub(crate) fn reuse_verified_environment(
 #[derive(Debug)]
 pub enum RealizeError {
     Provider(super::Provider::ProviderError),
+    /// A project lock named the Nix closure, but its portable bytes or
+    /// identity could not be replayed. Keep this distinct from generic Hangar
+    /// failures so callers can render the registered cache diagnostic.
+    LockedNix(std::io::Error),
     Store(std::io::Error),
     Integrity(IntegrityFailure),
 }
@@ -1112,6 +1116,45 @@ pub fn entry_id(name: &str, version: &str, reference: &str, out: &str) -> String
         format!("{name}-{short}")
     } else {
         format!("{name}-{version}-{short}")
+    }
+}
+
+/// Build the directory identity for a Nix realization from its immutable
+/// output digest. Nix outputs are projected into a root-local Hangar path, so
+/// hashing that path would make the same locked closure look different on
+/// every checkout or machine.
+pub(crate) fn content_addressed_entry_id(
+    name: &str,
+    version: &str,
+    reference: &str,
+    output_hash: &str,
+) -> String {
+    let fp = SHA256::sha256_hex(
+        format!("jet.content-entry.v1\0{reference}\0{output_hash}").as_bytes(),
+    );
+    let short = &fp[..12];
+    if version.is_empty() {
+        format!("{name}-{short}")
+    } else {
+        format!("{name}-{version}-{short}")
+    }
+}
+
+/// Return the identity expected for a persisted entry. Nix records use their
+/// immutable output digest; legacy/native records retain the existing local
+/// output-path identity until they are rewritten.
+pub(crate) fn expected_entry_id(entry: &StoreEntry) -> String {
+    let nix = ProducerRecord::decode(&entry.producer_record)
+        .is_ok_and(|producer| producer.provider == "nix");
+    if nix && !entry.envelope.output_hash.is_empty() {
+        content_addressed_entry_id(
+            &entry.name,
+            &entry.version,
+            &entry.reference,
+            &entry.envelope.output_hash,
+        )
+    } else {
+        entry_id(&entry.name, &entry.version, &entry.reference, &entry.out)
     }
 }
 
@@ -1298,7 +1341,16 @@ fn record_realized_mode_unlocked(
         )?
     };
     named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
-    let id = entry_id(&realized.name, &realized.version, &realized.reference, &out);
+    let id = if realized.producer.provider == "nix" {
+        content_addressed_entry_id(
+            &realized.name,
+            &realized.version,
+            &realized.reference,
+            &realized.envelope.output_hash,
+        )
+    } else {
+        entry_id(&realized.name, &realized.version, &realized.reference, &out)
+    };
     let dir = roots.hangar_dir().join(&id);
     let now = now_secs();
     let realized_at = read_meta(&dir)
@@ -1518,7 +1570,12 @@ pub(crate) fn record_locked_nix(
                 provenance: lock_envelope.provenance.clone(),
             };
             let producer = make_producer(digest, &[])?;
-            let id = entry_id("__nix_cas", digest, &format!("nix-cas:{digest}"), &out);
+            let id = content_addressed_entry_id(
+                "__nix_cas",
+                digest,
+                &format!("nix-cas:{digest}"),
+                digest,
+            );
             entries.push(StoreEntry {
                 id,
                 name: "__nix_cas".into(),
@@ -1545,7 +1602,8 @@ pub(crate) fn record_locked_nix(
         let output = object_root.join(&closure.output).to_string_lossy().into_owned();
         let output_bin = Path::new(&output).join("bin");
         let primary_producer = make_producer(&closure.output, &closure.references)?;
-        let primary_id = entry_id(name, version, reference, &output);
+        let primary_id =
+            content_addressed_entry_id(name, version, reference, &closure.output);
         let primary = StoreEntry {
             id: primary_id.clone(),
             name: name.to_string(),
@@ -1837,7 +1895,7 @@ fn replay_locked_nix_package(
             Ok(Some(value)) => value,
             Ok(None) => return Ok(None),
             Err(error) => {
-                return Err(RealizeError::Store(std::io::Error::other(error)));
+                return Err(RealizeError::LockedNix(std::io::Error::other(error)));
             }
         };
     let lock_digest =
@@ -1849,7 +1907,7 @@ fn replay_locked_nix_package(
         &closure,
         &envelope,
     )
-    .map_err(RealizeError::Store)?;
+    .map_err(RealizeError::LockedNix)?;
     let entry = record_locked_nix(
         roots,
         &name,
@@ -1860,7 +1918,7 @@ fn replay_locked_nix_package(
         &object_digests,
         &lock_digest,
     )
-    .map_err(RealizeError::Store)?;
+    .map_err(RealizeError::LockedNix)?;
     project_receipt_projection(ctx, &entry)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(Some(VerifiedRealization {

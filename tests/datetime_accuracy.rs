@@ -215,7 +215,7 @@ fn run_witness(
     command
         .arg(source)
         .current_dir(root)
-        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_STORE_DIR", cache.join("build"))
         .env("JET_RUN_CACHE_DIR", cache.join("run"))
         .env("JET_TZDB_DIR", root.join("corelib/tzdb"))
         .env("JETPACK_ENV", "1")

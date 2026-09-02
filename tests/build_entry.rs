@@ -1479,6 +1479,78 @@ fn run() { print("ok") }
 }
 
 #[test]
+fn concurrent_jet_builds_share_store_lock_and_run() {
+    let left = Scratch::new("concurrent-build-left");
+    let right = Scratch::new("concurrent-build-right");
+    let source = r#"
+fn run() {
+    print("shared store")
+}
+"#;
+    for scratch in [&left, &right] {
+        write(&scratch.join("main.jet"), source);
+    }
+    let store = left.join("store");
+    let holder = jet_store::Store::open(
+        jet_store::StoreConfig::new(store.clone()).with_reserve_bytes(0),
+    )
+    .expect("open shared store lock holder");
+
+    let owner = jet_store::ProcessIdentity::current();
+    let lock_path = holder.root().join("locks/store.lock");
+    fs::write(
+        &lock_path,
+        format!("jet.store.v1|lock|{}|{}\n", owner.pid(), owner.start()),
+    )
+    .expect("hold shared store lock");
+
+    let spawn_build = |scratch: &Scratch| {
+        Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["build", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", &store)
+            .env("JET_STORE_RESERVE_BYTES", "0")
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .spawn()
+            .expect("spawn concurrent build")
+    };
+    let left_child = spawn_build(&left);
+    let right_child = spawn_build(&right);
+    std::thread::sleep(Duration::from_millis(3000));
+    fs::remove_file(&lock_path).expect("release shared store lock");
+
+    let left_build = left_child
+        .wait_with_output()
+        .expect("wait for left concurrent build");
+    let right_build = right_child
+        .wait_with_output()
+        .expect("wait for right concurrent build");
+    for (name, output) in [("left", left_build), ("right", right_build)] {
+        assert!(
+            output.status.success(),
+            "{name} concurrent build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    for (name, scratch) in [("left", &left), ("right", &right)] {
+        let run = Command::new(scratch.join("build/main"))
+            .current_dir(&scratch.path)
+            .output()
+            .expect("run concurrent build binary");
+        assert!(
+            run.status.success(),
+            "{name} binary failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "shared store");
+    }
+}
+
+#[test]
 fn jet_build_positional_name_resolves_one_workspace_member() {
     let root = project("workspace-member-cli");
     let member = root.join("packages/one");

@@ -12,10 +12,8 @@ fn run() {
     insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
     _inserted :: scoped.execute(insert) ?? panic("insert")
     failed :: db.transaction(scoped, "bad batch", [SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"}, SQL{"INSERT INTO missing_table VALUES (1)"}]) ?? 0
-    row :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
-    found :: row ?? panic("missing")
-    count :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
-    counted :: count ?? panic("missing count")
+    found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
+    counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
     print(created)
     print(skipped)
     print(failed)
