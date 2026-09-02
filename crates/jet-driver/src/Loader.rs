@@ -14,7 +14,7 @@ use crate::AST::{
     ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, OutputKind,
     PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
 };
-use jet_pkg_model::Authority::{AuthorityResolver, CheckedFile};
+use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -620,6 +620,46 @@ fn project_parts_loader_error(
         .collect();
     LoaderError { diagnostics }
 }
+/// Recover the concrete path behind a project-wide authority failure. The
+/// ProjectParts report keeps its scan root as the failure location, while the
+/// shared resolver owns the offending descendant path. Repeating the read-only
+/// discovery is safe only when it reproduces the same registered diagnostic.
+fn authority_failure_file(
+    project_root: &Path,
+    failure: &crate::ProjectParts::ProjectPartScanFailure,
+) -> String {
+    let fallback = relative_display(project_root, &failure.path);
+    if failure.problem.code != "E1334" {
+        return fallback;
+    }
+    let Ok(resolver) = AuthorityResolver::open(&failure.path) else {
+        return fallback;
+    };
+    let Err(error) = resolver.discover_source_files() else {
+        return fallback;
+    };
+    let diagnostic = error.diagnostic();
+    if diagnostic.code != failure.problem.code || diagnostic.what != failure.problem.what {
+        return fallback;
+    }
+    let path = match &error {
+        AuthorityError::Missing(path)
+        | AuthorityError::Symlink(path)
+        | AuthorityError::AmbiguousManifest(path)
+        | AuthorityError::RetiredManifest(path)
+        | AuthorityError::Escapes(path)
+        | AuthorityError::Changed(path) => Some(path.as_path()),
+        AuthorityError::ManifestParse { path, .. }
+        | AuthorityError::Io { path, .. }
+        | AuthorityError::WrongKind { path, .. }
+        | AuthorityError::Invalid { path, .. } => Some(path.as_path()),
+        AuthorityError::NestedMembers { member, .. } => Some(member.as_path()),
+        AuthorityError::WorkspaceAmbiguous(paths) => paths.first().map(|path| path.as_path()),
+        AuthorityError::WorkspaceNoModule | AuthorityError::Unsupported(_) => None,
+    };
+    path.map(|path| relative_display(project_root, path))
+        .unwrap_or(fallback)
+}
 
 /// What the project's manifest + the shared hangar tell the module resolver
 /// about consuming packages with `use <pkg>` (U17).
@@ -1124,12 +1164,21 @@ fn load_entry_with_overlays_mode_on_stack(
         .parent()
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
-    let workspace_root = match find_workspace_root_checked(&entry_dir) {
+    let workspace_root = match find_workspace_root_with_error(&entry_dir) {
         Ok(root) => root,
-        Err(diagnostic) => {
+        Err((_failure_root, error)) => {
+            let diagnostic = error.workspace_diagnostic();
+            let file = if diagnostic.code == "E1334" {
+                match &error {
+                    AuthorityError::Symlink(path) => path.display().to_string(),
+                    _ => entry_abs.display().to_string(),
+                }
+            } else {
+                entry_abs.display().to_string()
+            };
             return Err(record_loader_error(
                 &mut sink,
-                LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
+                LoaderError::at(&file, "", vec![diagnostic]),
             ));
         }
     };
@@ -2077,7 +2126,7 @@ fn load_entry_with_overlays_mode_on_stack(
             .iter()
             .find(|failure| failure.authority)
         {
-            let file = relative_display(&project_root, &failure.path);
+            let file = authority_failure_file(&project_root, failure);
             return Err(record_loader_error(
                 &mut sink,
                 LoaderError::at(&file, "", vec![failure.problem.clone()]),
@@ -3212,17 +3261,19 @@ pub fn authority_name_for_entry(entry: &Path) -> Result<String, Diagnostic> {
 /// Workspace roots are independent project boundaries. In particular, a
 /// workspace nested below a package root must own file and module imports
 /// inside that workspace instead of inheriting the package's wider tree.
-pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir =
-        AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
+fn find_workspace_root_with_error(
+    start: &Path,
+) -> Result<Option<PathBuf>, (PathBuf, AuthorityError)> {
+    let mut dir = AuthorityResolver::authority_walk_root(start)
+        .map_err(|error| (start.to_path_buf(), error))?;
     loop {
-        if let Some(resolver) =
-            AuthorityResolver::open_for_authority_walk(&dir).map_err(|error| error.diagnostic())?
-        {
+        let resolver = AuthorityResolver::open_for_authority_walk(&dir)
+            .map_err(|error| (dir.clone(), error))?;
+        if let Some(resolver) = resolver {
             match resolver.resolve_workspace_source() {
                 Ok(Some(_)) => return Ok(Some(dir)),
                 Ok(None) => {}
-                Err(error) => return Err(error.workspace_diagnostic()),
+                Err(error) => return Err((dir.clone(), error)),
             }
         }
         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
@@ -3230,6 +3281,11 @@ pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diag
         };
         dir = parent;
     }
+}
+
+pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    find_workspace_root_with_error(start)
+        .map_err(|(_, error)| error.workspace_diagnostic())
 }
 
 /// D-JPK-FILENAME2=B (A2): walk upward the same way [`find_manifest_root`]
@@ -3702,8 +3758,12 @@ fn load_file(
             .chain(std::iter::once(&norm))
             .map(|p| relative_display(project_root, p))
             .collect();
+        let cycle_file = stack
+            .last()
+            .map(|path| relative_display(project_root, path))
+            .unwrap_or_else(|| display.to_string());
         return Err(LoaderError::at(
-            display,
+            &cycle_file,
             "",
             vec![Diagnostic::error(
                 "E0604",
