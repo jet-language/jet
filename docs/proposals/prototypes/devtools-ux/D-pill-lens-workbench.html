@@ -1,0 +1,841 @@
+<!-- PROTOTYPE — throwaway design artifact for Tower ballot D-DX-DEVTOOLS-UX1. Not product code. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype — sample data · Devtools · Pill / Lens / Workbench</title>
+<style>
+:root {
+  --bg: #090c10;
+  --surface: #10151c;
+  --surface-2: #151c25;
+  --surface-3: #1b2530;
+  --surface-hover: #202c38;
+  --line: #2a3744;
+  --line-strong: #3a4a5a;
+  --text: #f1f5f8;
+  --text-2: #b9c5cf;
+  --muted: #7d8b98;
+  --accent: #72b8ff;
+  --accent-soft: rgba(114,184,255,.14);
+  --success: #62d3a0;
+  --success-soft: rgba(98,211,160,.14);
+  --warning: #e8b867;
+  --warning-soft: rgba(232,184,103,.14);
+  --danger: #f17c83;
+  --danger-soft: rgba(241,124,131,.14);
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); font: 13px/1.45 var(--sans); }
+button, input, select { font: inherit; }
+button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button, .clickable { cursor: pointer; }
+code, pre, .mono { font-family: var(--mono); }
+.app-shell { min-height: 100vh; padding: 14px 18px 42px; }
+.proto-label { position: fixed; top: 8px; right: 12px; z-index: 30; color: var(--muted); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; pointer-events: none; }
+.core-banner { display: flex; align-items: center; gap: 12px; max-width: 1480px; margin: 0 auto 12px; padding: 8px 10px 8px 13px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 7px; background: var(--surface); color: var(--text-2); font-size: 12px; }
+.core-banner strong { color: var(--text); margin-right: 5px; }
+.core-banner span { flex: 1; }
+.icon-button, .quiet-button, .primary-button, .state-button, .pill-segment, .panel-tab, .command-item, .tree-item, .timeline-event, .route-link { border: 1px solid transparent; background: none; }
+.icon-button { width: 26px; height: 26px; border-radius: 5px; color: var(--muted); font-size: 17px; line-height: 1; }
+.icon-button:hover, .quiet-button:hover { background: var(--surface-hover); color: var(--text); }
+.quiet-button { padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); color: var(--text-2); font-size: 11px; }
+.quiet-button:hover { border-color: var(--line-strong); }
+.primary-button { padding: 7px 11px; border: 1px solid rgba(114,184,255,.5); border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-weight: 650; font-size: 11px; }
+.primary-button:hover { background: rgba(114,184,255,.23); }
+.topbar { max-width: 1480px; margin: 0 auto 12px; min-height: 46px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); }
+.wordmark { display: flex; align-items: center; gap: 8px; font-weight: 750; letter-spacing: -.01em; }
+.wordmark-mark { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font: 11px var(--mono); }
+.top-path { color: var(--muted); font: 11px var(--mono); }
+.top-spacer { flex: 1; }
+.status-chip, .sync-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-2); font: 10px var(--mono); }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.status-chip.warning .status-dot { background: var(--warning); }
+.status-chip.danger .status-dot { background: var(--danger); }
+.sync-chip { color: var(--success); border-color: rgba(98,211,160,.28); background: var(--success-soft); }
+.main-grid { max-width: 1480px; margin: 0 auto; display: grid; grid-template-columns: minmax(440px, 1fr) minmax(520px, 1.08fr); gap: 12px; align-items: start; }
+.surface-shell { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.surface-head { min-height: 42px; padding: 8px 11px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); background: #0d1218; }
+.surface-head h2 { margin: 0; font-size: 12px; font-weight: 720; }
+.surface-head .surface-meta { color: var(--muted); font: 10px var(--mono); }
+.surface-head .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.left-stage { position: relative; min-height: 708px; padding: 12px; background: #0d1217; overflow: hidden; }
+.app-card { min-height: 680px; position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: #f4f7fa; color: #1b2530; }
+.app-nav { height: 42px; display: flex; align-items: center; gap: 16px; padding: 0 14px; border-bottom: 1px solid #d5dde5; background: #fff; }
+.app-brand { font-weight: 760; color: #182331; }
+.app-nav a { color: #637383; font-size: 11px; text-decoration: none; }
+.app-nav a.active { color: #1c5d93; font-weight: 700; }
+.app-user { margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: #dceafa; color: #1d5989; font: 10px var(--mono); }
+.app-main { padding: 22px 20px 94px; }
+.app-heading { display: flex; align-items: start; gap: 12px; margin-bottom: 17px; }
+.app-heading h3 { margin: 0 0 3px; color: #142131; font-size: 23px; letter-spacing: -.025em; }
+.app-heading p { margin: 0; color: #718091; font-size: 11px; }
+.app-heading .app-route { margin-left: auto; padding: 4px 7px; border: 1px solid #cbd8e4; border-radius: 4px; color: #4f6b83; background: #f0f5f9; font: 10px var(--mono); }
+.app-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 13px; }
+.app-metric { padding: 10px; border: 1px solid #dbe3ea; border-radius: 5px; background: #fff; }
+.app-metric small { display: block; color: #7d8c9a; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.app-metric b { display: block; margin-top: 5px; color: #24384c; font-size: 16px; }
+.app-panel { border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
+.app-panel-head { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-bottom: 1px solid #e3e9ee; }
+.app-panel-head strong { font-size: 12px; }
+.app-panel-head span { color: #758696; font-size: 10px; }
+.app-panel-head .app-action { margin-left: auto; padding: 5px 8px; border: 0; border-radius: 4px; background: #21689c; color: #fff; font-size: 10px; }
+.app-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.app-table th { padding: 8px 11px; color: #7e8d9c; text-align: left; font: 9px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.app-table td { padding: 9px 11px; border-top: 1px solid #edf1f4; color: #526678; }
+.app-table td:first-child { color: #1f3b53; font-weight: 700; }
+.app-table tr[data-inspect] { cursor: pointer; }
+.app-table tr[data-inspect]:hover, .app-table tr.selected { background: #edf5fc; }
+.app-table .order-status { display: inline-block; padding: 2px 5px; border-radius: 3px; color: #21624e; background: #dff3e9; font: 9px var(--mono); }
+.form-view { display: none; }
+.form-view.active { display: block; }
+.form-grid { display: grid; gap: 11px; padding: 14px; }
+.form-field { display: grid; gap: 4px; }
+.form-field label { color: #637383; font: 10px var(--mono); }
+.form-field input, .form-field select, .form-field textarea { width: 100%; padding: 7px 8px; border: 1px solid #cbd8e4; border-radius: 4px; color: #24384c; background: #f9fbfc; font-size: 11px; }
+.form-field textarea { min-height: 56px; resize: vertical; }
+.form-field .field-error { color: #b63e4d; font-size: 10px; }
+.form-submit { padding: 7px 10px; border: 0; border-radius: 4px; background: #21689c; color: #fff; font-size: 10px; }
+.route-link { color: #21689c; text-decoration: underline; text-underline-offset: 2px; }
+.app-error { display: none; margin-bottom: 12px; padding: 10px; border: 1px solid #e7a4aa; border-radius: 5px; background: #fff0f1; color: #9b3541; }
+.app-error.show { display: block; }
+.app-error strong { display: block; margin-bottom: 3px; }
+.app-error code { font-size: 10px; }
+.app-toast { position: absolute; right: 12px; bottom: 82px; display: none; max-width: 220px; padding: 9px 11px; border: 1px solid #abcabf; border-radius: 5px; background: #f0fbf6; color: #22604a; box-shadow: 0 6px 22px rgba(20,49,38,.12); font-size: 10px; }
+.app-toast.show { display: block; }
+.lens-panel { position: absolute; z-index: 4; top: 12px; right: 12px; bottom: 64px; width: min(345px, calc(100% - 24px)); display: flex; flex-direction: column; border: 1px solid var(--line-strong); border-radius: 7px; background: rgba(16,21,28,.98); box-shadow: 0 18px 60px rgba(0,0,0,.48); transform: translateX(calc(100% + 20px)); transition: transform .18s ease; }
+.lens-panel.open { transform: translateX(0); }
+.lens-head { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.lens-head h3 { margin: 0; font-size: 13px; }
+.lens-head .lens-context { color: var(--accent); font: 10px var(--mono); }
+.lens-head .head-actions { margin-left: auto; display: flex; gap: 5px; }
+.lens-scroll { min-height: 0; flex: 1; overflow: auto; padding: 10px; }
+.inspect-summary { padding: 10px; margin-bottom: 9px; border: 1px solid rgba(114,184,255,.35); border-radius: 5px; background: var(--accent-soft); }
+.inspect-summary .eyebrow { color: var(--accent); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .09em; }
+.inspect-summary strong { display: block; margin: 4px 0 2px; font-size: 14px; }
+.inspect-summary p { margin: 0; color: var(--text-2); font-size: 11px; }
+.lens-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.lens-card { min-height: 91px; padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); }
+.lens-card h4 { margin: 0 0 6px; color: var(--muted); font: 9px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.lens-card p { margin: 0; color: var(--text-2); font-size: 10px; }
+.lens-card b { color: var(--text); font-weight: 650; }
+.lens-card .good { color: var(--success); }
+.lens-card .warn { color: var(--warning); }
+.lens-card .bad { color: var(--danger); }
+.lens-divider { display: flex; align-items: center; gap: 8px; margin: 13px 0 8px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.lens-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.drawer { border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.drawer-head { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.drawer-head label { color: var(--muted); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.drawer-head select { margin-left: auto; max-width: 155px; padding: 4px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text); background: var(--surface-3); font-size: 10px; }
+.drawer-list { padding: 8px; }
+.panel-row { display: flex; align-items: start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.panel-row:last-child { border-bottom: 0; }
+.panel-row .row-main { min-width: 0; flex: 1; }
+.panel-row strong { display: block; color: var(--text); font-size: 10px; font-weight: 650; }
+.panel-row span { display: block; margin-top: 2px; color: var(--text-2); font: 9px/1.45 var(--mono); overflow-wrap: anywhere; }
+.panel-mark { width: 6px; height: 6px; flex: 0 0 auto; margin-top: 4px; border-radius: 2px; background: var(--accent); }
+.panel-mark.good { background: var(--success); }
+.panel-mark.warn { background: var(--warning); }
+.panel-mark.bad { background: var(--danger); }
+.lens-timeline { padding: 8px 10px 9px; border-top: 1px solid var(--line); background: #0d1218; }
+.timeline-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; color: var(--muted); font: 9px var(--mono); }
+.timeline-label strong { color: var(--accent); font-weight: 500; }
+.timeline-range { width: 100%; height: 14px; accent-color: var(--accent); cursor: ew-resize; }
+.timeline-ticks { display: flex; justify-content: space-between; color: var(--muted); font: 8px var(--mono); }
+.workbench-shell { position: relative; min-width: 0; min-height: 760px; }
+.workbench-live { min-height: 760px; display: grid; grid-template-rows: 42px 1fr 27px; }
+.workbench-body { min-height: 0; display: grid; grid-template-columns: 145px minmax(220px, 1fr) minmax(190px, .86fr); }
+.wb-pane { min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid var(--line); background: var(--surface); }
+.wb-pane:last-child { border-right: 0; }
+.wb-pane-head { padding: 9px 10px 7px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.tree { padding: 0 7px 10px; }
+.tree-group { margin-bottom: 9px; }
+.tree-label { padding: 4px 5px; color: var(--muted); font: 9px var(--mono); }
+.tree-item { width: 100%; display: flex; gap: 6px; align-items: center; padding: 6px 6px; border-radius: 4px; color: var(--text-2); text-align: left; font-size: 10px; }
+.tree-item:hover, .tree-item.active { background: var(--accent-soft); color: var(--accent); }
+.tree-icon { color: var(--muted); font: 9px var(--mono); }
+.compare-strip { display: flex; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line); background: #0d1218; }
+.compare-strip .compare-label { padding-top: 3px; color: var(--muted); font: 9px var(--mono); }
+.compare-button { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); color: var(--text-2); font: 9px var(--mono); cursor: pointer; }
+.compare-button.active { border-color: rgba(114,184,255,.5); color: var(--accent); background: var(--accent-soft); }
+.wb-timeline { padding: 10px; }
+.wb-time-line { position: relative; height: 10px; margin: 11px 5px 16px; border-top: 1px solid var(--line-strong); }
+.wb-time-line::before, .wb-time-line::after { content: ""; position: absolute; top: -4px; width: 7px; height: 7px; border: 1px solid var(--muted); border-radius: 50%; background: var(--surface); }
+.wb-time-line::before { left: 0; }
+.wb-time-line::after { right: 0; }
+.wb-marker { position: absolute; top: -6px; left: 0%; width: 11px; height: 11px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 3px var(--accent-soft); transform: translateX(-50%); }
+.wb-ticks { display: flex; justify-content: space-between; color: var(--muted); font: 8px var(--mono); }
+.timeline-events { margin-top: 14px; display: grid; gap: 5px; }
+.timeline-event { width: 100%; display: grid; grid-template-columns: 32px 1fr auto; gap: 6px; padding: 7px 6px; border-radius: 4px; color: var(--text-2); text-align: left; font-size: 9px; }
+.timeline-event:hover, .timeline-event.active { background: var(--accent-soft); color: var(--text); }
+.timeline-event .event-time { color: var(--accent); font: 9px var(--mono); }
+.timeline-event .event-kind { color: var(--muted); font: 8px var(--mono); }
+.timeline-event .event-dur { color: var(--muted); font: 8px var(--mono); }
+.inspector { padding: 0 10px 14px; }
+.inspector-selection { margin: 0 0 10px; padding: 9px; border: 1px solid rgba(114,184,255,.35); border-radius: 5px; background: var(--accent-soft); }
+.inspector-selection small { color: var(--accent); font: 9px var(--mono); }
+.inspector-selection strong { display: block; margin-top: 3px; font-size: 13px; }
+.inspector-selection span { display: block; margin-top: 2px; color: var(--text-2); font: 9px var(--mono); }
+.inspector-block { padding: 9px 0; border-bottom: 1px solid var(--line); }
+.inspector-block h4 { margin: 0 0 6px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.inspector-kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; color: var(--text-2); font-size: 10px; }
+.inspector-kv code { color: var(--text); font-size: 9px; text-align: right; }
+.workbench-status { display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-top: 1px solid var(--line); color: var(--muted); font: 9px var(--mono); }
+.workbench-status strong { color: var(--success); font-weight: 500; }
+.popout-view { position: fixed; z-index: 25; inset: 14px; display: none; grid-template-rows: 48px 1fr; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg); box-shadow: 0 30px 100px rgba(0,0,0,.72); }
+.popout-view.open { display: grid; }
+.popout-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: #0d1218; }
+.popout-head h2 { margin: 0; font-size: 13px; }
+.popout-head span { color: var(--success); font: 10px var(--mono); }
+.popout-head .head-actions { display: flex; gap: 6px; margin-left: auto; }
+.popout-body { min-height: 0; display: grid; grid-template-columns: 180px minmax(280px, 1fr) minmax(240px, .8fr); }
+.popout-body .wb-pane { border-color: var(--line); }
+.scrim { position: fixed; z-index: 24; inset: 0; display: none; background: rgba(0,0,0,.58); }
+.scrim.open { display: block; }
+.tui-section, .hosts-section { max-width: 1480px; margin: 12px auto 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.section-head { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 8px 11px; border-bottom: 1px solid var(--line); }
+.section-head h2 { margin: 0; font-size: 12px; }
+.section-head span { color: var(--muted); font: 10px var(--mono); }
+.section-head .head-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.tui-frame { overflow-x: auto; padding: 12px; background: #050705; }
+.tui-frame pre { width: 720px; min-height: 384px; margin: 0; padding: 12px; border: 1px solid #23352b; border-radius: 5px; background: #08100b; color: #8be0ad; font: 11px/1.5 var(--mono); white-space: pre; }
+.tui-frame.monochrome pre { color: #d2d8d5; border-color: #59615e; background: #101212; }
+.hosts-section { padding-bottom: 13px; }
+.host-definition { margin: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: #0c1117; }
+.host-definition code { color: var(--accent); font-size: 10px; white-space: pre-wrap; }
+.host-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 0 12px; }
+.host-card { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); }
+.host-card h3 { margin: 0 0 7px; color: var(--text-2); font-size: 10px; font-weight: 650; }
+.host-thumb { height: 86px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 4px; background: #0a0f15; }
+.host-thumb .mini-top { height: 12px; padding: 3px 5px; background: #17212b; }
+.host-thumb .mini-top i { display: inline-block; width: 4px; height: 4px; margin-right: 2px; border-radius: 50%; background: var(--muted); }
+.mini-content { display: grid; grid-template-columns: 32% 1fr; height: 74px; }
+.mini-side { padding: 5px; border-right: 1px solid var(--line); }
+.mini-side b, .mini-line, .mini-pill { display: block; height: 4px; margin-bottom: 5px; border-radius: 2px; background: #536270; }
+.mini-side b { width: 80%; background: var(--accent); }
+.mini-line { width: 76%; margin: 8px 7px 6px; }
+.mini-line.short { width: 54%; }
+.mini-pill { width: 44%; margin: 8px 7px; background: var(--success); }
+.mini-table { padding: 5px; }
+.mini-table span { display: block; height: 5px; margin: 4px 0; border-top: 1px solid #2b3945; }
+.host-thumb.terminal { padding: 7px; color: var(--success); font: 7px/1.5 var(--mono); }
+.host-thumb.terminal .mini-line { width: 90%; height: auto; margin: 0 0 3px; background: none; }
+.host-thumb.editor { display: grid; grid-template-columns: 43% 57%; }
+.editor-code { padding: 6px; color: #8a9bab; font: 6px/1.7 var(--mono); }
+.editor-side { padding: 5px; border-left: 1px solid var(--line); }
+.editor-side .mini-line { margin: 4px 0; width: 85%; }
+.host-thumb.native { position: relative; padding: 15px 7px 7px; }
+.native-window { padding: 6px; border: 1px solid #556675; background: #161f28; }
+.native-window .mini-line { margin: 3px 0; width: 86%; }
+.host-thumb.overlay .mini-content { opacity: .45; }
+.host-thumb.overlay .overlay-card { position: relative; width: 72%; margin: -56px auto 0; padding: 8px 5px; border: 1px solid var(--accent); border-radius: 3px; background: #121a23; }
+.overlay-card .mini-line { margin: 4px 0; width: 90%; }
+.state-switcher { position: fixed; z-index: 20; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 4px; max-width: calc(100vw - 24px); padding: 5px; border: 1px solid var(--line-strong); border-radius: 6px; background: rgba(9,12,16,.96); box-shadow: 0 9px 30px rgba(0,0,0,.42); }
+.state-switcher .state-label { padding: 0 5px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.state-button { padding: 5px 7px; border-radius: 4px; color: var(--text-2); font: 9px var(--mono); white-space: nowrap; }
+.state-button:hover { background: var(--surface-hover); }
+.state-button.active { background: var(--accent-soft); color: var(--accent); }
+.pill { position: absolute; z-index: 6; left: 12px; bottom: 12px; max-width: calc(100% - 24px); display: flex; align-items: stretch; border: 1px solid #435566; border-radius: 6px; background: #101820; box-shadow: 0 9px 25px rgba(10,21,32,.28); }
+.pill-prefix { display: flex; align-items: center; padding: 6px 7px; border-right: 1px solid #334655; color: var(--accent); font: 9px var(--mono); font-weight: 700; }
+.pill-segment { min-width: 0; padding: 6px 8px; border-right: 1px solid #334655; color: #b6c4cf; text-align: left; font: 9px var(--mono); white-space: nowrap; }
+.pill-segment:last-child { border-right: 0; }
+.pill-segment:hover, .pill-segment.active { background: #1b2b3b; color: var(--text); }
+.pill-segment .pill-value { color: var(--text); }
+.pill-segment .pill-value.success { color: var(--success); }
+.pill-segment .pill-value.warning { color: var(--warning); }
+.pill-segment .pill-value.danger { color: var(--danger); }
+.help-overlay { position: fixed; z-index: 40; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,.66); }
+.help-overlay.open { display: flex; }
+.help-card { width: min(420px, 100%); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 25px 80px rgba(0,0,0,.6); }
+.help-head { display: flex; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+.help-head h2 { margin: 0; font-size: 14px; }
+.help-head button { margin-left: auto; }
+.shortcut-list { display: grid; grid-template-columns: 1fr auto; gap: 0; padding: 5px 12px 12px; }
+.shortcut-list div { padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--text-2); }
+.shortcut-list div:nth-last-child(-n+2) { border-bottom: 0; }
+.shortcut-list kbd { padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--accent); background: var(--surface-2); font: 10px var(--mono); }
+.palette { position: fixed; z-index: 42; inset: 0; display: none; align-items: start; justify-content: center; padding-top: 108px; background: rgba(0,0,0,.58); }
+.palette.open { display: flex; }
+.palette-card { width: min(530px, calc(100% - 30px)); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 25px 80px rgba(0,0,0,.62); overflow: hidden; }
+.palette-search { width: 100%; padding: 13px; border: 0; border-bottom: 1px solid var(--line); outline: none; color: var(--text); background: #0c1117; font: 12px var(--mono); }
+.command-list { max-height: 310px; overflow: auto; padding: 5px; }
+.command-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 8px; border-radius: 4px; color: var(--text-2); text-align: left; font-size: 11px; }
+.command-item:hover, .command-item:focus-visible { background: var(--accent-soft); color: var(--text); }
+.command-item .command-key { margin-left: auto; color: var(--muted); font: 9px var(--mono); }
+.state-banner { display: none; max-width: 1480px; margin: 0 auto 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text-2); font-size: 11px; }
+.state-banner.show { display: block; }
+.state-banner.warning { border-color: rgba(232,184,103,.45); background: var(--warning-soft); }
+.state-banner.danger { border-color: rgba(241,124,131,.45); background: var(--danger-soft); }
+.state-banner strong { color: var(--text); }
+.production-note { max-width: 1480px; margin: 15px auto 0; padding: 9px 0; border-top: 1px solid var(--line); color: var(--muted); font: 10px var(--mono); }
+@media (max-width: 1100px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .workbench-live { min-height: 640px; }
+  .workbench-shell { min-height: 640px; }
+  .left-stage { min-height: 700px; }
+  .host-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 768px) {
+  .app-shell { padding: 10px 10px 54px; }
+  .topbar { gap: 8px; flex-wrap: wrap; padding-bottom: 8px; }
+  .topbar .top-spacer { display: none; }
+  .top-path { order: 3; width: 100%; }
+  .topbar .status-chip { margin-left: auto; }
+  .main-grid { gap: 10px; }
+  .left-stage { min-height: 690px; padding: 8px; }
+  .app-card { min-height: 662px; }
+  .app-main { padding: 17px 12px 92px; }
+  .app-heading h3 { font-size: 20px; }
+  .app-metrics { grid-template-columns: 1fr 1fr; }
+  .app-metric:last-child { display: none; }
+  .app-table { font-size: 9px; }
+  .app-table th, .app-table td { padding: 8px 6px; }
+  .lens-panel { top: 8px; right: 8px; bottom: 58px; width: calc(100% - 16px); }
+  .workbench-body, .popout-body { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+  .wb-pane { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .wb-pane:last-child { border-bottom: 0; }
+  .popout-view { inset: 7px; }
+  .host-grid { grid-template-columns: repeat(2, 1fr); }
+  .state-switcher { overflow-x: auto; right: 12px; }
+  .state-switcher .state-label { display: none; }
+  .pill { overflow-x: auto; right: 12px; }
+  .pill-segment { flex: 0 0 auto; }
+}
+</style>
+</head>
+<body>
+<div class="proto-label">Prototype — sample data</div>
+<div class="app-shell">
+  <aside class="core-banner" id="coreBanner" aria-label="Prototype core loop">
+    <strong>Archetype D · Pill → Lens → Workbench</strong>
+    <span>Glance at the pill, point to inspect, pop out to work — one panel definition, every surface.</span>
+    <button class="icon-button" id="dismissBanner" type="button" aria-label="Dismiss core loop banner">×</button>
+  </aside>
+  <header class="topbar">
+    <div class="wordmark"><span class="wordmark-mark">D</span><span>Devtools</span></div>
+    <span class="top-path">Orders · @run.jet · /orders</span>
+    <span class="top-spacer"></span>
+    <span class="sync-chip" id="syncChip">● live sync</span>
+    <span class="status-chip" id="statusChip"><span class="status-dot"></span><span id="statusText">jet dev (JIT) · ready</span></span>
+    <button class="quiet-button" id="lensButton" type="button">Lens <span class="mono">Alt+J</span></button>
+    <button class="primary-button" id="popoutButton" type="button">Pop out <span class="mono">Ctrl+Shift+W</span></button>
+    <button class="icon-button" id="helpButton" type="button" aria-label="Show keyboard shortcuts">?</button>
+  </header>
+  <div class="state-banner" id="stateBanner" role="status"></div>
+  <main class="main-grid" aria-label="Pill lens workbench prototype">
+    <section class="surface-shell" aria-labelledby="appSurfaceTitle">
+      <div class="surface-head">
+        <h2 id="appSurfaceTitle">Running app + Lens</h2>
+        <span class="surface-meta">in-app surface · shared selection</span>
+        <div class="head-actions"><span class="status-chip"><span class="status-dot"></span> /orders</span></div>
+      </div>
+      <div class="left-stage">
+        <article class="app-card" aria-label="Fake Orders web app">
+          <nav class="app-nav" aria-label="Orders app navigation">
+            <span class="app-brand">Orders</span>
+            <a href="#" class="active" id="ordersRouteLink">Orders</a>
+            <a href="#" id="settingsRouteLink">Settings</a>
+            <span class="app-user">NS</span>
+          </nav>
+          <div class="app-main">
+            <div class="app-heading">
+              <div><h3 id="appTitle">Orders</h3><p id="appSubtitle">Back-office order queue</p></div>
+              <span class="app-route" id="appRoute" data-inspect="OrdersPage">/orders</span>
+            </div>
+            <div class="app-error" id="appError" data-inspect="Runtime failure"></div>
+            <div class="app-metrics">
+              <div class="app-metric" data-inspect="orders.list"><small>Pending</small><b>24</b></div>
+              <div class="app-metric" data-inspect="OrdersTable"><small>Visible rows</small><b>24 / 1,000</b></div>
+              <div class="app-metric" data-inspect="Cart"><small>Cart total</small><b>€184.00</b></div>
+            </div>
+            <section class="app-panel table-view" id="tableView" data-inspect="OrdersTable">
+              <div class="app-panel-head"><strong>OrdersTable</strong><span>status = pending · page 1</span><button class="app-action" type="button" id="openOrderButton">Open 1042</button></div>
+              <table class="app-table" aria-label="Orders table">
+                <thead><tr><th>Id</th><th>Customer</th><th>Total</th><th>Status</th><th>Created</th></tr></thead>
+                <tbody>
+                  <tr data-inspect="Order 1042" data-selection="OrdersTable"><td>#1042</td><td>Ingrid N.</td><td>€184.00</td><td><span class="order-status">pending</span></td><td>today</td></tr>
+                  <tr data-inspect="Order 1041" data-selection="OrdersTable"><td>#1041</td><td>Arun P.</td><td>€42.10</td><td><span class="order-status">pending</span></td><td>today</td></tr>
+                  <tr data-inspect="Order 1039" data-selection="OrdersTable"><td>#1039</td><td>Maria S.</td><td>€67.50</td><td><span class="order-status">pending</span></td><td>yesterday</td></tr>
+                  <tr data-inspect="Order 1038" data-selection="OrdersTable"><td>#1038</td><td>Lucas V.</td><td>€91.20</td><td><span class="order-status">pending</span></td><td>yesterday</td></tr>
+                </tbody>
+              </table>
+            </section>
+            <section class="app-panel form-view" id="formView" data-inspect="ShipOrder">
+              <div class="app-panel-head"><strong>ShipOrder</strong><span>/orders/1042</span><button class="app-action" type="button" id="backOrdersButton">Back to Orders</button></div>
+              <div class="form-grid">
+                <div class="form-field" data-inspect="address"><label for="addressInput">address · Address</label><input id="addressInput" value="12 Harbor St, Oslo" aria-label="Address"></div>
+                <div class="form-field" data-inspect="carrier"><label for="carrierInput">carrier · Carrier</label><select id="carrierInput" aria-label="Carrier"><option value="">Choose a carrier</option><option>PostNord</option><option>DHL</option></select><span class="field-error">choose a carrier</span></div>
+                <div class="form-field" data-inspect="notes"><label for="notesInput">notes · String?</label><textarea id="notesInput" aria-label="Notes">leave at reception</textarea></div>
+                <div><button class="form-submit" type="button">Ship order</button></div>
+              </div>
+            </section>
+          </div>
+          <div class="app-toast" id="appToast"></div>
+          <div class="pill" id="pill" aria-label="Devtools status pill">
+            <span class="pill-prefix">DEV</span>
+            <button class="pill-segment" type="button" data-panel="Build"><span aria-hidden="true">● </span>build <span class="pill-value success" id="pillBuild">ready</span></button>
+            <button class="pill-segment" type="button" data-panel="Build"><span aria-hidden="true">↻ </span>reload <span class="pill-value" id="pillReload">120ms · 4 kept</span></button>
+            <button class="pill-segment" type="button" data-panel="Traces"><span aria-hidden="true">⌁ </span>errors <span class="pill-value success" id="pillErrors">0</span></button>
+            <button class="pill-segment" type="button" data-panel="Tests"><span aria-hidden="true">✓ </span>tests <span class="pill-value warning" id="pillTests">1 failing</span></button>
+            <button class="pill-segment" type="button" data-panel="Queries"><span aria-hidden="true">↗ </span>fetching <span class="pill-value warning" id="pillFetching">1</span></button>
+          </div>
+        </article>
+        <aside class="lens-panel open" id="lensPanel" aria-label="Contextual Lens">
+          <div class="lens-head"><h3>Lens</h3><span class="lens-context" id="lensContext">OrdersTable</span><div class="head-actions"><button class="quiet-button" id="drawerToggle" type="button">Panel drawer</button><button class="icon-button" id="closeLensButton" type="button" aria-label="Close Lens">×</button></div></div>
+          <div class="lens-scroll">
+            <div class="inspect-summary"><span class="eyebrow">Inspect on hover</span><strong id="selectionTitle">OrdersTable</strong><p id="selectionDescription">24 visible rows from 1,000, virtualized at 36px.</p></div>
+            <div class="lens-cards" aria-label="Contextual inspection cards">
+              <article class="lens-card" data-card="route"><h4>Route / render reason</h4><p id="cardRoute">/orders · <b>server + stream</b><br>loader orders.list</p></article>
+              <article class="lens-card" data-card="query"><h4>Query state</h4><p id="cardQuery">orders.list · <b class="good">fresh</b><br>41ms · updated 2s ago</p></article>
+              <article class="lens-card" data-card="store"><h4>Store reads</h4><p id="cardStore">Cart · <b>3 items</b><br>€184.00 · 4 changes</p></article>
+              <article class="lens-card" data-card="form"><h4>Form field state</h4><p id="cardForm">ShipOrder · <b class="warn">dirty / invalid</b><br>carrier: choose a carrier</p></article>
+              <article class="lens-card" data-card="cost"><h4>Cost</h4><p id="cardCost">Orders.jet:31 · <b class="good">copy removed</b><br>48 bytes in loop</p></article>
+              <article class="lens-card" data-card="change"><h4>Last change</h4><p id="cardChange">fn pick_carrier<br><b>hot reload · 120ms</b></p></article>
+            </div>
+            <div class="lens-divider">Single panel drawer</div>
+            <div class="drawer" id="panelDrawer">
+              <div class="drawer-head"><label for="drawerSelect">Panel</label><select id="drawerSelect" aria-label="Choose plugin panel"><option>Build</option><option>Routes</option><option>Queries</option><option>Mutations</option><option>Forms</option><option>Table</option><option>Store</option><option>Traces</option><option>Cost</option><option>Gates</option><option>Tests</option><option>Jobs</option><option>Payments</option></select></div>
+              <div class="drawer-list" id="drawerList"></div>
+            </div>
+          </div>
+          <div class="lens-timeline"><div class="timeline-label"><span>Time cursor · shared</span><strong id="lensTime">0ms · GET /api/orders</strong></div><input class="timeline-range" id="timelineRange" type="range" min="0" max="330" value="0" step="1" aria-label="Shared timeline cursor"><div class="timeline-ticks"><span>0ms</span><span>80ms</span><span>220ms</span><span>330ms</span></div></div>
+        </aside>
+      </div>
+    </section>
+    <section class="surface-shell workbench-shell" aria-labelledby="workbenchTitle">
+      <div class="workbench-live">
+        <div class="surface-head"><h2 id="workbenchTitle">Workbench</h2><span class="surface-meta">three panes · program / compare / inspector</span><div class="head-actions"><span class="sync-chip">● synced</span><button class="quiet-button" id="popoutInlineButton" type="button">Pop out</button></div></div>
+        <div class="workbench-body">
+          <aside class="wb-pane" aria-label="Program tree"><div class="wb-pane-head">Program tree</div><div class="tree">
+            <div class="tree-group"><div class="tree-label">package orders</div><button class="tree-item active" type="button" data-selection="OrdersTable"><span class="tree-icon">▾</span>src</button><button class="tree-item" type="button" data-selection="OrdersPage"><span class="tree-icon">·</span>Orders.jet</button><button class="tree-item" type="button" data-selection="ShipOrder"><span class="tree-icon">·</span>ShipOrder.jet</button><button class="tree-item" type="button" data-selection="Cart"><span class="tree-icon">·</span>Cart.jet</button></div>
+            <div class="tree-group"><div class="tree-label">routes</div><button class="tree-item" type="button" data-selection="OrdersPage"><span class="tree-icon">·</span>/orders</button><button class="tree-item" type="button" data-selection="ShipOrder"><span class="tree-icon">·</span>/orders/:id</button></div>
+            <div class="tree-group"><div class="tree-label">package payments@1.4.0</div><button class="tree-item" type="button" data-selection="Payments"><span class="tree-icon">·</span>Payments</button></div>
+          </div></aside>
+          <section class="wb-pane" aria-label="Timeline with compare"><div class="wb-pane-head">Timeline + compare</div><div class="compare-strip"><span class="compare-label">view</span><button class="compare-button active" type="button" data-compare="current">current</button><button class="compare-button" type="button" data-compare="previous">previous</button></div><div class="wb-timeline"><div class="timeline-label"><span>shared cursor</span><strong id="wbTime">0ms</strong></div><div class="wb-time-line"><span class="wb-marker" id="wbMarker"></span></div><div class="wb-ticks"><span>request</span><span>render</span><span>ship</span><span>reload</span></div><div class="timeline-events" id="timelineEvents"></div></div></section>
+          <aside class="wb-pane" aria-label="Inspector"><div class="wb-pane-head">Inspector</div><div class="inspector"><div class="inspector-selection"><small>selected from Lens</small><strong id="wbSelection">OrdersTable</strong><span id="wbSelectionPath">src/Orders.jet:31</span></div><div class="inspector-block"><h4>Render</h4><div class="inspector-kv"><span>mode</span><code id="inspectMode">server + stream</code><span>reason</span><code id="inspectReason">orders.list</code><span>cost</span><code id="inspectCost">copy removed</code></div></div><div class="inspector-block"><h4>Compare</h4><div class="inspector-kv"><span id="compareKey">current</span><code id="compareValue">12:05:11</code><span>survived</span><code>draft + cache</code></div></div><div class="inspector-block"><h4>Selection contract</h4><p style="margin:0;color:var(--text-2);font-size:10px">One selection and one time cursor travel between the app, Lens, Workbench, terminal, editor, and native window.</p></div></div></aside>
+        </div>
+        <div class="workbench-status"><strong>● live</strong><span>selection and time cursor are linked to the running app</span><span id="wbStateStatus">idle</span></div>
+      </div>
+    </section>
+  </main>
+  <section class="tui-section" aria-labelledby="tuiTitle">
+    <div class="section-head"><h2 id="tuiTitle">Terminal · jet dev</h2><span>same panel definition, 80×24 minimum</span><div class="head-actions"><button class="quiet-button" id="tuiToggle" type="button" aria-pressed="false">Monochrome: off</button></div></div>
+    <div class="tui-frame" id="tuiFrame"><pre id="tuiOutput" aria-label="Terminal rendering"></pre></div>
+  </section>
+  <section class="hosts-section" aria-labelledby="hostsTitle">
+    <div class="section-head"><h2 id="hostsTitle">How a plugin registers</h2><span>Payments · one definition, five hosts</span></div>
+    <div class="host-definition"><code>panel Payments = { package: "payments@1.4.0", title: "Payments", rows: [id, amount, status, provider] }</code></div>
+    <div class="host-grid">
+      <article class="host-card"><h3>Browser Lens drawer</h3><div class="host-thumb"><div class="mini-top"><i></i><i></i><i></i></div><div class="mini-content"><div class="mini-side"><b></b><span class="mini-line"></span><span class="mini-line short"></span></div><div class="mini-table"><span></span><span></span><span></span><span></span></div></div></div></article>
+      <article class="host-card"><h3>Workbench pane</h3><div class="host-thumb"><div class="mini-top"><i></i><i></i><i></i></div><div class="mini-content"><div class="mini-side"><b></b><span class="mini-line short"></span></div><div class="mini-table"><span></span><span></span><span></span><span></span></div></div></div></article>
+      <article class="host-card"><h3>Terminal</h3><div class="host-thumb terminal"><span class="mini-line">Payments  payments@1.4.0</span><span class="mini-line">pay_88  €184.00  authorized</span><span class="mini-line">pay_87  €42.10   captured</span><span class="mini-line">provider: stripe</span></div></article>
+      <article class="host-card"><h3>Editor side panel</h3><div class="host-thumb editor"><div class="editor-code">fn ship() {<br>&nbsp;&nbsp;order.pay()<br>}</div><div class="editor-side"><span class="mini-pill"></span><span class="mini-line"></span><span class="mini-line short"></span></div></div></article>
+      <article class="host-card"><h3>Native window overlay</h3><div class="host-thumb native overlay"><div class="mini-content"><div class="mini-side"><b></b><span class="mini-line short"></span></div><div class="mini-table"><span></span><span></span></div></div><div class="overlay-card"><span class="mini-line"></span><span class="mini-line short"></span></div></div></article>
+    </div>
+  </section>
+  <footer class="production-note">Production note: Devtools code is compiled out of release builds. The development endpoint is loopback-only.</footer>
+</div>
+<div class="scrim" id="scrim"></div>
+<section class="popout-view" id="popoutView" aria-label="Popped out Workbench">
+  <div class="popout-head"><h2>Workbench</h2><span>full view · editor panel · synced</span><div class="head-actions"><span class="sync-chip">● live sync</span><button class="quiet-button" id="closePopoutButton" type="button">Close pop-out <span class="mono">Esc</span></button></div></div>
+  <div class="popout-body">
+    <aside class="wb-pane"><div class="wb-pane-head">Program tree</div><div class="tree"><div class="tree-group"><div class="tree-label">package orders</div><button class="tree-item active" type="button" data-selection="OrdersTable"><span class="tree-icon">▾</span>src</button><button class="tree-item" type="button" data-selection="OrdersPage"><span class="tree-icon">·</span>Orders.jet</button><button class="tree-item" type="button" data-selection="ShipOrder"><span class="tree-icon">·</span>ShipOrder.jet</button><button class="tree-item" type="button" data-selection="Cart"><span class="tree-icon">·</span>Cart.jet</button></div><div class="tree-group"><div class="tree-label">package payments@1.4.0</div><button class="tree-item" type="button" data-selection="Payments"><span class="tree-icon">·</span>Payments</button></div></div></aside>
+    <section class="wb-pane"><div class="wb-pane-head">Timeline + compare</div><div class="compare-strip"><span class="compare-label">view</span><button class="compare-button active" type="button" data-compare="current">current</button><button class="compare-button" type="button" data-compare="previous">previous</button></div><div class="wb-timeline"><div class="timeline-label"><span>shared cursor</span><strong id="popTime">0ms</strong></div><div class="wb-time-line"><span class="wb-marker" id="popMarker"></span></div><div class="wb-ticks"><span>request</span><span>render</span><span>ship</span><span>reload</span></div><div class="timeline-events" id="popTimelineEvents"></div></div></section>
+    <aside class="wb-pane"><div class="wb-pane-head">Inspector</div><div class="inspector"><div class="inspector-selection"><small>selected from Lens</small><strong id="popSelection">OrdersTable</strong><span id="popSelectionPath">src/Orders.jet:31</span></div><div class="inspector-block"><h4>Render</h4><div class="inspector-kv"><span>mode</span><code id="popMode">server + stream</code><span>reason</span><code id="popReason">orders.list</code><span>cost</span><code id="popCost">copy removed</code></div></div><div class="inspector-block"><h4>Compare</h4><div class="inspector-kv"><span>view</span><code id="popCompare">current</code><span>survived</span><code>draft + cache</code></div></div></div></aside>
+  </div>
+</section>
+<div class="help-overlay" id="helpOverlay" role="dialog" aria-modal="true" aria-labelledby="helpTitle"><div class="help-card"><div class="help-head"><h2 id="helpTitle">Keyboard shortcuts</h2><button class="icon-button" id="closeHelpButton" type="button" aria-label="Close keyboard shortcuts">×</button></div><div class="shortcut-list"><div>Open or close Lens</div><div><kbd>Alt</kbd> + <kbd>J</kbd></div><div>Open command palette</div><div><kbd>Ctrl</kbd> + <kbd>K</kbd></div><div>Pop out Workbench</div><div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></div><div>Step time cursor</div><div><kbd>[</kbd> <kbd>]</kbd></div><div>Back / close surface</div><div><kbd>Esc</kbd></div><div>Show this help</div><div><kbd>?</kbd></div></div></div></div>
+<div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Command palette"><div class="palette-card"><input class="palette-search" id="paletteSearch" placeholder="Type a command…" aria-label="Search commands"><div class="command-list" id="commandList"><button class="command-item" type="button" data-command="Build">Open Build panel <span class="command-key">Enter</span></button><button class="command-item" type="button" data-command="Routes">Open Routes panel</button><button class="command-item" type="button" data-command="Queries">Open Queries panel</button><button class="command-item" type="button" data-command="Payments">Open Payments panel</button><button class="command-item" type="button" data-command="Workbench">Pop out Workbench <span class="command-key">Ctrl+Shift+W</span></button><button class="command-item" type="button" data-command="Tests">Show failing tests</button></div></div></div>
+<script type="application/json" id="sample-data">
+{
+  "app": { "name": "Orders", "entry": "@run.jet", "package": "orders", "tier": "jet dev (JIT)", "port": 43127, "version": "dev build 214" },
+  "build": {
+    "status": "ready",
+    "lastBuildMs": 380,
+    "lastReloadMs": 120,
+    "lastReloadKept": ["ShipOrder form draft", "scroll position /orders", "Cart store (3 items)", "query cache: 4 entries"],
+    "lastReloadReset": [],
+    "diagnostics": [],
+    "failingDiagnostic": {
+      "code": "E0421",
+      "severity": "error",
+      "title": "mismatched types",
+      "file": "src/Orders.jet",
+      "line": 48,
+      "col": 17,
+      "what": "`total` is `Int` but this branch returns `String`",
+      "why": "Every branch of a `match` must produce the same type so the caller can rely on one result type.",
+      "fix": "Return `total.to_string()` here, or make the other branches return `Int`.",
+      "snippet": [
+        "46 |     .Shipped => total",
+        "47 |     .Pending => total",
+        "48 |     .Cancelled => \"n/a\"",
+        "   |                  ^^^^^ this is `String`, the other branches are `Int`"
+      ]
+    }
+  },
+  "routes": [
+    { "path": "/", "page": "Home", "render": "static", "reason": "no runtime data", "layout": "Shell", "hits": 3 },
+    { "path": "/orders", "page": "OrdersPage", "render": "server + stream", "reason": "loader orders.list", "layout": "Shell", "hits": 12, "loader": "orders.list", "params": {}, "search": { "status": "String?", "page": "Int = 1" } },
+    { "path": "/orders/:id", "page": "OrderDetail", "render": "server + island", "reason": "loader orders.byId; ShipOrder form is interactive", "layout": "Shell", "hits": 5, "loader": "orders.byId", "params": { "id": "OrderId" } },
+    { "path": "/settings", "page": "Settings", "render": "client", "reason": "explicit .render(.Client)", "layout": "Shell", "hits": 1 }
+  ],
+  "queries": [
+    { "key": "orders.list {status: null, page: 1}", "state": "fresh", "updatedAgo": "2s", "durationMs": 41, "observers": 1, "staleAfter": "30s", "rows": 1000, "source": "GET /api/orders" },
+    { "key": "orders.byId 1042", "state": "fresh", "updatedAgo": "9s", "durationMs": 18, "observers": 1, "staleAfter": "30s", "source": "GET /api/orders/1042" },
+    { "key": "me", "state": "stale", "updatedAgo": "5m", "durationMs": 12, "observers": 2, "staleAfter": "1m", "source": "GET /api/me" },
+    { "key": "carriers", "state": "fetching", "updatedAgo": "—", "durationMs": null, "observers": 1, "staleAfter": "10m", "source": "GET /api/carriers" }
+  ],
+  "mutations": [
+    { "name": "orders.ship", "state": "idle", "lastRun": "1m ago", "lastDurationMs": 220, "invalidates": ["orders.list", "orders.byId"], "optimistic": true }
+  ],
+  "forms": [
+    { "name": "ShipOrder", "route": "/orders/1042", "dirty": true, "valid": false, "fields": [
+      { "name": "address", "type": "Address", "value": "12 Harbor St, Oslo", "touched": true, "error": null },
+      { "name": "carrier", "type": "Carrier", "value": "", "touched": true, "error": "choose a carrier" },
+      { "name": "notes", "type": "String?", "value": "leave at reception", "touched": false, "error": null }
+    ], "submitCount": 0, "validation": "on blur, async on submit" }
+  ],
+  "table": { "name": "OrdersTable", "rows": 1000, "visibleRows": 24, "rendered": 32, "sort": "created desc", "filter": "status = pending", "page": 1, "pageSize": 50, "virtual": true, "rowHeightPx": 36, "columns": ["Id", "Customer", "Total", "Status", "Created"] },
+  "store": {
+    "name": "Cart", "items": 3, "total": "€184.00",
+    "history": [
+      { "t": "12:04:01.120", "action": "AddItem sku=A-19", "diff": "+1 item" },
+      { "t": "12:04:03.410", "action": "AddItem sku=B-02", "diff": "+1 item" },
+      { "t": "12:04:09.902", "action": "SetQuantity A-19 → 2", "diff": "total €142 → €184" },
+      { "t": "12:05:11.004", "action": "hot reload", "diff": "state kept (type unchanged)" }
+    ]
+  },
+  "traces": [
+    { "t": 0, "durMs": 41, "kind": "request", "label": "GET /api/orders", "status": 200 },
+    { "t": 2, "durMs": 38, "kind": "query", "label": "orders.list" },
+    { "t": 45, "durMs": 6, "kind": "render", "label": "OrdersPage (server)" },
+    { "t": 52, "durMs": 3, "kind": "render", "label": "OrdersTable island" },
+    { "t": 60, "durMs": 18, "kind": "request", "label": "GET /api/orders/1042", "status": 200 },
+    { "t": 80, "durMs": 220, "kind": "mutation", "label": "orders.ship (1m ago)" },
+    { "t": 310, "durMs": 12, "kind": "job", "label": "Seed (dev job)" },
+    { "t": 330, "durMs": 120, "kind": "reload", "label": "hot reload: src/Orders.jet" }
+  ],
+  "cost": [
+    { "site": "src/Orders.jet:31", "kind": "copy", "note": "implicit copy of `Order` (48 bytes) in loop", "removedByOptimizer": true },
+    { "site": "src/Orders.jet:77", "kind": "bigint", "note": "`total * 1000` may fall back to big integers", "removedByOptimizer": false },
+    { "site": "src/Cart.jet:12", "kind": "alloc", "note": "`items.push` grows on each add", "removedByOptimizer": false }
+  ],
+  "gates": [
+    { "site": "src/Payments.jet:19", "gate": "#Unsafe(\"vendor SDK pointer\")", "kind": "unsafe", "by": "explicit" },
+    { "site": "package.jet", "gate": "policy.lints.allow = [L0524]", "kind": "lint", "by": "manifest" }
+  ],
+  "tests": { "passed": 12, "failed": 1, "skipped": 0, "durationMs": 640, "failing": [
+    { "name": "ShipOrder rejects empty carrier", "file": "tests/ShipOrder.jet", "line": 22, "message": "expected error `choose a carrier`, got none" }
+  ] },
+  "jobs": [
+    { "name": "Seed", "scope": "Dev", "doc": "Load 1,000 sample orders", "lastRun": "12:03", "schedule": null },
+    { "name": "Lint", "scope": "Dev", "doc": "Run policy lints on the package", "lastRun": "11:58", "schedule": null },
+    { "name": "Reconcile", "scope": "Ship", "doc": "Nightly reconciliation with the payment provider", "lastRun": "02:00", "schedule": "#Every(1d)" }
+  ],
+  "thirdParty": { "panel": "Payments", "package": "payments@1.4.0", "rows": [
+    { "id": "pay_88", "amount": "€184.00", "status": "authorized", "provider": "stripe", "ageMs": 9200 },
+    { "id": "pay_87", "amount": "€42.10", "status": "captured", "provider": "stripe", "ageMs": 81200 }
+  ] },
+  "runtimeFailure": {
+    "title": "Index out of range",
+    "message": "index 3 is past the end of `carriers` (length 3)",
+    "frames": [
+      { "fn": "pick_carrier", "file": "src/Orders.jet", "line": 91 },
+      { "fn": "ShipOrder.submit", "file": "src/Orders.jet", "line": 64 },
+      { "fn": "run", "file": "@run.jet", "line": 8 }
+    ],
+    "fix": "Check `i < carriers.len()` or use `carriers.get(i)` which returns an Option."
+  },
+  "reloadEvent": { "file": "src/Orders.jet", "changed": "fn pick_carrier", "swapMs": 120, "kept": ["ShipOrder draft", "Cart (3 items)", "scroll /orders", "query cache 4/4"], "restarted": [] }
+}
+</script>
+<script>
+(function () {
+  'use strict';
+  var sampleNode = document.getElementById('sample-data');
+  var DATA = JSON.parse(sampleNode.textContent);
+  var state = { name: 'idle', selection: 'OrdersTable', time: 0, compare: 'current' };
+  var panelNames = ['Build', 'Routes', 'Queries', 'Mutations', 'Forms', 'Table', 'Store', 'Traces', 'Cost', 'Gates', 'Tests', 'Jobs', 'Payments'];
+  var contexts = {
+    OrdersTable: { title: 'OrdersTable', description: '24 visible rows from 1,000, virtualized at 36px.', path: 'src/Orders.jet:31', mode: 'server + stream', reason: 'orders.list', cost: 'copy removed' },
+    OrdersPage: { title: 'OrdersPage', description: 'Route /orders renders server data as a stream.', path: 'src/Orders.jet:18', mode: 'server + stream', reason: 'loader orders.list', cost: '41ms query' },
+    'Order 1042': { title: 'Order 1042', description: 'Selected row in OrdersTable, backed by orders.byId.', path: 'src/Orders.jet:64', mode: 'server + island', reason: 'orders.byId 1042', cost: '18ms query' },
+    ShipOrder: { title: 'ShipOrder', description: 'Interactive form on /orders/1042 with a missing carrier.', path: 'src/Orders.jet:64', mode: 'server + island', reason: 'orders.byId 1042', cost: 'async validation' },
+    address: { title: 'address · Address', description: 'Touched field with a preserved draft value.', path: 'src/Orders.jet:67', mode: 'form field', reason: 'ShipOrder', cost: 'no allocation' },
+    carrier: { title: 'carrier · Carrier', description: 'Touched field with validation error: choose a carrier.', path: 'src/Orders.jet:71', mode: 'form field', reason: 'ShipOrder', cost: 'async on submit' },
+    notes: { title: 'notes · String?', description: 'Untouched optional note retained through reload.', path: 'src/Orders.jet:74', mode: 'form field', reason: 'ShipOrder', cost: 'no allocation' },
+    Cart: { title: 'Cart', description: 'Store reads show three items and €184.00 total.', path: 'src/Cart.jet:12', mode: 'store', reason: '3 items', cost: 'push allocation' },
+    Payments: { title: 'Payments', description: 'Third-party panel from payments@1.4.0 rendered as native data.', path: 'package payments@1.4.0', mode: 'plugin panel', reason: 'stripe rows', cost: 'panel definition' },
+    'Runtime failure': { title: 'Runtime failure', description: 'Jet-frames-only trace for an index error in ShipOrder.', path: 'src/Orders.jet:91', mode: 'runtime', reason: 'index out of range', cost: 'no silent fallback' }
+  };
+  var els = {
+    lens: document.getElementById('lensPanel'),
+    lensContext: document.getElementById('lensContext'),
+    selectionTitle: document.getElementById('selectionTitle'),
+    selectionDescription: document.getElementById('selectionDescription'),
+    wbSelection: document.getElementById('wbSelection'),
+    wbSelectionPath: document.getElementById('wbSelectionPath'),
+    popSelection: document.getElementById('popSelection'),
+    popSelectionPath: document.getElementById('popSelectionPath'),
+    timelineRange: document.getElementById('timelineRange'),
+    lensTime: document.getElementById('lensTime'),
+    wbTime: document.getElementById('wbTime'),
+    popTime: document.getElementById('popTime'),
+    wbMarker: document.getElementById('wbMarker'),
+    popMarker: document.getElementById('popMarker'),
+    drawerSelect: document.getElementById('drawerSelect'),
+    drawerList: document.getElementById('drawerList'),
+    tuiOutput: document.getElementById('tuiOutput'),
+    tuiFrame: document.getElementById('tuiFrame'),
+    popoutView: document.getElementById('popoutView'),
+    scrim: document.getElementById('scrim'),
+    helpOverlay: document.getElementById('helpOverlay'),
+    palette: document.getElementById('palette'),
+    paletteSearch: document.getElementById('paletteSearch'),
+    stateBanner: document.getElementById('stateBanner'),
+    appError: document.getElementById('appError'),
+    appToast: document.getElementById('appToast'),
+    statusChip: document.getElementById('statusChip'),
+    statusText: document.getElementById('statusText'),
+    wbStateStatus: document.getElementById('wbStateStatus'),
+    pillBuild: document.getElementById('pillBuild'),
+    pillReload: document.getElementById('pillReload'),
+    pillErrors: document.getElementById('pillErrors'),
+    pillTests: document.getElementById('pillTests'),
+    pillFetching: document.getElementById('pillFetching')
+  };
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>\"']/g, function (ch) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' })[ch]; });
+  }
+  function contextFor(name) { return contexts[name] || { title: name, description: 'Shared selection from the running app.', path: 'src/Orders.jet', mode: 'devtools', reason: 'selected', cost: 'observed' }; }
+  function openLens() { els.lens.classList.add('open'); }
+  function closeLens() { els.lens.classList.remove('open'); }
+  function setSelection(name) {
+    state.selection = name;
+    var ctx = contextFor(name);
+    els.lensContext.textContent = ctx.title;
+    els.selectionTitle.textContent = ctx.title;
+    els.selectionDescription.textContent = ctx.description;
+    els.wbSelection.textContent = ctx.title;
+    els.wbSelectionPath.textContent = ctx.path;
+    els.popSelection.textContent = ctx.title;
+    els.popSelectionPath.textContent = ctx.path;
+    document.getElementById('inspectMode').textContent = ctx.mode;
+    document.getElementById('inspectReason').textContent = ctx.reason;
+    document.getElementById('inspectCost').textContent = ctx.cost;
+    document.getElementById('popMode').textContent = ctx.mode;
+    document.getElementById('popReason').textContent = ctx.reason;
+    document.getElementById('popCost').textContent = ctx.cost;
+    document.querySelectorAll('[data-selection]').forEach(function (node) { node.classList.toggle('active', node.getAttribute('data-selection') === name); });
+    document.querySelectorAll('[data-inspect]').forEach(function (node) { node.classList.toggle('selected', node.getAttribute('data-inspect') === name); });
+    renderTui();
+  }
+  function formatTime(t) {
+    var nearest = DATA.traces.reduce(function (best, item) { return Math.abs(item.t - t) < Math.abs(best.t - t) ? item : best; }, DATA.traces[0]);
+    return t + 'ms · ' + nearest.label;
+  }
+  function setTime(value) {
+    state.time = Math.max(0, Math.min(330, Number(value) || 0));
+    els.timelineRange.value = String(state.time);
+    els.lensTime.textContent = formatTime(state.time);
+    els.wbTime.textContent = state.time + 'ms';
+    els.popTime.textContent = state.time + 'ms';
+    var pct = (state.time / 330) * 100;
+    els.wbMarker.style.left = pct + '%';
+    els.popMarker.style.left = pct + '%';
+    document.querySelectorAll('.timeline-event').forEach(function (node) {
+      node.classList.toggle('active', Number(node.getAttribute('data-time')) <= state.time && Number(node.getAttribute('data-time')) === DATA.traces.reduce(function (best, item) { return item.t <= state.time && item.t >= best ? item.t : best; }, 0));
+    });
+    renderTui();
+  }
+  function panelRows(name) {
+    var rows = [];
+    if (name === 'Build') {
+      if (state.name === 'build failed') {
+        var d = DATA.build.failingDiagnostic;
+        rows.push({ tone: 'bad', title: d.code + ' · ' + d.title, text: d.file + ':' + d.line + ':' + d.col + ' · ' + d.what });
+        rows.push({ tone: 'warn', title: 'How to get back', text: d.fix + ' Then choose idle to rebuild.' });
+      } else if (state.name === 'building') {
+        rows.push({ tone: 'warn', title: 'building · ' + DATA.app.tier, text: 'compiling @run.jet · previous build remains available' });
+      } else {
+        rows.push({ tone: 'good', title: 'ready · ' + DATA.app.tier, text: DATA.app.version + ' · ' + DATA.build.lastBuildMs + 'ms build' });
+      }
+      rows.push({ tone: 'good', title: 'last reload · ' + DATA.build.lastReloadMs + 'ms', text: DATA.build.lastReloadKept.join(' · ') });
+      return rows;
+    }
+    if (name === 'Routes') return DATA.routes.map(function (r) { return { tone: r.path === '/orders' ? 'good' : '', title: r.path + ' · ' + r.page, text: r.render + ' · ' + r.reason + ' · ' + r.hits + ' hits' }; });
+    if (name === 'Queries') return DATA.queries.map(function (q) { return { tone: q.state === 'fetching' ? 'warn' : q.state === 'fresh' ? 'good' : '', title: q.key, text: q.state + ' · ' + (q.durationMs == null ? 'pending' : q.durationMs + 'ms') + ' · ' + q.source }; });
+    if (name === 'Mutations') return DATA.mutations.map(function (m) { return { tone: '', title: m.name + ' · ' + m.state, text: m.lastRun + ' · ' + m.lastDurationMs + 'ms · invalidates ' + m.invalidates.join(', ') }; });
+    if (name === 'Forms') return DATA.forms[0].fields.map(function (f) { return { tone: f.error ? 'bad' : f.touched ? 'good' : '', title: f.name + ' · ' + f.type, text: (f.value || 'empty') + ' · ' + (f.error || (f.touched ? 'touched' : 'untouched')) }; });
+    if (name === 'Table') return [{ tone: 'good', title: DATA.table.name + ' · ' + DATA.table.rows + ' rows', text: DATA.table.visibleRows + ' visible · ' + DATA.table.rendered + ' rendered · virtual ' + DATA.table.rowHeightPx + 'px' }, { title: 'window', text: DATA.table.filter + ' · ' + DATA.table.sort + ' · page ' + DATA.table.page }];
+    if (name === 'Store') return DATA.store.history.map(function (h) { return { tone: h.action === 'hot reload' ? 'good' : '', title: h.t, text: h.action + ' · ' + h.diff }; });
+    if (name === 'Traces') return DATA.traces.map(function (t) { return { tone: t.kind === 'reload' ? 'warn' : t.status === 200 ? 'good' : '', title: t.t + 'ms · ' + t.kind, text: t.label + ' · ' + t.durMs + 'ms' }; });
+    if (name === 'Cost') return DATA.cost.map(function (c) { return { tone: c.removedByOptimizer ? 'good' : 'warn', title: c.site + ' · ' + c.kind, text: c.note + (c.removedByOptimizer ? ' · removed by optimizer' : '') }; });
+    if (name === 'Gates') return DATA.gates.map(function (g) { return { tone: g.kind === 'unsafe' ? 'warn' : '', title: g.site + ' · ' + g.kind, text: g.gate + ' · by ' + g.by }; });
+    if (name === 'Tests') return [{ tone: 'good', title: DATA.tests.passed + ' passed · ' + DATA.tests.failed + ' failing', text: DATA.tests.durationMs + 'ms · skipped ' + DATA.tests.skipped }, { tone: 'bad', title: DATA.tests.failing[0].name, text: DATA.tests.failing[0].file + ':' + DATA.tests.failing[0].line + ' · ' + DATA.tests.failing[0].message }];
+    if (name === 'Jobs') return DATA.jobs.map(function (j) { return { tone: '', title: j.name + ' · ' + j.scope, text: j.doc + ' · last ' + j.lastRun + (j.schedule ? ' · ' + j.schedule : '') }; });
+    if (name === 'Payments') return DATA.thirdParty.rows.map(function (p) { return { tone: p.status === 'authorized' ? 'good' : '', title: p.id + ' · ' + p.amount, text: p.status + ' · ' + p.provider + ' · ' + p.ageMs + 'ms ago' }; });
+    return [];
+  }
+  function renderPanel(name) {
+    if (!panelNames.includes(name)) name = 'Build';
+    els.drawerSelect.value = name;
+    els.drawerList.innerHTML = panelRows(name).map(function (row) { return '<div class="panel-row"><span class="panel-mark ' + esc(row.tone || '') + '"></span><div class="row-main"><strong>' + esc(row.title) + '</strong><span>' + esc(row.text) + '</span></div></div>'; }).join('');
+    renderTui();
+  }
+  function renderTimelineEvents() {
+    var html = DATA.traces.map(function (t, i) { return '<button class="timeline-event" type="button" data-time="' + t.t + '" data-selection="' + (t.kind === 'query' ? 'OrdersPage' : t.kind === 'reload' ? 'OrdersPage' : 'OrdersTable') + '"><span class="event-time">' + t.t + 'ms</span><span>' + esc(t.label) + '</span><span class="event-dur">' + t.durMs + 'ms</span></button>'; }).join('');
+    document.getElementById('timelineEvents').innerHTML = html;
+    document.getElementById('popTimelineEvents').innerHTML = html;
+    bindInteractive();
+  }
+  function renderTui() {
+    var selectedPanel = els.drawerSelect.value || 'Build';
+    var rows = panelRows(selectedPanel).slice(0, 6).map(function (row) { return '  ' + (row.tone === 'bad' ? '!' : row.tone === 'warn' ? '~' : row.tone === 'good' ? '✓' : '·') + ' ' + row.title + '  ' + row.text; });
+    while (rows.length < 6) rows.push('');
+    var buildState = state.name === 'build failed' ? 'FAILED' : state.name === 'building' ? 'BUILDING' : 'READY';
+    var traceLine = state.name === 'runtime failure' ? 'runtime: Index out of range · Jet frames only' : 'runtime: none';
+    var output = [
+      '┌─ jet dev · Orders · ' + DATA.app.tier + ' ────────────────────────────┐',
+      '│ DEV pill  ' + buildState + '  reload 120ms/4 kept  errors ' + (state.name === 'runtime failure' ? '1' : '0') + '  tests 1 fail  fetching 1 │',
+      '├─ palette Ctrl+K ────────────────────────────────────────────────────┤',
+      '│ [Build] Routes  Queries  Mutations  Forms  Table  Store  Traces      │',
+      '│ Cost  Gates  Tests  Jobs  Payments                                      │',
+      '├─ workbench · selection ' + state.selection + ' · cursor ' + state.time + 'ms ─────────────┤',
+      '│ PROGRAM TREE       │ TIMELINE + COMPARE       │ INSPECTOR             │',
+      '│ src/Orders.jet     │ 0 request   ' + String(state.time).padStart(3, ' ') + 'ms ●       │ ' + String(contextFor(state.selection).mode).slice(0, 20).padEnd(20, ' ') + ' │',
+      '│   ShipOrder.jet    │ 45 render   80 ship      │ route ' + String(contextFor(state.selection).reason).slice(0, 19).padEnd(19, ' ') + ' │',
+      '│   Cart.jet         │ 330 reload              │ cost ' + String(contextFor(state.selection).cost).slice(0, 20).padEnd(20, ' ') + ' │',
+      '├─ ' + selectedPanel + ' panel ────────────────────────────────────────────┤'
+    ].concat(rows).concat(['├─────────────────────────────────────────────────────────────────────┤', '│ ' + traceLine.padEnd(69, ' ') + ' │', '└─ [ ] step time   Alt+J lens   Ctrl+Shift+W pop out   ? help ─────────┘']);
+    els.tuiOutput.textContent = output.join('\n');
+  }
+  function stateConfig(name) {
+    return {
+      idle: { label: 'idle', tone: '', text: '', build: 'ready', errors: '0', toast: '' },
+      building: { label: 'building', tone: 'warning', text: '<strong>Building dev build 214.</strong> The previous build remains available while @run.jet compiles.', build: 'building', errors: '0', toast: '' },
+      'build failed': { label: 'build failed', tone: 'danger', text: '<strong>Build failed · E0421 mismatched types.</strong> Open Build, fix src/Orders.jet:48, then choose idle to rebuild.', build: 'failed', errors: '0', toast: '' },
+      'runtime failure': { label: 'runtime failure', tone: 'danger', text: '<strong>Runtime failure · Index out of range.</strong> Inspect the Jet-frames-only trace; no framework frames are shown.', build: 'ready', errors: '1', toast: 'Runtime failure · Jet frames only' },
+      'hot reload': { label: 'hot reload', tone: '', text: '<strong>Hot reload complete in 120ms.</strong> ShipOrder draft, Cart, scroll position, and query cache 4/4 survived.', build: 'ready', errors: '0', toast: 'Reloaded · 4 state groups kept' },
+      'tests failing': { label: 'tests failing', tone: 'warning', text: '<strong>Tests failing · 12 passed, 1 failed.</strong> Open Tests to inspect ShipOrder rejects empty carrier.', build: 'ready', errors: '0', toast: '' }
+    }[name];
+  }
+  function setState(name) {
+    state.name = name;
+    var cfg = stateConfig(name);
+    document.querySelectorAll('.state-button').forEach(function (button) { button.classList.toggle('active', button.getAttribute('data-state') === name); });
+    els.stateBanner.className = 'state-banner' + (cfg.text ? ' show' : '') + (cfg.tone ? ' ' + cfg.tone : '');
+    els.stateBanner.innerHTML = cfg.text;
+    els.statusText.textContent = DATA.app.tier + ' · ' + cfg.label;
+    els.statusChip.className = 'status-chip' + (cfg.tone ? ' ' + cfg.tone : '');
+    els.pillBuild.textContent = cfg.build;
+    els.pillBuild.className = 'pill-value ' + (cfg.build === 'failed' ? 'danger' : cfg.build === 'building' ? 'warning' : 'success');
+    els.pillReload.textContent = name === 'hot reload' ? '120ms · 4 kept' : '120ms · 4 kept';
+    els.pillErrors.textContent = cfg.errors;
+    els.pillErrors.className = 'pill-value ' + (cfg.errors === '1' ? 'danger' : 'success');
+    els.pillTests.textContent = name === 'tests failing' ? '1 failing' : '1 failing';
+    els.pillFetching.textContent = '1';
+    els.wbStateStatus.textContent = cfg.label;
+    els.appError.className = 'app-error' + (name === 'runtime failure' ? ' show' : '');
+    if (name === 'runtime failure') {
+      els.appError.innerHTML = '<strong>' + esc(DATA.runtimeFailure.title) + '</strong><code>' + esc(DATA.runtimeFailure.message) + '</code><br><small>Jet frames: ' + DATA.runtimeFailure.frames.map(function (f) { return esc(f.fn) + ' · ' + esc(f.file) + ':' + f.line; }).join(' → ') + '</small>';
+      setSelection('Runtime failure');
+    }
+    els.appToast.className = 'app-toast' + (cfg.toast ? ' show' : '');
+    els.appToast.textContent = cfg.toast;
+    if (name === 'build failed') renderPanel('Build');
+    if (name === 'tests failing') renderPanel('Tests');
+    if (name === 'runtime failure') renderPanel('Traces');
+    renderTui();
+  }
+  function openPopout() { els.popoutView.classList.add('open'); els.scrim.classList.add('open'); }
+  function closePopout() { els.popoutView.classList.remove('open'); els.scrim.classList.remove('open'); }
+  function openHelp() { els.helpOverlay.classList.add('open'); }
+  function closeHelp() { els.helpOverlay.classList.remove('open'); }
+  function openPalette() { els.palette.classList.add('open'); els.paletteSearch.value = ''; filterCommands(''); els.paletteSearch.focus(); }
+  function closePalette() { els.palette.classList.remove('open'); }
+  function filterCommands(query) { var q = String(query || '').toLowerCase(); document.querySelectorAll('.command-item').forEach(function (item) { item.hidden = q && item.textContent.toLowerCase().indexOf(q) < 0; }); }
+  function bindInteractive() {
+    document.querySelectorAll('[data-inspect]').forEach(function (node) {
+      if (node.dataset.bound) return;
+      node.dataset.bound = '1';
+      node.addEventListener('mouseenter', function () { openLens(); setSelection(node.getAttribute('data-inspect')); });
+      node.addEventListener('focus', function () { openLens(); setSelection(node.getAttribute('data-inspect')); });
+      node.addEventListener('click', function () { openLens(); setSelection(node.getAttribute('data-inspect')); });
+    });
+    document.querySelectorAll('[data-selection]').forEach(function (node) {
+      if (node.dataset.selectionBound) return;
+      node.dataset.selectionBound = '1';
+      node.addEventListener('click', function () { openLens(); setSelection(node.getAttribute('data-selection')); });
+    });
+    document.querySelectorAll('.timeline-event').forEach(function (node) {
+      if (node.dataset.timeBound) return;
+      node.dataset.timeBound = '1';
+      node.addEventListener('click', function () { setTime(node.getAttribute('data-time')); setSelection(node.getAttribute('data-selection')); });
+    });
+    document.querySelectorAll('.pill-segment').forEach(function (node) {
+      if (node.dataset.pillBound) return;
+      node.dataset.pillBound = '1';
+      node.addEventListener('click', function () { openLens(); renderPanel(node.getAttribute('data-panel')); });
+    });
+  }
+  document.getElementById('dismissBanner').addEventListener('click', function () { document.getElementById('coreBanner').remove(); });
+  document.getElementById('lensButton').addEventListener('click', function () { els.lens.classList.toggle('open'); });
+  document.getElementById('closeLensButton').addEventListener('click', closeLens);
+  document.getElementById('drawerToggle').addEventListener('click', function () { document.getElementById('panelDrawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); els.drawerSelect.focus(); });
+  document.getElementById('drawerSelect').addEventListener('change', function () { renderPanel(this.value); });
+  document.getElementById('openOrderButton').addEventListener('click', function () { document.getElementById('tableView').classList.remove('active'); document.getElementById('formView').classList.add('active'); document.getElementById('appRoute').textContent = '/orders/1042'; setSelection('ShipOrder'); });
+  document.getElementById('backOrdersButton').addEventListener('click', function () { document.getElementById('formView').classList.remove('active'); document.getElementById('tableView').classList.add('active'); document.getElementById('appRoute').textContent = '/orders'; setSelection('OrdersTable'); });
+  document.getElementById('ordersRouteLink').addEventListener('click', function (event) { event.preventDefault(); document.getElementById('backOrdersButton').click(); });
+  document.getElementById('settingsRouteLink').addEventListener('click', function (event) { event.preventDefault(); setSelection('OrdersPage'); });
+  document.getElementById('popoutButton').addEventListener('click', openPopout);
+  document.getElementById('popoutInlineButton').addEventListener('click', openPopout);
+  document.getElementById('closePopoutButton').addEventListener('click', closePopout);
+  els.scrim.addEventListener('click', closePopout);
+  document.getElementById('helpButton').addEventListener('click', openHelp);
+  document.getElementById('closeHelpButton').addEventListener('click', closeHelp);
+  els.helpOverlay.addEventListener('click', function (event) { if (event.target === els.helpOverlay) closeHelp(); });
+  document.getElementById('tuiToggle').addEventListener('click', function () { var on = !els.tuiFrame.classList.contains('monochrome'); els.tuiFrame.classList.toggle('monochrome', on); this.textContent = 'Monochrome: ' + (on ? 'on' : 'off'); this.setAttribute('aria-pressed', String(on)); });
+  els.timelineRange.addEventListener('input', function () { setTime(this.value); });
+  document.querySelectorAll('.compare-button').forEach(function (button) { button.addEventListener('click', function () { state.compare = this.getAttribute('data-compare'); document.querySelectorAll('.compare-button').forEach(function (peer) { peer.classList.toggle('active', peer.getAttribute('data-compare') === state.compare); }); document.getElementById('compareKey').textContent = state.compare; document.getElementById('compareValue').textContent = state.compare === 'previous' ? '12:03:44' : '12:05:11'; document.getElementById('popCompare').textContent = state.compare; }); });
+  document.querySelectorAll('.state-button').forEach(function (button) { button.addEventListener('click', function () { setState(this.getAttribute('data-state')); }); });
+  document.querySelectorAll('.command-item').forEach(function (button) { button.addEventListener('click', function () { var command = this.getAttribute('data-command'); closePalette(); if (command === 'Workbench') openPopout(); else if (command) { renderPanel(command); openLens(); } }); });
+  els.paletteSearch.addEventListener('input', function () { filterCommands(this.value); });
+  els.paletteSearch.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      var firstVisible = Array.prototype.find.call(document.querySelectorAll('.command-item'), function (item) { return !item.hidden; });
+      if (firstVisible) firstVisible.click();
+    }
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === '?' && !event.ctrlKey && !event.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { event.preventDefault(); openHelp(); return; }
+    if (event.altKey && event.key.toLowerCase() === 'j') { event.preventDefault(); els.lens.classList.toggle('open'); return; }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (els.palette.classList.contains('open')) closePalette(); else openPalette(); return; }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'w') { event.preventDefault(); openPopout(); return; }
+    if (event.key === '[') { event.preventDefault(); setTime(state.time - 10); return; }
+    if (event.key === ']') { event.preventDefault(); setTime(state.time + 10); return; }
+    if (event.key === 'Escape') { if (els.palette.classList.contains('open')) closePalette(); else if (els.helpOverlay.classList.contains('open')) closeHelp(); else if (els.popoutView.classList.contains('open')) closePopout(); else closeLens(); }
+  });
+  var stateStrip = document.createElement('div');
+  stateStrip.className = 'state-switcher';
+  stateStrip.setAttribute('aria-label', 'Prototype states');
+  stateStrip.innerHTML = '<span class="state-label">state</span>' + ['idle', 'building', 'build failed', 'runtime failure', 'hot reload', 'tests failing'].map(function (name) { return '<button class="state-button' + (name === 'idle' ? ' active' : '') + '" type="button" data-state="' + name + '">' + name + '</button>'; }).join('');
+  document.body.appendChild(stateStrip);
+  stateStrip.querySelectorAll('.state-button').forEach(function (button) { button.addEventListener('click', function () { setState(button.getAttribute('data-state')); }); });
+  renderTimelineEvents();
+  renderPanel('Build');
+  setSelection('OrdersTable');
+  setTime(0);
+  setState('idle');
+}());
+</script>
+</body>
+</html>
