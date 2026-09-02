@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { projectStatus } from "./status.mjs";
+import { mergeStatus, projectStatus } from "./status.mjs";
 
 function fixture(scope = "partial_entry") {
   return {
@@ -168,4 +168,96 @@ test("projects live reload comparison rows and axis publication", () => {
     warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "parity" },
   });
   assert.deepEqual(status.axes.live_reload.verdicts, { vite: "parity" });
+});
+
+function mergeReport(date, runId, cells) {
+  return {
+    contract: "gauntlet-report-v1",
+    generated: `${date}T12:00:00.000Z`,
+    run_id: runId,
+    scoreboard: {
+      primary_metric_by_mode: { batch: "runtime_wall_seconds" },
+      cells,
+    },
+    reproducibility: { tier_policy_by_mode: { batch: ["aot", "run"] } },
+  };
+}
+
+function measuredTier(ratio, verdict) {
+  return { status: "measured", jet: ratio, peer: 1, ratio, verdict };
+}
+
+function measuredCell(id, ratioByPeer) {
+  return {
+    id,
+    domain: "text",
+    kind: "batch",
+    entries: [{
+      entry: id,
+      mode: "batch",
+      primary_metric: "runtime_wall_seconds",
+      peers: Object.entries(ratioByPeer).map(([language, ratios]) => ({
+        language,
+        required_tiers: ["aot", "run"],
+        metric_comparisons: {
+          runtime_wall_seconds: {
+            tiers: {
+              aot: measuredTier(ratios.aot.ratio, ratios.aot.verdict),
+              run: measuredTier(ratios.run.ratio, ratios.run.verdict),
+            },
+          },
+        },
+      })),
+    }],
+  };
+}
+
+test("merges partial reports by cell, tier, and metric without erasing measurements", () => {
+  const oldCell = measuredCell("text.kernel", {
+    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+    python: { aot: { ratio: 0.8, verdict: "win" }, run: { ratio: 1, verdict: "loss" } },
+  });
+  const newCell = measuredCell("text.regex", {
+    rust: { aot: { ratio: 0.9, verdict: "win" }, run: { ratio: 0.91, verdict: "win" } },
+  });
+  const newerPartial = {
+    id: "text.kernel",
+    domain: "text",
+    kind: "batch",
+    entries: [],
+  };
+  const merged = mergeStatus([
+    { report: mergeReport("2026-09-01", "run-old", [oldCell]), reportPath: "gauntlet/results/2026-09-01.json" },
+    { report: mergeReport("2026-09-02", "run-new", [newerPartial, newCell]), reportPath: "gauntlet/results/2026-09-02.json" },
+  ]);
+  const old = merged.cells.find((cell) => cell.id === "text.kernel");
+  const fresh = merged.cells.find((cell) => cell.id === "text.regex");
+  assert.equal(merged.summary.cells, 2);
+  assert.equal(merged.summary.loss, 1);
+  assert.equal(merged.summary.win, 1);
+  assert.equal(old.measured_at, "2026-09-01");
+  assert.equal(old.run_id, "run-old");
+  assert.equal(old.peers.find((peer) => peer.peer === "rust").tiers.aot.ratio, 1.03);
+  assert.equal(old.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, "parity");
+  assert.equal(old.peers.find((peer) => peer.peer === "python").tiers.run.verdict, "loss");
+  assert.equal(old.verdict, "loss");
+  assert.equal(fresh.measured_at, "2026-09-02");
+  assert.deepEqual(merged.source.run_ids, ["run-old", "run-new"]);
+});
+
+test("applies the Rust parity band and non-Rust strict win boundary", () => {
+  const report = mergeReport("2026-09-03", "run-law", [measuredCell("law", {
+    rust: { aot: { ratio: 1.05, verdict: null }, run: { ratio: 0.99, verdict: null } },
+    python: { aot: { ratio: 0.99, verdict: null }, run: { ratio: 1, verdict: null } },
+  })]);
+  const status = projectStatus(report, "gauntlet/results/2026-09-03.json");
+  const cell = status.cells[0];
+  assert.equal(cell.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, null);
+  assert.equal(cell.metric_verdicts.runtime_wall_seconds, "loss");
+  const merged = mergeStatus([{ report, reportPath: "gauntlet/results/2026-09-03.json" }]);
+  const rust = merged.cells[0].peers.find((peer) => peer.peer === "rust");
+  const python = merged.cells[0].peers.find((peer) => peer.peer === "python");
+  assert.equal(rust.metric_comparisons.runtime_wall_seconds.tiers.aot.verdict, null);
+  assert.equal(rust.verdict, "parity");
+  assert.equal(python.verdict, "loss");
 });
