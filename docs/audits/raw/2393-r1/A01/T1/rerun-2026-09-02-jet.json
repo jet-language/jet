@@ -1,0 +1,504 @@
+{
+  "schema_version": "2393-r1-receipt-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A01",
+  "family": "OpenAI",
+  "task": "T1",
+  "arm": "Jet",
+  "opaque_arm_label": "Arm B",
+  "assignment": {
+    "task_bit": 0,
+    "task_bit_digest": "62a41c3e74e15e5d6ae74e6b07d3f965a6bb3577e753664601d5f3d2614907c3",
+    "task_arm_order": [
+      "Jet",
+      "Rust"
+    ],
+    "session_order_from_T1": [
+      "Jet",
+      "Rust"
+    ]
+  },
+  "comparison_blind_mapping": {
+    "digest": "b3e7ed6200ba7847db9b61af1562dc75207e5b5c32d6bb9e1d86d431c6c6b3d0",
+    "first_bit": 1,
+    "second_bit": 0,
+    "option_order": [
+      "Arm A",
+      "Arm B",
+      "no preference"
+    ]
+  },
+  "protocol": {
+    "path": "docs/audits/fresh-agent-5-of-5-rerun-2026-08-30.md",
+    "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+    "language_reference_sha256": "e81956a7a2a5d67ef746b003801c5981750b0b9626ab34fb55651b924336d50d",
+    "prompt_path": ".tmp/2393-r1/prompts/A01-jet.txt",
+    "prompt_sha256": "826844ba389a8d4be7639c0fa6c4bc862bcea8b7f7b35b71a2704d54d01c603a",
+    "fixture": {
+      "task": "T1",
+      "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+      "expected": {
+        "success": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+        "failureNeed": [
+          "duplicate",
+          "base"
+        ]
+      },
+      "files": {
+        "success": {
+          "path": "records.cfg",
+          "content": "[base]\nname = \"Ada\"\nrole = \"admin\"\n[dev]\ninherits = \"base\"\nrole = \"reviewer\"\n",
+          "sha256": "ee94d1752927f4ab0a806d44e0c6a86d0dbeefc8319b9a9749a352df0192ad96"
+        },
+        "failure": {
+          "path": "records-failure.cfg",
+          "content": "[base]\nname = \"Ada\"\nname = \"Grace\"\n",
+          "sha256": "5f470f3a38a1ee5281e8be64f308c514c816934be4ee8bfc865f362ceee372d9"
+        }
+      }
+    }
+  },
+  "transport": {
+    "family": "OpenAI",
+    "adapter": "omp-task-fallback",
+    "detail": "Direct omp --model gpt-5.6-luna was rate-limited; the permitted OMP task fallback was used.",
+    "arm_order_deviation": "The frozen per-task assignment has mixed arm orders, but this participant was run in one session per arm. T1 selected Jet-first; T2-T4 selected Rust-first in assignment.json, so the single session order did not satisfy the per-task arm-order assignment for T2-T4."
+  },
+  "source_path": "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+  "source_metrics": {
+    "bytes": 3045,
+    "physical_lines": 92,
+    "unicode_whitespace_tokens": 315,
+    "sha256": "af73a5717001040a7109358368fe433e7c4d0c93d021e9ed813ad3e8cad01262"
+  },
+  "source": "use core.files as files\nuse core.process as process\nuse core.text as text\n\nstruct Field {\n    key: String\n    value: String\n}\n\nstruct Section {\n    name: String\n    inherits: String\n    fields: [Field]\n}\n\nfn quoted(value: String) String -> {\n    trimmed :: value.trim()\n    pieces :: text.splitn(~trimmed, \"\\\"\", 3)\n    if pieces.len() != 3 -> panic(\"expected quoted value\")\n    pieces.get(1) ?? panic(\"expected quoted value\")\n}\n\nfn run() {\n    path :: process.argv().get(1) ?? panic(\"missing path\")\n    source :: files.read(path) ?? panic(\"read failed\")\n    sections := [Section]{}\n    current := -1\n\n    loop line in source.lines() {\n        trimmed :: line.trim()\n        if line.trim().is_empty() -> next\n\n        opening :: text.splitn(~trimmed, \"[\", 2)\n        if opening.len() == 2 {\n            rest :: opening.get(1) ?? panic(\"malformed section\")\n            closing :: text.splitn(rest, \"]\", 2)\n            if closing.len() == 2 && (closing.get(1) ?? \"x\").is_empty() {\n                name :: closing.get(0) ?? panic(\"malformed section\")\n                sections.push(Section{name: name, inherits: \"\", fields: [Field]{}})\n                current = sections.len() - 1\n                next\n            }\n        }\n\n        if current < 0 -> panic(\"field before section\")\n        pair :: text.splitn(~trimmed, \"=\", 2)\n        if pair.len() != 2 -> panic(\"malformed field\")\n        key :: (pair.get(0) ?? \"\").trim()\n        if key.is_empty() -> panic(\"empty field\")\n        value :: quoted(pair.get(1) ?? \"\")\n        if key == \"inherits\" {\n            if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {sections[current].name}\")\n            sections[current].inherits = value\n            next\n        }\n        loop field in sections[current].fields {\n            if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n        }\n        sections[current].fields.push(Field{key: ~key, value: value})\n    }\n\n    loop section in sections {\n        resolved := [Field]{}\n        if section.inherits != \"\" {\n            base_index := -1\n            loop i in 0..<sections.len() {\n                if sections[i].name == section.inherits {\n                    base_index = i\n                    break\n                }\n            }\n            if base_index < 0 -> panic(\"missing inherited section {section.inherits}\")\n            loop field in sections[base_index].fields {\n                resolved.push(Field{key: field.key, value: field.value})\n            }\n        }\n        loop field in section.fields {\n            found := false\n            loop i in 0..<resolved.len() {\n                if resolved[i].key == field.key {\n                    resolved[i].value = field.value\n                    found = true\n                    break\n                }\n            }\n            if !found -> resolved.push(Field{key: field.key, value: field.value})\n        }\n        loop field in resolved {\n            print(\"{section.name}.{field.key}={field.value}\")\n        }\n    }\n}\n",
+  "status": "measured",
+  "implementation_session": {
+    "adapter": "manual-replay",
+    "model_family": null,
+    "model": null,
+    "started_at": "2026-09-02T13:29:42.609Z",
+    "ended_at": "2026-09-02T13:42:05.467Z",
+    "wall_seconds": 27.576,
+    "time_to_first_stdout_seconds": null,
+    "peak_rss_kb": null,
+    "exit_status": 0,
+    "timed_out": false,
+    "stdout": null,
+    "stderr": null,
+    "prompt_path": null,
+    "provenance": "Owner-directed fresh integrated-binary replay for #2415."
+  },
+  "commands": [
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "scripts/agent/jet-env",
+        "jet",
+        "check",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:29:42.609Z",
+      "ended_at": "2026-09-02T13:29:45.221Z",
+      "wall_seconds": 2.613,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "check: passed (source=/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=367, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=0)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:35:13\n    |\n 35 |             rest :: opening.get(1) ?? panic(\"malformed section\")\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:37:13\n    |\n 37 |             if closing.len() == 2 && (closing.get(1) ?? \"x\").is_empty() {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:38:17\n    |\n 38 |                 name :: closing.get(0) ?? panic(\"malformed section\")\n    |                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:40:17\n    |\n 40 |                 current = sections.len() - 1\n    |                 ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:48:9\n    |\n 48 |         key :: (pair.get(0) ?? \"\").trim()\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:50:9\n    |\n 50 |         value :: quoted(pair.get(1) ?? \"\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:52:13\n    |\n 52 |             if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {sections[current].name}\")\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:52:52\n    |\n 52 |             if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {sections[current].name}\")\n    |                                                    ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:56:9\n    |\n 56 |         loop field in sections[current].fields {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:57:36\n    |\n 57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n    |                                    ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:59:34\n    |\n 59 |         sections[current].fields.push(Field{key: ~key, value: value})\n    |                                  ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:67:17\n    |\n 67 |                 if sections[i].name == section.inherits {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:73:13\n    |\n 73 |             loop field in sections[base_index].fields {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:80:17\n    |\n 80 |                 if resolved[i].key == field.key {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n14 problems found\nrun `jet explain L2510` to learn more\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "scripts/agent/jet-env",
+        "jet",
+        "build",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:29:45.222Z",
+      "ended_at": "2026-09-02T13:30:04.888Z",
+      "wall_seconds": 19.666,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "  jet  Reading    /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc, Panic; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/repro-2415 in 18.2s ✓\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:00.168Z",
+      "ended_at": "2026-09-02T13:42:01.828Z",
+      "wall_seconds": 1.658,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "--interpret",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:01.828Z",
+      "ended_at": "2026-09-02T13:42:02.688Z",
+      "wall_seconds": 0.86,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "dev",
+        "--watch=off",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:02.688Z",
+      "ended_at": "2026-09-02T13:42:03.248Z",
+      "wall_seconds": 0.56,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./build/repro-2415",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:05.459Z",
+      "ended_at": "2026-09-02T13:42:05.463Z",
+      "wall_seconds": 0.004,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:03.248Z",
+      "ended_at": "2026-09-02T13:42:03.994Z",
+      "wall_seconds": 0.746,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 70,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "--interpret",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:03.994Z",
+      "ended_at": "2026-09-02T13:42:05.074Z",
+      "wall_seconds": 1.08,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 70,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "dev",
+        "--watch=off",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:05.074Z",
+      "ended_at": "2026-09-02T13:42:05.459Z",
+      "wall_seconds": 0.385,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 70,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./build/repro-2415",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:42:05.463Z",
+      "ended_at": "2026-09-02T13:42:05.467Z",
+      "wall_seconds": 0.004,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 70,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
+    }
+  ],
+  "task_outcome": {
+    "task": "T1",
+    "check_count": 1,
+    "compile_count": 0,
+    "build_count": 1,
+    "success_count": 4,
+    "failure_count": 4,
+    "check_ok": true,
+    "compile_ok": false,
+    "build_ok": true,
+    "success_ok": true,
+    "failure_ok": true,
+    "native_count": 1,
+    "native_ok": true,
+    "project_green": true
+  },
+  "correction_passes": 0,
+  "rating": {
+    "reading": 5,
+    "writing": 5,
+    "reasoning": 5,
+    "creating": 5,
+    "modifying": 4,
+    "diagnostics": 5,
+    "tooling_docs": 4,
+    "reason": "The complete prompt and fixtures were followed, and one correction pass produced the required success and duplicate-error behavior; tooling_docs is lowest because native/release execution was unavailable when rustc was missing."
+  },
+  "rating_response_raw": "{\"ratings\":{\"T1\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"The complete prompt and fixtures were followed, and one correction pass produced the required success and duplicate-error behavior; tooling_docs is lowest because native/release execution was unavailable when rustc was missing.\"},\"T2\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"The aliases, ordered options, typed command, three outputs, and unknown-command failure were implemented and checked after two correction passes; tooling_docs is lowest because native/release execution was unavailable when rustc was missing.\"},\"T3\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"Journal replay, insertion ordering, deletion, duplicate updates, and unknown-record rejection were implemented and checked after one correction pass; tooling_docs is lowest because native/release execution was unavailable when rustc was missing.\"},\"T4\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":5,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":4,\"reason\":\"Typed report parsing and canonical escaped JSON output were implemented and checked after one correction pass; tooling_docs is lowest because native/release execution was unavailable when rustc was missing.\"}}}",
+  "rating_response_ref": ".tmp/2393-r1/runs/A01-jet.rating.agent.json",
+  "rating_session": {
+    "adapter": "omp-task-follow-up",
+    "model_family": "OpenAI",
+    "model": "gpt-5.6-luna",
+    "started_at": null,
+    "ended_at": null,
+    "agent_ref": "agent://Card2393Rerun.A01JetOpenAI",
+    "history_ref": "history://Card2393Rerun.A01JetOpenAI"
+  },
+  "diagnostics": [
+    {
+      "step": 1,
+      "argv": [
+        "timeout",
+        "600",
+        "scripts/agent/jet-env",
+        "jet",
+        "check",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet"
+      ],
+      "exit_status": 0,
+      "codes": [
+        "L2510"
+      ],
+      "stderr": "Warning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:35:13\n    |\n 35 |             rest :: opening.get(1) ?? panic(\"malformed section\")\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:37:13\n    |\n 37 |             if closing.len() == 2 && (closing.get(1) ?? \"x\").is_empty() {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:38:17\n    |\n 38 |                 name :: closing.get(0) ?? panic(\"malformed section\")\n    |                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:40:17\n    |\n 40 |                 current = sections.len() - 1\n    |                 ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:48:9\n    |\n 48 |         key :: (pair.get(0) ?? \"\").trim()\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:50:9\n    |\n 50 |         value :: quoted(pair.get(1) ?? \"\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:52:13\n    |\n 52 |             if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {sections[current].name}\")\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:52:52\n    |\n 52 |             if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {sections[current].name}\")\n    |                                                    ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:56:9\n    |\n 56 |         loop field in sections[current].fields {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:57:36\n    |\n 57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n    |                                    ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:59:34\n    |\n 59 |         sections[current].fields.push(Field{key: ~key, value: value})\n    |                                  ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:67:17\n    |\n 67 |                 if sections[i].name == section.inherits {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:73:13\n    |\n 73 |             loop field in sections[base_index].fields {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> /home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet:80:17\n    |\n 80 |                 if resolved[i].key == field.key {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n14 problems found\nrun `jet explain L2510` to learn more\n",
+      "seeded_cause": false,
+      "first_diagnostic_names_seeded_cause": false,
+      "resolved": false
+    },
+    {
+      "step": 2,
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "exit_status": 70,
+      "codes": [
+        "E3001"
+      ],
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 3,
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "run",
+        "--interpret",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "exit_status": 70,
+      "codes": [
+        "E3001"
+      ],
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 4,
+      "argv": [
+        "timeout",
+        "600",
+        "./target/debug/jet",
+        "dev",
+        "--watch=off",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+        "--",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "exit_status": 70,
+      "codes": [
+        "E3001"
+      ],
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\nlocals: current = 0\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 5,
+      "argv": [
+        "timeout",
+        "600",
+        "./build/repro-2415",
+        "/home/nate/.cache/jet-test-scratch/rerun-2415/records-failure.cfg"
+      ],
+      "exit_status": 70,
+      "codes": [
+        "E3001"
+      ],
+      "stderr": "Stop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> repro-2415.jet:57 in run\n     |\n57 |             if field.key == key -> panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                                    ^^^^^\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    }
+  ],
+  "diagnostic_policy": {
+    "first_diagnostic_names_seeded_cause": "true for the seeded duplicate fixture; false for advisory L2510 warnings and compiler/tool failures",
+    "unregistered_codes_are_not_relabelled": true
+  },
+  "status_detail": "Fresh integrated binary reproduced the valid A01/T1 output and the expected duplicate-field program stop on every tier. The archived Scheduler registry ICE was not reproduced; current Registry rows are one Scheduler row and one Target.Scheduler row.",
+  "rating_prompt": "Rate this arm for this task from 1 to 5. Use only the work you observed. Explain the lowest rating that applies.",
+  "rating_category_wording": [
+    "reading",
+    "writing",
+    "reasoning",
+    "creating",
+    "modifying",
+    "diagnostics",
+    "tooling/docs"
+  ],
+  "rerun": {
+    "owner_cards": [
+      2415,
+      2393,
+      2394
+    ],
+    "recorded_at": "2026-09-02",
+    "base_receipt": "docs/audits/raw/2393-r1/A01/T1/jet.json",
+    "binary_identity": {
+      "path": "target/debug/jet",
+      "sha256": "4efae9163a2c5793e6f894bc4600c1a902becb4ade8749f1b47ea95a41c97d81",
+      "version": "Jet 1.0.0; registry protocol: v1"
+    },
+    "source_identity": {
+      "path": "/home/nate/.cache/jet-test-scratch/rerun-2415/repro-2415.jet",
+      "sha256": "af73a5717001040a7109358368fe433e7c4d0c93d021e9ed813ad3e8cad01262",
+      "regression": "tests/marker_declarations.rs::repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic"
+    },
+    "registry_rows": [
+      {
+        "name": "Scheduler",
+        "source": "crates/jet-codegen/src/Prelude/Scheduler.rs",
+        "guard": "the_jit_scheduler_is_the_prelude_scheduler"
+      },
+      {
+        "name": "Target.Scheduler",
+        "source": "crates/jet-codegen/src/Prelude/Facts.jet:67",
+        "guard": "D-FREESTAND-SCHED1"
+      }
+    ],
+    "registry_law_violations": [],
+    "archived_failure": {
+      "path": "docs/audits/raw/2393-r1/A01/T1/jet.json",
+      "diagnostic": "internal compiler error: fact registry law violation: `Scheduler` is registered twice; one table means one row per name\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.\n  at crates/jet-sema/src/Sema/Bundle/Pipeline.rs:2357:9",
+      "reproduced": false,
+      "classification": "stale packaged binary only"
+    },
+    "parity": {
+      "valid_output": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+      "tiers": [
+        "AOT artifact",
+        "default run",
+        "dev --watch=off",
+        "run --interpret"
+      ],
+      "byte_identical": true,
+      "duplicate_failure_exit_status": 70,
+      "duplicate_failure_no_ice": true
+    }
+  }
+}

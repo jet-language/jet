@@ -1,0 +1,793 @@
+{
+  "schema_version": "2393-r1-receipt-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A10",
+  "family": "Anthropic",
+  "task": "T4",
+  "arm": "Rust",
+  "opaque_arm_label": "Arm A",
+  "assignment": {
+    "task_bit": 1,
+    "task_bit_digest": "cb2a775a2bd748390e8d73cbb99ec37549bef0a4f1bfa11eb9a2530d326e49b1",
+    "task_arm_order": [
+      "Rust",
+      "Jet"
+    ],
+    "session_order_from_T1": [
+      "Jet",
+      "Rust"
+    ]
+  },
+  "comparison_blind_mapping": {
+    "digest": "af40dafa6ae5a5511e50b3f831030fe1d02774c85df34b297362bb3da86de163",
+    "first_bit": 1,
+    "second_bit": 0,
+    "option_order": [
+      "Arm A",
+      "Arm B",
+      "no preference"
+    ]
+  },
+  "protocol": {
+    "path": "docs/audits/fresh-agent-5-of-5-rerun-2026-08-30.md",
+    "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+    "language_reference_sha256": "6313eade3a13e199c2006953453dd0ffed82db6bb173c46f354021c36bdbf509",
+    "prompt_path": ".tmp/2393-r1/prompts/A10-rust.txt",
+    "prompt_sha256": "2943ccc825cf6e40dce9fe41c45bb22b22726480b09ea1e16244b6c5039053a4",
+    "fixture": {
+      "task": "T4",
+      "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+      "expected": {
+        "success": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n"
+      },
+      "files": {
+        "success": {
+          "path": "report.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\n",
+          "sha256": "a9a0e89c7cd8d98eba7885756b010829b88b2890728d4ad8f2ff177faec35d9e"
+        },
+        "malformed": {
+          "truncated.tsv": {
+            "path": "inputs/truncated.tsv",
+            "content": "name\tAda\ncount\t2\nnote\n",
+            "sha256": "b25dd204cc57b6c1c95956e2c85b4d00ebc40602c9c22265eb5d55a152e2299b"
+          },
+          "empty-key.tsv": {
+            "path": "inputs/empty-key.tsv",
+            "content": "name\tAda\ncount\t2\n\tbad\n",
+            "sha256": "30f67d4949ed4bf840a9bfd9330fcb2f4837ea09dc0a1e98b369543fa83bd147"
+          },
+          "extra-column.tsv": {
+            "path": "inputs/extra-column.tsv",
+            "content": "name\tAda\ncount\t2\nnote\tline \"one\"\textra\n",
+            "sha256": "fef58b7ef1f8e35ca0c717ab26c3a70619fd014ac36678a98257f14eff6aeba8"
+          },
+          "unknown-key.tsv": {
+            "path": "inputs/unknown-key.tsv",
+            "content": "name\tAda\ncount\t2\nstatus\tready\n",
+            "sha256": "e59410b546ddc08b6b1b451bfdcfc0e62d1185626087acf8ef9475cded0e9466"
+          },
+          "duplicate-key.tsv": {
+            "path": "inputs/duplicate-key.tsv",
+            "content": "name\tAda\ncount\t2\ncount\t3\nnote\tline \"one\"\n",
+            "sha256": "0b5d05e5a1539a5260b0c2f010daeee14eecdb86e7c6160451077615036c3612"
+          },
+          "invalid-count.tsv": {
+            "path": "inputs/invalid-count.tsv",
+            "content": "name\tAda\ncount\tnope\nnote\tline \"one\"\n",
+            "sha256": "5f833c7c3776d4d645d82e80ab59cc9d5b6f962927ab9d9506baa1094636559c"
+          },
+          "missing-required-key.tsv": {
+            "path": "inputs/missing-required-key.tsv",
+            "content": "name\tAda\ncount\t2\n",
+            "sha256": "54a7b16c6418c4b305b88ca3b6182cf3f01ada33b4f45a3759ed6e56248ea142"
+          }
+        }
+      }
+    }
+  },
+  "transport": {
+    "family": "Anthropic",
+    "adapter": "omp-command",
+    "detail": "Direct omp command; Rust rating retry corrected an incorrect prompt path.",
+    "arm_order_deviation": null
+  },
+  "source_path": "/home/nate/.cache/jet-test-scratch/rerun-2419/t4.rs",
+  "source_metrics": {
+    "bytes": 3728,
+    "physical_lines": 104,
+    "unicode_whitespace_tokens": 386,
+    "sha256": "960b23d66b5dc2d094d5e88c86f9183f9fd9109fde72f2fe3d00c06371076843"
+  },
+  "source": "use std::env;\nuse std::fs;\nuse std::process;\n\nconst MALFORMED_ROW: &str = \"what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\";\nconst EMPTY_KEY: &str = \"what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab\";\nconst UNKNOWN_KEY: &str = \"what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys\";\nconst DUPLICATE_KEY: &str = \"what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row\";\nconst INVALID_COUNT: &str = \"what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count\";\nconst MISSING_KEY: &str = \"what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row\";\n\nfn fail(path: &str, line: usize, reason: &str) -> ! {\n    eprintln!(\"{path}:{line}:{reason}\");\n    process::exit(1);\n}\n\nfn json_escape(value: &str) -> String {\n    let mut escaped = String::with_capacity(value.len());\n    for character in value.chars() {\n        match character {\n            '\"' => escaped.push_str(\"\\\\\\\"\"),\n            '\\\\' => escaped.push_str(\"\\\\\\\\\"),\n            '\\n' => escaped.push_str(\"\\\\n\"),\n            '\\r' => escaped.push_str(\"\\\\r\"),\n            '\\t' => escaped.push_str(\"\\\\t\"),\n            character if (character as u32) < 0x20 => {\n                escaped.push_str(&format!(\"\\\\u{:04x}\", character as u32));\n            }\n            character => escaped.push(character),\n        }\n    }\n    escaped\n}\n\nfn main() {\n    let mut arguments = env::args();\n    let _program = arguments.next();\n    let path = arguments.next().unwrap_or_else(|| {\n        eprintln!(\"missing report path\");\n        process::exit(1);\n    });\n    let source = fs::read_to_string(&path).unwrap_or_else(|error| {\n        eprintln!(\"read failed: {error}\");\n        process::exit(1);\n    });\n\n    let mut name = String::new();\n    let mut count_text = String::new();\n    let mut note = String::new();\n    let mut count_line = 0usize;\n    let mut seen_name = false;\n    let mut seen_count = false;\n    let mut seen_note = false;\n    let mut line_number = 0usize;\n\n    for line in source.lines() {\n        line_number += 1;\n        let parts: Vec<&str> = line.splitn(3, '\\t').collect();\n        if parts.len() != 2 {\n            fail(&path, line_number, MALFORMED_ROW);\n        }\n        let key = parts[0].trim();\n        let value = parts[1];\n        if key.is_empty() {\n            fail(&path, line_number, EMPTY_KEY);\n        }\n        match key {\n            \"name\" => {\n                if seen_name {\n                    fail(&path, line_number, DUPLICATE_KEY);\n                }\n                name = value.to_string();\n                seen_name = true;\n            }\n            \"count\" => {\n                if seen_count {\n                    fail(&path, line_number, DUPLICATE_KEY);\n                }\n                count_text = value.to_string();\n                count_line = line_number;\n                seen_count = true;\n            }\n            \"note\" => {\n                if seen_note {\n                    fail(&path, line_number, DUPLICATE_KEY);\n                }\n                note = value.to_string();\n                seen_note = true;\n            }\n            _ => fail(&path, line_number, UNKNOWN_KEY),\n        }\n    }\n\n    if !seen_name || !seen_count || !seen_note {\n        fail(&path, line_number + 1, MISSING_KEY);\n    }\n    let count: i64 = count_text.parse().unwrap_or_else(|_| fail(&path, count_line, INVALID_COUNT));\n    println!(\n        \"{{\\\"count\\\":{},\\\"name\\\":\\\"{}\\\",\\\"note\\\":\\\"{}\\\"}}\",\n        count,\n        json_escape(&name),\n        json_escape(&note)\n    );\n}\n",
+  "status": "measured",
+  "implementation_session": {
+    "adapter": "manual-replay",
+    "model_family": null,
+    "model": null,
+    "started_at": "2026-09-02T13:34:14.822Z",
+    "ended_at": "2026-09-02T13:34:24.399Z",
+    "wall_seconds": 2.7679999999999967,
+    "time_to_first_stdout_seconds": null,
+    "peak_rss_kb": null,
+    "exit_status": 0,
+    "timed_out": false,
+    "stdout": null,
+    "stderr": null,
+    "prompt_path": null,
+    "provenance": "Owner-directed strict Rust T4 replay matched to the fresh Jet fixture for #2419."
+  },
+  "commands": [
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "scripts/agent/jet-env",
+        "rustc",
+        "/home/nate/.cache/jet-test-scratch/rerun-2419/t4.rs",
+        "-o",
+        "/home/nate/.cache/jet-test-scratch/rerun-2419/t4-debug"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:34:21.663Z",
+      "ended_at": "2026-09-02T13:34:22.974Z",
+      "wall_seconds": 1.311,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "scripts/agent/jet-env",
+        "rustc",
+        "-O",
+        "/home/nate/.cache/jet-test-scratch/rerun-2419/t4.rs",
+        "-o",
+        "/home/nate/.cache/jet-test-scratch/rerun-2419/t4-release"
+      ],
+      "cwd": "/home/nate/Projects/Github/jet",
+      "started_at": "2026-09-02T13:34:22.974Z",
+      "ended_at": "2026-09-02T13:34:24.399Z",
+      "wall_seconds": 1.425,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/report.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.822Z",
+      "ended_at": "2026-09-02T13:34:14.824Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/report.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.824Z",
+      "ended_at": "2026-09-02T13:34:14.826Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 0,
+      "timed_out": false,
+      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.826Z",
+      "ended_at": "2026-09-02T13:34:14.828Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.828Z",
+      "ended_at": "2026-09-02T13:34:14.830Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.830Z",
+      "ended_at": "2026-09-02T13:34:14.832Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv:3:what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.832Z",
+      "ended_at": "2026-09-02T13:34:14.834Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv:3:what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.834Z",
+      "ended_at": "2026-09-02T13:34:14.836Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.836Z",
+      "ended_at": "2026-09-02T13:34:14.838Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.838Z",
+      "ended_at": "2026-09-02T13:34:14.839Z",
+      "wall_seconds": 0.001,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv:3:what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.839Z",
+      "ended_at": "2026-09-02T13:34:14.841Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv:3:what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.841Z",
+      "ended_at": "2026-09-02T13:34:14.843Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv:3:what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.843Z",
+      "ended_at": "2026-09-02T13:34:14.845Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv:3:what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.845Z",
+      "ended_at": "2026-09-02T13:34:14.847Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv:2:what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.847Z",
+      "ended_at": "2026-09-02T13:34:14.849Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv:2:what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.849Z",
+      "ended_at": "2026-09-02T13:34:14.852Z",
+      "wall_seconds": 0.003,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv:3:what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row\n"
+    },
+    {
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv"
+      ],
+      "cwd": "/home/nate/.cache/jet-test-scratch/rerun-2419",
+      "started_at": "2026-09-02T13:34:14.852Z",
+      "ended_at": "2026-09-02T13:34:14.854Z",
+      "wall_seconds": 0.002,
+      "time_to_first_stdout_seconds": null,
+      "peak_rss_kb": null,
+      "exit_status": 1,
+      "timed_out": false,
+      "stdout": "",
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv:3:what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row\n"
+    }
+  ],
+  "task_outcome": {
+    "task": "T4",
+    "check_count": 0,
+    "compile_count": 2,
+    "build_count": 0,
+    "success_count": 2,
+    "failure_count": 14,
+    "check_ok": false,
+    "compile_ok": true,
+    "build_ok": false,
+    "success_ok": true,
+    "failure_ok": true,
+    "native_count": 2,
+    "native_ok": true,
+    "project_green": true
+  },
+  "correction_passes": 0,
+  "rating": {
+    "reading": 5,
+    "writing": 5,
+    "reasoning": 4,
+    "creating": 4,
+    "modifying": 4,
+    "diagnostics": 4,
+    "tooling_docs": 3,
+    "reason": "Lowest: tooling_docs (3). No documentation of expected TSV schema or JSON output format. All test vectors pass; JSON escaping correctly handles embedded quotes and control characters. Reasoning at 4: output key order is hard-coded in a format string rather than derived from a schema, making extension brittle. Diagnostics at 4: unknown-field and missing-field errors are clear, but no error is produced for a line without a tab (silently skipped)."
+  },
+  "rating_response_raw": "{\"ratings\":{\"T1\":{\"reading\":5,\"writing\":5,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Lowest: tooling_docs (3). The program provides only a bare `usage:` line on missing args — no help flag, no description of the config format or inheritance semantics. All test vectors pass; parsing of sections, quoted values, and the `inherits` directive is correct. Reasoning docked to 4 because a missing parent section is silently ignored rather than diagnosed. Creating at 4 for unnecessary cloning (keys, values, name_map) where references would suffice.\"},\"T2\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":4,\"modifying\":4,\"diagnostics\":5,\"tooling_docs\":3,\"reason\":\"Lowest: tooling_docs (3). No --help flag, no usage summary listing valid subcommands and options. All four test vectors (ls --json, inspect --format text, rm --dry-run, unknown command) produce exact expected output and exit codes. Error messages are precise and contextual. Creating at 4: `format` is heap-allocated as String where &str would suffice, and `label()` returns a static string that could replace the enum variant names directly.\"},\"T3\":{\"reading\":5,\"writing\":5,\"reasoning\":5,\"creating\":4,\"modifying\":5,\"diagnostics\":5,\"tooling_docs\":3,\"reason\":\"Lowest: tooling_docs (3). No documentation of the pipe-delimited record format. All test vectors pass — insertion-order preservation with update-in-place semantics is correct, and the unknown-record-kind failure case produces a line-numbered diagnostic. Creating at 4: the (usize, String) tuple in the HashMap is functional but a small struct would be clearer; sort_by_key borrows through the reference awkwardly.\"},\"T4\":{\"reading\":5,\"writing\":5,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Lowest: tooling_docs (3). No documentation of expected TSV schema or JSON output format. All test vectors pass; JSON escaping correctly handles embedded quotes and control characters. Reasoning at 4: output key order is hard-coded in a format string rather than derived from a schema, making extension brittle. Diagnostics at 4: unknown-field and missing-field errors are clear, but no error is produced for a line without a tab (silently skipped).\"}}}\n",
+  "rating_response_ref": ".tmp/2393-r1/runs/A10-rust.rating.retry.omp.json",
+  "rating_session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--tools=read",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/prompts/A10-rust-rating.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A10",
+    "started_at": "2026-09-01T00:03:10.300Z",
+    "ended_at": "2026-09-01T00:04:21.169Z",
+    "wall_seconds": 70.86856359599903,
+    "time_to_first_stdout_seconds": 70.84125691599958,
+    "peak_rss_kb": 306656,
+    "exit_status": 0,
+    "timed_out": false,
+    "stderr": "Working...\n",
+    "prompt_path": ".tmp/2393-r1/prompts/A10-rust-rating.txt"
+  },
+  "diagnostics": [
+    {
+      "step": 1,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 2,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/truncated.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 3,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv:3:what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 4,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv:3:what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 5,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 6,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv:3:what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 7,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv:3:what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 8,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv:3:what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 9,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv:3:what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 10,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv:3:what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 11,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv:2:what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 12,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv:2:what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 13,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-debug",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv:3:what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    },
+    {
+      "step": 14,
+      "argv": [
+        "timeout",
+        "600",
+        "./t4-release",
+        "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv"
+      ],
+      "exit_status": 1,
+      "codes": [
+        "unregistered_or_tool_text"
+      ],
+      "stderr": "/home/nate/Projects/Github/jet/tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv:3:what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row\n",
+      "seeded_cause": true,
+      "first_diagnostic_names_seeded_cause": true,
+      "resolved": true
+    }
+  ],
+  "diagnostic_policy": {
+    "first_diagnostic_names_seeded_cause": "true for the malformed-input fixtures; unregistered comparator text is preserved without relabelling",
+    "unregistered_codes_are_not_relabelled": true
+  },
+  "status_detail": "Strict Rust comparator accepts the valid fixture and rejects the same seven malformed TSV cases with byte-identical stdout, stderr, and exit status to Jet.",
+  "rating_prompt": "Rate this arm for this task from 1 to 5. Use only the work you observed. Explain the lowest rating that applies.",
+  "rating_category_wording": [
+    "reading",
+    "writing",
+    "reasoning",
+    "creating",
+    "modifying",
+    "diagnostics",
+    "tooling/docs"
+  ],
+  "rerun": {
+    "owner_cards": [
+      2419,
+      2393,
+      2394
+    ],
+    "recorded_at": "2026-09-02",
+    "base_receipt": "docs/audits/raw/2393-r1/A10/T4/rust.json",
+    "fixture_root": "tests/fixtures/fresh_agent_t4",
+    "matched_jet_receipt": "docs/audits/raw/2393-r1/A10/T4/rerun-2026-09-02-jet.json",
+    "compiler": {
+      "debug": "rustc",
+      "release": "rustc -O"
+    },
+    "tier_parity": {
+      "valid_byte_identical": true,
+      "malformed_byte_identical": true,
+      "malformed_exit_status": 1,
+      "malformed_stdout_empty": true
+    }
+  }
+}
