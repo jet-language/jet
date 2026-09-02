@@ -279,3 +279,34 @@ Commit the new procedure receipt and canonical evidence only after the command
 passes. Do not mark remediation cards done as part of this procedure. A
 non-zero finding, incomplete coverage, changed identity, or missing report is
 a failed closure and requires returning to the affected remediation work.
+
+## Closure report validator
+
+The dated reconciliation report is a separate, repository-committed record.
+It is valid only when it contains the five marked sections:
+
+- `security-criteria:v1` records one evidence path for each card criterion.
+- `security-dispositions:v1` records exactly 134 candidate rows.
+- `security-independent-review:v1` records all ten campaign cards and their
+  independent-review evidence.
+- `security-evidence-hashes:v1` records a SHA-256 digest for every referenced
+  evidence artifact.
+- `security-receipt:v1` records the reconciliation counts and fresh-scan gate.
+
+Run the validator from the repository root:
+
+~~~
+timeout 120 node scripts/agent/security-scan.mjs validate \
+  --report docs/audits/security-closure-2026-09-02.md
+~~~
+
+The validator derives the expected candidate IDs, titles, and final
+dispositions from `docs/audits/security-deep-scan-2026-08-03.md`. It rejects
+missing or repeated IDs, conflicting dispositions, invalid evidence paths,
+stale SHA-256 digests, incomplete independent-review rows, and a receipt that
+claims a fresh scan without the external gate.
+
+The validator does not replace the Codex Security scan. A report with
+`pending-external-gate` is a valid reconciliation record but does not satisfy
+criterion 3 or the final closure gate. Criterion 3 becomes eligible only after
+the exact `finalize` command above passes against a fresh completed scan.

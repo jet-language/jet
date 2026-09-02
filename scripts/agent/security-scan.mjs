@@ -774,6 +774,349 @@ function validateFinalBundle(bundle, info) {
   };
 }
 
+const CLOSURE_SOURCE_PATH = "docs/audits/security-deep-scan-2026-08-03.md";
+const CLOSURE_CANDIDATE_COUNT = 134;
+const CLOSURE_DISPOSITION_RE =
+  /^(?:already-fixed|confirmed|rejected|out-of-scope|duplicate-of-[a-z0-9][a-z0-9-]*)$/;
+
+function stripClosureCode(value) {
+  const text = value.trim();
+  return text.startsWith("`") && text.endsWith("`") ? text.slice(1, -1) : text;
+}
+
+function closureSection(report, startMarker, endMarker, label) {
+  const start = report.indexOf(startMarker);
+  if (start < 0) {
+    fail("report is missing " + label);
+  }
+  const bodyStart = start + startMarker.length;
+  const end = report.indexOf(endMarker, bodyStart);
+  if (end < 0) {
+    fail("report is missing the end of " + label);
+  }
+  return report.slice(bodyStart, end);
+}
+
+function closureTable(body, header, label) {
+  const rows = body
+    .split(/\r?\n/)
+    .filter((line) => line.trim().startsWith("|"))
+    .map((line) => line.trim().split("|").slice(1, -1).map((cell) => cell.trim()));
+  if (rows.length === 0 || !deepEqual(rows[0], header)) {
+    fail(label + " has the wrong header");
+  }
+  const data = rows.slice(1).filter((row) => !row.every((cell) => /^:?-{3,}:?$/.test(cell)));
+  if (data.some((row) => row.length !== header.length)) {
+    fail(label + " has a malformed row");
+  }
+  return data;
+}
+
+function closureEvidenceReference(value, label) {
+  const reference = stripClosureCode(value);
+  const match = reference.match(/^(.+):(\d+)(?:-(\d+))?$/);
+  if (!match) {
+    fail(label + " must be a path:line reference");
+  }
+  const artifact = safeRelativePath(match[1], label + " artifact");
+  const firstLine = Number(match[2]);
+  const lastLine = match[3] ? Number(match[3]) : firstLine;
+  if (lastLine < firstLine) {
+    fail(label + " has a reversed line range");
+  }
+  return { artifact, firstLine, lastLine };
+}
+
+function readClosureSource(repo) {
+  const sourcePath = join(repo, CLOSURE_SOURCE_PATH);
+  ensureRegular(sourcePath, "closure reconciliation source");
+  const sourceLines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+  const candidates = new Map();
+  const dispositions = new Map();
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const match = sourceLines[index].match(/^\| `([a-z0-9][a-z0-9-]*)` \|/);
+    if (!match) {
+      continue;
+    }
+    const id = match[1];
+    const cells = sourceLines[index].split("|").map((cell) => cell.trim());
+    if (!candidates.has(id)) {
+      const candidate = cells[2] || "";
+      if (!candidate) {
+        fail("reconciliation source has no candidate title for " + id);
+      }
+      candidates.set(id, { candidate, inventoryLine: index + 1 });
+    }
+    for (const cell of cells.slice(2)) {
+      const disposition = cell.replace(/^`|`$/g, "");
+      if (!CLOSURE_DISPOSITION_RE.test(disposition)) {
+        continue;
+      }
+      const entries = dispositions.get(id) || [];
+      entries.push({ disposition, line: index + 1 });
+      dispositions.set(id, entries);
+    }
+  }
+  if (candidates.size !== CLOSURE_CANDIDATE_COUNT) {
+    fail(
+      "reconciliation source has " +
+        candidates.size +
+        " candidates; expected " +
+        CLOSURE_CANDIDATE_COUNT,
+    );
+  }
+  const finalDispositions = new Map();
+  for (const [id, entries] of dispositions) {
+    const values = [...new Set(entries.map((entry) => entry.disposition))];
+    if (values.length !== 1) {
+      fail("reconciliation source has conflicting dispositions for " + id);
+    }
+    finalDispositions.set(id, values[0]);
+  }
+  if (finalDispositions.size !== CLOSURE_CANDIDATE_COUNT) {
+    fail(
+      "reconciliation source has " +
+        finalDispositions.size +
+        " final dispositions; expected " +
+        CLOSURE_CANDIDATE_COUNT,
+    );
+  }
+  return { sourcePath, candidates, dispositions: finalDispositions };
+}
+
+function closurePathReferences(text, label) {
+  const references = [];
+  for (const match of text.matchAll(/`([^`]+)`/g)) {
+    if (!/:(?:\d+)(?:-\d+)?$/.test(match[1])) {
+      continue;
+    }
+    references.push(closureEvidenceReference(match[1], label));
+  }
+  return references;
+}
+
+function parseClosureReceipt(body) {
+  const match = body.match(/~~~json\s*([\s\S]*?)\s*~~~/);
+  if (!match) {
+    fail("receipt block must contain a JSON fence");
+  }
+  try {
+    return JSON.parse(match[1]);
+  } catch (error) {
+    fail("receipt block is not valid JSON: " + error.message);
+  }
+}
+
+function validateClosureReport(value) {
+  const reportPath = resolve(value);
+  if (!isInside(SCRIPT_REPO_ROOT, reportPath)) {
+    fail("closure report must be inside the repository");
+  }
+  ensureRegular(reportPath, "closure report");
+  const report = readFileSync(reportPath, "utf8");
+  if (!/^# Jet security closure report$/m.test(report)) {
+    fail("closure report has the wrong title");
+  }
+  if (!report.includes("Report date: 2026-09-02")) {
+    fail("closure report has the wrong report date");
+  }
+
+  const source = readClosureSource(SCRIPT_REPO_ROOT);
+  const sourceLength = readFileSync(source.sourcePath, "utf8").split(/\r?\n/).length;
+  const dispositionRows = closureTable(
+    closureSection(
+      report,
+      "<!-- security-dispositions:v1 -->",
+      "<!-- /security-dispositions -->",
+      "candidate disposition table",
+    ),
+    ["id", "candidate", "disposition", "evidence path"],
+    "candidate disposition table",
+  );
+  if (dispositionRows.length !== CLOSURE_CANDIDATE_COUNT) {
+    fail(
+      "candidate disposition table has " +
+        dispositionRows.length +
+        " rows; expected " +
+        CLOSURE_CANDIDATE_COUNT,
+    );
+  }
+  const reportIds = new Set();
+  const referencedArtifacts = new Set();
+  const reportCounts = {};
+  for (const row of dispositionRows) {
+    const id = stripClosureCode(row[0]);
+    const candidate = row[1];
+    const disposition = stripClosureCode(row[2]);
+    if (!source.candidates.has(id)) {
+      fail("candidate disposition table contains unknown ID " + id);
+    }
+    if (reportIds.has(id)) {
+      fail("candidate disposition table repeats ID " + id);
+    }
+    reportIds.add(id);
+    const expected = source.candidates.get(id);
+    if (candidate !== expected.candidate) {
+      fail("candidate title does not match the reconciliation source for " + id);
+    }
+    if (disposition !== source.dispositions.get(id)) {
+      fail("candidate disposition does not match the reconciliation source for " + id);
+    }
+    if (!CLOSURE_DISPOSITION_RE.test(disposition)) {
+      fail("candidate disposition is not allowed for " + id);
+    }
+    const evidence = closureEvidenceReference(row[3], "candidate " + id);
+    if (evidence.artifact !== CLOSURE_SOURCE_PATH) {
+      fail("candidate " + id + " must cite the reconciliation source");
+    }
+    referencedArtifacts.add(evidence.artifact);
+    reportCounts[disposition] = (reportCounts[disposition] || 0) + 1;
+    if (evidence.firstLine < 1 || evidence.lastLine > sourceLength) {
+      fail("candidate " + id + " cites a line outside the reconciliation source");
+    }
+  }
+  if (reportIds.size !== CLOSURE_CANDIDATE_COUNT) {
+    fail("candidate disposition table does not contain every expected ID");
+  }
+
+  const criteriaRows = closureTable(
+    closureSection(
+      report,
+      "<!-- security-criteria:v1 -->",
+      "<!-- /security-criteria -->",
+      "criterion evidence table",
+    ),
+    ["criterion", "status", "evidence path"],
+    "criterion evidence table",
+  );
+  if (criteriaRows.length !== 5) {
+    fail("criterion evidence table must contain five rows");
+  }
+  const criterionNumbers = criteriaRows.map((row) => row[0]);
+  if (!deepEqual(criterionNumbers, ["1", "2", "3", "4", "5"])) {
+    fail("criterion evidence table must contain criteria 1 through 5 in order");
+  }
+  for (const row of criteriaRows) {
+    const references = closurePathReferences(row[2], "criterion " + row[0]);
+    if (references.length !== 1) {
+      fail("criterion " + row[0] + " must have one evidence path");
+    }
+    referencedArtifacts.add(references[0].artifact);
+  }
+
+  const reviewRows = closureTable(
+    closureSection(
+      report,
+      "<!-- security-independent-review:v1 -->",
+      "<!-- /security-independent-review -->",
+      "independent review table",
+    ),
+    ["campaign", "owning card", "candidate count", "independent review evidence"],
+    "independent review table",
+  );
+  const expectedReviews = [
+    ["#1377", "11"],
+    ["#1378", "9"],
+    ["#1379", "12"],
+    ["#1380", "35"],
+    ["#1381", "6"],
+    ["#1382", "22"],
+    ["#1383", "10"],
+    ["#1384", "20"],
+    ["#1385", "7"],
+    ["#1386", "2"],
+  ];
+  if (reviewRows.length !== expectedReviews.length) {
+    fail("independent review table must contain ten campaign rows");
+  }
+  for (const [index, row] of reviewRows.entries()) {
+    if (row[1] !== expectedReviews[index][0] || row[2] !== expectedReviews[index][1]) {
+      fail("independent review row " + String(index + 1) + " has the wrong card or count");
+    }
+    const references = closurePathReferences(
+      row[3],
+      "independent review row " + String(index + 1),
+    );
+    if (references.length !== 1) {
+      fail("independent review row " + String(index + 1) + " must have one evidence path");
+    }
+    referencedArtifacts.add(references[0].artifact);
+  }
+
+  const hashRows = closureTable(
+    closureSection(
+      report,
+      "<!-- security-evidence-hashes:v1 -->",
+      "<!-- /security-evidence-hashes -->",
+      "evidence hash table",
+    ),
+    ["artifact", "sha256"],
+    "evidence hash table",
+  );
+  const digests = new Map();
+  for (const row of hashRows) {
+    const artifact = safeRelativePath(stripClosureCode(row[0]), "evidence artifact");
+    if (digests.has(artifact)) {
+      fail("evidence hash table repeats " + artifact);
+    }
+    if (!/^[0-9a-f]{64}$/.test(row[1])) {
+      fail("evidence hash for " + artifact + " is not SHA-256");
+    }
+    const artifactPath = join(SCRIPT_REPO_ROOT, artifact);
+    ensureRegular(artifactPath, "evidence artifact " + artifact);
+    const actual = sha256(readFileSync(artifactPath));
+    if (actual !== row[1]) {
+      fail("SHA-256 mismatch for evidence artifact " + artifact);
+    }
+    digests.set(artifact, row[1]);
+  }
+  for (const artifact of referencedArtifacts) {
+    if (!digests.has(artifact)) {
+      fail("referenced evidence artifact has no SHA-256: " + artifact);
+    }
+  }
+
+  const receipt = parseClosureReceipt(
+    closureSection(
+      report,
+      "<!-- security-receipt:v1 -->",
+      "<!-- /security-receipt -->",
+      "receipt block",
+    ),
+  );
+  assertPlainObject(receipt, "receipt");
+  if (
+    receipt.documentType !== "jet.security-closure.receipt" ||
+    receipt.schemaVersion !== "1.0" ||
+    receipt.card !== CARD ||
+    receipt.report !== relative(SCRIPT_REPO_ROOT, reportPath).split(sep).join("/") ||
+    receipt.candidateCount !== CLOSURE_CANDIDATE_COUNT ||
+    receipt.uniqueDispositionCount !== CLOSURE_CANDIDATE_COUNT ||
+    receipt.conflictingDispositionCount !== 0 ||
+    receipt.unresolvedCandidates !== 0
+  ) {
+    fail("receipt does not match the reconciled report");
+  }
+  if (!deepEqual(receipt.dispositions, reportCounts)) {
+    fail("receipt disposition counts do not match the report");
+  }
+  assertPlainObject(receipt.freshRepositoryScan, "receipt.freshRepositoryScan");
+  if (
+    receipt.freshRepositoryScan.status !== "pending-external-gate" ||
+    typeof receipt.freshRepositoryScan.pluginDirectory !== "string" ||
+    receipt.freshRepositoryScan.pluginDirectory.length === 0 ||
+    typeof receipt.freshRepositoryScan.command !== "string" ||
+    !receipt.freshRepositoryScan.command.includes("security-scan.mjs finalize")
+  ) {
+    fail("receipt does not record the pending fresh-scan gate");
+  }
+  console.log(
+    "security-scan: PASS report validation (" +
+      String(CLOSURE_CANDIDATE_COUNT) +
+      " dispositions, 0 conflicts, fresh scan gate pending)",
+  );
+}
+
 function resolvePluginDirectory(value) {
   const configured = value || process.env.CODEX_SECURITY_PLUGIN_DIR;
   if (!configured) {
@@ -1018,8 +1361,13 @@ function parseArgs(argumentsList) {
     process.exitCode = command ? 0 : 2;
     return null;
   }
-  if (command !== "prepare" && command !== "finalize" && command !== "check") {
-    fail("command must be prepare, finalize, or check");
+  if (
+    command !== "prepare" &&
+    command !== "finalize" &&
+    command !== "check" &&
+    command !== "validate"
+  ) {
+    fail("command must be prepare, finalize, check, or validate");
   }
   const args = { command };
   for (let index = 1; index < argumentsList.length; index += 1) {
@@ -1034,6 +1382,8 @@ function parseArgs(argumentsList) {
       args.scanDir = argumentsList[++index];
     } else if (args && token === "--plugin-dir") {
       args.pluginDir = argumentsList[++index];
+    } else if (args && token === "--report") {
+      args.report = argumentsList[++index];
     } else if (args && token === "--publish-dir") {
       args.publishDir = argumentsList[++index];
     } else if (token === "--help") {
@@ -1053,8 +1403,14 @@ function parseArgs(argumentsList) {
   if ((command === "finalize" || command === "check") && (!args.request || !args.scanDir)) {
     fail(command + " requires --request and --scan-dir");
   }
+  if (command === "validate" && !args.report) {
+    fail("validate requires --report");
+  }
   if (command === "check" && args.publishDir) {
     fail("check cannot publish evidence");
+  }
+  if (command === "validate" && Object.hasOwn(args, "repo")) {
+    fail("validate accepts only --report");
   }
   return args;
 }
@@ -1063,6 +1419,7 @@ function printUsage() {
   console.log(
     [
       "Usage:",
+      "  security-scan.mjs validate --report REPO/docs/audits/security-closure-DATE.md",
       "  security-scan.mjs prepare --repo REPO --out NEW_DIR",
       "  security-scan.mjs finalize --repo REPO --request REQUEST --scan-dir SCAN_DIR",
       "      --plugin-dir CODEX_SECURITY_PLUGIN_DIR [--publish-dir REPO/docs/audits/security-final-DATE]",
@@ -1074,7 +1431,9 @@ function printUsage() {
 
 try {
   const args = parseArgs(process.argv.slice(2));
-  if (args?.command === "prepare") {
+  if (args?.command === "validate") {
+    validateClosureReport(args.report);
+  } else if (args?.command === "prepare") {
     prepare(args);
   } else if (args?.command === "finalize") {
     finalizeOrCheck(args, "finalize");
