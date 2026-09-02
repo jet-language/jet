@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Rights: one walker, one frame, ten codes — canonical Jet proposal rendering.">
+<title>Rights: one walker, one frame, ten codes — Jet proposal</title>
+<style>
+:root {
+  --bg: #071019;
+  --surface-1: #0b1621;
+  --surface-2: #101d29;
+  --surface-3: #152534;
+  --border: #294050;
+  --border-soft: #1c3140;
+  --text: #f0f6f8;
+  --text-2: #c1ced4;
+  --muted: #93a5ae;
+  --amber: #f4b860;
+  --amber-soft: #332817;
+  --cyan: #6dd7e8;
+  --cyan-soft: #102c34;
+  --green: #70d69a;
+  --green-soft: #112c21;
+  --red: #ff8585;
+  --red-soft: #381d22;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --measure: 78ch;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-padding-top: 5.25rem; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(109,215,232,.025) 1px, transparent 1px),
+    linear-gradient(rgba(109,215,232,.018) 1px, transparent 1px),
+    var(--bg);
+  background-size: 32px 32px;
+  color: var(--text);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip-link {
+  position: fixed; z-index: 100; top: .75rem; left: .75rem;
+  transform: translateY(-180%); padding: .65rem .9rem;
+  border: 1px solid var(--cyan); border-radius: 6px;
+  background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono);
+}
+.skip-link:focus { transform: translateY(0); }
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(7,16,25,.96); backdrop-filter: blur(12px);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto;
+  padding: .7rem 1.5rem;
+}
+.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
+.topbar a:hover { color: var(--text); }
+.back-link { white-space: nowrap; }
+.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
+.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
+.top-links a:hover { background: var(--surface-2); }
+.page {
+  position: relative; max-width: 1260px; margin: 0 auto;
+  padding: 3.6rem 1.5rem 5.5rem 1.5rem;
+}
+.page::before {
+  position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px;
+  background: linear-gradient(var(--amber), rgba(244,184,96,.12)); content: "";
+}
+.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.toc {
+  position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto;
+  padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px;
+  background: rgba(11,22,33,.88);
+}
+.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
+.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
+.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
+main { min-width: 0; }
+.hero-card {
+  margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem;
+  border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(244,184,96,.08), var(--surface-1) 40%, var(--surface-2));
+  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+}
+.eyebrow, .trace-label, .kicker { color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 .9rem; }
+.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem, 6.2vw, 5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
+h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem, 3.6vw, 2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
+h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem, 2.3vw, 1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
+.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
+.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg, var(--amber-soft), transparent 82%); color: var(--text-2); }
+.meta-row { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.35rem; }
+.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
+.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
+.pill .pill-rec { color: var(--green); }
+.score-line { margin: 1.15rem 0 0; color: var(--text-2); font-size: .83rem; }
+.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: .7rem; }
+.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
+.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.slate-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.5rem 0 0; padding-top: 1.05rem; border-top: 1px solid var(--border-soft); }
+.slate-strip a { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font: 700 .68rem var(--mono); text-decoration: none; }
+.markdown { max-width: var(--measure); }
+.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
+.markdown strong { color: var(--text); }
+.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--cyan-soft), transparent 90%); color: var(--text); }
+.markdown blockquote p { margin: 0; color: var(--text); }
+.markdown code, .table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
+.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+caption { padding: .8rem 1rem; color: var(--muted); text-align: left; font: .7rem var(--mono); }
+th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
+.option-table { border-collapse: separate; border-spacing: 0; }
+.option-table thead th { background: rgba(16,29,41,.8); }
+.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
+.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
+.option-table tbody td + td { padding-top: .12rem; padding-bottom: .75rem; }
+.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
+.option-table tbody td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row:not(.has-recommended-text) td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
+.rung-table tbody { position: relative; display: grid; gap: .72rem; padding: .9rem 1rem .9rem 2.3rem; }
+.rung-table tbody::before { position: absolute; top: 1.25rem; bottom: 1.25rem; left: 1.05rem; width: 2px; background: linear-gradient(var(--cyan), rgba(109,215,232,.2)); content: ""; }
+.rung-table tbody tr { position: relative; display: grid; grid-template-columns: minmax(3.5rem,.28fr) minmax(7rem,.65fr) minmax(12rem,1.2fr) minmax(14rem,2fr); border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); }
+.rung-table tbody tr::before { position: absolute; top: 1.05rem; left: -1.72rem; width: .72rem; height: .72rem; border: 2px solid var(--cyan); border-radius: 50%; background: var(--bg); content: ""; }
+.rung-table tbody td { border: 0; padding: .75rem .65rem; }
+.rung-table tbody td:first-child { color: var(--amber); }
+.code-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.code-card + .code-card { margin-top: .7rem; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .58rem .75rem; border-bottom: 1px solid var(--border-soft); color: var(--muted); font: 750 .64rem var(--mono); letter-spacing: .075em; text-transform: uppercase; }
+.code-context { padding: .65rem .8rem .15rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); font-size: .78rem; }
+.badge { display: inline-flex; align-items: center; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; font: 800 .61rem/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.badge.real { color: var(--cyan); background: var(--cyan-soft); }
+.badge.illustrative { color: var(--amber); background: var(--amber-soft); }
+pre { margin: 0; padding: 1rem; overflow-x: auto; background: #08131c; color: #dcebf0; font: .78rem/1.58 var(--mono); tab-size: 4; }
+.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
+.compare-side { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
+.compare-side.real { border-top: 3px solid var(--cyan); }
+.compare-side.illustrative { border-top: 3px solid var(--amber); }
+.compare-title { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 2.1rem; margin: 0 0 .55rem; color: var(--text-2); font: 700 .72rem/1.35 var(--mono); }
+.compare-side .code-card { border-color: var(--border-soft); }
+.compare-side .code-context { display: none; }
+.mode-note { margin: 1.1rem 0 .6rem; color: var(--text-2); font-size: .88rem; }
+.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
+.ballot-index { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.ballot-index h2 { margin-top: 0; }
+.ballot-index-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: ballot; }
+.ballot-index-item { min-width: 0; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); counter-increment: ballot; }
+.ballot-index-item::before { content: counter(ballot, decimal-leading-zero); display: block; margin-bottom: .35rem; color: var(--muted); font: 750 .62rem var(--mono); }
+.ballot-index-item a { font: 750 .76rem var(--mono); }
+.ballot-index-rec { display: block; margin-top: .3rem; color: var(--text-2); font-size: .76rem; }
+.ballot-index-owner { display: block; margin-top: .4rem; color: var(--muted); font: .67rem var(--mono); }
+footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; }
+  .toc-label { width: 100%; }
+  .toc a { padding: .25rem .4rem; }
+  .toc a.level-3 { padding-left: .4rem; }
+  .toc a.level-3::before { content: "· "; color: var(--amber); }
+}
+@media (max-width: 820px) {
+  .score-grid, .option-table tbody { grid-template-columns: 1fr; }
+  .rung-table tbody tr { grid-template-columns: 1fr 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: 1 / -1; }
+  .comparison { grid-template-columns: 1fr; }
+  .ballot-index-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { padding-inline: .8rem; }
+  .nav-mark { display: none; }
+  .top-links { margin-left: 0; }
+  .page { padding: 2.8rem .9rem 4rem 1.3rem; }
+  .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; }
+  .hero-card { padding: 1.4rem 1.15rem 1.25rem; }
+  h1 { max-width: 12ch; }
+  .rung-table tbody { padding-left: 1.8rem; }
+  .rung-table tbody::before { left: .75rem; }
+  .rung-table tbody tr::before { left: -1.3rem; }
+  .rung-table tbody tr { grid-template-columns: 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+.badge.source-verified { color: var(--green); background: var(--green-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to proposal</a>
+<header class="topbar"><div class="topbar-inner"><a class="nav-mark" href="whole-language-frame.html">JET / PROPOSALS</a><a class="back-link" href="whole-language-frame.html">← Whole-language frame</a><nav class="top-links" aria-label="Proposal pages"><a href="whole-language-frame.html">← Frame</a></nav></div></header>
+<div class="page" id="top"><div class="layout"><aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p><a class="level-2" href="#executive-summary">Executive summary</a><a class="level-2" href="#the-problem-eleven-coats">The problem: eleven coats</a><a class="level-2" href="#the-proposal">The proposal</a><a class="level-3" href="#one-row-at-four-scopes-ratified-unchanged">One row at four scopes (ratified, unchanged)</a><a class="level-3" href="#presets-lower-to-rows-the-transaction-checker-stays-d-rights1-option-c">Presets lower to rows; the transaction checker stays (D-RIGHTS1 option C)</a><a class="level-3" href="#one-frame-the-codes-stay-d-rights-diag1-option-b">One frame, the codes stay (D-RIGHTS-DIAG1 option B)</a><a class="level-3" href="#invocation-rights-d-rights-cli1-option-b">Invocation rights (D-RIGHTS-CLI1 option B)</a><a class="level-2" href="#rungs">Rungs</a><a class="level-2" href="#three-exits-for-the-inference-magic">Three exits for the inference magic</a><a class="level-2" href="#decisions">Decisions</a><a class="level-3" href="#d-rights1-one-rights-walker">D-RIGHTS1 — one rights walker</a><a class="level-3" href="#d-rights-cli1-invocation-rights-spelling">D-RIGHTS-CLI1 — invocation rights spelling</a><a class="level-3" href="#d-rights-diag1-one-frame">D-RIGHTS-DIAG1 — one frame</a><a class="level-2" href="#what-stays">What stays</a><a class="level-2" href="#implementation-shape">Implementation shape</a><a class="level-2" href="#where-jet-loses-today">Where Jet loses today</a><a class="level-2" href="#strongest-unverified-assumption">Strongest unverified assumption</a></aside><main id="content">
+<header class="hero-card"><p class="eyebrow">slate</p><h1>Rights: one walker, one frame, ten codes</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p><p class="status-copy">Status: proposal, 2026-09-01, revised after the review passes; element 1 of <code>whole-language-frame.md</code>. Independently adoptable. Ballots: D-RIGHTS1 (recommended C), D-RIGHTS-CLI1 (B), D-RIGHTS-DIAG1 (B). Nothing here is implemented; transcripts marked illustrative do not run today.</p>
+<div class="meta-row"><div><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-RIGHTS1 <span class="pill-rec">C</span></span><span class="pill">D-RIGHTS-CLI1 <span class="pill-rec">B <code>--allow=… --deny=…</code>, deny wins</span></span><span class="pill">D-RIGHTS-DIAG1 <span class="pill-rec">B</span></span></div></div></div>
+<p class="score-line">Score: mechanisms deleted 4 (purity walker, replayable walker, comptime branch, <code>--pure</code> flag) plus twenty flags; capabilities kept all; capabilities gained 3 (the chain in every denial, leaf-precise invocation caps, <code>@irreversible</code> as a declared fact the transaction checker reads).</p><div class="score-grid"><article class="score-tile"><strong class="score-value">4</strong><span class="score-name">mechanisms deleted</span><p class="score-detail">(purity walker, replayable walker, comptime branch, <code>--pure</code> flag) plus twenty flags</p></article><article class="score-tile"><strong class="score-value">all</strong><span class="score-name">capabilities kept</span><p class="score-detail">all</p></article><article class="score-tile"><strong class="score-value">3</strong><span class="score-name">capabilities gained</span><p class="score-detail">(the chain in every denial, leaf-precise invocation caps, <code>@irreversible</code> as a declared fact the transaction checker reads)</p></article></div></header>
+<article class="markdown"><h2 id="executive-summary">Executive summary</h2><p>&quot;May this code do X here?&quot; is one question. Jet answers it with the ratified rights row at four scopes (<code>-[FS.Read]&gt;</code>, <code>#FX</code>, <code>authority.holds</code>, and twenty command-line flags), and then answers it again in a purity walker, a replayable walker, a comptime branch, and <code>--pure</code>. A separate transaction checker asks a different question, whether an irreversible effect inside <code>#Transact</code> has an undo, and must stay: <code>on_commit</code> and <code>#Undo</code> are exceptions a row by effect name cannot see (D-TXN1-4, D-BOUND-UNDO1).</p><p>The proposal keeps every ratified spelling and every ratified code. It deletes the three private walkers and the CLI copy after a differential matrix proves the verdicts identical. It gives every rights report one frame with the chain from the call to the refusing scope, and it replaces twenty flags with <code>--allow=</code> and <code>--deny=</code>, whose words are the manifest&#39;s own.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th><th scope="col">ballots</th></tr></thead><tbody><tr class=""><td>private walkers and CLI copy</td><td>one walker for rights rows; transaction checker stays</td><td>D-RIGHTS1</td></tr><tr class=""><td>twenty command-line flags</td><td><code>--allow=</code> and <code>--deny=</code></td><td>D-RIGHTS-CLI1</td></tr><tr class=""><td>moving one call changes the frame</td><td>one frame with the chain; codes stay</td><td>D-RIGHTS-DIAG1</td></tr></tbody></table></div><h2 id="the-problem-eleven-coats">The problem: eleven coats</h2><p>See <code>whole-language-frame.md</code>, Question 1, for the full table with homes. The short form:</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">coat</th><th scope="col">spelling</th><th scope="col">private walker or table</th><th scope="col">fate</th></tr></thead><tbody><tr class=""><td>row</td><td><code>-[FS.Read]&gt;</code></td><td><code>Sema/Effects.rs:438-500</code> (canonical)</td><td>stays</td></tr><tr class=""><td>purity</td><td><code>-[]&gt;</code></td><td><code>Sema/Purity.rs:77-99</code></td><td>walker deleted; the row is empty</td></tr><tr class=""><td>block</td><td><code>#FX(Net)</code>, <code>#FX(grant: FS)</code>, <code>#FX(authority: IO)</code></td><td><code>effects_surface.rs:139-152</code></td><td>stays (ratified D-AUTHORITY-SCOPE1)</td></tr><tr class=""><td>package</td><td><code>authority.holds</code></td><td><code>Authority.rs:239-326</code></td><td>stays; own-code enforcement gap carded #2511</td></tr><tr class=""><td>module ceiling</td><td>manifest</td><td><code>Sema/Effects.rs:232-280</code></td><td>stays</td></tr><tr class=""><td>replayable</td><td><code>#Replayable</code></td><td><code>Sema/Effects.rs:1480-1565</code></td><td>walker deleted; lowers to a row</td></tr><tr class=""><td>transaction</td><td><code>#Transact</code></td><td><code>Effects.rs:262-274</code></td><td>checker stays; the table becomes a declared fact</td></tr><tr class=""><td>comptime</td><td><code>@ { }</code></td><td><code>crates/jet-comptime/src/Comptime/Purity.rs:78-123</code></td><td>stage split and <code>impure_builtin</code> leaf table deleted; the block holds a row</td></tr><tr class=""><td>pure eval</td><td><code>--pure</code></td><td><code>Sema/Purity.rs:123-159</code></td><td>flag stays as the spelling; lowers to the empty row</td></tr><tr class=""><td>invocation</td><td><code>--allow-net</code> … <code>--deny-gpu</code></td><td><code>Source/main.rs:1570-1774</code></td><td>replaced by <code>--allow=</code>/<code>--deny=</code></td></tr><tr class=""><td>deny-only roots</td><td><code>!Mem.Alloc</code>, <code>Panic</code></td><td><code>Sema/Effects.rs:66-132</code></td><td>stay</td></tr></tbody></table></div><p>Two live probes show the cost. <code>jet eval --pure &#39;print(&quot;x&quot;)&#39;</code> prints <code>x</code> and exits 0 (lane D probe 24): the CLI copy is weaker than the source walker. A package with <code>authority: { holds: { allow: [FS, Time] } }</code> whose own function declares <code>-[Net]&gt;</code> and calls <code>http.get</code> passes <code>jet check</code> and <code>jet build</code> (verification block <code>rights</code>, #2511).</p><h2 id="the-proposal">The proposal</h2><h3 id="one-row-at-four-scopes-ratified-unchanged">One row at four scopes (ratified, unchanged)</h3><div class="code-block"><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>use core.files as fs
+
+fn load(p: String) String -[FS.Read]&gt; { return fs.read(p) }     // callable row
+
+fn run() {
+    #FX(FS.Read) { print(load(&quot;notes.txt&quot;)) }                     // block narrows
+    #FX(grant: Net, &quot;vendor webhook&quot;) { print(fetch(&quot;https://x&quot;)) } // block loosens: one word, on the record
+}</code></pre></div></div><div class="code-block"><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>// package.jet
+authority: { holds: { allow: [FS, Time] } }                       // package caps everything under it</code></pre></div></div><h3 id="presets-lower-to-rows-the-transaction-checker-stays-d-rights1-option-c">Presets lower to rows; the transaction checker stays (D-RIGHTS1 option C)</h3><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">spelling today</th><th scope="col">today</th><th scope="col">proposed</th></tr></thead><tbody><tr class=""><td><code>-[]&gt;</code></td><td>separate purity walker</td><td>the row is empty; the one walker checks it</td></tr><tr class=""><td><code>#Replayable</code></td><td>separate walker, fixed set</td><td>lowers to <code>-[!Time, !Rand, !Net, !IO]&gt;</code></td></tr><tr class=""><td><code>@ { }</code> comptime</td><td>policy branch</td><td>the block holds <code>-[Mem]&gt;</code>; <code>#Impure(&quot;reason&quot;)</code> is the grant word (ratified D-ONCE-GATE1)</td></tr><tr class=""><td><code>jet eval --pure</code></td><td>CLI copy</td><td>the spelling stays; it lowers to the empty row and the same walker refuses <code>print</code></td></tr><tr class=""><td><code>#Transact(name) { }</code></td><td>hand-written irreversibility table</td><td>the checker stays; <code>FS.Write</code>, <code>Net</code>, <code>Exec</code>, and <code>FFI</code> carry a declared <code>@irreversible</code> fact it reads (element 7)</td></tr></tbody></table></div><p>The spellings stay. What dies is the second implementation behind each row check. Precondition: a differential matrix runs purity, replayable, comptime, and invocation cases through the old walkers and the row walker and shows identical verdicts before any walker is deleted.</p><h3 id="one-frame-the-codes-stay-d-rights-diag1-option-b">One frame, the codes stay (D-RIGHTS-DIAG1 option B)</h3><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Today, moving one call changes the frame (real; codes from <code>tests/ui/effect_out_of_set.jet</code> and <code>tests/ui/effect_authority_out_of_set.jet</code>):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>// package.jet
+authority: { holds: { allow: [FS, Time] } }</code></pre></div><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>// run.jet
+use core.http as http
+fn fetch(url: String) String -[FS]&gt; { return http.get(url).body().text(1024) }   // E0740 today
+fn run() {
+    #FX(FS) { fetch(&quot;https://x&quot;) }                                                // E0712 today
+}</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed frame (illustrative):</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>text</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>Error [E0712]: this `#FX` region uses the effect `Net`, which it has no authority for
+  run.jet:8:15   fetch(&quot;https://x&quot;)   reaches Net through fetch → core.http.get
+  scope chain:   #FX(FS) at run.jet:8 → run → package orders (holds [FS, Time])
+  nearest scope that could grant Net: package orders (package.jet:2)
+  fix (needs-review):        add Net to authority.holds.allow in package.jet
+  fix (behavior-preserving): move the call out of the #FX(FS) block</code></pre></div></div></div><p>Every rights report reads the same way and keeps its code, and <code>jet check --json</code> carries a <code>denial_kind</code> field with the chain. The codes carry meaning a tool needs: a transaction denial (E0746) wants an undo, a pure-block denial (E3403) wants an injected <code>Clock</code>, a package denial (E1803) may need the call removed. E0750, an undeclared effect name, is a vocabulary error and keeps its own frame. A package grant is never a safe automatic edit: rights only widen by a written word (D-AUTHORITY-MODEL1), so that repair carries the ratified <code>needs-review</code> class and <code>jet fix</code> skips it by default.</p><h3 id="invocation-rights-d-rights-cli1-option-b">Invocation rights (D-RIGHTS-CLI1 option B)</h3><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th></tr></thead><tbody><tr class=""><td><code>jet run --allow-fs --deny-net --allow-time app.jet</code></td><td><code>jet run --allow=FS,Time --deny=Net app.jet</code></td></tr><tr class=""><td>cannot say allow <code>FS.Read</code> but deny <code>FS.Write</code></td><td><code>jet run --allow=FS --deny=FS.Write app.jet</code></td></tr><tr class=""><td><code>jet eval --pure &#39;1 + 2&#39;</code></td><td>unchanged spelling; lowers to the empty row</td></tr></tbody></table></div><p>Precedence: names expand to their leaves, then deny wins; the same effect in both flags is a usage error (E2102). Jet reads the two flags before the program&#39;s own flags; a program receives a literal <code>--allow</code> after <code>--</code>. The old twenty flags stop with a message that prints the exact replacement; scripts outside the repository are migrated by hand.</p><h2 id="rungs">Rungs</h2><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">code</th><th scope="col">what the user types beyond the program</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td><code>fn save(t: String) { fs.write(&quot;out.txt&quot;, t) }</code></td><td>nothing; <code>FS.Write</code> inferred (ratified D-EFFECT-OMIT1)</td></tr><tr class=""><td>1</td><td>intermediate</td><td><code>fn save(t: String) -[FS.Write]&gt; { … }</code></td><td>the row, as documentation the compiler holds you to</td></tr><tr class=""><td>2</td><td>expert</td><td><code>#FX(FS.Read) { … }</code></td><td>a block that may do less</td></tr><tr class=""><td>3</td><td>expert</td><td><code>#FX(grant: Net, &quot;vendor webhook&quot;) { … }</code></td><td>a block that may do more, one word, on the ledger</td></tr><tr class=""><td>4</td><td>expert</td><td><code>authority: { holds: { allow: [FS, Time] } }</code></td><td>the package cap</td></tr><tr class=""><td>5</td><td>expert</td><td><code>--allow=FS --deny=Net</code></td><td>the invocation cap</td></tr></tbody></table></div><p>No upper rung changes rung 0. A beginner&#39;s inferred program is unchanged by any expert row above it, except that a cap can refuse it, which is the point of a cap.</p><h2 id="three-exits-for-the-inference-magic">Three exits for the inference magic</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">today</th><th scope="col">proposed</th></tr></thead><tbody><tr class=""><td>see</td><td><code>f.@effects</code> (ratified D-FACT-READ1); <code>jet inspect authority</code></td><td><code>jet inspect rights app.jet</code> lists every callable with its row and how it was inferred (illustrative)</td></tr><tr class=""><td>write</td><td><code>-[…]&gt;</code></td><td>unchanged</td></tr><tr class=""><td>refuse</td><td><code>authority: { holds: { allow: [] } }</code></td><td>unchanged</td></tr></tbody></table></div><h2 id="decisions">Decisions</h2><h3 id="d-rights1-one-rights-walker">D-RIGHTS1 — one rights walker</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class=""><td>A</td><td>one walker for everything, including transactions; rejected by the rival review because <code>on_commit</code> and <code>#Undo</code> are exceptions a row cannot express</td></tr><tr class=""><td>B</td><td>keep every walker; unify only the words; drift stays possible, as <code>--pure</code> already shows</td></tr><tr class="recommended-row has-recommended-text"><td>C (recommended)</td><td>one walker for rights rows at every scope; presets lower to rows; the transaction checker stays and reads a declared <code>@irreversible</code> fact; differential matrix before deletion</td></tr></tbody></table></div><p>Amends: D-REPLAY1 and D-SHAPE8 as lowerings. D-TXN1-4 and D-BOUND-UNDO1 unchanged. The command-line spelling is decided in D-RIGHTS-CLI1.</p><h3 id="d-rights-cli1-invocation-rights-spelling">D-RIGHTS-CLI1 — invocation rights spelling</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>A</td><td><code>--rights=+FS.Read,-Net</code></td></tr><tr class="recommended-row has-recommended-text"><td>B (recommended)</td><td><code>--allow=FS.Read,Time --deny=Net</code>; deny wins after leaf expansion; duplicates are usage errors; read before the program&#39;s flags</td></tr><tr class=""><td>C</td><td>keep twenty flags</td></tr><tr class=""><td>D</td><td><code>--allow FS.Read --allow Time --deny Net</code> (repeatable)</td></tr></tbody></table></div><p>Amends: D-CLI-GLOBAL1 flag set; reserves the two names against <code>#CLI</code> structs with a diagnostic.</p><h3 id="d-rights-diag1-one-frame">D-RIGHTS-DIAG1 — one frame</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class=""><td>A</td><td>one code for every denial; rejected by the rival review because tools lose the discriminator and E0750 is not a denial</td></tr><tr class="recommended-row has-recommended-text"><td>B (recommended)</td><td>one frame with the chain and <code>denial_kind</code>; the ten codes stay; a grant is <code>needs-review</code>, never safe</td></tr><tr class=""><td>C</td><td>keep the reports as they are</td></tr></tbody></table></div><p>Amends: the I4 snapshots of nine rows and their <code>jet.report/v1</code> detail fields; no code retires.</p><h2 id="what-stays">What stays</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">kept</th><th scope="col">why</th></tr></thead><tbody><tr class=""><td><code>-[…]&gt;</code></td><td>callable row</td></tr><tr class=""><td><code>-[]&gt;</code></td><td>the row is empty</td></tr><tr class=""><td><code>#FX(...)</code></td><td>block narrows</td></tr><tr class=""><td><code>#FX(grant:)</code></td><td>one word, on the record</td></tr><tr class=""><td><code>authority.holds</code></td><td>package caps everything under it</td></tr><tr class=""><td><code>#Unsafe(&quot;reason&quot;)</code></td><td>one gate word</td></tr><tr class=""><td><code>#Impure(&quot;reason&quot;)</code></td><td>the grant word</td></tr><tr class=""><td><code>#Nondeterministic(&quot;reason&quot;)</code></td><td>one gate word</td></tr><tr class=""><td><code>#Replayable</code> and <code>#Transact</code> as spellings</td><td>the replayable walker lowers to a row; the transaction checker stays</td></tr><tr class=""><td><code>jet eval --pure</code> as a spelling</td><td>lowers to the empty row</td></tr><tr class=""><td>the transaction checker</td><td>an irreversible effect owes an undo</td></tr><tr class=""><td>all ten codes</td><td>the code stays as the discriminator</td></tr><tr class=""><td>the ambient default for a file with no manifest (D-AUTH-AMBIENT1)</td><td>ratified</td></tr><tr class=""><td><code>Mem</code> and <code>Panic</code> as deny-only roots</td><td>rights a scope can give up</td></tr></tbody></table></div><h2 id="implementation-shape">Implementation shape</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">phase</th><th scope="col">work</th></tr></thead><tbody><tr class=""><td>A</td><td>the differential matrix; <code>@irreversible</code> declared in <code>Prelude/Effects.jet</code> and read by the transaction checker; one walker consumes rows from every scope kind; <code>Sema/Purity.rs:77-99</code>, the replayable walker, and the comptime stage split in <code>crates/jet-comptime/src/Comptime/Purity.rs:78-123</code> deleted after the matrix is green</td></tr><tr class=""><td>B</td><td>none owed; #2511 (own-code enforcement of <code>authority.holds</code>) is a separate defect card</td></tr><tr class=""><td>C</td><td>after D-RIGHTS-DIAG1: the frame with the chain and <code>denial_kind</code>, snapshots re-blessed; after D-RIGHTS-CLI1: <code>--allow=</code>/<code>--deny=</code>, the twenty flags removed from <code>CLI.rs</code> and <code>main.rs</code> with a replacement message</td></tr></tbody></table></div><h2 id="where-jet-loses-today">Where Jet loses today</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">peer</th><th scope="col">what it does better</th><th scope="col">Jet today</th></tr></thead><tbody><tr class=""><td>Koka</td><td>one effect abstraction with inference and handlers</td><td>four copies of the checker and twenty flags</td></tr><tr class=""><td>Deno</td><td>one permission grammar on the command line</td><td>four copies of the checker and twenty flags</td></tr><tr class=""><td>WASI</td><td>one permission grammar on the command line</td><td>four copies of the checker and twenty flags</td></tr></tbody></table></div><h2 id="strongest-unverified-assumption">Strongest unverified assumption</h2><p>That every private walker is semantically a row check. Lane C read the source of each; the rival review already found one that is not (the transaction rule), and the design changed. The differential matrix in phase A is the proof for the rest.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">assumption</th><th scope="col">how it is proved</th><th scope="col">where</th></tr></thead><tbody><tr class=""><td>every private walker is semantically a row check</td><td>the differential matrix</td><td>phase A; card #2501</td></tr></tbody></table></div></article>
+<footer>Canonical source: docs/proposals/rights-one-row.md; this page is a rendering.</footer>
+</main></div></div>
+</body>
+</html>

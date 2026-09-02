@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Shapes: one fact; text formats, env, and args are projections — canonical Jet proposal rendering.">
+<title>Shapes: one fact; text formats, env, and args are projections — Jet proposal</title>
+<style>
+:root {
+  --bg: #071019;
+  --surface-1: #0b1621;
+  --surface-2: #101d29;
+  --surface-3: #152534;
+  --border: #294050;
+  --border-soft: #1c3140;
+  --text: #f0f6f8;
+  --text-2: #c1ced4;
+  --muted: #93a5ae;
+  --amber: #f4b860;
+  --amber-soft: #332817;
+  --cyan: #6dd7e8;
+  --cyan-soft: #102c34;
+  --green: #70d69a;
+  --green-soft: #112c21;
+  --red: #ff8585;
+  --red-soft: #381d22;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --measure: 78ch;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-padding-top: 5.25rem; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(109,215,232,.025) 1px, transparent 1px),
+    linear-gradient(rgba(109,215,232,.018) 1px, transparent 1px),
+    var(--bg);
+  background-size: 32px 32px;
+  color: var(--text);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip-link {
+  position: fixed; z-index: 100; top: .75rem; left: .75rem;
+  transform: translateY(-180%); padding: .65rem .9rem;
+  border: 1px solid var(--cyan); border-radius: 6px;
+  background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono);
+}
+.skip-link:focus { transform: translateY(0); }
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(7,16,25,.96); backdrop-filter: blur(12px);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto;
+  padding: .7rem 1.5rem;
+}
+.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
+.topbar a:hover { color: var(--text); }
+.back-link { white-space: nowrap; }
+.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
+.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
+.top-links a:hover { background: var(--surface-2); }
+.page {
+  position: relative; max-width: 1260px; margin: 0 auto;
+  padding: 3.6rem 1.5rem 5.5rem 1.5rem;
+}
+.page::before {
+  position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px;
+  background: linear-gradient(var(--amber), rgba(244,184,96,.12)); content: "";
+}
+.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.toc {
+  position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto;
+  padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px;
+  background: rgba(11,22,33,.88);
+}
+.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
+.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
+.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
+main { min-width: 0; }
+.hero-card {
+  margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem;
+  border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(244,184,96,.08), var(--surface-1) 40%, var(--surface-2));
+  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+}
+.eyebrow, .trace-label, .kicker { color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 .9rem; }
+.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem, 6.2vw, 5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
+h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem, 3.6vw, 2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
+h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem, 2.3vw, 1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
+.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
+.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg, var(--amber-soft), transparent 82%); color: var(--text-2); }
+.meta-row { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.35rem; }
+.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
+.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
+.pill .pill-rec { color: var(--green); }
+.score-line { margin: 1.15rem 0 0; color: var(--text-2); font-size: .83rem; }
+.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: .7rem; }
+.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
+.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.slate-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.5rem 0 0; padding-top: 1.05rem; border-top: 1px solid var(--border-soft); }
+.slate-strip a { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font: 700 .68rem var(--mono); text-decoration: none; }
+.markdown { max-width: var(--measure); }
+.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
+.markdown strong { color: var(--text); }
+.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--cyan-soft), transparent 90%); color: var(--text); }
+.markdown blockquote p { margin: 0; color: var(--text); }
+.markdown code, .table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
+.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+caption { padding: .8rem 1rem; color: var(--muted); text-align: left; font: .7rem var(--mono); }
+th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
+.option-table { border-collapse: separate; border-spacing: 0; }
+.option-table thead th { background: rgba(16,29,41,.8); }
+.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
+.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
+.option-table tbody td + td { padding-top: .12rem; padding-bottom: .75rem; }
+.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
+.option-table tbody td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row:not(.has-recommended-text) td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
+.rung-table tbody { position: relative; display: grid; gap: .72rem; padding: .9rem 1rem .9rem 2.3rem; }
+.rung-table tbody::before { position: absolute; top: 1.25rem; bottom: 1.25rem; left: 1.05rem; width: 2px; background: linear-gradient(var(--cyan), rgba(109,215,232,.2)); content: ""; }
+.rung-table tbody tr { position: relative; display: grid; grid-template-columns: minmax(3.5rem,.28fr) minmax(7rem,.65fr) minmax(12rem,1.2fr) minmax(14rem,2fr); border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); }
+.rung-table tbody tr::before { position: absolute; top: 1.05rem; left: -1.72rem; width: .72rem; height: .72rem; border: 2px solid var(--cyan); border-radius: 50%; background: var(--bg); content: ""; }
+.rung-table tbody td { border: 0; padding: .75rem .65rem; }
+.rung-table tbody td:first-child { color: var(--amber); }
+.code-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.code-card + .code-card { margin-top: .7rem; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .58rem .75rem; border-bottom: 1px solid var(--border-soft); color: var(--muted); font: 750 .64rem var(--mono); letter-spacing: .075em; text-transform: uppercase; }
+.code-context { padding: .65rem .8rem .15rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); font-size: .78rem; }
+.badge { display: inline-flex; align-items: center; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; font: 800 .61rem/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.badge.real { color: var(--cyan); background: var(--cyan-soft); }
+.badge.illustrative { color: var(--amber); background: var(--amber-soft); }
+pre { margin: 0; padding: 1rem; overflow-x: auto; background: #08131c; color: #dcebf0; font: .78rem/1.58 var(--mono); tab-size: 4; }
+.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
+.compare-side { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
+.compare-side.real { border-top: 3px solid var(--cyan); }
+.compare-side.illustrative { border-top: 3px solid var(--amber); }
+.compare-title { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 2.1rem; margin: 0 0 .55rem; color: var(--text-2); font: 700 .72rem/1.35 var(--mono); }
+.compare-side .code-card { border-color: var(--border-soft); }
+.compare-side .code-context { display: none; }
+.mode-note { margin: 1.1rem 0 .6rem; color: var(--text-2); font-size: .88rem; }
+.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
+.ballot-index { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.ballot-index h2 { margin-top: 0; }
+.ballot-index-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: ballot; }
+.ballot-index-item { min-width: 0; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); counter-increment: ballot; }
+.ballot-index-item::before { content: counter(ballot, decimal-leading-zero); display: block; margin-bottom: .35rem; color: var(--muted); font: 750 .62rem var(--mono); }
+.ballot-index-item a { font: 750 .76rem var(--mono); }
+.ballot-index-rec { display: block; margin-top: .3rem; color: var(--text-2); font-size: .76rem; }
+.ballot-index-owner { display: block; margin-top: .4rem; color: var(--muted); font: .67rem var(--mono); }
+footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; }
+  .toc-label { width: 100%; }
+  .toc a { padding: .25rem .4rem; }
+  .toc a.level-3 { padding-left: .4rem; }
+  .toc a.level-3::before { content: "· "; color: var(--amber); }
+}
+@media (max-width: 820px) {
+  .score-grid, .option-table tbody { grid-template-columns: 1fr; }
+  .rung-table tbody tr { grid-template-columns: 1fr 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: 1 / -1; }
+  .comparison { grid-template-columns: 1fr; }
+  .ballot-index-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { padding-inline: .8rem; }
+  .nav-mark { display: none; }
+  .top-links { margin-left: 0; }
+  .page { padding: 2.8rem .9rem 4rem 1.3rem; }
+  .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; }
+  .hero-card { padding: 1.4rem 1.15rem 1.25rem; }
+  h1 { max-width: 12ch; }
+  .rung-table tbody { padding-left: 1.8rem; }
+  .rung-table tbody::before { left: .75rem; }
+  .rung-table tbody tr::before { left: -1.3rem; }
+  .rung-table tbody tr { grid-template-columns: 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+.badge.source-verified { color: var(--green); background: var(--green-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to proposal</a>
+<header class="topbar"><div class="topbar-inner"><a class="nav-mark" href="whole-language-frame.html">JET / PROPOSALS</a><a class="back-link" href="whole-language-frame.html">← Whole-language frame</a><nav class="top-links" aria-label="Proposal pages"><a href="whole-language-frame.html">← Frame</a></nav></div></header>
+<div class="page" id="top"><div class="layout"><aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p><a class="level-2" href="#executive-summary">Executive summary</a><a class="level-2" href="#the-problem-eleven-coats">The problem: eleven coats</a><a class="level-2" href="#the-proposal-on-the-page">The proposal on the page</a><a class="level-3" href="#one-shape-every-text-projection-d-shape-one1-option-c">One shape, every text projection (D-SHAPE-ONE1 option C)</a><a class="level-3" href="#migration-stays-where-it-is-ratified">Migration stays where it is ratified</a><a class="level-2" href="#rungs">Rungs</a><a class="level-2" href="#three-exits-for-the-auto-codable-magic">Three exits for the auto-Codable magic</a><a class="level-2" href="#decisions">Decisions</a><a class="level-3" href="#d-shape-one1-how-far-one-shape-fact-reaches">D-SHAPE-ONE1 — how far one shape fact reaches</a><a class="level-3" href="#d-shape-project1-args-as-a-decode-format">D-SHAPE-PROJECT1 — args as a decode format</a><a class="level-2" href="#what-stays">What stays</a><a class="level-2" href="#implementation-shape">Implementation shape</a><a class="level-2" href="#where-jet-loses-today">Where Jet loses today</a><a class="level-2" href="#strongest-unverified-assumption">Strongest unverified assumption</a></aside><main id="content">
+<header class="hero-card"><p class="eyebrow">slate</p><h1>Shapes: one fact; text formats, env, and args are projections</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p><p class="status-copy">Status: proposal, 2026-09-01, revised after the review passes; element 3 of <code>whole-language-frame.md</code>. Independently adoptable. Ballots: D-SHAPE-ONE1 (recommended C), D-SHAPE-PROJECT1 (A). Nothing here is implemented; transcripts marked illustrative do not run today.</p>
+<div class="meta-row"><div><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-SHAPE-ONE1 <span class="pill-rec">C</span></span><span class="pill">D-SHAPE-PROJECT1 <span class="pill-rec">A <code>args.decode&lt;T&gt;()</code> and <code>Config.merge</code></span></span></div></div></div>
+<p class="score-line">Score: mechanisms deleted 2 (<code>JSONValue</code>, the closed <code>EncodingFormat</code> enum); capabilities kept all; capabilities gained 3 (<code>args.decode&lt;T&gt;()</code> anywhere, <code>Config.merge</code> precedence, per-format rename facts).</p><div class="score-grid"><article class="score-tile"><strong class="score-value">2</strong><span class="score-name">mechanisms deleted</span><p class="score-detail">(<code>JSONValue</code>, the closed <code>EncodingFormat</code> enum)</p></article><article class="score-tile"><strong class="score-value">all</strong><span class="score-name">capabilities kept</span><p class="score-detail">all</p></article><article class="score-tile"><strong class="score-value">3</strong><span class="score-name">capabilities gained</span><p class="score-detail">(<code>args.decode&lt;T&gt;()</code> anywhere, <code>Config.merge</code> precedence, per-format rename facts)</p></article></div></header>
+<article class="markdown"><h2 id="executive-summary">Executive summary</h2><p>Jet already ratified and shipped most of the right substrate: one value tree (<code>DataTree</code>, D-SERDE2), one codec protocol (<code>Encode</code>/<code>Decode</code>), structs Codable by default (D-META-AUTO1), field defaults on the declaration (<code>port: Int{8080}</code>), a <code>migration</code> block that walks old wire shapes for <code>#PublishedSchema</code> types (D-MIGRATE1-4), and <code>env.decode&lt;T&gt;(prefix:, file:, allow:)</code> sharing one codec with JSON, TOML, and CSV (<code>examples/features/io/app_config.jet</code>). The audit&#39;s first draft called the env projection missing; the rival-family review corrected it.</p><p>What is left: a second JSON model that loses field order, a five-entry format enum for twelve codecs, one shared rename that cannot serve a legacy column name, command-line arguments decodable only at the entry function, and the ratified precedence (command input, then <code>#Env</code>, then the field default; D-CLI-GLOBAL1) applied only at the entry function. The proposal fixes exactly those. Database rows and FFI layout stay separate until a probe shows typed queries and layout survive; a field diff cannot name a table.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th><th scope="col">ballots</th></tr></thead><tbody><tr class=""><td>a second JSON model and a closed format enum</td><td>one shape fact reaches text formats, env, and args</td><td>D-SHAPE-ONE1</td></tr><tr class=""><td>args only at the entry function; precedence by hand</td><td><code>args.decode&lt;T&gt;()</code> through the builder; <code>Config.merge</code> applies the ratified precedence</td><td>D-SHAPE-PROJECT1</td></tr></tbody></table></div><h2 id="the-problem-eleven-coats">The problem: eleven coats</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">coat</th><th scope="col">spelling</th><th scope="col">home</th><th scope="col">what it privately knows</th></tr></thead><tbody><tr class=""><td><code>DataTree</code></td><td><code>.Object({…})</code></td><td><code>Prelude/CoreLib/JetStd/DataTree.rs:1-21</code></td><td>the canonical tree; ships nine kinds where the law says six</td></tr><tr class=""><td><code>JSONValue</code></td><td><code>json.parse</code></td><td><code>crates/jet-foundation/src/JSON.rs:6-15</code></td><td>a second tree, BTreeMap, loses order; not ratified public surface</td></tr><tr class=""><td><code>EncodingFormat</code></td><td>internal</td><td><code>EncodingTypes.rs:26-33</code></td><td>five formats of twelve</td></tr><tr class=""><td>CLI</td><td><code>fn run(args: T)</code>, <code>#[Short(&quot;p&quot;)]</code>, <code>#[Flag]</code>, <code>#Doc</code></td><td>D-CLI; <code>markers.rs:57-79</code></td><td>decodes only at the entry function, where D-CLI-GLOBAL1&#39;s precedence applies</td></tr><tr class=""><td>env</td><td><code>env.decode&lt;T&gt;(prefix:, file:, allow:)</code>, <code>#Env(&quot;PORT&quot;)</code></td><td><code>fixed_sigs.rs:4115-4121</code>; <code>app_config.jet:38</code></td><td>shipped; one codec with json</td></tr><tr class=""><td>build settings</td><td><code>@build.settings.key</code></td><td><code>Facts.rs:172-179</code></td><td>string keys</td></tr><tr class=""><td>DB rows</td><td><code>core.db</code></td><td><code>core-library.md:3932-3975</code></td><td>its own row mapping; unprobed</td></tr><tr class=""><td>FFI layout</td><td><code>#Layout(c)</code>, <code>#ABI</code></td><td><code>Prelude/Layout.rs</code>; <code>markers.rs:84-86</code></td><td>shares only layout and skip with the wire facts</td></tr><tr class=""><td>typed HTML</td><td><code>#HTML(&quot;page.html&quot;)</code></td><td><code>core_surface.rs:464-467</code></td><td>a string path (D-MARKERARGS1)</td></tr><tr class=""><td>migration</td><td><code>migration T { … }</code></td><td><code>Sema/SchemaMigration.rs:38-142</code></td><td>ratified for <code>#PublishedSchema</code> types; <code>add</code>/<code>remove</code>/<code>change</code> ratified, only <code>rename</code> evidenced</td></tr><tr class=""><td>dev state</td><td><code>#Persist</code> and D-HOTSWAP1</td><td><code>examples/features/devloop/persist.jet</code></td><td>a layout change restarts; the migration block is not consulted (element 4)</td></tr></tbody></table></div><p>Two probes from lane B: <code>json_integer_fidelity.jet</code> prints <code>-9223372036854775808</code> correctly on the typed path, while <code>encoding_breadth.jet</code> emits three L0520 display-migration warnings for <code>CBORError</code>, <code>JSONError</code>, <code>XMLError</code>; the codecs do not share one error type.</p><h2 id="the-proposal-on-the-page">The proposal on the page</h2><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Real today (verified on every tier, verification block <code>shapes</code>):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>use core.encoding.json as json
+use core.sys as env
+
+#CLI
+struct Config {
+    port: Int{8080}
+    host: String{&quot;localhost&quot;}
+    #Env(&quot;DATA_DIR&quot;) data_dir: String{&quot;./data&quot;}
+}
+
+fn run(args: Config) ![FieldError] {
+    text :: &quot;{{\&quot;port\&quot;: 9000, \&quot;host\&quot;: \&quot;example\&quot;}}&quot;
+    file :: json.decode&lt;Config&gt;(text)                    // JSON: owned by the shape
+    settings :: env.decode&lt;Config&gt;(prefix: &quot;APP_&quot;)       // env: shipped, one codec with json
+    print(file.port)                                     // 9000
+}</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (illustrative; the struct is unchanged, two things are new):</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>use core.args as args
+use core.sys as env
+
+#CLI
+struct Config {
+    port: Int{8080}
+    host: String{&quot;localhost&quot;}
+}
+
+fn run() ![FieldError] {
+    flags :: args.decode&lt;Config&gt;()                        // new: anywhere, through the same core.args builder as fn run(args: T)
+    settings :: env.decode&lt;Config&gt;(prefix: &quot;APP_&quot;)        // shipped
+    cfg :: Config.merge(flags, settings)                  // new: the ratified precedence (D-CLI-GLOBAL1) outside the entry function
+    print(cfg.port)
+}</code></pre></div><div class="code-card illustrative"><div class="code-head"><span>text</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>$ APP_PORT=9000 jet run app.jet -- --port 7000
+7000
+$ APP_PORT=9000 jet run app.jet
+9000
+$ jet run app.jet
+8080
+$ APP_PORT=nine jet run app.jet
+Error: at `port`: expected Int, found text &quot;nine&quot;        # invalid is reported, never treated as absent</code></pre></div></div></div><p><code>args.decode&lt;T&gt;()</code> lowers through the ratified <code>core.args</code> builder, so <code>--help</code> and every diagnostic are byte-identical to <code>fn run(args: T)</code>; there is no second parser (D-CLI builder floor).</p><h3 id="one-shape-every-text-projection-d-shape-one1-option-c">One shape, every text projection (D-SHAPE-ONE1 option C)</h3><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">field fact</th><th scope="col">spelling</th><th scope="col">json/cbor/csv/toml/yaml/xml</th><th scope="col">args</th><th scope="col">env</th></tr></thead><tbody><tr class=""><td>default</td><td><code>port: Int{8080}</code> (ratified)</td><td>absent → 8080</td><td>absent → 8080</td><td>unset → 8080</td></tr><tr class=""><td>rename, shared</td><td><code>#[Rename(&quot;port_number&quot;)]</code> (ratified)</td><td>key</td><td><code>--port-number</code></td><td><code>PORT_NUMBER</code></td></tr><tr class=""><td>rename, per format</td><td><code>#[Rename(&quot;port_number&quot;, env: &quot;PORT&quot;)]</code> (proposed, D-MARKSIG1 signature)</td><td>key</td><td><code>--port-number</code></td><td><code>PORT</code></td></tr><tr class=""><td>rename, per format only</td><td><code>#[Rename(json: &quot;port_number&quot;, env: &quot;PORT&quot;)]</code> (proposed; keyword-only form of the same signature)</td><td>key</td><td><code>--port</code></td><td><code>PORT</code></td></tr><tr class=""><td>skip</td><td><code>#Skip</code> (ratified)</td><td>omitted</td><td>omitted</td><td>omitted</td></tr><tr class=""><td>short</td><td><code>#[Short(&quot;p&quot;)]</code> (ratified)</td><td>ignored</td><td><code>-p</code></td><td>ignored</td></tr><tr class=""><td>doc</td><td><code>#Doc(&quot;…&quot;)</code> (ratified)</td><td>ignored</td><td>help text</td><td>ignored</td></tr><tr class=""><td>discriminant</td><td><code>#[Discriminant(&quot;kind&quot;)]</code> (ratified)</td><td>tag field</td><td>n/a</td><td>n/a</td></tr><tr class=""><td>version</td><td><code>migration T { … }</code> on a <code>#PublishedSchema</code> type (ratified)</td><td>old shape decodes</td><td>n/a</td><td>n/a</td></tr></tbody></table></div><p>A format that does not understand a fact ignores it for that projection; the fact stays on the shape and <code>jet inspect shapes</code> lists it (illustrative). A fact never needs to be written twice. The three rename forms are one marker signature (D-MARKSIG1): a shared name, a shared name with per-format overrides, or per-format names only.</p><h3 id="migration-stays-where-it-is-ratified">Migration stays where it is ratified</h3><div class="code-block"><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>#[PublishedSchema, Codable]
+struct Profile {
+    title: String
+    score: Int
+    verified: Bool{false}
+}
+
+migration Profile {
+    rename name -&gt; title
+    add verified: Bool = false
+}</code></pre></div></div><p>An old JSON record <code>{&quot;name&quot;:&quot;ada&quot;,&quot;score&quot;:3}</code> decodes to <code>Profile{title: &quot;ada&quot;, score: 3, verified: false}</code> on every text format (ratified D-MIGRATE4). Element 4 proposes the same block for a pinned live value of a <code>#PublishedSchema</code> type. Database schema scripts are not derived from it: a field diff has no table identity, constraints, or transaction policy, and that needs its own ballot after a probe.</p><h2 id="rungs">Rungs</h2><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">code</th><th scope="col">what happens</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td><code>struct Config { port: Int{8080} }</code></td><td>Codable by default (ratified D-META-AUTO1); <code>json.decode&lt;Config&gt;(text)</code> and <code>env.decode&lt;Config&gt;(prefix: &quot;APP_&quot;)</code> work with no marker</td></tr><tr class=""><td>1</td><td>intermediate</td><td><code>#[Rename(&quot;port_number&quot;)] port: Int{8080}</code></td><td>one field fact, every format honors it</td></tr><tr class=""><td>2</td><td>intermediate</td><td><code>#[Rename(&quot;port_number&quot;, env: &quot;PORT&quot;)]</code></td><td>one legacy name for one format (proposed)</td></tr><tr class=""><td>3</td><td>intermediate</td><td><code>#[PublishedSchema, Codable]</code> plus <code>migration Config { rename port_number -&gt; port }</code></td><td>old data still decodes (ratified)</td></tr><tr class=""><td>4</td><td>expert</td><td><code>derive Config.Wire { … }</code></td><td>hand-written codec body (ratified D-ONCE-DERIVE1) replaces the generated one</td></tr></tbody></table></div><h2 id="three-exits-for-the-auto-codable-magic">Three exits for the auto-Codable magic</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see</td><td><code>jet inspect shapes app.jet</code> prints every type&#39;s wire shape per format with renames and defaults (illustrative); today <code>T.reflect()</code> and <code>T.@layout</code> (ratified) show pieces</td></tr><tr class=""><td>write</td><td><code>derive Config.Wire { … }</code> (ratified)</td></tr><tr class=""><td>refuse</td><td><code>policy: .{ lints: .{ deny: [auto_derive] } }</code> refuses silent generation for the package; <code>#!Codable</code> refuses both wire directions at one type (S55, D-META-AUTO1)</td></tr></tbody></table></div><h2 id="decisions">Decisions</h2><h3 id="d-shape-one1-how-far-one-shape-fact-reaches">D-SHAPE-ONE1 — how far one shape fact reaches</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class=""><td>A</td><td>all projections including database rows and FFI layout now; rejected by the rival review: a field diff cannot name a table, FFI shares only layout and skip</td></tr><tr class=""><td>B</td><td>text formats only; args keeps its own parser</td></tr><tr class="recommended-row has-recommended-text"><td>C (recommended)</td><td>text formats, env, and args; per-format rename facts under one <code>#[Rename]</code> signature; migration stays on <code>#PublishedSchema</code>; <code>JSONValue</code> deleted; formats declared; database and FFI after their own probe</td></tr></tbody></table></div><p>Amends: D-ENCSTREAM-SURFACE1 (format enum becomes declared rows), D-MARKSIG1 (per-format rename signature). <code>JSONValue</code> deletion is conformance to D-SERDE13, not an amendment.</p><h3 id="d-shape-project1-args-as-a-decode-format">D-SHAPE-PROJECT1 — args as a decode format</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td><code>args.decode&lt;T&gt;()</code> through the ratified builder; <code>env.decode&lt;T&gt;()</code> unchanged; <code>Config.merge(flags, settings)</code> applies the ratified precedence (command input, <code>#Env</code>, field default; D-CLI-GLOBAL1) outside the entry function; invalid present values are <code>FieldError</code></td></tr><tr class=""><td>B</td><td>keep <code>fn run(args: T)</code> only; the ratified precedence applies only there; elsewhere programs combine by hand</td></tr><tr class=""><td>C</td><td><code>Config.from_args()</code> and <code>Config.from_env()</code> constructors, a second verb family</td></tr></tbody></table></div><h2 id="what-stays">What stays</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">kept</th><th scope="col">why</th></tr></thead><tbody><tr class=""><td><code>DataTree</code></td><td>canonical tree</td></tr><tr class=""><td><code>Encode</code>/<code>Decode</code></td><td>one codec protocol</td></tr><tr class=""><td>auto-Codable</td><td>structs Codable by default</td></tr><tr class=""><td><code>T{expr}</code> defaults</td><td>field defaults on the declaration</td></tr><tr class=""><td><code>#[Rename]</code></td><td>one field fact</td></tr><tr class=""><td><code>#Skip</code></td><td>omitted for every projection</td></tr><tr class=""><td><code>#[Discriminant]</code></td><td>tag field</td></tr><tr class=""><td><code>#[Short]</code></td><td>short argument</td></tr><tr class=""><td><code>#Doc</code></td><td>help text</td></tr><tr class=""><td><code>#Flag</code></td><td>CLI projection</td></tr><tr class=""><td><code>#Env</code></td><td>shipped env rename</td></tr><tr class=""><td><code>env.decode&lt;T&gt;(prefix:, file:, allow:)</code></td><td>one codec with JSON, TOML, and CSV</td></tr><tr class=""><td><code>migration</code> on <code>#PublishedSchema</code> types</td><td>old shape decodes</td></tr><tr class=""><td><code>derive T.Wire</code></td><td>hand-written codec body</td></tr><tr class=""><td><code>fn run(args: T)</code> as the beginner&#39;s zero-ceremony entry</td><td>beginner entry</td></tr><tr class=""><td><code>#Layout</code></td><td>FFI layout</td></tr><tr class=""><td><code>#ABI</code></td><td>FFI layout</td></tr></tbody></table></div><h2 id="implementation-shape">Implementation shape</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">phase</th><th scope="col">work</th></tr></thead><tbody><tr class=""><td>A</td><td><code>JSONValue</code> callers moved to <code>DataTree</code>; format rows declared in the Prelude; <code>EncodingFormat</code> generated; one <code>EncodingError</code></td></tr><tr class=""><td>B</td><td><code>migration add/remove/change</code> finished with examples on every tier (ratified D-MIGRATE2A/D/E, only <code>rename</code> evidenced); #2510 (<code>json.decode</code> with a computed text on the default tier) fixed</td></tr><tr class=""><td>C</td><td>after D-SHAPE-PROJECT1: <code>args.decode</code>, <code>Config.merge</code>; after D-SHAPE-ONE1: per-format renames, <code>jet inspect shapes</code></td></tr></tbody></table></div><h2 id="where-jet-loses-today">Where Jet loses today</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">peer</th><th scope="col">what it does better</th><th scope="col">Jet today</th></tr></thead><tbody><tr class=""><td>Rust serde</td><td>has one protocol and many adapters, and no second value model</td><td>two JSON trees and no args projection outside <code>run</code></td></tr><tr class=""><td>Pydantic</td><td>reads env and JSON in one model with a prefix rule</td><td>two JSON trees and no args projection outside <code>run</code></td></tr></tbody></table></div><h2 id="strongest-unverified-assumption">Strongest unverified assumption</h2><p>That <code>core.args</code> can expose <code>decode&lt;T&gt;()</code> outside the entry function without a second parser. The builder floor is ratified; the card proves byte-identical help and diagnostics between <code>fn run(args: T)</code> and <code>args.decode&lt;T&gt;()</code>.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">assumption</th><th scope="col">how it is proved</th><th scope="col">where</th></tr></thead><tbody><tr class=""><td><code>core.args</code> can expose <code>decode&lt;T&gt;()</code> outside the entry function without a second parser</td><td>byte-identical help and diagnostics between <code>fn run(args: T)</code> and <code>args.decode&lt;T&gt;()</code></td><td>card #2503</td></tr></tbody></table></div></article>
+<footer>Canonical source: docs/proposals/shapes-one-fact.md; this page is a rendering.</footer>
+</main></div></div>
+</body>
+</html>

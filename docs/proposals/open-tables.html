@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Open tables: Core is Jet, declared in one place, bootstrapped in one order — canonical Jet proposal rendering.">
+<title>Open tables: Core is Jet, declared in one place, bootstrapped in one order — Jet proposal</title>
+<style>
+:root {
+  --bg: #071019;
+  --surface-1: #0b1621;
+  --surface-2: #101d29;
+  --surface-3: #152534;
+  --border: #294050;
+  --border-soft: #1c3140;
+  --text: #f0f6f8;
+  --text-2: #c1ced4;
+  --muted: #93a5ae;
+  --amber: #f4b860;
+  --amber-soft: #332817;
+  --cyan: #6dd7e8;
+  --cyan-soft: #102c34;
+  --green: #70d69a;
+  --green-soft: #112c21;
+  --red: #ff8585;
+  --red-soft: #381d22;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --measure: 78ch;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-padding-top: 5.25rem; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(109,215,232,.025) 1px, transparent 1px),
+    linear-gradient(rgba(109,215,232,.018) 1px, transparent 1px),
+    var(--bg);
+  background-size: 32px 32px;
+  color: var(--text);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip-link {
+  position: fixed; z-index: 100; top: .75rem; left: .75rem;
+  transform: translateY(-180%); padding: .65rem .9rem;
+  border: 1px solid var(--cyan); border-radius: 6px;
+  background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono);
+}
+.skip-link:focus { transform: translateY(0); }
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(7,16,25,.96); backdrop-filter: blur(12px);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto;
+  padding: .7rem 1.5rem;
+}
+.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
+.topbar a:hover { color: var(--text); }
+.back-link { white-space: nowrap; }
+.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
+.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
+.top-links a:hover { background: var(--surface-2); }
+.page {
+  position: relative; max-width: 1260px; margin: 0 auto;
+  padding: 3.6rem 1.5rem 5.5rem 1.5rem;
+}
+.page::before {
+  position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px;
+  background: linear-gradient(var(--amber), rgba(244,184,96,.12)); content: "";
+}
+.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.toc {
+  position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto;
+  padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px;
+  background: rgba(11,22,33,.88);
+}
+.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
+.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
+.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
+main { min-width: 0; }
+.hero-card {
+  margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem;
+  border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(244,184,96,.08), var(--surface-1) 40%, var(--surface-2));
+  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+}
+.eyebrow, .trace-label, .kicker { color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 .9rem; }
+.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem, 6.2vw, 5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
+h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem, 3.6vw, 2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
+h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem, 2.3vw, 1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
+.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
+.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg, var(--amber-soft), transparent 82%); color: var(--text-2); }
+.meta-row { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.35rem; }
+.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
+.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
+.pill .pill-rec { color: var(--green); }
+.score-line { margin: 1.15rem 0 0; color: var(--text-2); font-size: .83rem; }
+.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: .7rem; }
+.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
+.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.slate-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.5rem 0 0; padding-top: 1.05rem; border-top: 1px solid var(--border-soft); }
+.slate-strip a { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font: 700 .68rem var(--mono); text-decoration: none; }
+.markdown { max-width: var(--measure); }
+.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
+.markdown strong { color: var(--text); }
+.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--cyan-soft), transparent 90%); color: var(--text); }
+.markdown blockquote p { margin: 0; color: var(--text); }
+.markdown code, .table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
+.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+caption { padding: .8rem 1rem; color: var(--muted); text-align: left; font: .7rem var(--mono); }
+th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
+.option-table { border-collapse: separate; border-spacing: 0; }
+.option-table thead th { background: rgba(16,29,41,.8); }
+.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
+.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
+.option-table tbody td + td { padding-top: .12rem; padding-bottom: .75rem; }
+.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
+.option-table tbody td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row:not(.has-recommended-text) td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
+.rung-table tbody { position: relative; display: grid; gap: .72rem; padding: .9rem 1rem .9rem 2.3rem; }
+.rung-table tbody::before { position: absolute; top: 1.25rem; bottom: 1.25rem; left: 1.05rem; width: 2px; background: linear-gradient(var(--cyan), rgba(109,215,232,.2)); content: ""; }
+.rung-table tbody tr { position: relative; display: grid; grid-template-columns: minmax(3.5rem,.28fr) minmax(7rem,.65fr) minmax(12rem,1.2fr) minmax(14rem,2fr); border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); }
+.rung-table tbody tr::before { position: absolute; top: 1.05rem; left: -1.72rem; width: .72rem; height: .72rem; border: 2px solid var(--cyan); border-radius: 50%; background: var(--bg); content: ""; }
+.rung-table tbody td { border: 0; padding: .75rem .65rem; }
+.rung-table tbody td:first-child { color: var(--amber); }
+.code-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.code-card + .code-card { margin-top: .7rem; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .58rem .75rem; border-bottom: 1px solid var(--border-soft); color: var(--muted); font: 750 .64rem var(--mono); letter-spacing: .075em; text-transform: uppercase; }
+.code-context { padding: .65rem .8rem .15rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); font-size: .78rem; }
+.badge { display: inline-flex; align-items: center; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; font: 800 .61rem/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.badge.real { color: var(--cyan); background: var(--cyan-soft); }
+.badge.illustrative { color: var(--amber); background: var(--amber-soft); }
+pre { margin: 0; padding: 1rem; overflow-x: auto; background: #08131c; color: #dcebf0; font: .78rem/1.58 var(--mono); tab-size: 4; }
+.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
+.compare-side { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
+.compare-side.real { border-top: 3px solid var(--cyan); }
+.compare-side.illustrative { border-top: 3px solid var(--amber); }
+.compare-title { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 2.1rem; margin: 0 0 .55rem; color: var(--text-2); font: 700 .72rem/1.35 var(--mono); }
+.compare-side .code-card { border-color: var(--border-soft); }
+.compare-side .code-context { display: none; }
+.mode-note { margin: 1.1rem 0 .6rem; color: var(--text-2); font-size: .88rem; }
+.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
+.ballot-index { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.ballot-index h2 { margin-top: 0; }
+.ballot-index-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: ballot; }
+.ballot-index-item { min-width: 0; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); counter-increment: ballot; }
+.ballot-index-item::before { content: counter(ballot, decimal-leading-zero); display: block; margin-bottom: .35rem; color: var(--muted); font: 750 .62rem var(--mono); }
+.ballot-index-item a { font: 750 .76rem var(--mono); }
+.ballot-index-rec { display: block; margin-top: .3rem; color: var(--text-2); font-size: .76rem; }
+.ballot-index-owner { display: block; margin-top: .4rem; color: var(--muted); font: .67rem var(--mono); }
+footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; }
+  .toc-label { width: 100%; }
+  .toc a { padding: .25rem .4rem; }
+  .toc a.level-3 { padding-left: .4rem; }
+  .toc a.level-3::before { content: "· "; color: var(--amber); }
+}
+@media (max-width: 820px) {
+  .score-grid, .option-table tbody { grid-template-columns: 1fr; }
+  .rung-table tbody tr { grid-template-columns: 1fr 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: 1 / -1; }
+  .comparison { grid-template-columns: 1fr; }
+  .ballot-index-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { padding-inline: .8rem; }
+  .nav-mark { display: none; }
+  .top-links { margin-left: 0; }
+  .page { padding: 2.8rem .9rem 4rem 1.3rem; }
+  .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; }
+  .hero-card { padding: 1.4rem 1.15rem 1.25rem; }
+  h1 { max-width: 12ch; }
+  .rung-table tbody { padding-left: 1.8rem; }
+  .rung-table tbody::before { left: .75rem; }
+  .rung-table tbody tr::before { left: -1.3rem; }
+  .rung-table tbody tr { grid-template-columns: 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+.badge.source-verified { color: var(--green); background: var(--green-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to proposal</a>
+<header class="topbar"><div class="topbar-inner"><a class="nav-mark" href="whole-language-frame.html">JET / PROPOSALS</a><a class="back-link" href="whole-language-frame.html">← Whole-language frame</a><nav class="top-links" aria-label="Proposal pages"><a href="whole-language-frame.html">← Frame</a></nav></div></header>
+<div class="page" id="top"><div class="layout"><aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p><a class="level-2" href="#executive-summary">Executive summary</a><a class="level-2" href="#the-problem">The problem</a><a class="level-2" href="#the-proposal">The proposal</a><a class="level-3" href="#one-declaration-generated-tables">One declaration, generated tables</a><a class="level-3" href="#bootstrap-order">Bootstrap order</a><a class="level-2" href="#rungs">Rungs</a><a class="level-2" href="#three-exits">Three exits</a><a class="level-2" href="#decision">Decision</a><a class="level-3" href="#d-opentable1-how-core-facts-are-homed">D-OPENTABLE1 — how Core facts are homed</a><a class="level-2" href="#what-stays">What stays</a><a class="level-2" href="#implementation-shape">Implementation shape</a><a class="level-2" href="#where-jet-loses-today">Where Jet loses today</a><a class="level-2" href="#strongest-unverified-assumption">Strongest unverified assumption</a></aside><main id="content">
+<header class="hero-card"><p class="eyebrow">slate</p><h1>Open tables: Core is Jet, declared in one place, bootstrapped in one order</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p><p class="status-copy">Status: proposal, 2026-09-01, revised after the review passes; element 7 of <code>whole-language-frame.md</code>. Independently adoptable; phase A is internal. Ballot: D-OPENTABLE1 (recommended D). Nothing here is implemented.</p>
+<div class="meta-row"><div><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-OPENTABLE1 <span class="pill-rec">D</span></span></div></div></div>
+<p class="score-line">Score: mechanisms deleted 4 (four hand tables with twins become generated); capabilities kept all; capabilities gained 1 (a drift guard on every table, generated or not).</p><div class="score-grid"><article class="score-tile"><strong class="score-value">4</strong><span class="score-name">mechanisms deleted</span><p class="score-detail">(four hand tables with twins become generated)</p></article><article class="score-tile"><strong class="score-value">all</strong><span class="score-name">capabilities kept</span><p class="score-detail">all</p></article><article class="score-tile"><strong class="score-value">1</strong><span class="score-name">capabilities gained</span><p class="score-detail">(a drift guard on every table, generated or not)</p></article></div></header>
+<article class="markdown"><h2 id="executive-summary">Executive summary</h2><p>The corpus law says every truth has one home and every other copy is rendered from it (D-ONCE-LAW1=A). Inside the compiler, five tables break it. Effect roots, the Core module list, the Core call dispatcher, the keyword list, and the sema derive registry are hand-written Rust tables that repeat facts already declared in Jet source, or that should be. Lane F found 622 <code>CoreCallRecord::new</code> rows and 145 ambient routes with no generator, <code>core.services</code> versus <code>core.service</code> drift, and an alias table that survives only because the dispatcher and the ledger disagree.</p><p>The proposal splits the tables by whether a Jet twin exists. Tables with a twin (effect roots and leaves, marker sites, fact reads, encoding formats, taint sinks, transaction irreversibility, the Core dispatcher, ambient routes, the export classifier) are generated from the declaration with a drift guard that fails the build on a hand row. Tables with no twin (the lexer keyword map, the CLI inventory, the report enums, the tier list) keep their Rust home as the one home under a guard that fails when a second copy appears; the parser must read the keyword table before any Prelude file exists, so generating it is a bootstrap cycle. Generation runs in an order that resolves before it declares: roots and reservations first, then modules and routes, then derives. Nothing in user syntax changes, and user packages cannot add Core roots; the phrase &quot;closed to everyone&quot; in the first draft meant closed to users, and this draft says so.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th><th scope="col">ballots</th></tr></thead><tbody><tr class=""><td>five hand tables repeat Jet declarations</td><td>generate where a twin exists; guard the rest</td><td>D-OPENTABLE1</td></tr></tbody></table></div><h2 id="the-problem">The problem</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">table</th><th scope="col">home</th><th scope="col">declared where</th><th scope="col">defect</th></tr></thead><tbody><tr class=""><td>effect roots</td><td><code>crates/jet-foundation/src/Effects.rs:11-25</code>, <code>Authority.rs:27-45</code></td><td><code>Prelude/Effects.jet:1-20</code> (declarations)</td><td>two Rust enums repeat the Jet declarations; <code>FFI</code> is irreversible in one (<code>Effects.rs:266-274</code>) and absent in the other</td></tr><tr class=""><td>Core modules</td><td><code>CoreModuleExports.rs:20-135</code></td><td>nowhere in Jet</td><td>hand-coded export kinds; <code>core.services</code> vs <code>core.service</code></td></tr><tr class=""><td>Core calls</td><td><code>CheckerCoreLib/core_call.rs:420-449,450-596,956-960</code></td><td>nowhere</td><td>622 rows plus 145 ambient routes hand-written; the alias table <code>core.task -&gt; core.tasks</code></td></tr><tr class=""><td>keywords</td><td><code>crates/jet-lexer/src/Lexer/mod.rs:46-84</code></td><td><code>Syntax.rs</code> (832 lines, ratified)</td><td>the lexer repeats the Syntax table; <code>Syntax::KW_SWITCH</code> is literally <code>&quot;if&quot;</code> and <code>Stmt::Switch</code> has no live grammar (lane A, card #2512)</td></tr><tr class=""><td>derives</td><td><code>Sema/Registration/Derives.rs:7-80</code></td><td>nowhere</td><td>user templates expand into generated items that still depend on this closed table</td></tr></tbody></table></div><p>Lane F&#39;s silhouette lists 34 documented Core domains with no dispatcher rows, including <code>compute</code>, <code>plugin</code>, <code>reactive</code>, <code>web</code>, and <code>storage</code>, and two <code>core.services</code> rows the ledger does not name.</p><h2 id="the-proposal">The proposal</h2><h3 id="one-declaration-generated-tables">One declaration, generated tables</h3><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>// crates/jet-codegen/src/Prelude/Effects.jet (today, ratified: declarations exist)
+effect FS { Read, Write }
+effect Net
+effect Time
+// proposed additions: the facts the Rust tables currently carry by hand
+effect FS.Write @irreversible
+effect Net @irreversible
+effect Exec @irreversible
+effect FFI @irreversible</code></pre></div></div><p><code>@irreversible</code> is a declared fact on the effect leaf; the transaction checker (element 1) reads it instead of its private table. Today the checker&#39;s table already treats FFI as irreversible; the declaration makes that fact visible and single-homed.</p><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>// proposed: crates/jet-codegen/src/Prelude/Core.jet
+module core.files exports { read, write, exists }      // one row per Core module, with its export kinds
+module core.tasks exports { spawn, join, all }        // the ledger&#39;s spelling; the core.task alias and dispatcher row die</code></pre></div></div><p>From those declarations the build generates <code>Effects.rs</code> enums, <code>CoreModuleExports.rs</code>, the dispatcher rows, and the ledger <code>core-surface-ledger.json</code>. A generator diff is a build failure, exactly like the existing <code>Syntax.rs</code> drift checks (<code>tests/syntax_ledger.rs</code>).</p><h3 id="bootstrap-order">Bootstrap order</h3><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">step</th><th scope="col">what</th><th scope="col">why first</th></tr></thead><tbody><tr class=""><td>1</td><td><code>Syntax.rs</code> (ratified, hand-maintained, the one home for keywords and sigils)</td><td>the lexer needs it before any Jet file is read</td></tr><tr class=""><td>2</td><td>effect roots and lexical reservations declared in <code>Effects.jet</code>; a generated <code>Effects.rs</code> checked in and diffed</td><td>sema needs roots before the Prelude modules are checked</td></tr><tr class=""><td>3</td><td><code>Core.jet</code> module and route declarations; generated dispatcher and ledger</td><td>routes need roots and types</td></tr><tr class=""><td>4</td><td>derives: the registry becomes a declaration in the Prelude with the same template mechanism user code uses (D-ONCE-DERIVE1)</td><td>last, because it depends on everything above</td></tr></tbody></table></div><p>The generated Rust is checked in so the compiler builds without running itself; the diff guard proves it matches the declarations.</p><h2 id="rungs">Rungs</h2><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">what changes</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td>nothing; <code>use core.files as fs</code> works as before</td></tr><tr class=""><td>1</td><td>user package</td><td>nothing new; packages declare their own effects as ratified (<code>effect Payments</code>, D-EFF4); Core roots stay closed to users</td></tr><tr class=""><td>2</td><td>compiler author</td><td>one declaration per Core fact; the tables are generated; the guard names the drift</td></tr></tbody></table></div><h2 id="three-exits">Three exits</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see</td><td><code>jet inspect structure --core</code> lists every Core module and root with its declaration site (illustrative)</td></tr><tr class=""><td>write</td><td>the declaration in the Prelude</td></tr><tr class=""><td>refuse</td><td>not applicable; this is compiler-internal</td></tr></tbody></table></div><h2 id="decision">Decision</h2><h3 id="d-opentable1-how-core-facts-are-homed">D-OPENTABLE1 — how Core facts are homed</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class=""><td>A</td><td>Generate every table: every table listed in the proposal is generated from a Jet declaration. Rejected by the rival review: the lexer keyword map, the CLI inventory, and the report enums have no declared twin, and a compiler needs those to parse the declarations that would generate them.</td></tr><tr class=""><td>B</td><td>Generate the dispatcher and the effect enum only: the two largest tables are generated; the small vocabularies stay hand-written. Two generators, no guard on the rest.</td></tr><tr class=""><td>C</td><td>Fix <code>core.services</code> by hand: no generator, no change.</td></tr><tr class="recommended-row has-recommended-text"><td>D (recommended)</td><td>Generate every table that has a declared twin; guard the rest as their own home. Tables with a Jet twin are generated from it with a drift guard that fails the build on a hand row: effect roots and leaves, marker sites, fact reads, encoding formats, taint sinks, transaction irreversibility, the Core dispatcher, ambient routes, and the export classifier. Tables with no twin keep their Rust home as the one home under a guard that fails when a second copy appears: the lexer keyword map, the CLI inventory, the report enums, the tier list. Irreversibility is declared on <code>FS.Write</code>, <code>Net</code>, <code>Exec</code>, and <code>FFI</code>. Precondition: a derivability census of the 622 dispatcher rows lists every row the generator cannot derive; each becomes a declared fact or a card before the dispatcher switches.</td></tr></tbody></table></div><p>Amends: D-META-ONE1 scope note (Prelude-only markers unchanged; the Rust twin retires) and D-META-REG1 (the registry as generator input). D-ONCE-LAW1 requires one home and a guard, not a Jet home, and D respects that. <code>core-surface-ledger.json</code> stays the rendered view (D-CORE-TREE1 unchanged); D-CORE-CALL1&#39;s floor (user code cannot call <code>__core_intrinsic</code>) is unchanged. Generation is a workspace build step over committed declarations, checked in like the embedded Prelude, so there is no bootstrap cycle: the lexer that parses the declarations is not generated from them.</p><h2 id="what-stays">What stays</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">kept</th><th scope="col">why</th></tr></thead><tbody><tr class=""><td><code>Syntax.rs</code> as the ratified keyword and sigil home</td><td>one home for keywords and sigils</td></tr><tr class=""><td>user-declared effects</td><td>packages declare their own effects</td></tr><tr class=""><td><code>__core_intrinsic</code> as compiler-only</td><td>user code cannot call it</td></tr><tr class=""><td>every Core module name that the ledger already lists</td><td>the ledger lists the names</td></tr><tr class=""><td><code>core-surface-ledger.json</code> as the rendered view</td><td>rendered view</td></tr></tbody></table></div><h2 id="implementation-shape">Implementation shape</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">phase</th><th scope="col">work</th></tr></thead><tbody><tr class=""><td>A</td><td>steps 1-3: declarations, generators, checked-in output, diff guard; the <code>core.task</code> alias row and dispatcher row deleted; <code>core.tasks</code> is the one spelling; #2513 (<code>core.services</code> and <code>core.task</code> drift) closes as part of this</td></tr><tr class=""><td>B</td><td>step 4: derives</td></tr><tr class=""><td>C</td><td>after D-OPENTABLE1: nothing further owed; the ballot chooses the order</td></tr></tbody></table></div><h2 id="where-jet-loses-today">Where Jet loses today</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">peer</th><th scope="col">what it does better</th><th scope="col">Jet today</th></tr></thead><tbody><tr class=""><td>Rust</td><td><code>core</code> and <code>std</code> are one crate tree the compiler reads</td><td>Core is declared in Jet and repeated in Rust five times</td></tr><tr class=""><td>Zig</td><td><code>std</code> is Zig source with <code>comptime</code> reflection and no parallel table</td><td>Core is declared in Jet and repeated in Rust five times</td></tr></tbody></table></div><h2 id="strongest-unverified-assumption">Strongest unverified assumption</h2><p>That every dispatcher row can be derived from a declaration. Lane F sampled rows and found hand-written argument adapters in some (<code>core_call.rs:450-596</code>); those adapters stay as marshalling code, and only the row that names them is generated. The phase A generator diff is the proof.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">assumption</th><th scope="col">how it is proved</th><th scope="col">where</th></tr></thead><tbody><tr class=""><td>every dispatcher row can be derived from a declaration</td><td>the phase A generator diff</td><td>card #2507</td></tr></tbody></table></div></article>
+<footer>Canonical source: docs/proposals/open-tables.md; this page is a rendering.</footer>
+</main></div></div>
+</body>
+</html>

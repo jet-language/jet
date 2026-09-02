@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="The lexical space: reservations and three repairs — canonical Jet proposal rendering.">
+<title>The lexical space: reservations and three repairs — Jet proposal</title>
+<style>
+:root {
+  --bg: #071019;
+  --surface-1: #0b1621;
+  --surface-2: #101d29;
+  --surface-3: #152534;
+  --border: #294050;
+  --border-soft: #1c3140;
+  --text: #f0f6f8;
+  --text-2: #c1ced4;
+  --muted: #93a5ae;
+  --amber: #f4b860;
+  --amber-soft: #332817;
+  --cyan: #6dd7e8;
+  --cyan-soft: #102c34;
+  --green: #70d69a;
+  --green-soft: #112c21;
+  --red: #ff8585;
+  --red-soft: #381d22;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --measure: 78ch;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-padding-top: 5.25rem; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(109,215,232,.025) 1px, transparent 1px),
+    linear-gradient(rgba(109,215,232,.018) 1px, transparent 1px),
+    var(--bg);
+  background-size: 32px 32px;
+  color: var(--text);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip-link {
+  position: fixed; z-index: 100; top: .75rem; left: .75rem;
+  transform: translateY(-180%); padding: .65rem .9rem;
+  border: 1px solid var(--cyan); border-radius: 6px;
+  background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono);
+}
+.skip-link:focus { transform: translateY(0); }
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(7,16,25,.96); backdrop-filter: blur(12px);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto;
+  padding: .7rem 1.5rem;
+}
+.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
+.topbar a:hover { color: var(--text); }
+.back-link { white-space: nowrap; }
+.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
+.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
+.top-links a:hover { background: var(--surface-2); }
+.page {
+  position: relative; max-width: 1260px; margin: 0 auto;
+  padding: 3.6rem 1.5rem 5.5rem 1.5rem;
+}
+.page::before {
+  position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px;
+  background: linear-gradient(var(--amber), rgba(244,184,96,.12)); content: "";
+}
+.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.toc {
+  position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto;
+  padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px;
+  background: rgba(11,22,33,.88);
+}
+.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
+.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
+.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
+main { min-width: 0; }
+.hero-card {
+  margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem;
+  border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(244,184,96,.08), var(--surface-1) 40%, var(--surface-2));
+  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+}
+.eyebrow, .trace-label, .kicker { color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 .9rem; }
+.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem, 6.2vw, 5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
+h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem, 3.6vw, 2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
+h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem, 2.3vw, 1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
+.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
+.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg, var(--amber-soft), transparent 82%); color: var(--text-2); }
+.meta-row { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.35rem; }
+.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
+.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
+.pill .pill-rec { color: var(--green); }
+.score-line { margin: 1.15rem 0 0; color: var(--text-2); font-size: .83rem; }
+.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: .7rem; }
+.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
+.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.slate-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.5rem 0 0; padding-top: 1.05rem; border-top: 1px solid var(--border-soft); }
+.slate-strip a { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font: 700 .68rem var(--mono); text-decoration: none; }
+.markdown { max-width: var(--measure); }
+.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
+.markdown strong { color: var(--text); }
+.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--cyan-soft), transparent 90%); color: var(--text); }
+.markdown blockquote p { margin: 0; color: var(--text); }
+.markdown code, .table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
+.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+caption { padding: .8rem 1rem; color: var(--muted); text-align: left; font: .7rem var(--mono); }
+th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
+.option-table { border-collapse: separate; border-spacing: 0; }
+.option-table thead th { background: rgba(16,29,41,.8); }
+.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
+.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
+.option-table tbody td + td { padding-top: .12rem; padding-bottom: .75rem; }
+.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
+.option-table tbody td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row:not(.has-recommended-text) td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
+.rung-table tbody { position: relative; display: grid; gap: .72rem; padding: .9rem 1rem .9rem 2.3rem; }
+.rung-table tbody::before { position: absolute; top: 1.25rem; bottom: 1.25rem; left: 1.05rem; width: 2px; background: linear-gradient(var(--cyan), rgba(109,215,232,.2)); content: ""; }
+.rung-table tbody tr { position: relative; display: grid; grid-template-columns: minmax(3.5rem,.28fr) minmax(7rem,.65fr) minmax(12rem,1.2fr) minmax(14rem,2fr); border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); }
+.rung-table tbody tr::before { position: absolute; top: 1.05rem; left: -1.72rem; width: .72rem; height: .72rem; border: 2px solid var(--cyan); border-radius: 50%; background: var(--bg); content: ""; }
+.rung-table tbody td { border: 0; padding: .75rem .65rem; }
+.rung-table tbody td:first-child { color: var(--amber); }
+.code-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.code-card + .code-card { margin-top: .7rem; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .58rem .75rem; border-bottom: 1px solid var(--border-soft); color: var(--muted); font: 750 .64rem var(--mono); letter-spacing: .075em; text-transform: uppercase; }
+.code-context { padding: .65rem .8rem .15rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); font-size: .78rem; }
+.badge { display: inline-flex; align-items: center; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; font: 800 .61rem/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.badge.real { color: var(--cyan); background: var(--cyan-soft); }
+.badge.illustrative { color: var(--amber); background: var(--amber-soft); }
+pre { margin: 0; padding: 1rem; overflow-x: auto; background: #08131c; color: #dcebf0; font: .78rem/1.58 var(--mono); tab-size: 4; }
+.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
+.compare-side { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
+.compare-side.real { border-top: 3px solid var(--cyan); }
+.compare-side.illustrative { border-top: 3px solid var(--amber); }
+.compare-title { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 2.1rem; margin: 0 0 .55rem; color: var(--text-2); font: 700 .72rem/1.35 var(--mono); }
+.compare-side .code-card { border-color: var(--border-soft); }
+.compare-side .code-context { display: none; }
+.mode-note { margin: 1.1rem 0 .6rem; color: var(--text-2); font-size: .88rem; }
+.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
+.ballot-index { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.ballot-index h2 { margin-top: 0; }
+.ballot-index-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: ballot; }
+.ballot-index-item { min-width: 0; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); counter-increment: ballot; }
+.ballot-index-item::before { content: counter(ballot, decimal-leading-zero); display: block; margin-bottom: .35rem; color: var(--muted); font: 750 .62rem var(--mono); }
+.ballot-index-item a { font: 750 .76rem var(--mono); }
+.ballot-index-rec { display: block; margin-top: .3rem; color: var(--text-2); font-size: .76rem; }
+.ballot-index-owner { display: block; margin-top: .4rem; color: var(--muted); font: .67rem var(--mono); }
+footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; }
+  .toc-label { width: 100%; }
+  .toc a { padding: .25rem .4rem; }
+  .toc a.level-3 { padding-left: .4rem; }
+  .toc a.level-3::before { content: "· "; color: var(--amber); }
+}
+@media (max-width: 820px) {
+  .score-grid, .option-table tbody { grid-template-columns: 1fr; }
+  .rung-table tbody tr { grid-template-columns: 1fr 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: 1 / -1; }
+  .comparison { grid-template-columns: 1fr; }
+  .ballot-index-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { padding-inline: .8rem; }
+  .nav-mark { display: none; }
+  .top-links { margin-left: 0; }
+  .page { padding: 2.8rem .9rem 4rem 1.3rem; }
+  .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; }
+  .hero-card { padding: 1.4rem 1.15rem 1.25rem; }
+  h1 { max-width: 12ch; }
+  .rung-table tbody { padding-left: 1.8rem; }
+  .rung-table tbody::before { left: .75rem; }
+  .rung-table tbody tr::before { left: -1.3rem; }
+  .rung-table tbody tr { grid-template-columns: 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+.badge.source-verified { color: var(--green); background: var(--green-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to proposal</a>
+<header class="topbar"><div class="topbar-inner"><a class="nav-mark" href="whole-language-frame.html">JET / PROPOSALS</a><a class="back-link" href="whole-language-frame.html">← Whole-language frame</a><nav class="top-links" aria-label="Proposal pages"><a href="whole-language-frame.html">← Frame</a></nav></div></header>
+<div class="page" id="top"><div class="layout"><aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p><a class="level-2" href="#executive-summary">Executive summary</a><a class="level-2" href="#the-lexical-ledger-real-today">The lexical ledger (real today)</a><a class="level-2" href="#repair-1-a-raw-ordinary-string-d-rawstr1">Repair 1: a raw ordinary String (D-RAWSTR1)</a><a class="level-2" href="#repair-2-trailing-commas-everywhere-d-trailcomma1">Repair 2: trailing commas everywhere (D-TRAILCOMMA1)</a><a class="level-2" href="#repair-3-enforce-the-semicolon-law-d-semi1">Repair 3: enforce the semicolon law (D-SEMI1)</a><a class="level-2" href="#the-marker-law-stands-d-markershape1">The marker law stands (D-MARKERSHAPE1)</a><a class="level-2" href="#one-marker-argument-d-markerargs1">One marker argument (D-MARKERARGS1)</a><a class="level-2" href="#rungs">Rungs</a><a class="level-2" href="#three-exits">Three exits</a><a class="level-2" href="#implementation-shape">Implementation shape</a><a class="level-2" href="#where-jet-loses-today">Where Jet loses today</a><a class="level-2" href="#strongest-unverified-assumption">Strongest unverified assumption</a></aside><main id="content">
+<header class="hero-card"><p class="eyebrow">slate</p><h1>The lexical space: reservations and three repairs</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p><p class="status-copy">Status: proposal, 2026-09-01, revised after the review passes; element 8 of <code>whole-language-frame.md</code>. Independently adoptable; each ballot stands alone. Ballots: D-RAWSTR1 (recommended A), D-TRAILCOMMA1 (A), D-SEMI1 (A), D-MARKERSHAPE1 (B, the law stands), D-MARKERARGS1 (A). Nothing here is implemented.</p>
+<div class="meta-row"><div><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-RAWSTR1 <span class="pill-rec">A backtick</span></span><span class="pill">D-TRAILCOMMA1 <span class="pill-rec">A</span></span><span class="pill">D-SEMI1 <span class="pill-rec">A E0373 with a contextual fix</span></span><span class="pill">D-MARKERSHAPE1 <span class="pill-rec">B keep</span></span><span class="pill">D-MARKERARGS1 <span class="pill-rec">A</span></span></div></div></div>
+<p class="score-line">Score: mechanisms deleted 0; capabilities kept all; capabilities gained 3 (raw ordinary Strings, uniform trailing commas, an enforced semicolon law).</p><div class="score-grid"><article class="score-tile"><strong class="score-value">0</strong><span class="score-name">mechanisms deleted</span><p class="score-detail">0</p></article><article class="score-tile"><strong class="score-value">all</strong><span class="score-name">capabilities kept</span><p class="score-detail">all</p></article><article class="score-tile"><strong class="score-value">3</strong><span class="score-name">capabilities gained</span><p class="score-detail">(raw ordinary Strings, uniform trailing commas, an enforced semicolon law)</p></article></div></header>
+<article class="markdown"><h2 id="executive-summary">Executive summary</h2><p>Lane A inventoried 230 lexical mechanisms and 79 silhouette rows and found a grammar that is mostly one thing: one callable form (D-CALLABLE-ONE1), one binding sigil pair (<code>::</code> and <code>:=</code>), one marker sigil (<code>#</code>) with one stacking law (D-MARK-STACK1), one dot-brace typed literal (<code>Regex{&quot;\d+&quot;}</code>, <code>Path{&quot;…&quot;}</code>, <code>.{ … }</code>), and one compile-time sigil (<code>@</code>) with three parser-disambiguated jobs. The first draft of this element over-claimed: it called <code>#Every(&quot;03:00&quot;)</code> an unchecked string when it is checked at compile time (E0926), it proposed literal forms that do not exist, and it reversed a ratified marker rule without evidence. The rival-family review caught all of that, and the ballots were redrawn.</p><p>What remains are three real repairs and one narrowing: no way to write an ordinary String without escapes; a trailing comma accepted in a list literal and refused in a parameter list (two E0003 errors at the closing bracket, real today); a ratified no-semicolon law (S6, E0373) that the lexer does not enforce; and one marker, <code>#HTML(&quot;page.html&quot;)</code>, that stores a path as text while Jet has a checked <code>Path{&quot;…&quot;}</code>. The reservation ledger records which sigils and prefixes are claimed and which are open, so a future spelling ballot starts from the ledger, not from a lexer read.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th><th scope="col">ballots</th></tr></thead><tbody><tr class=""><td>ordinary String interprets <code>\</code> and <code>{}</code> | backtick literal | D-RAWSTR1</td></tr><tr class=""><td>trailing comma differs by list kind</td><td>trailing commas everywhere</td><td>D-TRAILCOMMA1</td></tr><tr class=""><td><code>;</code> parses and runs</td><td>E0373 with the contextual edit</td><td>D-SEMI1</td></tr><tr class=""><td>the bracket marker law stands</td><td>keep D-MARK-STACK1</td><td>D-MARKERSHAPE1</td></tr><tr class=""><td><code>#HTML</code> stores a path as String</td><td><code>#HTML</code> takes <code>Path</code></td><td>D-MARKERARGS1</td></tr></tbody></table></div><h2 id="the-lexical-ledger-real-today">The lexical ledger (real today)</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">sigil or prefix</th><th scope="col">job</th><th scope="col">ratified by</th><th scope="col">evidence</th></tr></thead><tbody><tr class=""><td><code>::</code></td><td>immutable binding</td><td>D-BIND1</td><td><code>Syntax.rs</code></td></tr><tr class=""><td><code>:=</code></td><td>mutable binding</td><td>D-BIND1</td><td><code>Syntax.rs</code></td></tr><tr class=""><td><code>#</code></td><td>attached rule; <code>#[A, B]</code> for two or more</td><td>D-VERDICT-732-1, D-MARK-STACK1</td><td><code>markers.rs:1-16</code></td></tr><tr class=""><td><code>@</code></td><td>compile-time block, name, or fact</td><td>D-ONCE-AT1</td><td><code>markers.rs:6-8</code></td></tr><tr class=""><td><code>-[…]&gt;</code></td><td>effect row on a callable</td><td>D-EFF1</td><td><code>Sema/Effects.rs:438-500</code></td></tr><tr class=""><td><code>!</code></td><td>error type in a signature; deny-only root</td><td>D-RESULT1, D-EFF4</td><td></td></tr><tr class=""><td><code>?</code></td><td>optional type</td><td>D-OPT1</td><td></td></tr><tr class=""><td><code>??</code></td><td>fallback</td><td>D-RESULT-DECON2</td><td><code>syntax-surface.jet:302</code></td></tr><tr class=""><td><code>T{expr}</code></td><td>field default</td><td>D-DEFAULT-SHAPE1</td><td><code>codable_default.jet</code></td></tr><tr class=""><td><code>Name{&quot;…&quot;}</code></td><td>checked text head</td><td>S8, D-CHECKED-TEXT1</td><td><code>text/regex.jet:6-13</code></td></tr><tr class=""><td><code>.{ … }</code></td><td>typed anonymous value</td><td>D-POLICY-WORD1</td><td><code>syntax-decisions.md:2023-2029</code></td></tr><tr class=""><td><code> ` </code> | unclaimed | | <code>Lexer/mod.rs</code> has no rule</td></tr><tr class=""><td><code>r&quot;…&quot;</code>, <code>$&quot;…&quot;</code></td><td>unclaimed</td><td></td><td></td></tr><tr class=""><td><code>;</code></td><td>retired (E0373 ratified, not enforced)</td><td>S6</td><td><code>Lexer/mod.rs</code> accepts it</td></tr><tr class=""><td><code>_name</code></td><td>unclaimed as a reservation; leading underscore is an ordinary identifier</td><td></td><td>lane A</td></tr><tr class=""><td><code>__core_intrinsic</code></td><td>compiler-only namespace</td><td>D-CORE-CALL1</td><td><code>core_call.rs</code></td></tr></tbody></table></div><p>The phantom grammar lane A found, <code>Syntax::KW_SWITCH</code> whose value is literally <code>&quot;if&quot;</code> and a <code>Stmt::Switch</code> AST variant no parser path produces, is carded as a defect (#2512), not balloted; <code>Test</code>, <code>Todo</code>, and <code>Pure</code> are contextual identifiers, not keywords, and need no change.</p><h2 id="repair-1-a-raw-ordinary-string-d-rawstr1">Repair 1: a raw ordinary String (D-RAWSTR1)</h2><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Real today: <code>Regex{&quot;\d+&quot;}</code> and <code>Path{&quot;C:\Users&quot;}</code> already pass their text to a domain grammar, so a regex or a path never needs doubled backslashes. An ordinary String still interprets <code>\</code> and <code>{}</code>:</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>template :: &quot;C:\\tools\\{{name}}\\bin&quot;       // today: four backslashes and doubled braces to store one path template</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (option A): backtick is unclaimed; inside it nothing is an escape, braces are literal, there is no interpolation, and the literal may span lines. The one thing it cannot contain is a backtick; use an ordinary String for that.</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>template :: `C:\tools\{name}\bin`
+query :: `
+  select *
+  from orders
+`
+print(template)     // C:\tools\{name}\bin</code></pre></div></div></div><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">spelling</th><th scope="col">why not</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td><code> `…` </code></td><td></td></tr><tr class=""><td>B</td><td><code>r&quot;…&quot;</code>, <code>r#&quot;…&quot;#</code></td><td>a prefix is a second literal grammar; the hash form is a third</td></tr><tr class=""><td>C</td><td><code>Raw{&quot;…&quot;}</code></td><td>Raw is not a domain; a checked-text type with no check yields a value that is not a String</td></tr><tr class=""><td>D</td><td>keep escapes</td><td>plain Strings with backslashes and braces stay painful</td></tr></tbody></table></div><p>Amends: S8 (interpolation) and S20 (escapes) additively: neither applies inside a backtick literal. Regex and Path are unchanged.</p><h2 id="repair-2-trailing-commas-everywhere-d-trailcomma1">Repair 2: trailing commas everywhere (D-TRAILCOMMA1)</h2><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Real today, verified (verification block <code>lexical</code>):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>xs :: [1, 2, 3,]            // accepted
+fn f(a: Int, b: Int,) Int -&gt; a + b
+// Error [E0003]: expected `)` between arguments, found a piece of quoted text   (two errors at the closing bracket)</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (option A): every comma list accepts a trailing comma: parameters, arguments, list and map literals, constructor bodies, marker groups, effect rows, import lists, type arguments, and loop headers. <code>jet fmt</code> writes a trailing comma when the list spans lines and removes it when the list fits on one line; a comment after the last item counts as the multi-line form.</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>fn f(
+    a: Int,
+    b: Int,
+) Int -&gt; a + b
+f(1, 2)          // single line: fmt removes a trailing comma</code></pre></div></div></div><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">rule</th><th scope="col">why not</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td>accept everywhere; fmt decides layout</td><td></td></tr><tr class=""><td>B</td><td>legal only when the bracket is on a later line</td><td>a line-position rule is a second grammar for one comma</td></tr><tr class=""><td>C</td><td>collections accept, everything else rejects</td><td>two rules today is the defect</td></tr><tr class=""><td>D</td><td>reject everywhere</td><td>keeps the two-line diff every peer removed; retires working syntax</td></tr></tbody></table></div><p>Amends: S3 (parameter grammar) and the E0003 recovery table.</p><h2 id="repair-3-enforce-the-semicolon-law-d-semi1">Repair 3: enforce the semicolon law (D-SEMI1)</h2><p class="mode-note">Real today: <code>a :: 1; b :: 2</code> parses and runs (<code>explicit_semicolon.jet</code>, exit 0). S6 ratified E0373 for the retired spelling.</p><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>text</span><span class="badge illustrative">ILLUSTRATIVE</span></div><div class="code-context">Proposed (option A): the ratified E0373 with a behavior-preserving edit: a line break when code follows on the same line, removal at line end. The parser keeps a statement boundary at the same position so one file reports once and parsing resumes at the next statement. Precondition: a census of the corpus for deliberate semicolons before the error lands.</div><pre><code>a :: 1; b :: 2
+Error [E0373]: `;` is not a statement terminator in Jet
+  fix (behavior-preserving): break the line
+a :: 1
+b :: 2</code></pre></div></div><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">rule</th><th scope="col">why not</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td>E0373 with the contextual edit</td><td></td></tr><tr class=""><td>B</td><td>a lint with the same edit; <code>policy.lints.deny</code> promotes</td><td>retires a ratified code to add a lint that says the same thing</td></tr><tr class=""><td>C</td><td>fmt only</td><td>a never-formatted file keeps two spellings</td></tr></tbody></table></div><p>Amends: nothing; S6 is enforced as written.</p><h2 id="the-marker-law-stands-d-markershape1">The marker law stands (D-MARKERSHAPE1)</h2><p>D-MARK-STACK1=A (2026-07-23, card #761): one attached rule is <code>#Rule</code>; two or more distinct rules share one <code>#[A, B]</code> list; a one-item list or an adjacent bare stack is E0999 with the canonical rewrite; repeated rules such as two <code>#Post</code> markers are allowed; field and variant sites take only the bracket form. The first draft proposed stacking bare markers; the rival review found no new evidence that meets the bar for reopening. The ballot is a challenge and its recommendation is B, the law stands.</p><div class="code-block"><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>#[Pre(cents &gt; 0, &quot;positive&quot;), Post(result &gt; cents, &quot;grows&quot;)]
+fn add_fee(cents: Int) Int -&gt; { return cents + 5 }
+#[Pre(cents &gt; 0, &quot;positive&quot;)] fn f(cents: Int) Int -&gt; cents     // E0999: one-item list; fix: #Pre(...)</code></pre></div></div><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class=""><td>A</td><td>Amend: distinct bare markers may stack on separate lines; the bracket list stays as optional grouping; field and variant sites also accept bare markers; <code>jet fmt</code> writes stacked lines for functions and types and the bracket form for fields. Amends D-MARK-STACK1=A and S82. Rejected: two accepted layouts for one marker set, and a reopening without new evidence.</td></tr><tr class="recommended-row has-recommended-text"><td>B (recommended)</td><td>Keep D-MARK-STACK1 as ratified: one bare rule, one list for several, E0999 with the rewrite otherwise. The audit found no new evidence that meets the bar for reopening card #761.</td></tr></tbody></table></div><h2 id="one-marker-argument-d-markerargs1">One marker argument (D-MARKERARGS1)</h2><p>The first draft claimed every marker string hides a grammar. It does not: <code>#Every(&quot;03:00&quot;)</code> is checked at compile time (E0926), <code>#Policy</code> takes typed <code>PolicySetting</code> values, and <code>#[Rename]</code>, <code>#[Env]</code>, and <code>#Unsafe</code> carry text on purpose. One marker remains: <code>#HTML(&quot;page.html&quot;)</code> stores a file path as a String while Jet has a checked <code>Path{&quot;…&quot;}</code>.</p><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>#HTML(Path{&quot;page.html&quot;})          // proposed (option A): a malformed path fails at compile time with the Path grammar&#39;s diagnostic
+fn page() HTML -&gt; { … }
+#HTML(&quot;page.html&quot;)                // option B: no change; checked only when the file is missing</code></pre></div></div><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td><code>#HTML</code> takes <code>Path</code>: the companion page argument is a checked <code>Path</code> value, and a malformed path fails at compile time with the Path grammar&#39;s diagnostic. Signature change in <code>Prelude/Markers.jet</code> (D-MARKSIG1): <code>HTML(page: Path)</code>; <code>jet fix</code> rewrites <code>#HTML(&quot;x&quot;)</code> to <code>#HTML(Path{&quot;x&quot;})</code>.</td></tr><tr class=""><td>B</td><td>Keep the String: no change. Rejected: a path stored as text is checked only when it is missing.</td></tr></tbody></table></div><p>Amends: D-MARKSIG1&#39;s signature row for <code>#HTML</code>.</p><h2 id="rungs">Rungs</h2><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">repair</th><th scope="col">what the beginner types less</th><th scope="col">diagnostic</th></tr></thead><tbody><tr class=""><td>raw String</td><td>escapes for backslashes and braces</td><td>one diagnostic with one safe edit</td></tr><tr class=""><td>trailing comma</td><td>one comma rule</td><td>E0003</td></tr><tr class=""><td>semicolon</td><td>one terminator rule</td><td>E0373</td></tr></tbody></table></div><h2 id="three-exits">Three exits</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see</td><td><code>jet explain E0373</code>, <code>jet explain E0003</code> print the rule and the edit; the ledger table above is rendered from <code>Syntax.rs</code></td></tr><tr class=""><td>write</td><td>the canonical spelling each diagnostic names</td></tr><tr class=""><td>refuse</td><td>not applicable; no inference is introduced</td></tr></tbody></table></div><h2 id="implementation-shape">Implementation shape</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">phase</th><th scope="col">work</th></tr></thead><tbody><tr class=""><td>A</td><td>phantom <code>switch</code> grammar deleted (#2512); the semicolon census</td></tr><tr class=""><td>B</td><td>none owed</td></tr><tr class=""><td>C</td><td>after each ballot independently: backtick literal in the lexer with S8 and S20 amended; trailing comma in the parser with fmt rules and E0003 snapshots; E0373 with its edit and snapshot; <code>#HTML</code> signature change with one example</td></tr></tbody></table></div><h2 id="where-jet-loses-today">Where Jet loses today</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">peer</th><th scope="col">what it does better</th><th scope="col">Jet today</th></tr></thead><tbody><tr class=""><td>Rust</td><td>accepts a trailing comma everywhere and has a raw or multi-line string form</td><td>typed text heads beat Rust for regexes and paths and lose on a plain path template</td></tr><tr class=""><td>Go</td><td>accepts a trailing comma everywhere and has a raw or multi-line string form</td><td>typed text heads beat Go for regexes and paths and lose on a plain path template</td></tr><tr class=""><td>Zig</td><td>accepts a trailing comma everywhere and has a raw or multi-line string form</td><td>typed text heads beat Zig for regexes and paths and lose on a plain path template</td></tr><tr class=""><td>Swift</td><td>accepts a trailing comma everywhere and has a raw or multi-line string form</td><td>typed text heads beat Swift for regexes and paths and lose on a plain path template</td></tr></tbody></table></div><h2 id="strongest-unverified-assumption">Strongest unverified assumption</h2><p>That the corpus contains no deliberate semicolon that carries meaning. The lexer accepts it today; the census in phase A is the proof, and it runs before E0373 lands.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">assumption</th><th scope="col">how it is proved</th><th scope="col">where</th></tr></thead><tbody><tr class=""><td>the corpus contains no deliberate semicolon that carries meaning</td><td>the census in phase A before E0373 lands</td><td>card #2508</td></tr></tbody></table></div></article>
+<footer>Canonical source: docs/proposals/syntax-lexical-space.md; this page is a rendering.</footer>
+</main></div></div>
+</body>
+</html>
