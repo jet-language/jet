@@ -47,11 +47,8 @@ pub fn main(init: std.process.Init) !void {
     var total: i64 = 0;
 
     while (true) {
-        const raw_line = reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
-        const line = std.mem.trimEnd(u8, raw_line, "\r");
+        const raw_line = reader.interface.takeDelimiter('\n') catch |err| return err;
+        const line = std.mem.trimEnd(u8, raw_line orelse break, "\r");
         var fields = std.mem.splitScalar(u8, line, ' ');
         const timestamp_text = fields.next() orelse continue;
         const level = fields.next() orelse continue;

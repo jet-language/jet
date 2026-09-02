@@ -63,10 +63,10 @@ pub fn main(init: std.process.Init) !void {
             if (ring_position == 16) ring_position = 0;
             running_sum += sample - old;
             const mean = @divTrunc(running_sum, 16);
-            const error = 2048 - mean;
-            integrator += error;
+            const controller_error = 2048 - mean;
+            integrator += controller_error;
             integrator = clamp(integrator, -8192, 8192);
-            var command = error * 4 + signedDiv8(integrator);
+            var command = controller_error * 4 + signedDiv8(integrator);
             command = clamp(command, -4095, 4095);
             actuator = command;
             accepted += 1;

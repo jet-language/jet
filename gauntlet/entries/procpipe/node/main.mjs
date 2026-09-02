@@ -6,13 +6,12 @@ console.log(`calc ${calc.stdout.trim()}`);
 
 const producer = spawn("python3", ["-c", "print('c'); print('a'); print('b')"], { stdio: ["ignore", "pipe", "pipe"] });
 const sorter = spawn("sort", [], { stdio: ["pipe", "pipe", "pipe"] });
+const producerExit = new Promise((resolve) => producer.once("close", (status) => resolve(status)));
+const sorterExit = new Promise((resolve) => sorter.once("close", (status) => resolve(status)));
 producer.stdout.pipe(sorter.stdin);
 let sortedOutput = "";
 for await (const chunk of sorter.stdout) sortedOutput += chunk.toString();
-const [producerStatus, sorterStatus] = await Promise.all([
-  new Promise((resolve) => producer.once("close", (status) => resolve(status))),
-  new Promise((resolve) => sorter.once("close", (status) => resolve(status))),
-]);
+const [producerStatus, sorterStatus] = await Promise.all([producerExit, sorterExit]);
 if (producerStatus !== 0 || sorterStatus !== 0) throw new Error("pipeline failed");
 const sorted = sortedOutput.trim().split(/\s+/).filter(Boolean);
 console.log(`sorted ${sorted.join(",")}`);

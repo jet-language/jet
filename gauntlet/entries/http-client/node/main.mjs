@@ -14,7 +14,7 @@ async function request(path) {
 const listing = await request("/items");
 if (listing.status !== 200) throw new Error(`items status ${listing.status}`);
 const items = listing.body.items;
-let totalQuantity = 0;
+console.log(`items ${items.length}`);
 for (const itemId of [2, 5, 99]) {
   const result = await request(`/items/${itemId}`);
   if (result.status === 404) {
