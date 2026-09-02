@@ -1,0 +1,19 @@
+// Card #2510: a computed String from fs.read flows into typed JSON decoding.
+use core.encoding.json as json
+use core.files as fs
+
+#Codable
+struct Order {
+    id: Int
+    cents: Int
+}
+
+fn run() {
+    path :: "/tmp/jet-json-typed-file.json"
+    payload :: "[{{\"id\":7,\"cents\":100}},{{\"id\":9,\"cents\":250}}]"
+    fs.write(path, payload) ?? panic("write failed")
+    text :: fs.read(path) ?? panic("read failed")
+    orders :: json.decode<[Order]>(text) ?? panic("decode failed")
+    loop order in orders { print("{order.id}: {order.cents}") }
+    fs.remove(path) ?? panic("remove failed")
+}

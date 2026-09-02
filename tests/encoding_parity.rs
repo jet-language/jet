@@ -2107,7 +2107,7 @@ fn run() {
 }
 
 /// #2510: a file-backed `String` must flow from `fs.read` into typed JSON
-/// decoding without manually projecting its `Result` carrier first.
+/// decoding with explicit fallible handling.
 #[test]
 fn exact_typed_json_numbers_match_aot_default_run_and_interpreter() {
     on_encoding_stack(exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner);
@@ -2172,7 +2172,8 @@ struct ExactIntRow {
 @limited_text :: "1{"0".repeat(1000000)}"
 
 fn run() {
-    value :: json.decode<ExactNumbers>(fs.read("@DIR@/exact.json"))
+    exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
+    value :: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
     print(value.amount.to_string())
     print(value.exponent.to_string())
     print(value.whole.to_string())
@@ -2215,7 +2216,8 @@ fn run() {
         .Err(_) -> { print("exponent-limit") }
         else -> { print("accepted") }
     }
-    if json.decode<ExactNumbers>(fs.read("@DIR@/mismatch.json")) == {
+    mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
+    if json.decode<ExactNumbers>(mismatch_text) == {
         .Err(_) -> { print("file-mismatch") }
         else -> { print("accepted") }
     }
