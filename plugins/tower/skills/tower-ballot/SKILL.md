@@ -24,25 +24,33 @@ paragraphs over 90 words.
 
 ## Choose the profile
 
-`full` is the default. Use `short` only when the owner explicitly asks for a
-short ballot in the current request.
+Ratified 2026-09-02 (D-BALLOT-PROCESS1 = C). Until Tower's gate catches up
+with this ruling (carded for the implementing orchestrator), the store still
+demands the six-summary shape for `full`: fill each retired key with the
+literal sentence `Retired by D-BALLOT-PROCESS1; not performed.` and never
+invent a pass that did not run.
 
-- A **short ballot** is one complete base draft. It has every decision field,
-  complete options, and a recommendation, but no review passes. Set
-  `ballotMode: "short"`, copy the owner's request into `shortAuthorizedBy`, and
-  omit `reviewPasses`.
-- A **full ballot** starts with the same complete base draft, then runs all five
-  review passes below. Set `ballotMode: "full"` and record all six stage
-  summaries in `reviewPasses`.
-  The `reviewPasses.beginner` string must begin with:
-  `Fresh agent: <agent-id>. Skill: rli5.`
-  The `reviewPasses.adversarial` string must begin with:
-  `Author model family: <family>. Adversarial model family: <family>.`
-  Draft and updated full ballots follow both rules. The beginner agent must be
-  fresh, and the two normalized model family names must differ. Ratified
-  decisions are immutable history.
+- **`short`** is the default for a ballot inside one mechanism with at most
+  three options. It is one complete base draft: the reading surface, every
+  decision field, complete options, a recommendation, no review passes. Set
+  `ballotMode: "short"` and put the ruling in `shortAuthorizedBy`
+  (`D-BALLOT-PROCESS1: one mechanism, three options`).
+- **`full`** is required for new syntax (anything that touches `Syntax.rs`),
+  any invariant carve-out (I1-I9), and any card the owner tags `full`. It is
+  the same base draft plus the two independent readers, recorded in
+  `reviewPasses`:
+  `beginner` must begin `Fresh agent: <agent-id>. Skill: rli5.` and the agent
+  must be fresh; `adversarial` must begin
+  `Author model family: <family>. Adversarial model family: <family>.` and the
+  two normalized families must differ.
+  The four self-graded summaries (base, boil the ocean, hybrid, cooperative)
+  are retired: a drafter grading its own draft is not a review.
+- The scaffold (`tower decision scaffold <card> --id <D-…>`, carded) fills
+  `surface.trio.current` from the card's probe run and `surface.trio.wild`
+  from the card's cited evidence; the author still writes every word.
 
 "Simple ballot" is not a profile name. `/simple` applies to both profiles.
+Ratified decisions are immutable history.
 
 ## The reading surface (write it first)
 
@@ -69,9 +77,36 @@ rest can be hidden." Tower refuses a ballot without a valid `surface`.
   keep their letters). Gains and losses are the reality only: each bullet is a
   concrete fact the long form or the code supports. Never pad a list; an
   option with no known loss lists none.
-- **`recommendation`** — `{rec, why, gains[], losses[], whyNot[{key, reason}], tradeoff}`.
+- **`recommendation`** — `{rec, why, gains[], losses[{loss, whyUnavoidable}], whyNot[{key, reason}], tradeoff}`.
   `rec` equals the ballot `rec`; `why` under 40 words; `whyNot` names every
-  losing option.
+  losing option. Every remaining loss carries `whyUnavoidable`: the concrete
+  reason it cannot be designed out (physics, a ratified law, a measured cost,
+  or "removing it brings back option B's loss X"). A loss without that reason
+  means the design is not finished. Tower's gate will refuse it (carded).
+  Until that gate lands the store only accepts plain strings under 14 words
+  in `losses`, so write the loss there and put each reason as one sentence
+  in `tradeoff`: `Unavoidable: <loss> because <reason>.`
+
+### The design-away pass (owner law, 2026-09-02)
+
+"The recommendation is not good enough until all losses are designed away, or
+until it is impossible to design any more of them away. Spend the effort up
+front so we do not pay for them later; get the best of all worlds."
+
+Before writing `rec`, take the leading option and, for each loss on it:
+
+1. Ask what change to the option removes the loss without adding a new one.
+   Steal from the other options and from the in-the-wild tools; this is the
+   synthesis the owner expects, not a separate "hybrid" option.
+2. If a change works, make it: the option's code, gist, gains, and the long
+   form all change, and the loss is deleted, not softened.
+3. If nothing works, write `whyUnavoidable` in one sentence a beginner can
+   check, naming what was tried when that is not obvious.
+4. Repeat until every loss is gone or carries its reason. Only then recommend.
+
+A recommendation whose losses were never attacked is a draft, not a ballot.
+Record what the pass changed in the card log so the next reader sees the
+work, not only the result.
 
 How the owner sees it (Tower Focus Mode and the html skill's ballot page):
 the question, the lesson, then the code stacked full width with no sideways
@@ -115,8 +150,10 @@ gist plus its gains and losses); anything longer goes in `technical`.
 - **`rec`** — the recommended option key.
 - **`recommendation`** — `{why, whyNot, tradeoff}`. Explain why the winner best
   serves this decision, why every other option loses here, and which downside
-  the recommendation accepts. `whyNot` contains one `{key, reason}` per losing
-  option. Never use empty phrases such as “best balance.”
+  the recommendation still accepts after the design-away pass. `whyNot` contains
+  one `{key, reason}` per losing option. `tradeoff` names only losses that
+  carry an unavoidability reason. Never use empty phrases such as "best
+  balance", and never accept a loss the pass did not attack.
 - **`group`** — one of the project's `decisionGroups` (see `.tower/config.json`)
   so the queue stays organized.
 
@@ -143,40 +180,33 @@ not create a separate hybrid option unless it is a real final design.
 
 ## Build and review in this exact order
 
-Do not start a later pass early. Revise the ballot after each pass, then write a
-one- or two-sentence summary of what that pass found or changed.
+1. **Surface and base draft** — write the reading surface, then the complete
+   long form: every credible option, worked code on the same workload, real
+   gains and losses, in-the-wild grounding. Fold mere tactics into their parent
+   options; add a genuinely distinct option when the search finds one.
+2. **Design-away pass** — attack every loss on the leading option as described
+   above; change the option, delete the loss, or write `whyUnavoidable`. Then
+   write `rec` (always `A`, listed first), `why`, `whyNot`, `tradeoff`.
+   A short ballot ships here.
+3. **Beginner** (full only) — dispatch one fresh OMP agent that had no role in
+   the earlier steps. The brief must invoke `/rli5`, provide the complete
+   ballot, and use the true-beginner profile unless the owner named another
+   reader. The agent attempts explain, predict, modify, and derive tasks and
+   returns the RLI5 friction table. Revise the ballot and record its exact
+   agent id after `Fresh agent: <agent-id>. Skill: rli5.`
+4. **Adversarial** (full only) — use the required rival model family to attack
+   the recommendation, assumptions, evidence, failure modes, and every
+   `whyUnavoidable`. Repair the ballot; change the recommendation if it does
+   not survive; re-run the design-away pass on anything the attack reopened.
 
-1. **Base** — write the complete first draft. This is the same finished draft
-   that a short ballot would ship. It includes all fields, every credible option,
-   worked examples, why the recommendation wins, why every other option loses,
-   and the accepted tradeoff.
-2. **Boil the ocean** — search the full solution space. Add a genuinely distinct
-   option if the base draft missed one. Fold mere tactics into their parent
-   options instead of padding the menu.
-3. **Hybrid** — test whether the best parts of different options can form a
-   stronger coherent choice. Revise the options and recommendation when they
-   can. The older detailed `hybrid` synthesis and harvest fields are optional;
-   the `reviewPasses.hybrid` summary is required.
-4. **Cooperative** — steelman every option on its own terms. Make each choice the
-   strongest honest version of itself, including the options you expect to lose.
-5. **Beginner** — dispatch one fresh OMP agent that had no role in the earlier
-   passes. The brief must invoke `/rli5`, provide the complete ballot, and use
-   the true-beginner profile unless the owner named another reader. The agent
-   must attempt explain, predict, modify, and derive tasks, then return the RLI5
-   friction table. Revise the ballot and record its exact agent id after
-   `Fresh agent: <agent-id>. Skill: rli5.`
-6. **Adversarial** — use the required rival model family to attack the
-   recommendation, assumptions, evidence, and failure modes. Repair the ballot
-   and change the recommendation if it does not survive.
+The two summaries are evidence, not status labels: say what was tested,
+added, removed, or repaired. After the adversarial pass, check that
+`recommendation.whyNot` still covers every losing option and that no loss
+lost its reason.
 
-The summaries are evidence, not status labels. Say what was tested, added,
-removed, combined, strengthened, or repaired. After the adversarial pass, check
-that `recommendation.whyNot` still covers every losing option.
-
-Focus Mode shows these stages in order: base in slate, boil the ocean in violet,
-hybrid in cyan, cooperative in green, beginner in blue, and adversarial in
-orange. It shows the recommendation in blue and reasons against alternatives
-in muted red. Labels and icons carry the same meaning when color is unavailable.
+Focus Mode shows the beginner pass in blue and the adversarial pass in orange,
+the recommendation in blue, and reasons against alternatives in muted red.
+Labels and icons carry the same meaning when color is unavailable.
 
 ## Mechanics
 

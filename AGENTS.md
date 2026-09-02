@@ -190,6 +190,15 @@ performance cell and metric. Rust alone permits parity at a same-run
 Jet/Rust ratio of `1.05` or lower; that band is measurement noise, not a
 target or win. Every non-Rust peer requires Jet/peer below `1.00`.
 
+Required cells are the language foundations (numerics, text, files,
+concurrency, networking, build and run times) plus one real workload for
+each of the eight critical areas: web, games, CLI and scripts, data
+analysis, backend services, AI/ML applications, GUI apps, and embedded. A
+niche outside those areas gets a required cell only when Jet ships a
+first-party battery for it; anything else may be measured and reported but
+never gates a card, milestone, or release (owner, 2026-09-02). Jet does not
+claim wins in niches it does not ship.
+
 Apply the rule per cell and metric. Never average away a loss, substitute an
 easier workload or tier, omit a required peer, or pass wrong, unavailable,
 uncovered, mismatched, or inconclusive evidence. A performance card,

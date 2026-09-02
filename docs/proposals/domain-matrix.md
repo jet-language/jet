@@ -2,21 +2,16 @@
 
 ## Status
 
-This document is the owner-facing proposal for Tower epoch e15.
+**Superseded on 2026-09-02.** The owner ratified 42 of these ballots and then withdrew the whole slate the same day: it went too far toward building every niche in core. With the owner's one-time permission the 46 ballots and the 210 mechanism, domain, gauntlet, and global cards were deleted; the 9 substrate-defect cards stay. The research is archived at `docs/research/domain-matrix-archive/`. The replacement program (probes for eight critical areas, primitive-only gap proposals, executable examples for buildable niches) lives in Tower epoch e15, retitled "Foundations for every domain", and in `docs/research/domain-foundations-2026-09.md` once the probes finish. The text below is kept as history and decides nothing.
 
 | Field | Value |
 |---|---|
-| State | Proposal |
-| Epoch | e15 |
+| State | Superseded (history) |
+| Epoch | e15 (retitled) |
 | Date | 2026-09-02 |
-| Owner gates | Open: D-DOMAIN-RINGS1, D-DOMAIN-GAUNTLET1, and D-DOMAIN-ORDER1 |
-| Ratification unlocks | Ring placement, workload registration, closure rules, and the e15 build order |
-| Card map | 219 cards: 88 mechanism, 108 domain, 9 defect, 11 gauntlet, and 3 global |
-| Ballot map | 45 ballots: 42 mechanism ballots and 3 global ballots |
-
-The global ballots are `D-DOMAIN-RINGS1` (#2539), `D-DOMAIN-GAUNTLET1` (#2537), and `D-DOMAIN-ORDER1` (#2538). Each is open on its card in Tower; `node plugins/tower/tower.mjs decision show <id>` prints the full ballot.
-
-Ratification permits implementation against one placement policy, one performance gate, and one ranked order. It does not claim that any domain is shipped.
+| Owner gates | None open; the three global ballots were deleted with the slate |
+| Card map | Deleted; 9 defect cards kept |
+| Ballot map | Deleted; archived in `docs/research/domain-matrix-archive/ballots.json.gz` |
 
 ## Owner brief
 

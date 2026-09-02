@@ -41,6 +41,22 @@ Owner directive 2026-08-05: "ALL CARDS MUST be either in an epoch, frozen, or a 
 
 **How to apply:** Enforcement is in code (`checkCardHome` in plugins/tower/app/store.mjs on add+update, `unhomed-card` rule in lint.mjs, `empty()` boards born with an active e1). When adding cards while no epoch is active, ALWAYS pass `--epoch <id>` (or `--track sidequest`) — the CLI now errors otherwise. Related: [[cards-are-handoff-source-of-truth]], [[owner-only-tower-serve]].
 
+### ballot-losses-designed-away-2026-09-02
+
+*Owner 2026-09-02 — a recommendation is not good enough until every loss is designed away, or shown impossible to design away; new ballots recommend A first; gains and losses are the reality only*
+
+Owner: "the recommendation is not good enough until all losses/downsides are designed away OR until it is impossible to design any more of the losses away. Remember we need to spend effort up front figuring out how to eliminate the losses so we dont pay for them later and get the best of all worlds." Same day: "I dont want filler either, dont invent garbage for pros/cons, just list the reality" and "keep the recommended at the top/option A always" (new ballots only; ballots already open keep their letters).
+
+Applies through `plugins/tower/skills/tower-ballot/SKILL.md` (design-away pass, `losses[{loss, whyUnavoidable}]`, `rec` = `A` first) and Tower's gate (card #2760 carries the store change). D-BALLOT-PROCESS1 = C is ratified: short profile by default for a one-mechanism ballot with at most three options; full profile (fresh rli5 beginner + rival-family adversarial) for new syntax, invariant carve-outs, and owner-tagged `full` cards; the four self-graded review summaries are retired; a scaffold command fills the reading surface's current and in-the-wild panes.
+
+### domain-rescope-2026-09-02
+
+*Owner 2026-09-02 — the domain-matrix slate went too far; core keeps primitives, ecosystem tools, today's core library, and shared data types; niches are built BY library authors WITH Jet*
+
+Owner: "we may have gone way too far on the whole beating every niche at once forever in every domain in every language ... jet is very feature rich already so we need to make sure we provide all the primitives/building blocks needed to ensure that domain specifics can be built. we want things like ecosystem tools to be built in, things that give excellent ux/dx, but not niche specifics like a library for processing acoustic signals ... A library author should have all the tools they need with jet to MAKE that acoustic signal processing library."
+
+Rulings (grilling session): (1) scope = e15 only; e14 developer-experience rulings stand. (2) Core = language primitives + ecosystem/DX tools + today's core library + shared data types (one table, one unit, one receipt). (3) Evidence = full "everything a builder needs" probes for eight critical areas (web, games, CLI and scripts, data analysis, backend services, AI/ML apps, GUI apps, embedded), targeted build probes for doubtful mechanisms, judgment for plain cases. (4) A gap is a primitive, never a niche library: impossible, unsafe without `#Unsafe`, slow without compiler help, call-site ceremony, or heavy author boilerplate when very common or shared across domains; one primitive unblocking several areas is one proposal. (5) Buildable niches get executable examples only; critical areas get batteries and connective tissue as needed. (6) One-time permission: the 46 domain ballots (42 ratified) and 210 slate cards were deleted without new ballots; the 9 substrate-defect cards stay; research archived at `docs/research/domain-matrix-archive/`. (7) Performance gate required cells = foundations + one real workload per critical area; niche cells only with a shipped battery (`AGENTS.md`). (8) Output = one consolidated slate after all probes: mining report, then 5-15 primitive ballots written by the orchestrator, `rec` A, losses designed away. (9) The planning orchestrator (fable) does probing, research, report, carding, balloting only, never implementation; up to 30 Luna max subagents for legwork; no subagent writes a ballot. (10) e15 retitled "Foundations for every domain".
+
 ### ballot-first-always
 
 *Balloting owner-blocking decisions is THE*
