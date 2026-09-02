@@ -89,7 +89,8 @@ fn run_interpret_rejects_release_profile() {
 /// survive every native execution adapter. The first item is the tier's
 /// program identity, so the observable comparison covers the forwarded
 /// program arguments while the same source proves flags, filenames, Unicode,
-/// an empty value, and a bare -- survive the CLI split unchanged.
+/// an empty value and separator, a value containing --, a bare --, and
+/// --interpret survive the CLI split unchanged.
 #[test]
 fn argv_agrees_on_every_native_tier() {
     let dir = std::env::temp_dir().join(format!(
@@ -109,7 +110,16 @@ fn argv_agrees_on_every_native_tier() {
     )
     .unwrap();
 
-    let program_args = ["--flag", "--port=50000", "report file.jet", "Δ", "", "--"];
+    let program_args = [
+        "--flag",
+        "--port=50000",
+        "report file.jet",
+        "Δ",
+        "",
+        "pre--post",
+        "--",
+        "--interpret",
+    ];
     let cache = dir.join("cache");
     let run = |label: &str, args: &[&str]| {
         let output = Command::new(jet())
@@ -142,6 +152,13 @@ fn argv_agrees_on_every_native_tier() {
         args.extend_from_slice(&program_args);
         run(label, &args)
     };
+    let empty_invocation = |label: &str, command: &str, extra: &[&str]| {
+        let mut args = vec![command];
+        args.extend_from_slice(extra);
+        args.push("main.jet");
+        args.push("--");
+        run(label, &args)
+    };
     let default = invocation("default", "run", &[]);
     let interpret = invocation("interpret", "run", &["--interpret"]);
     let release = invocation("release", "run", &["--release"]);
@@ -150,6 +167,10 @@ fn argv_agrees_on_every_native_tier() {
         args.extend_from_slice(&program_args);
         run("dev", &args)
     };
+    let empty_default = empty_invocation("empty-default", "run", &[]);
+    let empty_interpret = empty_invocation("empty-interpret", "run", &["--interpret"]);
+    let empty_release = empty_invocation("empty-release", "run", &["--release"]);
+    let empty_dev = empty_invocation("empty-dev", "dev", &["--watch=off"]);
 
     let build = Command::new(jet())
         .args(["build", "main.jet", "--quiet"])
@@ -164,32 +185,53 @@ fn argv_agrees_on_every_native_tier() {
         "AOT build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let aot = Command::new(dir.join("build/main"))
-        .args(program_args)
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert_eq!(
-        aot.status.code(),
-        Some(0),
-        "AOT binary failed:\n{}",
-        String::from_utf8_lossy(&aot.stderr)
-    );
+    let aot_run = |label: &str, args: &[&str]| {
+        let output = Command::new(dir.join("build/main"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{label} binary failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "{label} binary wrote stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let aot = aot_run("AOT", &program_args);
+    let empty_aot = aot_run("AOT empty", &[]);
 
     for (label, output) in [
         ("interpret", interpret),
         ("release", release),
         ("dev", dev),
-        ("AOT", aot.stdout),
+        ("AOT", aot),
     ] {
         assert_eq!(output, default, "{label} argv output diverged");
     }
-    let expected = "7\n6\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<-->\n";
+    let expected =
+        "9\n8\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<pre--post>\n<-->\n<--interpret>\n";
     assert_eq!(
         default.as_slice(),
         expected.as_bytes(),
         "forwarded argv was not preserved"
     );
+
+    for (label, output) in [
+        ("empty default", empty_default),
+        ("empty interpret", empty_interpret),
+        ("empty release", empty_release),
+        ("empty dev", empty_dev),
+        ("empty AOT", empty_aot),
+    ] {
+        assert_eq!(output, b"1\n0\n", "{label} argv output diverged");
+    }
 
     let _ = fs::remove_dir_all(&dir);
 }
