@@ -1,6 +1,7 @@
 //! D-BUILDENTRY1/D-BUILDACTION1: real Jet `fn build` vertical.
 
 mod common;
+use common::Scratch;
 
 use jet::Comptime::Build::{ActionOutcome, BuildCapability, BuildPolicy, CacheHitReason};
 use jet::Driver::{
@@ -69,6 +70,60 @@ fn inspect_opts() -> BuildRunOptions {
 fn write(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
 }
+fn copy_determinism_fixture(scratch: &Scratch) {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/determinism");
+    for name in ["main.jet", "alpha.jet", "beta.jet"] {
+        fs::copy(fixture.join(name), scratch.join(name)).unwrap();
+    }
+}
+
+fn normalize_receipt_output(bytes: &[u8], root: &Path) -> Vec<u8> {
+    let root = root.to_string_lossy();
+    String::from_utf8_lossy(bytes)
+        .replace(root.as_ref(), "<checkout>")
+        .into_bytes()
+}
+
+fn normalized_receipts(root: &Path) -> Vec<(
+    String,
+    i32,
+    Vec<(String, String)>,
+    Vec<u8>,
+    Vec<u8>,
+)> {
+    let store = jet::ReceiptStore::ReceiptStore::new(root.join(".jet/receipts"));
+    let mut receipts = store
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|receipt| {
+            let inputs = receipt
+                .claim
+                .inputs
+                .into_iter()
+                .map(|input| {
+                    let path = input
+                        .path
+                        .strip_prefix(root)
+                        .unwrap_or(input.path.as_path())
+                        .to_string_lossy()
+                        .into_owned();
+                    (path, input.digest)
+                })
+                .collect();
+            (
+                receipt.claim.verb,
+                receipt.status,
+                inputs,
+                normalize_receipt_output(&receipt.stdout, root),
+                normalize_receipt_output(&receipt.stderr, root),
+            )
+        })
+        .collect::<Vec<_>>();
+    receipts.sort();
+    receipts
+}
+
 
 fn first_file_under(path: &Path) -> PathBuf {
     for entry in fs::read_dir(path).unwrap() {
@@ -388,19 +443,15 @@ fn compiler_self_speed_reports_clean_and_incremental_medians() {
 }
 
 #[test]
-fn compiler_speed_phase_timing_reports_real_release_build() {
-    let root = project("compiler-speed-phase-timing");
+fn compiler_speed_explain_build_reports_release_nodes() {
+    let root = project("compiler-speed-explain-build");
     let entry = root.join("main.jet");
-    let timing = root.join("timing");
-    fs::create_dir_all(&timing).unwrap();
     write(&entry, "fn run() { print(\"timing\") }\n");
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "--release", "main.jet"])
         .current_dir(&root)
-        .env("JET_TIMING", "1")
-        .env("JET_TIMING_DIR", &timing)
-        .env("JET_CACHE_DIR", root.join("cache"))
+        .env("JET_STORE_DIR", root.join("store"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run optimized compiler-speed build");
@@ -411,30 +462,137 @@ fn compiler_speed_phase_timing_reports_real_release_build() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let frontend = fs::read_to_string(timing.join("jet-timing.json")).unwrap();
-    let phase_us = |report: &str, phase: &str| -> u64 {
-        let marker = format!("\"name\":\"{phase}\",\"us\":");
-        let value = report
-            .split_once(&marker)
-            .and_then(|(_, tail)| tail.split([',', '}']).next())
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_else(|| panic!("timing report has no positive {phase} duration: {report}"));
-        assert!(value > 0, "timing report recorded zero {phase} duration: {report}");
-        value
-    };
-    for phase in ["parse", "sema", "ffi", "tir", "emission", "cache_key", "rust_bytes"] {
-        phase_us(&frontend, phase);
-    }
-    let backend = fs::read_to_string(timing.join("build/jet-timing-backend.json")).unwrap();
-    phase_us(&backend, "backend");
-    phase_us(&backend, "link");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let explanation = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "explain-build", "main.jet", "--json"])
+        .current_dir(&root)
+        .env("JET_STORE_DIR", root.join("store"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("read release build explanation");
     assert!(
-        stderr.contains("jet-timing binary_bytes="),
-        "optimized production build did not report binary size: {stderr}"
+        explanation.status.success(),
+        "explain-build failed: {}\n{}",
+        String::from_utf8_lossy(&explanation.stdout),
+        String::from_utf8_lossy(&explanation.stderr)
     );
+    let report = String::from_utf8_lossy(&explanation.stdout);
+    assert!(report.contains("\"schema\":\"jet.explain-build/v1\""));
+    assert!(report.contains("\"program\":\"main.jet\""));
+    assert!(report.contains("\"nodes\":["));
     assert!(root.join("build/main").is_file());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn release_build_and_default_run_preserve_typed_empty_list_type() {
+    let scratch = Scratch::new("typed-empty-list-release");
+    write(
+        &scratch.join("main.jet"),
+        r#"
+fn run() {
+    rows := [String]{}
+    print(rows.len())
+}
+"#,
+    );
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "--profile=release", "main.jet"])
+        .current_dir(&scratch.path)
+        .env("JET_STORE_DIR", scratch.join("cache"))
+        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run typed empty-list release build");
+    assert!(
+        build.status.success(),
+        "release build failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let aot = Command::new(scratch.join("build/main"))
+        .current_dir(&scratch.path)
+        .output()
+        .expect("run typed empty-list AOT binary");
+    assert!(
+        aot.status.success(),
+        "AOT binary failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&aot.stdout),
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&aot.stdout).trim(), "0");
+
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&scratch.path)
+        .env("JET_STORE_DIR", scratch.join("cache"))
+        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run typed empty-list default run");
+    assert!(
+        interpreted.status.success(),
+        "default run failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&interpreted.stdout),
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&interpreted.stdout).trim(),
+        "0"
+    );
+}
+
+#[test]
+fn two_builds_from_two_paths_are_byte_identical() {
+    let left = Scratch::new("determinism-left");
+    let right = Scratch::new("determinism-right");
+    copy_determinism_fixture(&left);
+    copy_determinism_fixture(&right);
+
+    let build = |scratch: &Scratch| {
+        Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["build", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", scratch.join("cache"))
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run determinism build")
+    };
+    for (name, output) in [("left", build(&left)), ("right", build(&right))] {
+        assert!(
+            output.status.success(),
+            "{name} determinism build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let left_rust = fs::read(left.join("build/main.rs")).unwrap();
+    let right_rust = fs::read(right.join("build/main.rs")).unwrap();
+    assert_eq!(
+        jet::SHA256::sha256_hex(&left_rust),
+        jet::SHA256::sha256_hex(&right_rust),
+        "generated Rust SHA-256 changed with checkout path"
+    );
+    assert_eq!(left_rust, right_rust, "generated Rust changed with checkout path");
+
+    let left_binary = fs::read(left.join("build/main")).unwrap();
+    let right_binary = fs::read(right.join("build/main")).unwrap();
+    assert_eq!(
+        jet::SHA256::sha256_hex(&left_binary),
+        jet::SHA256::sha256_hex(&right_binary),
+        "native binary SHA-256 changed with checkout path"
+    );
+    assert_eq!(left_binary, right_binary, "native binary changed with checkout path");
+
+    let left_receipts = normalized_receipts(&left.path);
+    let right_receipts = normalized_receipts(&right.path);
+    assert!(!left_receipts.is_empty(), "build must publish a receipt");
+    assert_eq!(
+        left_receipts, right_receipts,
+        "build receipts differ beyond checkout paths"
+    );
 }
 
 #[test]

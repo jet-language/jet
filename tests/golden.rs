@@ -153,19 +153,16 @@ fn examples_compile_and_run() {
             .expect("system clock is after Unix epoch")
             .as_nanos()
     ));
-    let build_cache = scratch.join("build-cache");
     let ffi_cache = scratch.join("ffi");
-    // #2074: runtime rlibs are content-addressed on (runtime source, exported
-    // source, rustc identity, flags, env) and re-verified against
-    // `artifact.sha256` on every hit, so sharing them across runs cannot
-    // resurrect a stale runtime — a wrong key is a miss, never a reuse. A
-    // per-run directory would instead pay one cold runtime compile per key on
+    // #2074/#2516: the store is content-addressed and re-verified against the
+    // artifact digest on every hit, so sharing it across runs cannot
+    // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
+    // per-run store would instead pay one cold runtime compile per key on
     // every golden run, which is the exact cost this substrate exists to
     // remove. Living under the target dir keeps `cargo clean` as the reset.
-    let runtime_cache = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-runtime-rlibs");
-    std::env::set_var("JET_CACHE_DIR", &build_cache);
+    let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
+    std::env::set_var("JET_STORE_DIR", &store);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
-    std::env::set_var("JET_RUNTIME_CACHE_DIR", &runtime_cache);
     let _scratch = GoldenScratch { path: scratch };
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");

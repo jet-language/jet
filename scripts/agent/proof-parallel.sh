@@ -59,6 +59,13 @@ esac
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
+# #2757: since the jet-store cutover every jet invocation shares one machine-wide
+# store, and a second live process fails E2105 on the store lock instead of
+# waiting. Proof batches therefore get their own store, disjoint from the
+# orchestrator's and every worker's builds; tests that need isolation set
+# JET_STORE_DIR themselves (JET_CACHE_DIR / JET_RUNTIME_CACHE_DIR are retired).
+export JET_STORE_DIR="${JET_STORE_DIR:-$scratch/store}"
+mkdir -p "$JET_STORE_DIR"
 
 # Cargo defaults to one rustc per hardware thread. This machine has 32 and the
 # Jet crates embed the whole Prelude, so an uncapped cold build peaked at 52G of

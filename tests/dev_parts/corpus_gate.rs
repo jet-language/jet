@@ -105,7 +105,7 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String)> {
     let index = std::env::var("JET_CORE_CONFORMANCE_SHARD_INDEX").ok();
     let count = std::env::var("JET_CORE_CONFORMANCE_SHARD_COUNT").ok();
-    match (index, count) {
+    let entries = match (index, count) {
         (None, None) => entries,
         (Some(index), Some(count)) => {
             let index = index.parse::<usize>().expect("Core conformance shard index must be an integer");
@@ -119,6 +119,19 @@ fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String
                 .collect()
         }
         _ => panic!("Core conformance shard index and count must be set together"),
+    };
+    // Repair mode: `JET_CORE_CONFORMANCE_FILTER=a/b,c/d` keeps only witnesses
+    // whose stem contains one of the comma-separated needles, so one witness
+    // can be proven without rerunning the whole denominator.
+    match std::env::var("JET_CORE_CONFORMANCE_FILTER") {
+        Ok(filter) if !filter.trim().is_empty() => {
+            let needles: Vec<String> = filter.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+            let kept: Vec<(String, String)> =
+                entries.into_iter().filter(|(stem, _)| needles.iter().any(|n| stem.contains(n.as_str()))).collect();
+            assert!(!kept.is_empty(), "Core conformance filter `{filter}` matched no witness stem");
+            kept
+        }
+        _ => entries,
     }
 }
 

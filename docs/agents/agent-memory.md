@@ -1050,6 +1050,49 @@ pure-Claude fan-outs, never as a codex nursery.
 
 ## Project state, ratified slates, and technical traps
 
+### campaign-traps-2026-09-02
+
+*Traps that cost the 2026-09-02 sidequest campaign most of a day; each has a durable fix or rule.*
+
+- **Machine-wide store contention (#2757).** After the jet-store cutover every `jet` process
+  shares `~/.cache/jet/store`; a second live process fails `E2105 store lock is owned by a
+  live process` instead of waiting. Until #2757 lands the wait, every parallel proof or test
+  isolates with `JET_STORE_DIR` (`scripts/agent/proof-parallel.sh` exports its own store;
+  tests set `.env("JET_STORE_DIR", scratch)`). `JET_CACHE_DIR` and `JET_RUNTIME_CACHE_DIR`
+  are retired and silently ignored — a test that still sets them is not isolated.
+- **Retired spellings hide in card text.** `jet explain-build` moved to
+  `jet inspect explain-build` (E2101); `.{ … }` record dots are E1206; non-unit braced
+  callables need `fn f() T -> { … }` (E0080); `task` is reserved (E0003); package fixtures
+  need `authority.holds` grants (E1803). Check the ratified spelling in
+  `docs/spec/syntax-decisions.md` before treating a red suite as a compiler defect.
+- **Callback ABI is the effective carrier.** Under D-FAILURE-FOUNDATION1 a callable
+  parameter `f: fn(Int) Int` has ABI `fn(Int) Result<Int, Err>`; `cx.fn_types` and
+  `cx.sigs` carry that effective type, `cx.fn_source_types` keeps the source spelling for
+  user-visible binding types only, fn-value call sites project with one Try, and lambda
+  literals adopt the slot carrier (`fallible_lambda_value` derives the ok type from the
+  lambda body, never from the enclosing function). Do not revert any half of this.
+- **Speculative comptime folds must be silent.** Sema's implicit constant fold lowers
+  reachable functions through the TirBridge before validation completes; a lowering
+  failure there means "not foldable" and runs under the suppressed ICE hook. A printed
+  ICE before a correct E-diagnostic is that path leaking, not a codegen bug.
+- **Conformance gate repair loop.** `JET_CORE_CONFORMANCE_FILTER=a/b,c/d` proves single
+  witnesses; `JET_CORE_CONFORMANCE_CENSUS=1` lists every failure in one run (test binary
+  `--test dev_corpus_gate`). The denominator checker (`node
+  scripts/agent/core-conformance.mjs --check`) requires every witness to consume its
+  value (print/assert/method receiver, or a plain call plus a later observation for
+  Unit rows) and counts owner-ratified carve-outs (`exclusions.tsv`, e.g.
+  `core.mem.from_addr` under D-MEM-SENTRY1) instead of bending witnesses. Registry rows
+  in `core_calls.rs` must name a real Prelude symbol with the real arity; bespoke
+  emitter arms need `.without_direct_aot()/.without_direct_jit()`; `--test
+  core_call_table` is the executable reconciliation.
+- **Golden suite budget.** `--test golden` exceeds the 900 s default under a parallel
+  batch and a cold store; run it alone against the persistent
+  `CARGO_TARGET_TMPDIR/jet-golden-store`, or add a committed `tests/suite_budgets.txt`
+  row with its reason.
+- **Stale scratch fixtures poison authority discovery.** A leftover hostile symlink
+  fixture under a shared scratch root produced `E1334 authority path is a symlink` for
+  an unrelated build; use a fresh directory per repro.
+
 ### agent-durability-plan
 
 *Fable-independence audit done 2026-07-10; plan at docs/plans/agent-durability.md awaits owner greenlight (cards/ballots not yet minted)*

@@ -248,6 +248,58 @@ much code moved. Proof is the bottleneck, so proof is what must be parallel.
 - Prefer a proof that closes a card over a proof that merely informs. When one command
   settles the last criterion on two cards, run it first.
 
+### Shared-tree cutovers are serialized, and every edit lands balanced
+
+2026-09-02 lost roughly four hours of a twenty-worker wave to one cause: a worker
+left a shared crate unbalanced (an extra `}`, a renamed field without its callers,
+a removed module still imported) and every sibling's proof failed at compile until
+it was repaired. It happened ten times in one day (`jet-comptime`, `jet-store`,
+`Source/CmdCompile.rs`, `lower_ctx.rs`, `Context.rs`, `lambdas.rs`, an LSP test
+module, a jetpack match).
+
+- At most **one cutover of a shared crate is in flight at a time** (`jet-comptime`,
+  `jet-driver`, `jet-store`, `Source/CmdCompile.rs`, `crates/jet-jit/src/jit/*`,
+  `Codegen/Context.rs`). A second cutover waits for the first to reach CHECK OK.
+- A worker on a shared crate writes **whole functions per edit**, re-reads the region
+  immediately before each edit, and runs its crate lane-check before it moves to the
+  next file. It never yields with the crate red. "Land it balanced or revert the
+  slice" is the rule; the orchestrator says so in the brief, not after the fact.
+- The orchestrator broadcasts a known red state **once** ("known: X, owner Y, do not
+  report") and broadcasts once more when the workspace lane is green. Without that,
+  every worker spends its budget re-reporting the same compile error.
+- Every cutover brief names the **whole consumer set**: callers, tests, tools, docs,
+  env variables, CLI spellings. The jet-store cutover closed with `Source/ crates/
+  tools/` grep-clean while 30 test files still set the retired `JET_CACHE_DIR`, which
+  silently pointed every parallel test at the user's real store and produced E2105
+  lock failures in the next proof batch.
+
+### Worker budget is about twenty-five minutes; brief for it
+
+Luna workers are force-wrapped after roughly 25 minutes or 200 requests. A slice that
+needs an hour returns "partial, unproven" three times and each continuation re-derives
+the last one's context.
+
+- Brief in **20-minute slices** with an explicit per-item loop ("prove one, move to the
+  next"), and plan the continuation worker up front (`ConfJit`, `ConfJit2`, …).
+- Every lane appends a per-item status table to `~/.cache/jet-luna/lanes/<lane>.md`;
+  the continuation brief points at it.
+- A brief that says "no proof yet" at the end of the budget is a brief that was too
+  big, not a worker that failed.
+
+### Fixture drift is repaired by a mechanical lane, not inside a feature lane
+
+Suites that were red at handoff for ratified-syntax drift (`->` on non-unit braced
+callables, `task` reserved, `.{` retired, missing `authority.holds` grants, retired
+env variables, moved CLI routes such as `jet inspect explain-build`) are a separate
+mechanical worker per suite family. Mixing that repair into a feature lane costs the
+feature worker its budget and hides real compiler defects behind fixture noise.
+
+### Stale binaries produce false compiler bugs
+
+Before any "compiler defect" claim, rebuild `target/debug/jet`. Today a printed ICE
+and an E1334 came from a stale binary and a stale hostile fixture in a shared
+scratch root, and cost two lanes their budget.
+
 ### Redirects in backgrounded subshells
 
 `( … ) &` in an agent shell does not reliably inherit an exported `TMPDIR`, and
