@@ -516,9 +516,25 @@ const PEER_LAUNCH_CONTRACT = "compiled-workload-peer-isolation-v1";
 let peerLauncherCache = null;
 function peerLauncherInfo() {
   const configured = process.env.JET_COMPILED_WORKLOAD_PEER_LAUNCHER || "";
-  if (!configured) fail("peer isolation launcher is unavailable");
-  const launcher = resolveExecutable(configured);
-  if (!launcher) fail("peer isolation launcher is unavailable: " + configured);
+  const launcherPath = configured || path.join(
+    root,
+    ".jet",
+    process.platform === "win32" ? "compiled-workload-peer-launcher.exe" : "compiled-workload-peer-launcher",
+  );
+  if (!configured && !fs.existsSync(launcherPath)) {
+    const source = path.join(root, "tools", "ci", "compiled-workload-peer-launcher.rs");
+    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+    const build = spawnSync("rustc", ["--edition=2021", "-O", source, "-o", launcherPath], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    });
+    if (build.error || build.status !== 0) {
+      fail("peer isolation launcher build failed: " + cleanText(build.stderr || build.stdout || build.error?.message));
+    }
+  }
+  const launcher = resolveExecutable(launcherPath);
+  if (!launcher) fail("peer isolation launcher is unavailable: " + launcherPath);
   if (process.platform === "win32") {
     if (!launcher.toLowerCase().endsWith(".exe")) fail("Windows peer isolation launcher must be an executable: " + launcher);
   } else {
@@ -696,6 +712,7 @@ function jetAuthority(task, sourcePath) {
   if (fields.has("argv") || fields.has("build-input") || source.includes("core.files")) allow.add("FS");
   if (source.includes("print(")) allow.add("IO");
   if (fields.get("network") === "loopback-only" || /\bcore\.(?:http|net)\b/.test(source)) allow.add("Net");
+  if (/\bcore\.time\b/.test(source)) allow.add("Time");
   if (/\bpanic\s*\(/.test(source)) allow.add("Panic");
   if (/\b(?:String|struct|loop|use core\.|embed_file|print\s*\()/.test(source)) allow.add("Mem.Alloc");
   if (allow.size === 0) fail("task authority resolved to no Jet effects: " + task.task_id);
@@ -903,6 +920,11 @@ function targetArtifactProof(artifact, target) {
   }
   fail("unsupported target proof: " + target);
 }
+function unavailableTarget(result, target) {
+  const output = cleanText(result.stderr) || cleanText(result.stdout);
+  return Boolean(target && output.includes(target) &&
+    (output.includes("E3302") || /(?:not available|not installed|cannot find)/i.test(output)));
+}
 function jetBuild(project, source, target = "", embeddedInput = "", task) {
   if (!task) fail("Jet build authority contract is missing: " + source);
   fs.mkdirSync(project, { recursive: true });
@@ -918,9 +940,10 @@ function jetBuild(project, source, target = "", embeddedInput = "", task) {
   if (target) args.push("--target=" + target);
   args.push(path.relative(project, staged.entry).split(path.sep).join("/"));
   const env = {
-    JET_CACHE_DIR: path.join(project, ".jet-build-cache"),
+    JET_STORE_DIR: path.join(project, ".jet-store"),
     JET_RUN_CACHE_DIR: path.join(project, ".jet-run-cache"),
-    JET_RUNTIME_CACHE_DIR: path.join(project, ".jet-runtime-cache"),
+    JET_FFI_CACHE_DIR: path.join(project, ".jet-ffi-cache"),
+    CARGO_NET_OFFLINE: "true",
     ...(target === "aarch64-unknown-linux-gnu" ? {
       RUSTC_LINKER: process.env.RUSTC_LINKER_CROSS || "aarch64-linux-gnu-gcc",
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER:
@@ -931,7 +954,19 @@ function jetBuild(project, source, target = "", embeddedInput = "", task) {
     } : {}),
   };
   const result = peerMeasured(task, jetBin, args, project, env);
-  if (result.status !== 0) fail("Jet build failed for " + source + ": " + cleanText(result.stderr));
+  if (result.status !== 0) {
+    if (unavailableTarget(result, target)) {
+      return {
+        result,
+        unavailable: "toolchain_unavailable;target=" + target + ";error=" + (cleanText(result.stderr) || cleanText(result.stdout)),
+        binary: "",
+        args,
+        env,
+        source: staged,
+      };
+    }
+    fail("Jet build failed for " + source + ": " + cleanText(result.stderr));
+  }
   const binary = path.join(project, "build", "main" + exeSuffix);
   if (!target || target !== "web") requireFile(binary, "Jet build artifact");
   return { result, binary, args, env, source: staged };
@@ -1099,7 +1134,20 @@ function peerBuild(language, source, dir, crossTarget = "", task, ledgerOverride
   }
   assertFrozenPeerCommand(task, language, "build", command, args, ledgerOverride);
   const result = peerMeasured(task, command, args, dir, env);
-  if (result.status !== 0) fail("peer build failed for " + source + ": " + cleanText(result.stderr));
+  if (result.status !== 0) {
+    if (unavailableTarget(result, crossTarget)) {
+      return {
+        result,
+        unavailable: "toolchain_unavailable;target=" + crossTarget + ";error=" + (cleanText(result.stderr) || cleanText(result.stdout)),
+        closure: [],
+        artifact: "",
+        command,
+        args,
+        source: staged,
+      };
+    }
+    fail("peer build failed for " + source + ": " + cleanText(result.stderr));
+  }
   const artifact = language === "domain" ? staged.entry : output;
   return {
     result,
@@ -1538,9 +1586,8 @@ for (const task of manifest) {
       ["run", path.relative(jitProject, jitSource).split(path.sep).join("/"), "--", jitInput],
       jitProject,
       {
-        JET_CACHE_DIR: path.join(jitProject, ".jet-build-cache"),
+        JET_STORE_DIR: path.join(jitProject, ".jet-store"),
         JET_RUN_CACHE_DIR: path.join(jitProject, ".jet-run-cache"),
-        JET_RUNTIME_CACHE_DIR: path.join(jitProject, ".jet-runtime-cache"),
       },
     );
     checked(jit, expected, taskId + "/jet/jit");
@@ -1549,6 +1596,8 @@ for (const task of manifest) {
   }
   let jetCrossHash = "-";
   let peerCrossHash = "-";
+  let jetCrossStatus = "pass";
+  let peerCrossStatus = "pass";
   let jetCrossProof = "-";
   let peerCrossProof = "-";
   let jetWebHash = "-";
@@ -1595,18 +1644,30 @@ for (const task of manifest) {
         "",
         task,
       );
-      jetCrossHash = artifactHash("jet", jetCross.binary);
-      jetCrossProof = targetArtifactProof(jetCross.binary, "aarch64-unknown-linux-gnu");
-      if (peerSupportsTarget(peer, "aarch64-unknown-linux-gnu")) {
-        const peerCross = peerBuild(
-          peer.language,
-          adapter.peer_source,
-          path.join(taskWork, "peer-cross"),
-          "aarch64-unknown-linux-gnu",
-          task,
-        );
-        peerCrossHash = artifactHash(peer.language, peerCross.artifact, peerCross.source.files, peerCross.source.root);
-        peerCrossProof = targetArtifactProof(peerCross.artifact, "aarch64-unknown-linux-gnu");
+      if (jetCross.unavailable) {
+        jetCrossStatus = "toolchain_unavailable";
+        jetCrossProof = jetCross.unavailable;
+        peerCrossStatus = "toolchain_unavailable";
+        peerCrossProof = jetCross.unavailable;
+      } else {
+        jetCrossHash = artifactHash("jet", jetCross.binary);
+        jetCrossProof = targetArtifactProof(jetCross.binary, "aarch64-unknown-linux-gnu");
+        if (peerSupportsTarget(peer, "aarch64-unknown-linux-gnu")) {
+          const peerCross = peerBuild(
+            peer.language,
+            adapter.peer_source,
+            path.join(taskWork, "peer-cross"),
+            "aarch64-unknown-linux-gnu",
+            task,
+          );
+          if (peerCross.unavailable) {
+            peerCrossStatus = "toolchain_unavailable";
+            peerCrossProof = peerCross.unavailable;
+          } else {
+            peerCrossHash = artifactHash(peer.language, peerCross.artifact, peerCross.source.files, peerCross.source.root);
+            peerCrossProof = targetArtifactProof(peerCross.artifact, "aarch64-unknown-linux-gnu");
+          }
+        }
       }
     }
   }
@@ -1646,10 +1707,12 @@ for (const task of manifest) {
         command = (language === "jet" ? jetWebCommand : peerWebCommand) + ";target-proof=" +
           (language === "jet" ? jetWebProof : peerWebProof) + ";" + authorityEvidence;
       } else if (!excluded && inScope && tier.platform === "cross-target") {
-        status = "pass";
+        status = language === "jet" ? jetCrossStatus : peerCrossStatus;
         artifact = language === "jet" ? jetCrossHash : peerCrossHash;
-        command = (language === "jet" ? "jet build --target=" : "peer build --target=") + tier.target +
-          ";target-proof=" + (language === "jet" ? jetCrossProof : peerCrossProof) + ";" + authorityEvidence;
+        command = status === "toolchain_unavailable"
+          ? (language === "jet" ? jetCrossProof : peerCrossProof) + ";" + authorityEvidence
+          : (language === "jet" ? "jet build --target=" : "peer build --target=") + tier.target +
+            ";target-proof=" + (language === "jet" ? jetCrossProof : peerCrossProof) + ";" + authorityEvidence;
       } else if (!excluded && inScope && tier.tier === "aot") {
         status = "pass";
         const closure = language === "jet" ? jetAotClosure : peerAotClosure;

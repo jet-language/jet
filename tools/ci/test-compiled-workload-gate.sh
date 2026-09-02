@@ -538,6 +538,7 @@ expect_reject missing-compiler-identity 'report identity is missing: jet_binary_
 
 cp -R "$report" "$tmp/compiler-identity-drift"
 awk -F '\t' -v OFS='\t' '$2 == "jet_binary_sha256" { $3 = "0000000000000000000000000000000000000000000000000000000000000000" } { print }' "$tmp/compiler-identity-drift/identity.tsv" >"$tmp/compiler-identity-drift/new" && mv "$tmp/compiler-identity-drift/new" "$tmp/compiler-identity-drift/identity.tsv"
+refresh_review_digest "$tmp/compiler-identity-drift"
 expect_reject compiler-identity-drift 'report compiler identity is invalid' "$tmp/compiler-identity-drift"
 
 cp -R "$report" "$tmp/missing-peer-launcher-identity"

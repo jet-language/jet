@@ -30,24 +30,13 @@ fn escape_count(cx: Float, cy: Float, maximum: Int) Int -> {
         magnitude_x :: zx * zx
         magnitude_y :: zy * zy
         magnitude_squared :: magnitude_x + magnitude_y
-        if magnitude_squared > 4.0f -> return i + 1
+        threshold :: Float{4.0}
+        if magnitude_squared > threshold -> return i + 1
     }
     return maximum
 }
 
-fn emit_case(
-    label: String,
-    named: Bool,
-    width: Int,
-    height: Int,
-    stride: Int,
-    iterations: Int,
-    parse_failed: Bool,
-    width_seen: Bool,
-    height_seen: Bool,
-    stride_seen: Bool,
-    iterations_seen: Bool
-) {
+fn emit_case(label: String, named: Bool, width: Int, height: Int, stride: Int, iterations: Int, parse_failed: Bool, width_seen: Bool, height_seen: Bool, stride_seen: Bool, iterations_seen: Bool) {
     if parse_failed || !width_seen || !height_seen || !stride_seen || !iterations_seen {
         reject_case(label, named)
         return
@@ -96,7 +85,7 @@ fn run_single(raw: String) {
     iterations_seen := false
     parse_failed := false
     loop line in raw.lines() {
-        trimmed :: line.trim()
+        trimmed :: ~(line.trim())
         if trimmed == "" -> next
         fields :: line.split("=").to_list()
         if fields.len() != 2 {
@@ -124,23 +113,9 @@ fn run_single(raw: String) {
             if iterations_seen -> parse_failed = true
             iterations_seen = true
             iterations = value
-        } else {
-            parse_failed = true
-        }
+        } else { parse_failed = true }
     }
-    emit_case(
-        "",
-        false,
-        width,
-        height,
-        stride,
-        iterations,
-        parse_failed,
-        width_seen,
-        height_seen,
-        stride_seen,
-        iterations_seen
-    )
+    emit_case("", false, width, height, stride, iterations, parse_failed, width_seen, height_seen, stride_seen, iterations_seen)
 }
 
 fn run_batch(raw: String) {
@@ -156,7 +131,7 @@ fn run_batch(raw: String) {
     active := false
     label := ""
     loop line in raw.lines() {
-        trimmed :: line.trim()
+        trimmed :: ~(line.trim())
         if trimmed == "" || trimmed.starts_with("#") -> next
         fields :: trimmed.split("=").to_list()
         if fields.len() != 2 {
@@ -166,19 +141,7 @@ fn run_batch(raw: String) {
         key :: fields[0].trim()
         if key == "case" {
             if active {
-                emit_case(
-                    label,
-                    true,
-                    width,
-                    height,
-                    stride,
-                    iterations,
-                    parse_failed,
-                    width_seen,
-                    height_seen,
-                    stride_seen,
-                    iterations_seen
-                )
+                emit_case(label, true, width, height, stride, iterations, parse_failed, width_seen, height_seen, stride_seen, iterations_seen)
             }
             label = fields[1].trim()
             width = 0
@@ -217,27 +180,11 @@ fn run_batch(raw: String) {
             if iterations_seen -> parse_failed = true
             iterations_seen = true
             iterations = value
-        } else {
-            parse_failed = true
-        }
+        } else { parse_failed = true }
     }
     if active {
-        emit_case(
-            label,
-            true,
-            width,
-            height,
-            stride,
-            iterations,
-            parse_failed,
-            width_seen,
-            height_seen,
-            stride_seen,
-            iterations_seen
-        )
-    } else {
-        reject_case("batch", true)
-    }
+        emit_case(label, true, width, height, stride, iterations, parse_failed, width_seen, height_seen, stride_seen, iterations_seen)
+    } else { reject_case("batch", true) }
 }
 
 fn run(args: WorkloadArgs) {

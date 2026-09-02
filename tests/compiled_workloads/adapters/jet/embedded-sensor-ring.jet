@@ -42,9 +42,7 @@ fn print_state(step: Int, op: String, result: String, value: Int, has_value: Boo
     count :: ring.count
     if has_value {
         print("step={step}|op={op}|value={value}|result={result}|head={head}|tail={tail}|count={count}")
-    } else {
-        print("step={step}|op={op}|result={result}|head={head}|tail={tail}|count={count}")
-    }
+    } else { print("step={step}|op={op}|result={result}|head={head}|tail={tail}|count={count}") }
 }
 
 #CLI
@@ -69,13 +67,12 @@ fn run(args: WorkloadArgs) {
         first := ""
         second := ""
         loop field in line.split("|") {
-            if field_count == 0 -> first = field
-            if field_count == 1 -> second = field
+            if field_count == 0 -> first = ~field
+            if field_count == 1 -> second = ~field
             field_count += 1
         }
         if field_count == 2 && first == "ENQ" {
-            parsed :: Int.parse(second)
-            if parsed == {
+            if Int.parse(second) == {
                 .Ok(value) -> {
                     if ring.enqueue(value) {
                         accepted_enqueues += 1

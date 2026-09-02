@@ -15,14 +15,19 @@ fn reject_json() {
 
 fn run(args: WorkloadArgs) {
     input :: args.input
-    raw :: fs.read(input) ?? return reject_json()
-    raw_bytes :: raw.bytes()
-    if raw_bytes.len() > 1048576 -> return reject_json()
-    if json.parse(raw) == {
-        .Ok(value) -> {
-            canonical :: json.canonical(value) ?? panic("canonicalize")
-            print("canonical={canonical}")
-            print("valid=true")
+    if fs.read(input) == {
+        .Ok(raw) -> {
+            raw_bytes :: raw.bytes()
+            if raw_bytes.len() <= 1048576 {
+                if json.parse(raw) == {
+                    .Ok(value) -> {
+                        canonical :: json.canonical(value) ?? panic("canonicalize")
+                        print("canonical={canonical}")
+                        print("valid=true")
+                    }
+                    .Err(_) -> reject_json()
+                }
+            } else { reject_json() }
         }
         .Err(_) -> reject_json()
     }

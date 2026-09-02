@@ -306,7 +306,7 @@ fn contained(root: &Path, child: &Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        child == root || child.starts_with(root)
+        child.strip_prefix(root).is_ok()
     }
 }
 
