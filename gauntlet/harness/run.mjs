@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runLiveReloadAxis as runLiveReloadAxisAdapter } from "./live-reload.mjs";
 import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./memory-safety-fuzz.mjs";
+import { projectStatus } from "./status.mjs";
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../..");
@@ -3521,6 +3522,14 @@ async function main() {
   await fs.mkdir(resultDir, { recursive: true });
   const resultPath = path.join(resultDir, `${dateStamp()}.json`);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
+  const statusPath = path.join(repoDir, "gauntlet/status.json");
+  if (fullScope) {
+    const status = projectStatus(report, resultPath);
+    await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+    console.log(`status\t${statusPath}`);
+  } else {
+    console.log(`status\tskipped partial scope; ${statusPath} was not overwritten`);
+  }
 
   console.log("entry\tlanguage\tstatus\truntime_s\tcold_build_s\tjet_verdicts\tmode_metrics");
   for (const result of results) {

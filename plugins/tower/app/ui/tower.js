@@ -319,6 +319,7 @@ const VIEWS = [
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
   { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
   { id: 'guidance', name: 'Guidance' },
+  { id: 'gauntlet', name: 'Gauntlet', count: () => gauntletCache?.summary?.loss ?? 0, alert: true },
 ];
 function docsFileCount() {
   if (!docsCache) return 0;
@@ -1730,6 +1731,92 @@ async function viewGuidance() {
     }
   });
 }
+// ---- Gauntlet tab: latest measured losses and uncovered territory -------------
+let gauntletCache = null;
+let gauntletLossesOnly = true;
+const GAUNTLET_VERDICT_ORDER = Object.freeze({ loss: 0, unmeasured: 1, parity: 2, win: 3 });
+const gauntletVerdict = (value) => Object.hasOwn(GAUNTLET_VERDICT_ORDER, value) ? value : 'unmeasured';
+const gauntletCount = (value) => Number.isFinite(value) ? value : 0;
+function gauntletBadge(value) {
+  const verdict = gauntletVerdict(value);
+  const modifier = { loss: 'loss', unmeasured: 'open', parity: 'met', win: 'verified' }[verdict];
+  return `<span class="critrow__badge critrow__badge--${modifier}">${verdict}</span>`;
+}
+function gauntletNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : '—';
+}
+function gauntletRows(status) {
+  const rows = [];
+  for (const cell of status.cells || []) {
+    const peers = Array.isArray(cell.peers) ? cell.peers : [];
+    for (const peer of peers) {
+      for (const [tier, values] of Object.entries(peer.tiers || {})) {
+        rows.push({ cell, peer, tier, values: values || {}, verdict: gauntletVerdict(values?.verdict) });
+      }
+    }
+    if (!peers.length) rows.push({ cell, peer: null, tier: null, values: {}, verdict: gauntletVerdict(cell.verdict) });
+  }
+  return rows.sort((left, right) => {
+    const order = (value) => GAUNTLET_VERDICT_ORDER[value] ?? GAUNTLET_VERDICT_ORDER.unmeasured;
+    return order(left.verdict) - order(right.verdict)
+      || String(left.cell.id || '').localeCompare(String(right.cell.id || ''))
+      || String(left.peer?.peer || '').localeCompare(String(right.peer?.peer || ''))
+      || String(left.tier || '').localeCompare(String(right.tier || ''));
+  });
+}
+async function loadGauntlet() {
+  const r = await fetch('/api/gauntlet');
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || 'Gauntlet fetch failed');
+  gauntletCache = j;
+}
+async function viewGauntlet() {
+  const v = $('#view');
+  if (!gauntletCache) {
+    v.innerHTML = '<div class="viewhead"><h1 class="h1">Gauntlet</h1><span class="viewhead__sub">loading…</span></div>';
+    try { await loadGauntlet(); renderChrome(); }
+    catch (e) {
+      v.innerHTML = `<div class="empty"><div>Gauntlet load failed: ${esc(e.message)}</div></div>`;
+      return;
+    }
+  }
+  const status = gauntletCache || {};
+  const summary = status.summary || {};
+  const source = status.source || {};
+  const publication = status.publication || {};
+  const generated = String(status.generated || '—').slice(0, 19).replace('T', ' ');
+  const scope = source.scope || publication.scope || '—';
+  const rows = gauntletRows(status);
+  const visibleRows = gauntletLossesOnly ? rows.filter(row => row.verdict === 'loss') : rows;
+  const summaryPills = [['loss', summary.loss], ['unmeasured', summary.unmeasured], ['parity', summary.parity], ['win', summary.win]]
+    .map(([verdict, count]) => `<span class="gauntlet__pill">${gauntletBadge(verdict)} <b>${esc(gauntletCount(count))}</b></span>`).join('');
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Gauntlet</h1>
+      <span class="viewhead__sub">where Jet still loses</span>
+      <div class="viewhead__actions"><button class="btn btn--ghost" id="gauntlet-filter" aria-pressed="${gauntletLossesOnly}">losses only</button></div>
+    </div>
+    <div class="gauntlet__meta">generated ${esc(generated)} · run ${esc(source.run_id || '—')} · scope ${esc(scope)} · publication ${esc(publication.status || '—')}</div>
+    <div class="gauntlet__summary" aria-label="Gauntlet summary">${summaryPills}</div>
+    <div class="opswrap gauntlet__tablewrap"><table class="ops gauntlet__table">
+      <thead><tr><th>entry</th><th>cell</th><th>mode</th><th>metric</th><th>peer</th><th>tier</th><th>Jet</th><th>peer</th><th>ratio</th><th>verdict</th></tr></thead>
+      <tbody>${visibleRows.length ? visibleRows.map(row => `<tr class="gauntlet__row--${row.verdict}">
+        <td>${esc(row.cell.entry || '—')}</td>
+        <td><span class="gauntlet__cell">${esc(row.cell.id || '—')}<small>${esc([row.cell.domain, row.cell.kind].filter(Boolean).join(' · '))}</small></span></td>
+        <td>${esc(row.cell.mode || '—')}</td>
+        <td>${esc(row.cell.primary_metric || '—')}</td>
+        <td>${esc(row.peer?.peer || '—')}</td>
+        <td>${esc(row.tier || '—')}</td>
+        <td>${esc(gauntletNumber(row.values.jet))}</td>
+        <td>${esc(gauntletNumber(row.values.peer))}</td>
+        <td>${row.values.ratio == null ? '—' : esc(typeof row.values.ratio === 'number' && Number.isFinite(row.values.ratio) ? row.values.ratio.toFixed(3) : '—')}</td>
+        <td>${gauntletBadge(row.verdict)}</td>
+      </tr>`).join('') : `<tr><td class="gauntlet__empty" colspan="10">${gauntletLossesOnly ? 'No measured losses.' : 'No Gauntlet rows.'}</td></tr>`}</tbody>
+    </table></div>`;
+  $('#gauntlet-filter').addEventListener('click', () => {
+    gauntletLossesOnly = !gauntletLossesOnly;
+    viewGauntlet();
+  });
+}
+
 
 
 // ---- PAPERCUTS: append-only friction log, grouped by day --------------------
@@ -1778,7 +1865,7 @@ function viewPapercuts() {
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, guidance: viewGuidance, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
 function render() {
   if (!S) return;
   renderBeacon();
