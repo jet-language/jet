@@ -305,20 +305,87 @@ Nothing to type, nothing to configure, nothing to learn. `jet build` is optimize
 
 ### II.11 Expert inspection and UI
 
-Owner direction: rich live board plus HTML report. Command names are law (D-BUILDQUERY1). Mockups for visual acceptance: `docs/proposals/automatic-build-optimization/mockups/terminal.html` and `report.html` (self-contained; verified structurally, not yet rendered in a browser on this machine — see III.6).
+Owner direction: rich live board plus HTML report, in the Jet color scheme (black and red), modernized. Command names are law (D-BUILDQUERY1). Mockups for visual acceptance: `docs/proposals/automatic-build-optimization/mockups/terminal.html` and `report.html` (self-contained; rendered in headless Chromium from the full devshell; screenshots in III.6). The frames below are the design; the mockups reproduce them byte for byte and the mockup page checks that on load.
 
-**Live board (TTY).** A ≤ 8-line region redrawn in place at ≤ 10 fps: one row per stage (`check` modules, `emit` units, `compile` units with a `reused` count, `link` outputs; `actions` and `fetch` rows appear only when relevant), a `cpu` row with occupancy (`cpu 2/16`) naming the running rustc processes, and a `path` row with the critical path and an estimate of the time left. Diagnostics and notes print above the region. On completion the board collapses to a receipt line:
+**Live board (TTY, ≥ 100 columns).** A ≤ 8-line region redrawn in place at ≤ 10 fps. The first line is the state line: spinner while running, then it becomes the receipt. One row per stage (`check` over all modules, `emit` and `compile` over all units, `link` over outputs; `actions` and `fetch` rows appear only when relevant), a `cpu` occupancy strip (two cells per core) naming the running processes, and a `path` row with the critical path and an estimate of the time left. Snapshot of a release build at 1.6 s:
+
+```
+⠹ jet build shop                                               release · x86_64-linux · 1.6s
+  check    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  42 modules · 3 rechecked                  0.18s
+  emit     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  3 units emitted · 18 reused               0.02s
+  compile  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸╸╸  1 of 3 compiled · 18 reused                1.4s
+  link     ────────────────────────────────  waiting on compile
+  cpu      ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░  2 of 16 busy · rustc shop/net · rustc shop/cli
+  path     shop/net → link                                                    est. 2.5s left
+```
+
+Bars are two-tone over the whole population: gray cells are work the store already held (reused modules or units), red cells are work done this build, `╸` cells are in flight, dim `─` cells are pending; red-class cells are `ceil(n / total × 32)`, at least one when `n > 0`. The red sliver is the work Jet did; the counts say the same in words. While linking, the `link` row shows an 8-cell sweep because link has no measurable progress.
+
+**Receipt.** On completion the board collapses to one line plus one hint; a no-change build is one line; a failed build keeps Jet's ordinary diagnostic format above its receipt:
 
 ```
 ✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop
   why: jet explain-build shop
 ✓ shop up to date · 38 ms · 21 units reused · release · ./build/shop
-✗ shop not built · 2 errors · 0.31s · nothing compiled, store unchanged
+✗ shop not built · 1 error · 0.31s · nothing compiled, store unchanged
 ```
 
-Width 80–99 columns shortens counts; below 80 drops the `cpu` and `path` rows. The `cpu` row reports occupancy (`cpu 2/16` when two slots run), and the `path` row shows an estimate only when recorded durations exist for the remaining nodes; otherwise the row is omitted. Non-TTY output is one line per stage as it completes, then the receipt. `NO_COLOR` removes color only (per no-color.org); a non-UTF-8 locale or `--ascii` uses ASCII bars and `[ok]`/`[x]` markers. One renderer owns stderr: it handles resize and `SIGTSTP`/`SIGCONT`, restores the cursor on every exit path, and falls back to plain lines when cursor control is unsafe (`TERM=dumb`, consoles without VT support). `--json` emits NDJSON events (`stage`, `node`, `receipt`) that editors and CI consume and that the HTML report embeds; `--trace` writes the same events in the Chrome Trace Event format for standard viewers. The full state matrix (archetypes × widths × TTY/pipe × color × terminal height, Unicode cell width, CI log folding, and multiplexers) is snapshot-tested.
+Notes print above the board or before the receipt (`note:` prefix): compiling the Jet runtime once for a new rustc, the store holding nothing for a new compiler, a store entry that failed verification and was rebuilt, a remote tier that was unreachable.
 
-**`jet explain-build <target|unit|file>`** prints why each node ran (the input that changed, by path and digest prefix), the critical path with per-node durations, store hits and misses per tier, and unit detail rows under their package. `--why <node>` prints one node's full input diff. `--json` returns the graph record. `--html [path]` writes a self-contained dark page: header strip, per-lane timeline with the critical path outlined, package/unit graph, sortable why-table with keyboard navigation, store panel, and the reproducibility class of every node (D-BUILDPROBE1). `--open` opens it. The LSP reads the same record for hover provenance (ratified).
+**Color law.** The board uses the Jet palette from `site/assets/site.css`: near-black ground, Jet red accent, ink and two grays, a green `✓`, and one cool instrument tone. Roles and their ANSI SGR on a 16-color terminal: brand red `1;31` for `jet`, compiled cells, busy cores, and the `$` prompt; bright red `91` for in-flight cells, the spinner, `✗`, `Error`, and carets; default foreground for names, counts, paths, and source; dim `2;37` for reused cells, stage labels, header meta, and elapsed; bright black `90` for pending cells, idle cores, gutters, and hints; green `32` for `✓` only; cyan `36` for `note:`, remote tier names, and URLs. Today's theme paints the `jet` accent bright cyan (`Theme::ACCENT_SGR = "1;96"`, `crates/jet-foundation/src/Terminal.rs:48`); accepting this board moves `ACCENT_SGR` to red so every CLI surface matches (card #2527). `NO_COLOR` removes color only, so reused and compiled cells share the glyph `━` and the counts carry the distinction; `--ascii` (or a non-UTF-8 locale) keeps the distinction in glyphs: `=` reused, `#` compiled or busy, `>` in flight, `.` pending or idle, `->` arrows, `-\|/` spinner:
+
+```
+/ jet build shop                                                 release, x86_64-linux, 1.6s
+  check    =============================###  42 modules, 3 rechecked                   0.18s
+  emit     ===========================#####  3 units emitted, 18 reused                0.02s
+  compile  ===========================##>>>  1 of 3 compiled, 18 reused                 1.4s
+  link     ................................  waiting on compile
+  cpu      ####............................  2 of 16 busy, rustc shop/net, rustc shop/cli
+  path     shop/net -> link                                                   est. 2.5s left
+```
+
+**Width rules.** 80–99 columns keep every row and shorten counts. Below 80 columns the `cpu` and `path` rows are dropped and bars are 16 cells:
+
+```
+⠹ jet build shop                          release · 1.6s
+  check    ━━━━━━━━━━━━━━━━  42 mod · 3 rechecked  0.18s
+  emit     ━━━━━━━━━━━━━━━━  3 units · 18 reused   0.02s
+  compile  ━━━━━━━━━━━━━━╸╸  1 of 3 · 18 reused     1.4s
+  link     ────────────────  waiting
+```
+
+The `path` row shows an estimate only when recorded durations exist for the remaining nodes, labeled `est.`; otherwise the right side is blank. Non-TTY output is one line per stage as it completes, then the receipt:
+
+```
+jet build shop (release, x86_64-linux)
+check    42 modules, 3 rechecked                  0.18s
+emit     3 units emitted, 18 reused               0.02s
+compile  3 units compiled, 18 reused               2.2s
+link     shop                                      1.7s
+built shop in 4.1s -> ./build/shop (3 of 21 units compiled, 18 reused)
+```
+
+One renderer owns stderr: it handles resize and `SIGTSTP`/`SIGCONT`, restores the cursor on every exit path, and falls back to plain lines when cursor control is unsafe (`TERM=dumb`, consoles without VT support). `--json` emits NDJSON events (`stage`, `node`, `receipt`) that editors and CI consume and that the HTML report embeds.
+
+**`jet explain-build <target|unit|file>`** prints why each node ran (the input that changed, by path and digest prefix), the critical path with per-node durations and a proportional strip of where the time went, store hits and misses per tier, and unit detail rows under their package:
+
+```
+$ jet explain-build shop
+shop · release · x86_64-linux · built 4.1s ago · 3 of 21 units compiled · 18 reused
+
+why
+  shop/net       compiled    2.2s   src/net/client.jet changed (fetch_all body)
+  shop/render    compiled    1.3s   src/render/table.jet changed (Row.width signature) → 1 dependent
+  shop/cli       compiled    0.4s   depends on shop/render interface
+  link shop      relinked    1.7s   3 units changed
+  18 units       reused         –   store · local
+
+critical path  4.1s   check 0.18 → emit 0.02 → rustc shop/net 2.2 → link 1.7
+               ░░░░▓███████████████████████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+store          local hits 18 · misses 3 · team off · 4.2 GiB of 20 GiB
+```
+
+`--why <node>` prints one node's full input diff. `--json` returns the graph record. `--html [path]` writes a self-contained page in the same palette: header strip, per-lane timeline with the critical path outlined and connected, package/unit graph, sortable why-table with keyboard navigation, store panel, and the reproducibility class of every node (D-BUILDPROBE1). Bars are colored by kind in a red ramp (check, emit, compile) with link in ink; reused work is a hollow faint tick; a unit restored from a remote tier is the instrument tone. `--open` opens it. The LSP reads the same record for hover provenance (ratified).
 
 **Timing.** `JET_TIMING` and `jet-timing.json` are replaced by per-node durations in the graph record; the perf dashboard reads `jet explain-build --json`. The receipt/timing conflict of I.2 disappears because measuring no longer disables replay.
 
@@ -484,7 +551,7 @@ Each case is a test with an exact expected outcome (hit set, miss set, diagnosti
 
 ### III.6 What remains unverified in this document
 
-- The HTML mockups were checked by parsing and by exact text comparison with this document's frames; no browser was available on this machine to render them. Owner visual acceptance is the render check.
+- The HTML mockups were checked by exact text comparison with this document's frames (the terminal page re-checks its frames on load and exposes `data-frames-ok`) and rendered in headless Chromium 151 from the full devshell (`scripts/agent/jet-env full chromium --headless=new --screenshot …`); screenshots are session evidence under `~/.cache/jet-luna/abo/shots/`. Owner visual acceptance remains the look-and-feel check.
 - The `HashMap` ordering claims of the prior draft were not re-verified line by line; slice 1 verifies and fixes them.
 - Cargo peer rows (I.4a) come from the `CargoPeer` lane; the front-end numbers in I.4 are from a debug build of the compiler and are upper bounds.
 
