@@ -143,6 +143,32 @@ every mature language is paying down a default it can no longer change.
   and enum/sum-type contrasts favor Jet live.
   https://www.youtube.com/watch?v=c7eLIsaDL7U
 
+**Never, operators, and supply-chain batch (4 videos, mined 2026-09-01).** The
+remaining "Jet Research Queue" entries, mined with 30 live probes on AOT,
+`jet run`, and `jet eval` and a fresh second reader; full report at
+`docs/audits/video-mine-never-operators-supply-chain-2026-09-01.md`.
+Meta-lesson: the default path decides the outcome, and a name for a fact is
+not the fact. Cards #2430–#2438; ballots D-NEVER2 and D-OPMIX1.
+
+- Semicolon — Rust Condvar Explained: Stop Wasting 100% CPU: Jet's
+  `Shared`/`Condition`/`guard.wait` is shipped with predicate re-check and
+  tier parity; the busy loop compiles in silence (lint card #2435) and E0041
+  claims Jet never shares memory (copy card #2434).
+  https://www.youtube.com/watch?v=kHpEolpE3pU
+- Let's Get Rusty — Rust just introduced a new "never" type: `!` merged for
+  1.100 after ten years of `()`-fallback and `Infallible` debt; Jet's
+  `fn f() Never` is an AOT ICE and D-NEVER1=C's own sample fails E0124
+  (#2431); ballot D-NEVER2 on the named contract.
+  https://www.youtube.com/watch?v=wpqiH56ITZo
+- Indently — "NotImplemented" is Awesome in Python: run-time operand
+  ownership versus Jet's static hooks; `Money + Money` prints zero on the
+  default tier and ICEs on AOT, including the repo example (#2430); ballot
+  D-OPMIX1 on mixed-type operands. https://www.youtube.com/watch?v=xUBIbhPC_rQ
+- Low Level — a lot of people are upset: the 2026-08-20 `arrayref`
+  compile-time backdoor (RUSTSEC-2026-0260); Jet's `extern rust` bridge calls
+  host cargo outside D-JPK-SANDBOX2 (#2432); `jet new` emits an unparseable
+  manifest since 8b9933668 (#2433). https://www.youtube.com/watch?v=uQV6hYwyjMY
+
 **Compiled-scripting and explicitness batch (3 videos, mined 2026-08-21).**
 A YouTube playlist mined together: the compiled-TypeScript moment, the
 hardware-cost optimization thesis, and Zig 0.16 explicitness pedagogy.
